@@ -2,16 +2,16 @@
   "app": "simple-erp",
   "version": 3,
   "counts": {
-    "tools": 487,
+    "tools": 504,
     "byRisk": {
-      "critical": 106,
-      "read": 224,
-      "write": 157
+      "critical": 107,
+      "read": 232,
+      "write": 165
     },
     "byToolset": {
       "persetujuan": 14,
       "sistem": 19,
-      "penjualan": 75,
+      "penjualan": 92,
       "obrolan": 2,
       "akuntansi": 33,
       "pengajuan-pembayaran": 32,
@@ -24,14 +24,14 @@
       "produksi": 28,
       "master-data": 12
     },
-    "routes": 578
+    "routes": 595
   },
   "toolsets": [
     {
       "id": "penjualan",
       "title": "Penjualan",
       "purpose": "Toolset **penjualan** memungkinkan AIRA membaca dan mengoperasikan siklus penjualan Entaris: Inquiry (permintaan prospek), Penawaran (Quotation), Pesanan Penjualan (Sales Order/SO), Surat Jalan (Delivery Order/DO) termasuk Surat Jalan Sementara (SJS), Invoice Penjualan, Retur Penjualan, dan Uang Muka Pelanggan. Hampir semua tool baca (daftar, detail, ringkasan) aman dipanggil otomatis; tool tulis dipisah menurut dampaknya: dokumen non-posting (draft/status) versus tool yang memposting stok atau jurnal (invoice, DO, retur, uang muka), yang selalu berisiko `critical` atau butuh konfirmasi. Master item jasa (`svc_*`) tercatat di toolset master-data tetapi dipakai pada baris invoice.",
-      "guide": "### Alur bisnis\n\nRantai dokumen (setiap langkah boleh dilewati; Invoice bisa dibuat langsung tanpa SO/DO):\n\n```\nInquiry (INQ) -> Penawaran (QO) -> [Sales Order (PSN)] -> Surat Jalan (DO) -> Invoice Penjualan (SI) -> Pembayaran (modul Bank & Kas)\n                                        \\-> SJS (Surat Jalan Sementara) -> ditautkan ke DO resmi\nInvoice -> Retur Penjualan (RN)          Uang Muka Pelanggan -> dipakai/di-offset/di-refund ke Invoice\n```\n\nStatus per dokumen:\n\n- **Inquiry**: `Baru`, `Diproses`, `Dikonversi` (terkunci, hanya lewat `inq_link`), `Hilang` (wajib alasan >= 5 karakter), `Ditutup`. Hanya inquiry yang belum Dikonversi boleh dihapus.\n- **Penawaran**: `Draft` -> `Sent` (`quot_send`, butuh minimal 1 item dan `validUntil` belum lewat) -> `Accepted` (`quot_accept`) atau `Rejected` (`quot_reject`, alasan wajib). Penawaran `Sent` yang melewati `validUntil` otomatis menjadi `Expired` (job harian). `Cancelled` lewat `quot_cancel` (capability `doc.cancel`; tidak bisa bila sudah dikonversi ke invoice). Hanya `Draft` yang bisa diedit/dihapus. Konversi: `quot_convert_payload` (hanya Accepted) -> `si_create` -> `quot_link`. Catatan: konversi penawaran menuju INVOICE, bukan SO (SO hanya menyimpan `quotationId` sebagai rujukan).\n- **Sales Order**: `Draft` -> `Submitted` (`so_submit`) -> `PartiallyDelivered` -> `FullyDelivered` (dihitung otomatis dari baris DO yang tertaut) atau `Cancelled`. SO hanya boleh diedit saat Draft. Over-delivery (kirim melebihi sisa) diperbolehkan dan hanya dicatat log.\n- **Surat Jalan (DO)**: dibuat `Submitted` dan langsung memotong stok. \"Belum ditagih\" = `Submitted` dengan `invoiceId` kosong; \"Invoiced\" = `Submitted` dengan `invoiceId` terisi; `Cancelled`. Filter status `Invoiced` pada `do_list` hanyalah turunan, bukan nilai kolom.\n- **SJS**: `Open` (Terbuka) -> `Linked` (ditautkan ke DO resmi) atau `Cancelled`. Hanya dokumen kirim sementara; tidak menyentuh stok/GL/WAC dan tidak bisa di-invoice.\n- **Invoice Penjualan**: tidak ada draft pada alur API — `si_create` langsung memposting; status awal `Submitted` (`Paid` bila total Rp 0), lalu `PartiallyPaid`/`Paid`/`Overdue` mengikuti pembayaran, atau `Cancelled`.\n- **Retur**: `Submitted` atau `Cancelled` (Draft ada di enum tetapi tidak dipakai alur normal).\n- **Uang muka pelanggan**: dicatat sebagai Payment bertipe `CustomerDeposit` (dibuat lewat modul Pembayaran, bukan toolset ini). Status turunan `Active`, `PartiallyUsed`, `FullyUsed` dihitung dari jumlah terpakai/refund; status dokumen `Submitted`/`Cancelled`.\n\n### Aturan posting\n\nHanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu transaksi database dan harus seimbang:\n\n| Aksi | Stok | Jurnal GL |\n|---|---|---|\n| Inquiry, Penawaran, SO (semua status), SJS | Tidak ada | Tidak ada |\n| `do_create`, `so_generate_do` | Keluar per item/gudang, unitCost = WAC saat kirim (dikunci) | Tidak ada (HPP menunggu invoice) |\n| `do_update` | Balik pergerakan lama + keluar baru | Tidak ada |\n| `do_cancel` | Stok dikembalikan | Tidak ada |\n| `do_from_invoice` | Tidak ada (stok sudah dipotong invoice) | Tidak ada |\n| `si_create` | Keluar untuk baris inventori (kecuali baris dari DO, yang memakai unitCost terkunci di DO) | DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran; lalu JV-COGS: DR 5.1 HPP (fallback 5) / CR Persediaan |\n| `si_cancel` | Stok dikembalikan | Semua jurnal invoice + HPP dibalik |\n| `sret_create` | Masuk lagi untuk baris `restock=true` | JV-RN: DR 4.3 Retur Penjualan (+ PPN Keluaran) / CR 1.2.1 Piutang (sebesar yang mengurangi outstanding) dan CR 2.1.2 Uang Muka Pelanggan (kelebihan, jadi kredit pelanggan); JV-COGS-RN: DR Persediaan / CR HPP pada biaya asli |\n| `cdep_apply` | Tidak ada | DR 2.1.2 Uang Muka Pelanggan / CR 1.2.1 Piutang Usaha |\n| `cdep_refund` | Tidak ada | Offset: DR 2.1.2 / CR 1.2.1 (FIFO ke faktur terlama); refund kas: DR 2.1.2 / CR Kas/Bank (1.1.x) |\n| `cdep_cancel`, `cdep_apply_cancel` | Tidak ada | Jurnal asal dibalik (soft-cancel ledger, bukan jurnal pembalik) |\n\nBiaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLoaded` baris invoice -> `averageCost` item (WAC). Pembayaran invoice ada di toolset kas-bank (`pay_record`: DR Kas/Bank / CR Piutang).\n\n### Persetujuan\n\n- **Retur Penjualan** (`sret_create`): bila role pemanggil tidak punya capability `approval.bypass` (default hanya Admin), dokumen TIDAK dibuat; payload masuk antrian `ApprovalRequest` tipe `SalesReturn` (HTTP 202) dan dieksekusi saat disetujui (aktor = pengaju). Admin/role bypass langsung memposting (201).\n- **Surat Jalan** (`do_create`): antrian approval tipe `DeliveryOrder` hanya muncul pada kasus stok minus: `allowNegativeStock=true` tanpa capability `inventory.negative_stock`. Perhatikan: `so_generate_do` dan `do_update` TIDAK mengantrikan approval — keduanya menolak dengan 403 bila bypass stok minus diminta tanpa capability.\n- **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.\n- Keputusan approval dilakukan di toolset persetujuan; tool penjualan hanya mengantrikan.\n\n### Jebakan umum\n\n1. **`inq_convert_payload` bermutasi walau GET**: bila inquiry berupa prospek tanpa pelanggan, endpoint membuat master Pelanggan baru dan mengisi `partyId` inquiry. Diklasifikasikan `write`. Sebaliknya `quot_convert_payload` murni baca.\n2. **Invoice tidak punya draft**: `si_create` = posting langsung (jurnal + stok + HPP). Jangan dipanggil untuk \"simpan dulu\". `si_update` hanya mengubah catatan/jatuh tempo/syarat; nilai tidak bisa diedit — koreksi = `si_cancel` lalu buat ulang.\n3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi atau aplikasi uang muka aktif; `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.\n4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.\n5. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.\n6. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.\n7. **`do_list` status**: gunakan `Submitted` untuk \"belum ditagih\", `Invoiced` untuk \"sudah ditagih\". `do_pending` mewajibkan `partyId`.\n8. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).\n9. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.\n10. **Tarif pajak**: PPN (`taxPct`) bisa per baris dan per dokumen; PPh per baris (`pphPct`) didebit ke 1.5.4 bila akun itu ada di COA (jika tidak ada, baris PPh dilewati tanpa error).\n\n### Peta istilah\n\n| Istilah bisnis | Kode / field / status |\n|---|---|\n| Inquiry, permintaan harga, prospek | `Inquiry`, `inquiryNumber` (INQ), `prospectName`, status `Baru/Diproses/Dikonversi/Hilang/Ditutup` |\n| Penawaran, Quotation (QO) | `Quotation`, `quotationNumber`, `validUntil`, `Draft/Sent/Accepted/Rejected/Expired/Cancelled` |\n| Pesanan Penjualan, SO (PSN) | `SalesOrder`, `soNumber`, `deliveredQty`, `customerRefNo` (No. PO pelanggan) |\n| Surat Jalan, SJ, DO | `DeliveryOrder`, `doNumber`, `invoiceId` (terisi = sudah ditagih), `nomorMobil`, `driverName` |\n| Surat Jalan Sementara, SJS | `TemporaryDeliveryNote`, `Open/Linked/Cancelled` |\n| Invoice Penjualan, faktur (SI) | `SalesInvoice`, `invoiceNumber`, `outstanding`, `grandTotal`, `Submitted/PartiallyPaid/Paid/Overdue/Cancelled` |\n| Retur Penjualan, RN | `SalesReturn`, `returnNumber`, `restock`, jurnal `JV-RN-...` |\n| Uang muka pelanggan, DP | Payment `paymentType=CustomerDeposit`, akun 2.1.2, `refundedAmount`, `CustomerDepositApplication` |\n| Piutang usaha | akun 1.2.1 (`AR`) |\n| Penjualan / Pendapatan jasa | akun 4.1 / 4.2 |\n| HPP, COGS | akun 5.1 (fallback 5); biaya dari WAC/unitCost terkunci |\n| Retur Penjualan (akun) | akun 4.3 |\n| PPN Keluaran / PPh dibayar dimuka | `TAX_OUTPUT` / akun 1.5.4 |\n| WAC | rata-rata tertimbang biaya item (`averageCost`) |\n| Item jasa | `ServiceItem` (kode, tarif default, akun pendapatan) |\n| Stok minus | capability `inventory.negative_stock`, flag `allowNegativeStock` |",
+      "guide": "### Alur bisnis\n\nRantai dokumen (setiap langkah boleh dilewati; Invoice bisa dibuat langsung tanpa SO/DO):\n\n```\nInquiry (INQ) -> Penawaran (QO) -> [Sales Order (PSN)] -> Surat Jalan (DO) -> Invoice Penjualan (SI) -> Pembayaran (modul Bank & Kas)\n                                        \\-> SJS (Surat Jalan Sementara) -> ditautkan ke DO resmi\nInvoice -> Retur Penjualan (RN)          Uang Muka Pelanggan -> dipakai/di-offset/di-refund ke Invoice\n```\n\nStatus per dokumen:\n\n- **Inquiry**: `Baru`, `Diproses`, `Dikonversi` (terkunci, hanya lewat `inq_link`), `Hilang` (wajib alasan >= 5 karakter), `Ditutup`. Hanya inquiry yang belum Dikonversi boleh dihapus.\n- **Penawaran**: `Draft` -> `Sent` (`quot_send`, butuh minimal 1 item dan `validUntil` belum lewat) -> `Accepted` (`quot_accept`) atau `Rejected` (`quot_reject`, alasan wajib). Penawaran `Sent` yang melewati `validUntil` otomatis menjadi `Expired` (job harian). `Cancelled` lewat `quot_cancel` (capability `doc.cancel`; tidak bisa bila sudah dikonversi ke invoice). Hanya `Draft` yang bisa diedit/dihapus. Konversi: `quot_convert_payload` (hanya Accepted) -> `si_create` -> `quot_link`. Catatan: konversi penawaran menuju INVOICE, bukan SO (SO hanya menyimpan `quotationId` sebagai rujukan).\n- **Sales Order**: `Draft` -> `Submitted` (`so_submit`) -> `PartiallyDelivered` -> `FullyDelivered` (dihitung otomatis dari baris DO yang tertaut) atau `Cancelled`. SO hanya boleh diedit saat Draft. Over-delivery (kirim melebihi sisa) diperbolehkan dan hanya dicatat log.\n- **Surat Jalan (DO)**: dibuat `Submitted` dan langsung memotong stok. \"Belum ditagih\" = `Submitted` dengan `invoiceId` kosong; \"Invoiced\" = `Submitted` dengan `invoiceId` terisi; `Cancelled`. Filter status `Invoiced` pada `do_list` hanyalah turunan, bukan nilai kolom.\n- **SJS**: `Open` (Terbuka) -> `Linked` (ditautkan ke DO resmi) atau `Cancelled`. Hanya dokumen kirim sementara; tidak menyentuh stok/GL/WAC dan tidak bisa di-invoice.\n- **Invoice Penjualan**: tidak ada draft pada alur API — `si_create` langsung memposting; status awal `Submitted` (`Paid` bila total Rp 0), lalu `PartiallyPaid`/`Paid`/`Overdue` mengikuti pembayaran, atau `Cancelled`.\n- **Retur**: `Submitted` atau `Cancelled` (Draft ada di enum tetapi tidak dipakai alur normal).\n- **Uang muka pelanggan**: dicatat sebagai Payment bertipe `CustomerDeposit` (dibuat lewat modul Pembayaran, bukan toolset ini). Status turunan `Active`, `PartiallyUsed`, `FullyUsed` dihitung dari jumlah terpakai/refund; status dokumen `Submitted`/`Cancelled`.\n\n### Aturan posting\n\nHanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu transaksi database dan harus seimbang:\n\n| Aksi | Stok | Jurnal GL |\n|---|---|---|\n| Inquiry, Penawaran, SO (semua status), SJS | Tidak ada | Tidak ada |\n| `do_create`, `so_generate_do` | Keluar per item/gudang, unitCost = WAC saat kirim (dikunci) | Tidak ada (HPP menunggu invoice) |\n| `do_update` | Balik pergerakan lama + keluar baru | Tidak ada |\n| `do_cancel` | Stok dikembalikan | Tidak ada |\n| `do_from_invoice` | Tidak ada (stok sudah dipotong invoice) | Tidak ada |\n| `si_create` | Keluar untuk baris inventori (kecuali baris dari DO, yang memakai unitCost terkunci di DO) | DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran; lalu JV-COGS: DR 5.1 HPP (fallback 5) / CR Persediaan |\n| `si_cancel` | Stok dikembalikan | Semua jurnal invoice + HPP dibalik |\n| `sret_create` | Masuk lagi untuk baris `restock=true` | JV-RN: DR 4.3 Retur Penjualan (+ PPN Keluaran) / CR 1.2.1 Piutang (sebesar yang mengurangi outstanding) dan CR 2.1.2 Uang Muka Pelanggan (kelebihan, jadi kredit pelanggan); JV-COGS-RN: DR Persediaan / CR HPP pada biaya asli |\n| `cdep_apply` | Tidak ada | DR 2.1.2 Uang Muka Pelanggan / CR 1.2.1 Piutang Usaha |\n| `cdep_refund` | Tidak ada | Offset: DR 2.1.2 / CR 1.2.1 (FIFO ke faktur terlama); refund kas: DR 2.1.2 / CR Kas/Bank (1.1.x) |\n| `cdep_cancel`, `cdep_apply_cancel` | Tidak ada | Jurnal asal dibalik (soft-cancel ledger, bukan jurnal pembalik) |\n\nBiaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLoaded` baris invoice -> `averageCost` item (WAC). Pembayaran invoice ada di toolset kas-bank (`pay_record`: DR Kas/Bank / CR Piutang).\n\n### Persetujuan\n\n- **Retur Penjualan** (`sret_create`): bila role pemanggil tidak punya capability `approval.bypass` (default hanya Admin), dokumen TIDAK dibuat; payload masuk antrian `ApprovalRequest` tipe `SalesReturn` (HTTP 202) dan dieksekusi saat disetujui (aktor = pengaju). Admin/role bypass langsung memposting (201).\n- **Surat Jalan** (`do_create`): antrian approval tipe `DeliveryOrder` hanya muncul pada kasus stok minus: `allowNegativeStock=true` tanpa capability `inventory.negative_stock`. Perhatikan: `so_generate_do` dan `do_update` TIDAK mengantrikan approval — keduanya menolak dengan 403 bila bypass stok minus diminta tanpa capability.\n- **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.\n- Keputusan approval dilakukan di toolset persetujuan; tool penjualan hanya mengantrikan.\n\n### CRM: tindak lanjut dan catat lewat chat\n\nTool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau Customer yang terlewat.\n\n- **\"Apa yang harus saya follow-up hari ini?\"** -> `crm_followup_list` dengan `ownerId=me`. Hasil berisi empat jenis: `inquiry` (follow-up Inquiry jatuh tempo), `party` (follow-up Customer dari aktivitas), `quotation` (Quotation `Sent` tanpa jawaban setelah N hari dan tanpa kontak N hari terakhir), `reorder` (Customer langganan telat order). Item tanpa PIC ikut tampil untuk semua sales.\n- **Catat dari satu kalimat** (mis. \"tadi CV Lumbung telepon minta harga 5 ton, follow-up Kamis\"):\n  1. Cari Customer dengan `party_search` (parameter `search`). Bila lebih dari satu nama mirip, tanyakan pilihannya; jangan menebak dan jangan membuat Customer baru tanpa diminta.\n  2. Ada permintaan barang/harga baru -> `inq_create` (channel sesuai kanal, `followUpDate` dari kalimat). Hanya kabar atau obrolan -> `crm_activity_create` dengan `partyId` (dan `inquiryId` bila menyangkut Inquiry yang sudah ada), `type` sesuai kanal, `nextFollowUpDate` bila disebut, `source=aira`.\n  3. Ubah hari relatif (\"Kamis\", \"besok\", \"minggu depan\") menjadi tanggal YYYY-MM-DD berdasarkan tanggal hari ini di zona waktu bisnis, lalu sebutkan tanggalnya di konfirmasi.\n- **Efek mencatat aktivitas**: pada Inquiry, `nextFollowUpDate` menjadi tanggal follow-up Inquiry; tanpa tanggal, follow-up Inquiry dianggap selesai; Inquiry `Baru` menjadi `Diproses`. Pada Customer, follow-up Customer sebelumnya dianggap selesai.\n- **Selesai tanpa catatan / tunda**: `crm_followup_settle` (`kind=inquiry` id Inquiry, `kind=party` id aktivitas; `snoozeTo` untuk menunda). Item `reorder` ditangani dengan mencatat aktivitas, atau menjeda radar lewat `crm_party_profile_update.reorderSnoozedUntil`.\n- **Radar pesan ulang** (`crm_reorder_radar`): siklus = `reorderCycleDays` manual per Customer, atau rata-rata jarak invoice bila invoice minimal `reorderMinInvoices`. Telat bila hari sejak order terakhir melewati siklus x `reorderToleranceFactor`.\n- **Kontak**: `crm_contact_*`; nomor disimpan 62xxx. Tautan WhatsApp = `https://wa.me/<nomor>`.\n- **Ringkasan Customer**: `crm_party_overview` (kontak, aktivitas, Inquiry/Quotation terbuka, pembelian 12 bulan, radar). Nilai piutang dan pembelian `null` bila aktor tidak boleh melihat invoice penjualan.\n- AIRA tidak mengirim pesan ke Customer. Semua tindakan CRM hanya mencatat di Entaris.\n\n### Jebakan umum\n\n1. **`inq_convert_payload` bermutasi walau GET**: bila inquiry berupa prospek tanpa pelanggan, endpoint membuat master Pelanggan baru dan mengisi `partyId` inquiry. Diklasifikasikan `write`. Sebaliknya `quot_convert_payload` murni baca.\n2. **Invoice tidak punya draft**: `si_create` = posting langsung (jurnal + stok + HPP). Jangan dipanggil untuk \"simpan dulu\". `si_update` hanya mengubah catatan/jatuh tempo/syarat; nilai tidak bisa diedit — koreksi = `si_cancel` lalu buat ulang.\n3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi atau aplikasi uang muka aktif; `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.\n4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.\n5. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.\n6. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.\n7. **`do_list` status**: gunakan `Submitted` untuk \"belum ditagih\", `Invoiced` untuk \"sudah ditagih\". `do_pending` mewajibkan `partyId`.\n8. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).\n9. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.\n10. **Tarif pajak**: PPN (`taxPct`) bisa per baris dan per dokumen; PPh per baris (`pphPct`) didebit ke 1.5.4 bila akun itu ada di COA (jika tidak ada, baris PPh dilewati tanpa error).\n\n### Peta istilah\n\n| Istilah bisnis | Kode / field / status |\n|---|---|\n| Tindak lanjut, follow-up hari ini | `crm_followup_list` (kind `inquiry/party/quotation/reorder`) |\n| Customer telat order, radar pesan ulang | `crm_reorder_radar`, `Party.reorderCycleDays`, `reorderSnoozedUntil` |\n| Catatan telepon/WA/kunjungan | `CrmActivity` (`crm_activity_create`), `nextFollowUpDate` |\n| PIC sales | `salesOwnerId` pada Customer dan Inquiry |\n| Kontak PIC Customer | `PartyContact` (`crm_contact_*`), `isPrimary` |\n| Inquiry, permintaan harga, prospek | `Inquiry`, `inquiryNumber` (INQ), `prospectName`, status `Baru/Diproses/Dikonversi/Hilang/Ditutup` |\n| Penawaran, Quotation (QO) | `Quotation`, `quotationNumber`, `validUntil`, `Draft/Sent/Accepted/Rejected/Expired/Cancelled` |\n| Pesanan Penjualan, SO (PSN) | `SalesOrder`, `soNumber`, `deliveredQty`, `customerRefNo` (No. PO pelanggan) |\n| Surat Jalan, SJ, DO | `DeliveryOrder`, `doNumber`, `invoiceId` (terisi = sudah ditagih), `nomorMobil`, `driverName` |\n| Surat Jalan Sementara, SJS | `TemporaryDeliveryNote`, `Open/Linked/Cancelled` |\n| Invoice Penjualan, faktur (SI) | `SalesInvoice`, `invoiceNumber`, `outstanding`, `grandTotal`, `Submitted/PartiallyPaid/Paid/Overdue/Cancelled` |\n| Retur Penjualan, RN | `SalesReturn`, `returnNumber`, `restock`, jurnal `JV-RN-...` |\n| Uang muka pelanggan, DP | Payment `paymentType=CustomerDeposit`, akun 2.1.2, `refundedAmount`, `CustomerDepositApplication` |\n| Piutang usaha | akun 1.2.1 (`AR`) |\n| Penjualan / Pendapatan jasa | akun 4.1 / 4.2 |\n| HPP, COGS | akun 5.1 (fallback 5); biaya dari WAC/unitCost terkunci |\n| Retur Penjualan (akun) | akun 4.3 |\n| PPN Keluaran / PPh dibayar dimuka | `TAX_OUTPUT` / akun 1.5.4 |\n| WAC | rata-rata tertimbang biaya item (`averageCost`) |\n| Item jasa | `ServiceItem` (kode, tarif default, akun pendapatan) |\n| Stok minus | capability `inventory.negative_stock`, flag `allowNegativeStock` |",
       "tools": [
         "cdep_apply",
         "cdep_apply_cancel",
@@ -40,6 +40,23 @@
         "cdep_list",
         "cdep_refund",
         "cdep_summary",
+        "crm_activity_create",
+        "crm_activity_delete",
+        "crm_activity_get",
+        "crm_activity_list",
+        "crm_contact_create",
+        "crm_contact_delete",
+        "crm_contact_list",
+        "crm_contact_update",
+        "crm_followup_list",
+        "crm_followup_settle",
+        "crm_party_bulk_owner",
+        "crm_party_overview",
+        "crm_party_profile_update",
+        "crm_reorder_radar",
+        "crm_sales_users",
+        "crm_settings_get",
+        "crm_settings_update",
         "do_cancel",
         "do_create",
         "do_from_invoice",
@@ -3157,6 +3174,1065 @@
       "example": {
         "tool": "cogs_backfill_summary",
         "args": {}
+      }
+    },
+    {
+      "name": "crm_activity_create",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mencatat aktivitas sales (telepon, WA, kunjungan, email, catatan) pada Customer dan/atau Inquiry, opsional dengan tanggal follow-up berikutnya. Pada Inquiry: tanggal berikutnya menjadi follow-up Inquiry; tanpa tanggal, follow-up Inquiry dianggap selesai; Inquiry Baru menjadi Diproses. Pada Customer: follow-up Customer sebelumnya dianggap selesai.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "partyId": "uuid",
+        "inquiryId": "uuid",
+        "contactId": "uuid",
+        "type": "enum",
+        "summary": "string",
+        "outcome": "string",
+        "occurredAt": "date",
+        "nextFollowUpDate": "date",
+        "source": "enum"
+      },
+      "params": [
+        {
+          "name": "partyId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Customer. Wajib bila inquiryId kosong."
+        },
+        {
+          "name": "inquiryId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Inquiry terkait."
+        },
+        {
+          "name": "contactId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id kontak PIC yang dihubungi."
+        },
+        {
+          "name": "type",
+          "in": "body",
+          "type": "enum",
+          "required": true,
+          "description": "Jenis aktivitas.",
+          "enum": [
+            "Telepon",
+            "WhatsApp",
+            "Kunjungan",
+            "Email",
+            "Catatan"
+          ]
+        },
+        {
+          "name": "summary",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Ringkasan percakapan (mis. minta harga 5 ton, kirim minggu depan)."
+        },
+        {
+          "name": "outcome",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Hasil atau kesepakatan."
+        },
+        {
+          "name": "occurredAt",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Tanggal kejadian (YYYY-MM-DD); kosong = sekarang."
+        },
+        {
+          "name": "nextFollowUpDate",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Tanggal follow-up berikutnya (YYYY-MM-DD)."
+        },
+        {
+          "name": "source",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "description": "Isi 'aira' bila dicatat lewat AIRA.",
+          "enum": [
+            "form",
+            "aira"
+          ]
+        }
+      ],
+      "output": {
+        "id": "string"
+      },
+      "outputSummary": "Aktivitas yang dibuat (id, type, summary, nextFollowUpDate, party, inquiry, contact).",
+      "handler": "POST /api/crm/activities",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Catat aktivitas {type}: {summary} (follow-up berikutnya: {nextFollowUpDate})?",
+      "errors": [
+        "400: aktivitas harus tertaut ke Customer atau Inquiry.",
+        "400: kontak bukan milik Customer ini."
+      ],
+      "related": [
+        "crm_followup_list",
+        "crm_party_overview",
+        "inq_create"
+      ],
+      "doc": "### crm_activity_create\n\n**Ringkasan:** Mencatat aktivitas sales (telepon, WA, kunjungan, email, catatan) pada Customer dan/atau Inquiry, opsional dengan tanggal follow-up berikutnya. Pada Inquiry: tanggal berikutnya menjadi follow-up Inquiry; tanpa tanggal, follow-up Inquiry dianggap selesai; Inquiry Baru menjadi Diproses. Pada Customer: follow-up Customer sebelumnya dianggap selesai.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `POST /api/crm/activities` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `partyId` | body | `uuid` | tidak | Id Customer. Wajib bila inquiryId kosong. |\n| `inquiryId` | body | `uuid` | tidak | Id Inquiry terkait. |\n| `contactId` | body | `uuid` | tidak | Id kontak PIC yang dihubungi. |\n| `type` | body | enum: `Telepon`, `WhatsApp`, `Kunjungan`, `Email`, `Catatan` | ya | Jenis aktivitas. |\n| `summary` | body | `string` | ya | Ringkasan percakapan (mis. minta harga 5 ton, kirim minggu depan). |\n| `outcome` | body | `string` | tidak | Hasil atau kesepakatan. |\n| `occurredAt` | body | `date` | tidak | Tanggal kejadian (YYYY-MM-DD); kosong = sekarang. |\n| `nextFollowUpDate` | body | `date` | tidak | Tanggal follow-up berikutnya (YYYY-MM-DD). |\n| `source` | body | enum: `form`, `aira` | tidak | Isi 'aira' bila dicatat lewat AIRA. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_activity_create\",\n  \"args\": {\n    \"type\": \"Telepon\",\n    \"summary\": \"<summary>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Catat aktivitas Telepon: <summary> (follow-up berikutnya: {nextFollowUpDate})?\"\n}\n```\n\n**Isi hasil:** Aktivitas yang dibuat (id, type, summary, nextFollowUpDate, party, inquiry, contact).\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Catat aktivitas {type}: {summary} (follow-up berikutnya: {nextFollowUpDate})?\n\n**Error umum**\n\n- 400: aktivitas harus tertaut ke Customer atau Inquiry.\n- 400: kontak bukan milik Customer ini.\n\n**Tool terkait:** [`crm_followup_list`](#crm_followup_list), [`crm_party_overview`](#crm_party_overview), [`inq_create`](#inq_create)\n",
+      "example": {
+        "tool": "crm_activity_create",
+        "args": {
+          "type": "Telepon",
+          "summary": "<summary>"
+        }
+      }
+    },
+    {
+      "name": "crm_activity_delete",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menghapus aktivitas sales. Hanya pencatatnya, atau pemegang capability doc.cancel.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id aktivitas."
+        }
+      ],
+      "output": {
+        "success": "boolean"
+      },
+      "outputSummary": "{ success: true }",
+      "handler": "DELETE /api/crm/activities/:id",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Hapus aktivitas {id}?",
+      "doc": "### crm_activity_delete\n\n**Ringkasan:** Menghapus aktivitas sales. Hanya pencatatnya, atau pemegang capability doc.cancel.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `DELETE /api/crm/activities/:id` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id aktivitas. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_activity_delete\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus aktivitas 00000000-0000-0000-0000-000000000000?\"\n}\n```\n\n**Isi hasil:** { success: true }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Hapus aktivitas {id}?\n",
+      "example": {
+        "tool": "crm_activity_delete",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_activity_get",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Detail satu aktivitas sales: jenis, ringkasan, hasil, tanggal follow-up, Customer, Inquiry, kontak, dan pencatat.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id aktivitas."
+        }
+      ],
+      "output": {
+        "id": "string"
+      },
+      "outputSummary": "Aktivitas dengan party, inquiry, contact, creator.",
+      "handler": "GET /api/crm/activities/:id",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "doc": "### crm_activity_get\n\n**Ringkasan:** Detail satu aktivitas sales: jenis, ringkasan, hasil, tanggal follow-up, Customer, Inquiry, kontak, dan pencatat.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/activities/:id` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id aktivitas. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_activity_get\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<Aktivitas dengan party, inquiry, contact, creator.>\"\n}\n```\n\n**Isi hasil:** Aktivitas dengan party, inquiry, contact, creator.\n",
+      "example": {
+        "tool": "crm_activity_get",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_activity_list",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Riwayat aktivitas sales (telepon, WA, kunjungan, email, catatan) untuk satu Customer atau satu Inquiry, terbaru di atas.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "partyId": "uuid",
+        "inquiryId": "uuid",
+        "page": "number",
+        "limit": "number"
+      },
+      "params": [
+        {
+          "name": "partyId",
+          "in": "query",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Customer (wajib salah satu dengan inquiryId)."
+        },
+        {
+          "name": "inquiryId",
+          "in": "query",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Inquiry."
+        },
+        {
+          "name": "page",
+          "in": "query",
+          "type": "number",
+          "required": false,
+          "description": "Nomor halaman (mulai 1)."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "type": "number",
+          "required": false,
+          "description": "Jumlah per halaman (maks 100)."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "{ data: [{id, type, summary, outcome, occurredAt, nextFollowUpDate, followUpDoneAt, source, party, inquiry, contact, creator}], total, page, limit }",
+      "handler": "GET /api/crm/activities",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_activity_create"
+      ],
+      "doc": "### crm_activity_list\n\n**Ringkasan:** Riwayat aktivitas sales (telepon, WA, kunjungan, email, catatan) untuk satu Customer atau satu Inquiry, terbaru di atas.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/activities` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `partyId` | query | `uuid` | tidak | Id Customer (wajib salah satu dengan inquiryId). |\n| `inquiryId` | query | `uuid` | tidak | Id Inquiry. |\n| `page` | query | `number` | tidak | Nomor halaman (mulai 1). |\n| `limit` | query | `number` | tidak | Jumlah per halaman (maks 100). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_activity_list\",\n  \"args\": {\n    \"partyId\": \"00000000-0000-0000-0000-000000000000\",\n    \"inquiryId\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ data: [{id, type, summary, outcome, occurredAt, nextFollowUpDate, followUpDoneAt, source>\"\n}\n```\n\n**Isi hasil:** { data: [{id, type, summary, outcome, occurredAt, nextFollowUpDate, followUpDoneAt, source, party, inquiry, contact, creator}], total, page, limit }\n\n**Tool terkait:** [`crm_activity_create`](#crm_activity_create)\n",
+      "example": {
+        "tool": "crm_activity_list",
+        "args": {
+          "partyId": "00000000-0000-0000-0000-000000000000",
+          "inquiryId": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_contact_create",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menambah kontak PIC pada Customer. Nomor telepon dinormalkan ke 62xxx; hasil memuat peringatan bila nomor sama sudah dipakai Customer lain. Kontak pertama otomatis menjadi kontak utama.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid",
+        "name": "string",
+        "position": "string",
+        "phone": "string",
+        "email": "email",
+        "isPrimary": "boolean",
+        "notes": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        },
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Nama kontak."
+        },
+        {
+          "name": "position",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Jabatan."
+        },
+        {
+          "name": "phone",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Nomor telepon/WA."
+        },
+        {
+          "name": "email",
+          "in": "body",
+          "type": "email",
+          "required": false,
+          "description": "Email."
+        },
+        {
+          "name": "isPrimary",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Jadikan kontak utama."
+        },
+        {
+          "name": "notes",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Catatan."
+        }
+      ],
+      "output": {
+        "contact": "object",
+        "warning": "object"
+      },
+      "outputSummary": "{ contact, warning{ phoneUsedBy[] } }",
+      "handler": "POST /api/crm/parties/:id/contacts",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Tambah kontak {name} ({phone}) ke Customer {id}?",
+      "related": [
+        "crm_contact_list"
+      ],
+      "doc": "### crm_contact_create\n\n**Ringkasan:** Menambah kontak PIC pada Customer. Nomor telepon dinormalkan ke 62xxx; hasil memuat peringatan bila nomor sama sudah dipakai Customer lain. Kontak pertama otomatis menjadi kontak utama.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `POST /api/crm/parties/:id/contacts` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id Customer (Party). |\n| `name` | body | `string` | ya | Nama kontak. |\n| `position` | body | `string` | tidak | Jabatan. |\n| `phone` | body | `string` | tidak | Nomor telepon/WA. |\n| `email` | body | `email` | tidak | Email. |\n| `isPrimary` | body | `boolean` | tidak | Jadikan kontak utama. |\n| `notes` | body | `string` | tidak | Catatan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_contact_create\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\",\n    \"name\": \"<name>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Tambah kontak <name> ({phone}) ke Customer 00000000-0000-0000-0000-000000000000?\"\n}\n```\n\n**Isi hasil:** { contact, warning{ phoneUsedBy[] } }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Tambah kontak {name} ({phone}) ke Customer {id}?\n\n**Tool terkait:** [`crm_contact_list`](#crm_contact_list)\n",
+      "example": {
+        "tool": "crm_contact_create",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "name": "<name>"
+        }
+      }
+    },
+    {
+      "name": "crm_contact_delete",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menghapus kontak PIC Customer. Aktivitas yang menyebut kontak ini tetap ada, tautan kontaknya dikosongkan.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id kontak."
+        }
+      ],
+      "output": {
+        "success": "boolean"
+      },
+      "outputSummary": "{ success: true }",
+      "handler": "DELETE /api/crm/contacts/:id",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Hapus kontak {id}?",
+      "doc": "### crm_contact_delete\n\n**Ringkasan:** Menghapus kontak PIC Customer. Aktivitas yang menyebut kontak ini tetap ada, tautan kontaknya dikosongkan.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `DELETE /api/crm/contacts/:id` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id kontak. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_contact_delete\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus kontak 00000000-0000-0000-0000-000000000000?\"\n}\n```\n\n**Isi hasil:** { success: true }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Hapus kontak {id}?\n",
+      "example": {
+        "tool": "crm_contact_delete",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_contact_list",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Daftar kontak PIC milik satu Customer (kontak utama di atas). Nomor telepon dalam format 62xxx.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "[{ id, name, position, phone, email, isPrimary, notes }]",
+      "handler": "GET /api/crm/parties/:id/contacts",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_contact_create",
+        "crm_contact_update"
+      ],
+      "doc": "### crm_contact_list\n\n**Ringkasan:** Daftar kontak PIC milik satu Customer (kontak utama di atas). Nomor telepon dalam format 62xxx.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/parties/:id/contacts` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id Customer (Party). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_contact_list\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<[{ id, name, position, phone, email, isPrimary, notes }]>\"\n}\n```\n\n**Isi hasil:** [{ id, name, position, phone, email, isPrimary, notes }]\n\n**Tool terkait:** [`crm_contact_create`](#crm_contact_create), [`crm_contact_update`](#crm_contact_update)\n",
+      "example": {
+        "tool": "crm_contact_list",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_contact_update",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengubah kontak PIC Customer (nama, jabatan, telepon, email, kontak utama, catatan). Kirim semua field yang ingin dipertahankan.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid",
+        "name": "string",
+        "position": "string",
+        "phone": "string",
+        "email": "email",
+        "isPrimary": "boolean",
+        "notes": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id kontak."
+        },
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Nama kontak."
+        },
+        {
+          "name": "position",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Jabatan."
+        },
+        {
+          "name": "phone",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Nomor telepon/WA."
+        },
+        {
+          "name": "email",
+          "in": "body",
+          "type": "email",
+          "required": false,
+          "description": "Email."
+        },
+        {
+          "name": "isPrimary",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Jadikan kontak utama."
+        },
+        {
+          "name": "notes",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Catatan."
+        }
+      ],
+      "output": {
+        "contact": "object"
+      },
+      "outputSummary": "{ contact, warning{ phoneUsedBy[] } }",
+      "handler": "PUT /api/crm/contacts/:id",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Ubah kontak {id} menjadi {name} ({phone})?",
+      "related": [
+        "crm_contact_list"
+      ],
+      "doc": "### crm_contact_update\n\n**Ringkasan:** Mengubah kontak PIC Customer (nama, jabatan, telepon, email, kontak utama, catatan). Kirim semua field yang ingin dipertahankan.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `PUT /api/crm/contacts/:id` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id kontak. |\n| `name` | body | `string` | ya | Nama kontak. |\n| `position` | body | `string` | tidak | Jabatan. |\n| `phone` | body | `string` | tidak | Nomor telepon/WA. |\n| `email` | body | `email` | tidak | Email. |\n| `isPrimary` | body | `boolean` | tidak | Jadikan kontak utama. |\n| `notes` | body | `string` | tidak | Catatan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_contact_update\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\",\n    \"name\": \"<name>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah kontak 00000000-0000-0000-0000-000000000000 menjadi <name> ({phone})?\"\n}\n```\n\n**Isi hasil:** { contact, warning{ phoneUsedBy[] } }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Ubah kontak {id} menjadi {name} ({phone})?\n\n**Tool terkait:** [`crm_contact_list`](#crm_contact_list)\n",
+      "example": {
+        "tool": "crm_contact_update",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "name": "<name>"
+        }
+      }
+    },
+    {
+      "name": "crm_followup_list",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Daftar yang perlu ditindaklanjuti hari ini: inquiry jatuh tempo follow-up, follow-up Customer, Quotation terkirim tanpa jawaban, dan Customer langganan yang telat order.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "ownerId": "string",
+        "kinds": "string"
+      },
+      "params": [
+        {
+          "name": "ownerId",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "PIC sales: 'me' (aktor), UUID user, atau 'unassigned'. Tanpa filter = semua. Dengan UUID/me, item tanpa PIC ikut tampil."
+        },
+        {
+          "name": "kinds",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "Daftar jenis dipisah koma: inquiry, party, quotation, reorder. Kosong = semua."
+        }
+      ],
+      "output": {
+        "items": "array",
+        "counts": "object"
+      },
+      "outputSummary": "{ today, items: [{kind, id, partyId, partyName, title, documentNumber, dueOn, overdueDays, ownerId, ownerName, phone, note}], counts{inquiry,party,quotation,reorder} }. kind=inquiry -> id Inquiry; party -> id aktivitas; quotation -> id Quotation; reorder -> id Customer.",
+      "handler": "GET /api/crm/followups",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_followup_settle",
+        "crm_activity_create",
+        "crm_reorder_radar"
+      ],
+      "doc": "### crm_followup_list\n\n**Ringkasan:** Daftar yang perlu ditindaklanjuti hari ini: inquiry jatuh tempo follow-up, follow-up Customer, Quotation terkirim tanpa jawaban, dan Customer langganan yang telat order.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/followups` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `ownerId` | query | `string` | tidak | PIC sales: 'me' (aktor), UUID user, atau 'unassigned'. Tanpa filter = semua. Dengan UUID/me, item tanpa PIC ikut tampil. |\n| `kinds` | query | `string` | tidak | Daftar jenis dipisah koma: inquiry, party, quotation, reorder. Kosong = semua. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_followup_list\",\n  \"args\": {\n    \"ownerId\": \"<id>\",\n    \"kinds\": \"<kinds>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ today, items: [{kind, id, partyId, partyName, title, documentNumber, dueOn, overdueDays,>\"\n}\n```\n\n**Isi hasil:** { today, items: [{kind, id, partyId, partyName, title, documentNumber, dueOn, overdueDays, ownerId, ownerName, phone, note}], counts{inquiry,party,quotation,reorder} }. kind=inquiry -> id Inquiry; party -> id aktivitas; quotation -> id Quotation; reorder -> id Customer.\n\n**Tool terkait:** [`crm_followup_settle`](#crm_followup_settle), [`crm_activity_create`](#crm_activity_create), [`crm_reorder_radar`](#crm_reorder_radar)\n",
+      "example": {
+        "tool": "crm_followup_list",
+        "args": {
+          "ownerId": "<id>",
+          "kinds": "<kinds>"
+        }
+      }
+    },
+    {
+      "name": "crm_followup_settle",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menandai follow-up selesai atau menundanya ke tanggal lain. kind=inquiry untuk follow-up Inquiry, kind=party untuk follow-up Customer (id aktivitas dari crm_followup_list).",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "kind": "enum",
+        "id": "uuid",
+        "snoozeTo": "date"
+      },
+      "params": [
+        {
+          "name": "kind",
+          "in": "body",
+          "type": "enum",
+          "required": true,
+          "description": "inquiry atau party.",
+          "enum": [
+            "inquiry",
+            "party"
+          ]
+        },
+        {
+          "name": "id",
+          "in": "body",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Inquiry (kind=inquiry) atau id aktivitas (kind=party)."
+        },
+        {
+          "name": "snoozeTo",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Isi untuk menunda ke tanggal ini (YYYY-MM-DD); kosong = tandai selesai."
+        }
+      ],
+      "output": {
+        "success": "boolean"
+      },
+      "outputSummary": "{ success: true }",
+      "handler": "POST /api/crm/followups/settle",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Perbarui follow-up {kind} {id} (tunda ke: {snoozeTo})?",
+      "related": [
+        "crm_followup_list"
+      ],
+      "doc": "### crm_followup_settle\n\n**Ringkasan:** Menandai follow-up selesai atau menundanya ke tanggal lain. kind=inquiry untuk follow-up Inquiry, kind=party untuk follow-up Customer (id aktivitas dari crm_followup_list).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `POST /api/crm/followups/settle` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `kind` | body | enum: `inquiry`, `party` | ya | inquiry atau party. |\n| `id` | body | `uuid` | ya | Id Inquiry (kind=inquiry) atau id aktivitas (kind=party). |\n| `snoozeTo` | body | `date` | tidak | Isi untuk menunda ke tanggal ini (YYYY-MM-DD); kosong = tandai selesai. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_followup_settle\",\n  \"args\": {\n    \"kind\": \"inquiry\",\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Perbarui follow-up inquiry 00000000-0000-0000-0000-000000000000 (tunda ke: {snoozeTo})?\"\n}\n```\n\n**Isi hasil:** { success: true }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Perbarui follow-up {kind} {id} (tunda ke: {snoozeTo})?\n\n**Tool terkait:** [`crm_followup_list`](#crm_followup_list)\n",
+      "example": {
+        "tool": "crm_followup_settle",
+        "args": {
+          "kind": "inquiry",
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_party_bulk_owner",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengganti PIC sales banyak Customer sekaligus (maksimal 500).",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "partyIds": "array<uuid>",
+        "salesOwnerId": "uuid"
+      },
+      "params": [
+        {
+          "name": "partyIds",
+          "in": "body",
+          "type": "array<uuid>",
+          "required": true,
+          "description": "Daftar id Customer."
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": true,
+          "description": "Id user PIC sales baru; null = kosongkan PIC."
+        }
+      ],
+      "output": {
+        "updated": "number"
+      },
+      "outputSummary": "{ updated: jumlah Customer diubah }",
+      "handler": "POST /api/crm/parties/bulk-owner",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Ganti PIC sales untuk Customer terpilih menjadi {salesOwnerId}?",
+      "doc": "### crm_party_bulk_owner\n\n**Ringkasan:** Mengganti PIC sales banyak Customer sekaligus (maksimal 500).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `POST /api/crm/parties/bulk-owner` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `partyIds` | body | `array<uuid>` | ya | Daftar id Customer. |\n| `salesOwnerId` | body | `uuid` | ya | Id user PIC sales baru; null = kosongkan PIC. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_party_bulk_owner\",\n  \"args\": {\n    \"partyIds\": [],\n    \"salesOwnerId\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ganti PIC sales untuk Customer terpilih menjadi 00000000-0000-0000-0000-000000000000?\"\n}\n```\n\n**Isi hasil:** { updated: jumlah Customer diubah }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Ganti PIC sales untuk Customer terpilih menjadi {salesOwnerId}?\n",
+      "example": {
+        "tool": "crm_party_bulk_owner",
+        "args": {
+          "partyIds": [],
+          "salesOwnerId": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_party_overview",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Ringkasan 360 derajat satu Customer: kontak, 10 aktivitas terakhir, Inquiry dan Quotation terbuka, pembelian 12 bulan, invoice terakhir, piutang (bila boleh melihat invoice), dan status radar pesan ulang.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        }
+      ],
+      "output": {
+        "party": "object"
+      },
+      "outputSummary": "{ party, contacts[], activities[], activityTotal, inquiries[], quotations[], purchases{last12MonthsTotal,last12MonthsCount,lastInvoice}, reorder }",
+      "handler": "GET /api/crm/parties/:id/overview",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_activity_create",
+        "crm_contact_create"
+      ],
+      "doc": "### crm_party_overview\n\n**Ringkasan:** Ringkasan 360 derajat satu Customer: kontak, 10 aktivitas terakhir, Inquiry dan Quotation terbuka, pembelian 12 bulan, invoice terakhir, piutang (bila boleh melihat invoice), dan status radar pesan ulang.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/parties/:id/overview` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id Customer (Party). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_party_overview\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ party, contacts[], activities[], activityTotal, inquiries[], quotations[], purchases{las>\"\n}\n```\n\n**Isi hasil:** { party, contacts[], activities[], activityTotal, inquiries[], quotations[], purchases{last12MonthsTotal,last12MonthsCount,lastInvoice}, reorder }\n\n**Tool terkait:** [`crm_activity_create`](#crm_activity_create), [`crm_contact_create`](#crm_contact_create)\n",
+      "example": {
+        "tool": "crm_party_overview",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_party_profile_update",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengubah profil sales Customer: PIC sales, siklus order manual (hari) untuk radar pesan ulang, atau jeda radar sampai tanggal tertentu. Field yang tidak dikirim tidak berubah; null mengosongkan.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid",
+        "salesOwnerId": "uuid",
+        "reorderCycleDays": "number",
+        "reorderSnoozedUntil": "date"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id user PIC sales (lihat crm_sales_users); null = tanpa PIC."
+        },
+        {
+          "name": "reorderCycleDays",
+          "in": "body",
+          "type": "number",
+          "required": false,
+          "description": "Siklus order dalam hari; null = pakai rata-rata riwayat invoice."
+        },
+        {
+          "name": "reorderSnoozedUntil",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Sembunyikan dari radar sampai tanggal ini; null = aktif lagi."
+        }
+      ],
+      "output": {
+        "id": "string"
+      },
+      "outputSummary": "{ id, salesOwnerId, reorderCycleDays, reorderSnoozedUntil }",
+      "handler": "PUT /api/crm/parties/:id/profile",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Perbarui profil sales Customer {id}?",
+      "related": [
+        "crm_party_overview",
+        "crm_reorder_radar"
+      ],
+      "doc": "### crm_party_profile_update\n\n**Ringkasan:** Mengubah profil sales Customer: PIC sales, siklus order manual (hari) untuk radar pesan ulang, atau jeda radar sampai tanggal tertentu. Field yang tidak dikirim tidak berubah; null mengosongkan.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `crm` / `edit`)\n- **Handler:** `PUT /api/crm/parties/:id/profile` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `uuid` | ya | Id Customer (Party). |\n| `salesOwnerId` | body | `uuid` | tidak | Id user PIC sales (lihat crm_sales_users); null = tanpa PIC. |\n| `reorderCycleDays` | body | `number` | tidak | Siklus order dalam hari; null = pakai rata-rata riwayat invoice. |\n| `reorderSnoozedUntil` | body | `date` | tidak | Sembunyikan dari radar sampai tanggal ini; null = aktif lagi. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_party_profile_update\",\n  \"args\": {\n    \"id\": \"00000000-0000-0000-0000-000000000000\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Perbarui profil sales Customer 00000000-0000-0000-0000-000000000000?\"\n}\n```\n\n**Isi hasil:** { id, salesOwnerId, reorderCycleDays, reorderSnoozedUntil }\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).\n\n**Teks konfirmasi:** Perbarui profil sales Customer {id}?\n\n**Tool terkait:** [`crm_party_overview`](#crm_party_overview), [`crm_reorder_radar`](#crm_reorder_radar)\n",
+      "example": {
+        "tool": "crm_party_profile_update",
+        "args": {
+          "id": "00000000-0000-0000-0000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "crm_reorder_radar",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Radar pesan ulang: Customer langganan dengan siklus order (manual per Customer atau rata-rata jarak invoice) beserta status telat, tanggal order terakhir, dan nilai order rata-rata.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "ownerId": "string",
+        "state": "enum"
+      },
+      "params": [
+        {
+          "name": "ownerId",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "PIC sales: 'me' (aktor), UUID user, atau 'unassigned'. Tanpa filter = semua. Dengan UUID/me, item tanpa PIC ikut tampil."
+        },
+        {
+          "name": "state",
+          "in": "query",
+          "type": "enum",
+          "required": false,
+          "description": "Saring status radar.",
+          "enum": [
+            "late",
+            "ok",
+            "snoozed",
+            "insufficient"
+          ]
+        }
+      ],
+      "output": {
+        "data": "array"
+      },
+      "outputSummary": "{ data: [{partyId, partyName, state, orderCount, lastOrderOn, avgIntervalDays, cycleDays, cycleSource, daysSinceLastOrder, lateAfter, overdueDays, contactedSinceLate, avgOrderValue, salesOwnerName, phone}], settings }",
+      "handler": "GET /api/crm/reorder-radar",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_party_profile_update",
+        "crm_followup_list"
+      ],
+      "doc": "### crm_reorder_radar\n\n**Ringkasan:** Radar pesan ulang: Customer langganan dengan siklus order (manual per Customer atau rata-rata jarak invoice) beserta status telat, tanggal order terakhir, dan nilai order rata-rata.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/reorder-radar` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `ownerId` | query | `string` | tidak | PIC sales: 'me' (aktor), UUID user, atau 'unassigned'. Tanpa filter = semua. Dengan UUID/me, item tanpa PIC ikut tampil. |\n| `state` | query | enum: `late`, `ok`, `snoozed`, `insufficient` | tidak | Saring status radar. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_reorder_radar\",\n  \"args\": {\n    \"ownerId\": \"<id>\",\n    \"state\": \"late\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ data: [{partyId, partyName, state, orderCount, lastOrderOn, avgIntervalDays, cycleDays, >\"\n}\n```\n\n**Isi hasil:** { data: [{partyId, partyName, state, orderCount, lastOrderOn, avgIntervalDays, cycleDays, cycleSource, daysSinceLastOrder, lateAfter, overdueDays, contactedSinceLate, avgOrderValue, salesOwnerName, phone}], settings }\n\n**Tool terkait:** [`crm_party_profile_update`](#crm_party_profile_update), [`crm_followup_list`](#crm_followup_list)\n",
+      "example": {
+        "tool": "crm_reorder_radar",
+        "args": {
+          "ownerId": "<id>",
+          "state": "late"
+        }
+      }
+    },
+    {
+      "name": "crm_sales_users",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Daftar user aktif (id dan nama) untuk memilih PIC sales Customer atau Inquiry.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {},
+      "params": [],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "[{ id, fullName }]",
+      "handler": "GET /api/crm/sales-users",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "doc": "### crm_sales_users\n\n**Ringkasan:** Daftar user aktif (id dan nama) untuk memilih PIC sales Customer atau Inquiry.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/sales-users` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_sales_users\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<[{ id, fullName }]>\"\n}\n```\n\n**Isi hasil:** [{ id, fullName }]\n",
+      "example": {
+        "tool": "crm_sales_users",
+        "args": {}
+      }
+    },
+    {
+      "name": "crm_settings_get",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Pengaturan CRM: jam dan hari pengingat pagi, batas hari Quotation tanpa jawaban, faktor toleransi dan minimal invoice radar pesan ulang.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {},
+      "params": [],
+      "output": {
+        "reminderTime": "string"
+      },
+      "outputSummary": "{ reminderEnabled, reminderTime, reminderDays[], quotationNoReplyDays, reorderToleranceFactor, reorderMinInvoices, lastReminderOn }",
+      "handler": "GET /api/crm/settings",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "doc": "### crm_settings_get\n\n**Ringkasan:** Pengaturan CRM: jam dan hari pengingat pagi, batas hari Quotation tanpa jawaban, faktor toleransi dan minimal invoice radar pesan ulang.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, Viewer (modul `crm` / `view`)\n- **Handler:** `GET /api/crm/settings` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_settings_get\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ reminderEnabled, reminderTime, reminderDays[], quotationNoReplyDays, reorderToleranceFac>\"\n}\n```\n\n**Isi hasil:** { reminderEnabled, reminderTime, reminderDays[], quotationNoReplyDays, reorderToleranceFactor, reorderMinInvoices, lastReminderOn }\n",
+      "example": {
+        "tool": "crm_settings_get",
+        "args": {}
+      }
+    },
+    {
+      "name": "crm_settings_update",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengubah pengaturan CRM: jam dan hari pengingat pagi, batas hari Quotation tanpa jawaban, faktor toleransi dan minimal invoice radar pesan ulang. Butuh izin edit Pengaturan.",
+      "risk": "critical",
+      "roles": [
+        "Admin"
+      ],
+      "input": {
+        "reminderEnabled": "boolean",
+        "reminderTime": "string",
+        "reminderDays": "array<number>",
+        "quotationNoReplyDays": "number",
+        "reorderToleranceFactor": "number",
+        "reorderMinInvoices": "number"
+      },
+      "params": [
+        {
+          "name": "reminderEnabled",
+          "in": "body",
+          "type": "boolean",
+          "required": true,
+          "description": "Aktifkan pengingat pagi."
+        },
+        {
+          "name": "reminderTime",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Jam kirim HH:MM (zona waktu bisnis)."
+        },
+        {
+          "name": "reminderDays",
+          "in": "body",
+          "type": "array<number>",
+          "required": true,
+          "description": "Hari kirim, 1 = Senin sampai 7 = Minggu."
+        },
+        {
+          "name": "quotationNoReplyDays",
+          "in": "body",
+          "type": "number",
+          "required": true,
+          "description": "Quotation terkirim dianggap tanpa jawaban setelah sekian hari."
+        },
+        {
+          "name": "reorderToleranceFactor",
+          "in": "body",
+          "type": "number",
+          "required": true,
+          "description": "Faktor toleransi siklus order (mis. 1.5)."
+        },
+        {
+          "name": "reorderMinInvoices",
+          "in": "body",
+          "type": "number",
+          "required": true,
+          "description": "Minimal invoice agar rata-rata siklus dihitung."
+        }
+      ],
+      "output": {
+        "reminderTime": "string"
+      },
+      "outputSummary": "Pengaturan CRM setelah disimpan.",
+      "handler": "PUT /api/crm/settings",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok. Mengubah jadwal pengingat dan ambang daftar tindak lanjut untuk semua user.",
+      "confirm_template": "Ubah pengaturan CRM (pengingat {reminderTime}, aktif {reminderEnabled})?",
+      "related": [
+        "crm_settings_get"
+      ],
+      "doc": "### crm_settings_update\n\n**Ringkasan:** Mengubah pengaturan CRM: jam dan hari pengingat pagi, batas hari Quotation tanpa jawaban, faktor toleransi dan minimal invoice radar pesan ulang. Butuh izin edit Pengaturan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `crm` / `edit`)\n- **Handler:** `PUT /api/crm/settings` (src/routes/crm.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `reminderEnabled` | body | `boolean` | ya | Aktifkan pengingat pagi. |\n| `reminderTime` | body | `string` | ya | Jam kirim HH:MM (zona waktu bisnis). |\n| `reminderDays` | body | `array<number>` | ya | Hari kirim, 1 = Senin sampai 7 = Minggu. |\n| `quotationNoReplyDays` | body | `number` | ya | Quotation terkirim dianggap tanpa jawaban setelah sekian hari. |\n| `reorderToleranceFactor` | body | `number` | ya | Faktor toleransi siklus order (mis. 1.5). |\n| `reorderMinInvoices` | body | `number` | ya | Minimal invoice agar rata-rata siklus dihitung. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"crm_settings_update\",\n  \"args\": {\n    \"reminderEnabled\": true,\n    \"reminderTime\": \"<reminderTime>\",\n    \"reminderDays\": [],\n    \"quotationNoReplyDays\": 1,\n    \"reorderToleranceFactor\": 1,\n    \"reorderMinInvoices\": 1\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah pengaturan CRM (pengingat <reminderTime>, aktif true)?\"\n}\n```\n\n**Isi hasil:** Pengaturan CRM setelah disimpan.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Mengubah jadwal pengingat dan ambang daftar tindak lanjut untuk semua user.\n\n**Teks konfirmasi:** Ubah pengaturan CRM (pengingat {reminderTime}, aktif {reminderEnabled})?\n\n**Tool terkait:** [`crm_settings_get`](#crm_settings_get)\n",
+      "example": {
+        "tool": "crm_settings_update",
+        "args": {
+          "reminderEnabled": true,
+          "reminderTime": "<reminderTime>",
+          "reminderDays": [],
+          "quotationNoReplyDays": 1,
+          "reorderToleranceFactor": 1,
+          "reorderMinInvoices": 1
+        }
       }
     },
     {
@@ -16769,7 +17845,8 @@
         "itemsText": "string",
         "items": "array<object>",
         "notes": "string",
-        "followUpDate": "date"
+        "followUpDate": "date",
+        "salesOwnerId": "uuid"
       },
       "params": [
         {
@@ -16888,6 +17965,13 @@
           "type": "date",
           "required": false,
           "description": "Tanggal rencana tindak lanjut."
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "PIC sales (lihat crm_sales_users). Saat membuat, kosong = pembuat; saat mengubah, kosong = tidak berubah."
         }
       ],
       "output": {
@@ -16913,7 +17997,7 @@
         "inq_convert_payload",
         "quot_create"
       ],
-      "doc": "### inq_create\n\n**Ringkasan:** Mencatat inquiry baru dari calon/pelanggan (nomor INQ otomatis, status awal Baru). Barang minat boleh teks bebas (itemsMode=freetext) atau terstruktur (items[]).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `quotation` / `edit`)\n- **Handler:** `POST /api/inquiries` (src/routes/inquiries.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `channel` | body | enum: `WhatsApp`, `Telepon`, `Email`, `WalkIn`, `Referral`, `Lainnya` | tidak |  |\n| `partyId` | body | `string` | tidak | ID pelanggan terdaftar bila sudah ada; kosongkan untuk prospek baru. |\n| `prospectName` | body | `string` | ya | Nama calon pelanggan / kontak (wajib walau partyId diisi). |\n| `prospectPhone` | body | `string` | tidak |  |\n| `prospectEmail` | body | `email` | tidak |  |\n| `itemsMode` | body | enum: `freetext`, `structured` | tidak | freetext = isi itemsText; structured = isi items[]. |\n| `itemsText` | body | `string` | tidak |  |\n| `items` | body | `array<object>` | tidak | Baris dokumen (item). |\n| `items[].itemName` | body | `string` | ya |  |\n| `items[].quantity` | body | `number` | tidak |  |\n| `items[].unit` | body | `string` | tidak |  |\n| `items[].estimatedPrice` | body | `number` | tidak |  |\n| `items[].description` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `followUpDate` | body | `date` | tidak | Tanggal rencana tindak lanjut. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inq_create\",\n  \"args\": {\n    \"date\": \"2026-01-31\",\n    \"prospectName\": \"<prospectName>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Catat inquiry baru dari <prospectName> (channel {channel}) tanggal 2026-01-31?\"\n}\n```\n\n**Isi hasil:** Objek Inquiry yang dibuat (id, inquiryNumber, status Baru, items).\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya membuat dokumen Inquiry (status Baru).\n\n**Teks konfirmasi:** Catat inquiry baru dari {prospectName} (channel {channel}) tanggal {date}?\n\n**Prasyarat**\n\n- Tahun fiskal terbuka pada tanggal inquiry.\n\n**Error umum**\n\n- 400: validasi body (tanggal/prospectName wajib).\n\n**Tool terkait:** [`inq_set_status`](#inq_set_status), [`inq_convert_payload`](#inq_convert_payload), [`quot_create`](#quot_create)\n",
+      "doc": "### inq_create\n\n**Ringkasan:** Mencatat inquiry baru dari calon/pelanggan (nomor INQ otomatis, status awal Baru). Barang minat boleh teks bebas (itemsMode=freetext) atau terstruktur (items[]).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `quotation` / `edit`)\n- **Handler:** `POST /api/inquiries` (src/routes/inquiries.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `channel` | body | enum: `WhatsApp`, `Telepon`, `Email`, `WalkIn`, `Referral`, `Lainnya` | tidak |  |\n| `partyId` | body | `string` | tidak | ID pelanggan terdaftar bila sudah ada; kosongkan untuk prospek baru. |\n| `prospectName` | body | `string` | ya | Nama calon pelanggan / kontak (wajib walau partyId diisi). |\n| `prospectPhone` | body | `string` | tidak |  |\n| `prospectEmail` | body | `email` | tidak |  |\n| `itemsMode` | body | enum: `freetext`, `structured` | tidak | freetext = isi itemsText; structured = isi items[]. |\n| `itemsText` | body | `string` | tidak |  |\n| `items` | body | `array<object>` | tidak | Baris dokumen (item). |\n| `items[].itemName` | body | `string` | ya |  |\n| `items[].quantity` | body | `number` | tidak |  |\n| `items[].unit` | body | `string` | tidak |  |\n| `items[].estimatedPrice` | body | `number` | tidak |  |\n| `items[].description` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `followUpDate` | body | `date` | tidak | Tanggal rencana tindak lanjut. |\n| `salesOwnerId` | body | `uuid` | tidak | PIC sales (lihat crm_sales_users). Saat membuat, kosong = pembuat; saat mengubah, kosong = tidak berubah. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inq_create\",\n  \"args\": {\n    \"date\": \"2026-01-31\",\n    \"prospectName\": \"<prospectName>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Catat inquiry baru dari <prospectName> (channel {channel}) tanggal 2026-01-31?\"\n}\n```\n\n**Isi hasil:** Objek Inquiry yang dibuat (id, inquiryNumber, status Baru, items).\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya membuat dokumen Inquiry (status Baru).\n\n**Teks konfirmasi:** Catat inquiry baru dari {prospectName} (channel {channel}) tanggal {date}?\n\n**Prasyarat**\n\n- Tahun fiskal terbuka pada tanggal inquiry.\n\n**Error umum**\n\n- 400: validasi body (tanggal/prospectName wajib).\n\n**Tool terkait:** [`inq_set_status`](#inq_set_status), [`inq_convert_payload`](#inq_convert_payload), [`quot_create`](#quot_create)\n",
       "example": {
         "tool": "inq_create",
         "args": {
@@ -17447,7 +18531,8 @@
         "itemsText": "string",
         "items": "array<object>",
         "notes": "string",
-        "followUpDate": "date"
+        "followUpDate": "date",
+        "salesOwnerId": "uuid"
       },
       "params": [
         {
@@ -17571,6 +18656,13 @@
           "in": "body",
           "type": "date",
           "required": false
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "PIC sales (lihat crm_sales_users). Saat membuat, kosong = pembuat; saat mengubah, kosong = tidak berubah."
         }
       ],
       "output": {
@@ -17593,7 +18685,7 @@
         "inq_get",
         "inq_set_status"
       ],
-      "doc": "### inq_update\n\n**Ringkasan:** Mengubah isi inquiry (penuh, bukan parsial): tanggal, kontak, channel, barang minat, catatan, follow-up. Baris items diganti seluruhnya.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `quotation` / `edit`)\n- **Handler:** `PUT /api/inquiries/:id` (src/routes/inquiries.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID inquiry. |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `channel` | body | enum: `WhatsApp`, `Telepon`, `Email`, `WalkIn`, `Referral`, `Lainnya` | tidak |  |\n| `partyId` | body | `string` | tidak | ID pelanggan/vendor (Party). |\n| `prospectName` | body | `string` | ya | Nama calon pelanggan (prospek). |\n| `prospectPhone` | body | `string` | tidak |  |\n| `prospectEmail` | body | `email` | tidak |  |\n| `itemsMode` | body | enum: `freetext`, `structured` | tidak |  |\n| `itemsText` | body | `string` | tidak |  |\n| `items` | body | `array<object>` | tidak | Baris dokumen (item). |\n| `items[].itemName` | body | `string` | ya |  |\n| `items[].quantity` | body | `number` | tidak |  |\n| `items[].unit` | body | `string` | tidak |  |\n| `items[].estimatedPrice` | body | `number` | tidak |  |\n| `items[].description` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `followUpDate` | body | `date` | tidak |  |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inq_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"date\": \"2026-01-31\",\n    \"prospectName\": \"<prospectName>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah inquiry <id> (prospek <prospectName>)?\"\n}\n```\n\n**Isi hasil:** Objek Inquiry setelah diubah.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC.\n\n**Teks konfirmasi:** Ubah inquiry {id} (prospek {prospectName})?\n\n**Error umum**\n\n- 404: inquiry tidak ditemukan.\n- 400: validasi body.\n\n**Tool terkait:** [`inq_get`](#inq_get), [`inq_set_status`](#inq_set_status)\n",
+      "doc": "### inq_update\n\n**Ringkasan:** Mengubah isi inquiry (penuh, bukan parsial): tanggal, kontak, channel, barang minat, catatan, follow-up. Baris items diganti seluruhnya.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `quotation` / `edit`)\n- **Handler:** `PUT /api/inquiries/:id` (src/routes/inquiries.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID inquiry. |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `channel` | body | enum: `WhatsApp`, `Telepon`, `Email`, `WalkIn`, `Referral`, `Lainnya` | tidak |  |\n| `partyId` | body | `string` | tidak | ID pelanggan/vendor (Party). |\n| `prospectName` | body | `string` | ya | Nama calon pelanggan (prospek). |\n| `prospectPhone` | body | `string` | tidak |  |\n| `prospectEmail` | body | `email` | tidak |  |\n| `itemsMode` | body | enum: `freetext`, `structured` | tidak |  |\n| `itemsText` | body | `string` | tidak |  |\n| `items` | body | `array<object>` | tidak | Baris dokumen (item). |\n| `items[].itemName` | body | `string` | ya |  |\n| `items[].quantity` | body | `number` | tidak |  |\n| `items[].unit` | body | `string` | tidak |  |\n| `items[].estimatedPrice` | body | `number` | tidak |  |\n| `items[].description` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `followUpDate` | body | `date` | tidak |  |\n| `salesOwnerId` | body | `uuid` | tidak | PIC sales (lihat crm_sales_users). Saat membuat, kosong = pembuat; saat mengubah, kosong = tidak berubah. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inq_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"date\": \"2026-01-31\",\n    \"prospectName\": \"<prospectName>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah inquiry <id> (prospek <prospectName>)?\"\n}\n```\n\n**Isi hasil:** Objek Inquiry setelah diubah.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC.\n\n**Teks konfirmasi:** Ubah inquiry {id} (prospek {prospectName})?\n\n**Error umum**\n\n- 404: inquiry tidak ditemukan.\n- 400: validasi body.\n\n**Tool terkait:** [`inq_get`](#inq_get), [`inq_set_status`](#inq_set_status)\n",
       "example": {
         "tool": "inq_update",
         "args": {

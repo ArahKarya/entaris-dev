@@ -48,6 +48,22 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 - **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.
 - Keputusan approval dilakukan di toolset persetujuan; tool penjualan hanya mengantrikan.
 
+### CRM: tindak lanjut dan catat lewat chat
+
+Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau Customer yang terlewat.
+
+- **"Apa yang harus saya follow-up hari ini?"** -> `crm_followup_list` dengan `ownerId=me`. Hasil berisi empat jenis: `inquiry` (follow-up Inquiry jatuh tempo), `party` (follow-up Customer dari aktivitas), `quotation` (Quotation `Sent` tanpa jawaban setelah N hari dan tanpa kontak N hari terakhir), `reorder` (Customer langganan telat order). Item tanpa PIC ikut tampil untuk semua sales.
+- **Catat dari satu kalimat** (mis. "tadi CV Lumbung telepon minta harga 5 ton, follow-up Kamis"):
+  1. Cari Customer dengan `party_search` (parameter `search`). Bila lebih dari satu nama mirip, tanyakan pilihannya; jangan menebak dan jangan membuat Customer baru tanpa diminta.
+  2. Ada permintaan barang/harga baru -> `inq_create` (channel sesuai kanal, `followUpDate` dari kalimat). Hanya kabar atau obrolan -> `crm_activity_create` dengan `partyId` (dan `inquiryId` bila menyangkut Inquiry yang sudah ada), `type` sesuai kanal, `nextFollowUpDate` bila disebut, `source=aira`.
+  3. Ubah hari relatif ("Kamis", "besok", "minggu depan") menjadi tanggal YYYY-MM-DD berdasarkan tanggal hari ini di zona waktu bisnis, lalu sebutkan tanggalnya di konfirmasi.
+- **Efek mencatat aktivitas**: pada Inquiry, `nextFollowUpDate` menjadi tanggal follow-up Inquiry; tanpa tanggal, follow-up Inquiry dianggap selesai; Inquiry `Baru` menjadi `Diproses`. Pada Customer, follow-up Customer sebelumnya dianggap selesai.
+- **Selesai tanpa catatan / tunda**: `crm_followup_settle` (`kind=inquiry` id Inquiry, `kind=party` id aktivitas; `snoozeTo` untuk menunda). Item `reorder` ditangani dengan mencatat aktivitas, atau menjeda radar lewat `crm_party_profile_update.reorderSnoozedUntil`.
+- **Radar pesan ulang** (`crm_reorder_radar`): siklus = `reorderCycleDays` manual per Customer, atau rata-rata jarak invoice bila invoice minimal `reorderMinInvoices`. Telat bila hari sejak order terakhir melewati siklus x `reorderToleranceFactor`.
+- **Kontak**: `crm_contact_*`; nomor disimpan 62xxx. Tautan WhatsApp = `https://wa.me/<nomor>`.
+- **Ringkasan Customer**: `crm_party_overview` (kontak, aktivitas, Inquiry/Quotation terbuka, pembelian 12 bulan, radar). Nilai piutang dan pembelian `null` bila aktor tidak boleh melihat invoice penjualan.
+- AIRA tidak mengirim pesan ke Customer. Semua tindakan CRM hanya mencatat di Entaris.
+
 ### Jebakan umum
 
 1. **`inq_convert_payload` bermutasi walau GET**: bila inquiry berupa prospek tanpa pelanggan, endpoint membuat master Pelanggan baru dan mengisi `partyId` inquiry. Diklasifikasikan `write`. Sebaliknya `quot_convert_payload` murni baca.
@@ -65,6 +81,11 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 
 | Istilah bisnis | Kode / field / status |
 |---|---|
+| Tindak lanjut, follow-up hari ini | `crm_followup_list` (kind `inquiry/party/quotation/reorder`) |
+| Customer telat order, radar pesan ulang | `crm_reorder_radar`, `Party.reorderCycleDays`, `reorderSnoozedUntil` |
+| Catatan telepon/WA/kunjungan | `CrmActivity` (`crm_activity_create`), `nextFollowUpDate` |
+| PIC sales | `salesOwnerId` pada Customer dan Inquiry |
+| Kontak PIC Customer | `PartyContact` (`crm_contact_*`), `isPrimary` |
 | Inquiry, permintaan harga, prospek | `Inquiry`, `inquiryNumber` (INQ), `prospectName`, status `Baru/Diproses/Dikonversi/Hilang/Ditutup` |
 | Penawaran, Quotation (QO) | `Quotation`, `quotationNumber`, `validUntil`, `Draft/Sent/Accepted/Rejected/Expired/Cancelled` |
 | Pesanan Penjualan, SO (PSN) | `SalesOrder`, `soNumber`, `deliveredQty`, `customerRefNo` (No. PO pelanggan) |

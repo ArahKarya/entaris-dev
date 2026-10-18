@@ -7,6 +7,7 @@
     "delivery_order",
     "sales_invoice",
     "quotation",
+    "crm",
     "proforma_invoice",
     "sales_return",
     "customer_deposit",
@@ -20629,7 +20630,8 @@
         "itemsText": "string",
         "items": "array<object>",
         "notes": "string",
-        "followUpDate": "date"
+        "followUpDate": "date",
+        "salesOwnerId": "uuid"
       },
       "params": [
         {
@@ -20748,6 +20750,13 @@
           "type": "date",
           "required": false,
           "description": "Tanggal rencana tindak lanjut."
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "PIC sales (lihat crm_sales_users). Saat membuat, kosong = pembuat; saat mengubah, kosong = tidak berubah."
         }
       ],
       "output": {
@@ -28916,7 +28925,8 @@
         "itemsText": "string",
         "items": "array<object>",
         "notes": "string",
-        "followUpDate": "date"
+        "followUpDate": "date",
+        "salesOwnerId": "uuid"
       },
       "params": [
         {
@@ -29040,6 +29050,13 @@
           "in": "body",
           "type": "date",
           "required": false
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "PIC sales (lihat crm_sales_users). Saat membuat, kosong = pembuat; saat mengubah, kosong = tidak berubah."
         }
       ],
       "output": {
@@ -34405,6 +34422,937 @@
       "accessNote": "Semua user login; hanya sesi chat MILIK pemanggil (sesi lain = 404). Isi pesan dipotong 4.000 karakter per pesan.",
       "related": [
         "chat_cari_riwayat"
+      ]
+    },
+    {
+      "name": "crm_followup_list",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Daftar yang perlu ditindaklanjuti hari ini: inquiry jatuh tempo follow-up, follow-up Customer, Quotation terkirim tanpa jawaban, dan Customer langganan yang telat order.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "ownerId": "string",
+        "kinds": "string"
+      },
+      "params": [
+        {
+          "name": "ownerId",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "PIC sales: 'me' (aktor), UUID user, atau 'unassigned'. Tanpa filter = semua. Dengan UUID/me, item tanpa PIC ikut tampil."
+        },
+        {
+          "name": "kinds",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "Daftar jenis dipisah koma: inquiry, party, quotation, reorder. Kosong = semua."
+        }
+      ],
+      "output": {
+        "items": "array",
+        "counts": "object"
+      },
+      "outputSummary": "{ today, items: [{kind, id, partyId, partyName, title, documentNumber, dueOn, overdueDays, ownerId, ownerName, phone, note}], counts{inquiry,party,quotation,reorder} }. kind=inquiry -> id Inquiry; party -> id aktivitas; quotation -> id Quotation; reorder -> id Customer.",
+      "handler": "GET /api/crm/followups",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_followup_settle",
+        "crm_activity_create",
+        "crm_reorder_radar"
+      ]
+    },
+    {
+      "name": "crm_followup_settle",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menandai follow-up selesai atau menundanya ke tanggal lain. kind=inquiry untuk follow-up Inquiry, kind=party untuk follow-up Customer (id aktivitas dari crm_followup_list).",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "kind": "enum",
+        "id": "uuid",
+        "snoozeTo": "date"
+      },
+      "params": [
+        {
+          "name": "kind",
+          "in": "body",
+          "type": "enum",
+          "required": true,
+          "description": "inquiry atau party.",
+          "enum": [
+            "inquiry",
+            "party"
+          ]
+        },
+        {
+          "name": "id",
+          "in": "body",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Inquiry (kind=inquiry) atau id aktivitas (kind=party)."
+        },
+        {
+          "name": "snoozeTo",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Isi untuk menunda ke tanggal ini (YYYY-MM-DD); kosong = tandai selesai."
+        }
+      ],
+      "output": {
+        "success": "boolean"
+      },
+      "outputSummary": "{ success: true }",
+      "handler": "POST /api/crm/followups/settle",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Perbarui follow-up {kind} {id} (tunda ke: {snoozeTo})?",
+      "related": [
+        "crm_followup_list"
+      ]
+    },
+    {
+      "name": "crm_reorder_radar",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Radar pesan ulang: Customer langganan dengan siklus order (manual per Customer atau rata-rata jarak invoice) beserta status telat, tanggal order terakhir, dan nilai order rata-rata.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "ownerId": "string",
+        "state": "enum"
+      },
+      "params": [
+        {
+          "name": "ownerId",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "PIC sales: 'me' (aktor), UUID user, atau 'unassigned'. Tanpa filter = semua. Dengan UUID/me, item tanpa PIC ikut tampil."
+        },
+        {
+          "name": "state",
+          "in": "query",
+          "type": "enum",
+          "required": false,
+          "description": "Saring status radar.",
+          "enum": [
+            "late",
+            "ok",
+            "snoozed",
+            "insufficient"
+          ]
+        }
+      ],
+      "output": {
+        "data": "array"
+      },
+      "outputSummary": "{ data: [{partyId, partyName, state, orderCount, lastOrderOn, avgIntervalDays, cycleDays, cycleSource, daysSinceLastOrder, lateAfter, overdueDays, contactedSinceLate, avgOrderValue, salesOwnerName, phone}], settings }",
+      "handler": "GET /api/crm/reorder-radar",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_party_profile_update",
+        "crm_followup_list"
+      ]
+    },
+    {
+      "name": "crm_sales_users",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Daftar user aktif (id dan nama) untuk memilih PIC sales Customer atau Inquiry.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {},
+      "params": [],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "[{ id, fullName }]",
+      "handler": "GET /api/crm/sales-users",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1
+    },
+    {
+      "name": "crm_party_overview",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Ringkasan 360 derajat satu Customer: kontak, 10 aktivitas terakhir, Inquiry dan Quotation terbuka, pembelian 12 bulan, invoice terakhir, piutang (bila boleh melihat invoice), dan status radar pesan ulang.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        }
+      ],
+      "output": {
+        "party": "object"
+      },
+      "outputSummary": "{ party, contacts[], activities[], activityTotal, inquiries[], quotations[], purchases{last12MonthsTotal,last12MonthsCount,lastInvoice}, reorder }",
+      "handler": "GET /api/crm/parties/:id/overview",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_activity_create",
+        "crm_contact_create"
+      ]
+    },
+    {
+      "name": "crm_party_profile_update",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengubah profil sales Customer: PIC sales, siklus order manual (hari) untuk radar pesan ulang, atau jeda radar sampai tanggal tertentu. Field yang tidak dikirim tidak berubah; null mengosongkan.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid",
+        "salesOwnerId": "uuid",
+        "reorderCycleDays": "number",
+        "reorderSnoozedUntil": "date"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id user PIC sales (lihat crm_sales_users); null = tanpa PIC."
+        },
+        {
+          "name": "reorderCycleDays",
+          "in": "body",
+          "type": "number",
+          "required": false,
+          "description": "Siklus order dalam hari; null = pakai rata-rata riwayat invoice."
+        },
+        {
+          "name": "reorderSnoozedUntil",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Sembunyikan dari radar sampai tanggal ini; null = aktif lagi."
+        }
+      ],
+      "output": {
+        "id": "string"
+      },
+      "outputSummary": "{ id, salesOwnerId, reorderCycleDays, reorderSnoozedUntil }",
+      "handler": "PUT /api/crm/parties/:id/profile",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Perbarui profil sales Customer {id}?",
+      "related": [
+        "crm_party_overview",
+        "crm_reorder_radar"
+      ]
+    },
+    {
+      "name": "crm_party_bulk_owner",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengganti PIC sales banyak Customer sekaligus (maksimal 500).",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "partyIds": "array<uuid>",
+        "salesOwnerId": "uuid"
+      },
+      "params": [
+        {
+          "name": "partyIds",
+          "in": "body",
+          "type": "array<uuid>",
+          "required": true,
+          "description": "Daftar id Customer."
+        },
+        {
+          "name": "salesOwnerId",
+          "in": "body",
+          "type": "uuid",
+          "required": true,
+          "description": "Id user PIC sales baru; null = kosongkan PIC."
+        }
+      ],
+      "output": {
+        "updated": "number"
+      },
+      "outputSummary": "{ updated: jumlah Customer diubah }",
+      "handler": "POST /api/crm/parties/bulk-owner",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Ganti PIC sales untuk Customer terpilih menjadi {salesOwnerId}?"
+    },
+    {
+      "name": "crm_contact_list",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Daftar kontak PIC milik satu Customer (kontak utama di atas). Nomor telepon dalam format 62xxx.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "[{ id, name, position, phone, email, isPrimary, notes }]",
+      "handler": "GET /api/crm/parties/:id/contacts",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_contact_create",
+        "crm_contact_update"
+      ]
+    },
+    {
+      "name": "crm_contact_create",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menambah kontak PIC pada Customer. Nomor telepon dinormalkan ke 62xxx; hasil memuat peringatan bila nomor sama sudah dipakai Customer lain. Kontak pertama otomatis menjadi kontak utama.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid",
+        "name": "string",
+        "position": "string",
+        "phone": "string",
+        "email": "email",
+        "isPrimary": "boolean",
+        "notes": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id Customer (Party)."
+        },
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Nama kontak."
+        },
+        {
+          "name": "position",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Jabatan."
+        },
+        {
+          "name": "phone",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Nomor telepon/WA."
+        },
+        {
+          "name": "email",
+          "in": "body",
+          "type": "email",
+          "required": false,
+          "description": "Email."
+        },
+        {
+          "name": "isPrimary",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Jadikan kontak utama."
+        },
+        {
+          "name": "notes",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Catatan."
+        }
+      ],
+      "output": {
+        "contact": "object",
+        "warning": "object"
+      },
+      "outputSummary": "{ contact, warning{ phoneUsedBy[] } }",
+      "handler": "POST /api/crm/parties/:id/contacts",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Tambah kontak {name} ({phone}) ke Customer {id}?",
+      "related": [
+        "crm_contact_list"
+      ]
+    },
+    {
+      "name": "crm_contact_update",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengubah kontak PIC Customer (nama, jabatan, telepon, email, kontak utama, catatan). Kirim semua field yang ingin dipertahankan.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid",
+        "name": "string",
+        "position": "string",
+        "phone": "string",
+        "email": "email",
+        "isPrimary": "boolean",
+        "notes": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id kontak."
+        },
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Nama kontak."
+        },
+        {
+          "name": "position",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Jabatan."
+        },
+        {
+          "name": "phone",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Nomor telepon/WA."
+        },
+        {
+          "name": "email",
+          "in": "body",
+          "type": "email",
+          "required": false,
+          "description": "Email."
+        },
+        {
+          "name": "isPrimary",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Jadikan kontak utama."
+        },
+        {
+          "name": "notes",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Catatan."
+        }
+      ],
+      "output": {
+        "contact": "object"
+      },
+      "outputSummary": "{ contact, warning{ phoneUsedBy[] } }",
+      "handler": "PUT /api/crm/contacts/:id",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Ubah kontak {id} menjadi {name} ({phone})?",
+      "related": [
+        "crm_contact_list"
+      ]
+    },
+    {
+      "name": "crm_contact_delete",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menghapus kontak PIC Customer. Aktivitas yang menyebut kontak ini tetap ada, tautan kontaknya dikosongkan.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id kontak."
+        }
+      ],
+      "output": {
+        "success": "boolean"
+      },
+      "outputSummary": "{ success: true }",
+      "handler": "DELETE /api/crm/contacts/:id",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Hapus kontak {id}?"
+    },
+    {
+      "name": "crm_activity_list",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Riwayat aktivitas sales (telepon, WA, kunjungan, email, catatan) untuk satu Customer atau satu Inquiry, terbaru di atas.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "partyId": "uuid",
+        "inquiryId": "uuid",
+        "page": "number",
+        "limit": "number"
+      },
+      "params": [
+        {
+          "name": "partyId",
+          "in": "query",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Customer (wajib salah satu dengan inquiryId)."
+        },
+        {
+          "name": "inquiryId",
+          "in": "query",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Inquiry."
+        },
+        {
+          "name": "page",
+          "in": "query",
+          "type": "number",
+          "required": false,
+          "description": "Nomor halaman (mulai 1)."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "type": "number",
+          "required": false,
+          "description": "Jumlah per halaman (maks 100)."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "{ data: [{id, type, summary, outcome, occurredAt, nextFollowUpDate, followUpDoneAt, source, party, inquiry, contact, creator}], total, page, limit }",
+      "handler": "GET /api/crm/activities",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "crm_activity_create"
+      ]
+    },
+    {
+      "name": "crm_activity_get",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Detail satu aktivitas sales: jenis, ringkasan, hasil, tanggal follow-up, Customer, Inquiry, kontak, dan pencatat.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id aktivitas."
+        }
+      ],
+      "output": {
+        "id": "string"
+      },
+      "outputSummary": "Aktivitas dengan party, inquiry, contact, creator.",
+      "handler": "GET /api/crm/activities/:id",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1
+    },
+    {
+      "name": "crm_activity_create",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mencatat aktivitas sales (telepon, WA, kunjungan, email, catatan) pada Customer dan/atau Inquiry, opsional dengan tanggal follow-up berikutnya. Pada Inquiry: tanggal berikutnya menjadi follow-up Inquiry; tanpa tanggal, follow-up Inquiry dianggap selesai; Inquiry Baru menjadi Diproses. Pada Customer: follow-up Customer sebelumnya dianggap selesai.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "partyId": "uuid",
+        "inquiryId": "uuid",
+        "contactId": "uuid",
+        "type": "enum",
+        "summary": "string",
+        "outcome": "string",
+        "occurredAt": "date",
+        "nextFollowUpDate": "date",
+        "source": "enum"
+      },
+      "params": [
+        {
+          "name": "partyId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Customer. Wajib bila inquiryId kosong."
+        },
+        {
+          "name": "inquiryId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id Inquiry terkait."
+        },
+        {
+          "name": "contactId",
+          "in": "body",
+          "type": "uuid",
+          "required": false,
+          "description": "Id kontak PIC yang dihubungi."
+        },
+        {
+          "name": "type",
+          "in": "body",
+          "type": "enum",
+          "required": true,
+          "description": "Jenis aktivitas.",
+          "enum": [
+            "Telepon",
+            "WhatsApp",
+            "Kunjungan",
+            "Email",
+            "Catatan"
+          ]
+        },
+        {
+          "name": "summary",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Ringkasan percakapan (mis. minta harga 5 ton, kirim minggu depan)."
+        },
+        {
+          "name": "outcome",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Hasil atau kesepakatan."
+        },
+        {
+          "name": "occurredAt",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Tanggal kejadian (YYYY-MM-DD); kosong = sekarang."
+        },
+        {
+          "name": "nextFollowUpDate",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Tanggal follow-up berikutnya (YYYY-MM-DD)."
+        },
+        {
+          "name": "source",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "description": "Isi 'aira' bila dicatat lewat AIRA.",
+          "enum": [
+            "form",
+            "aira"
+          ]
+        }
+      ],
+      "output": {
+        "id": "string"
+      },
+      "outputSummary": "Aktivitas yang dibuat (id, type, summary, nextFollowUpDate, party, inquiry, contact).",
+      "handler": "POST /api/crm/activities",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Catat aktivitas {type}: {summary} (follow-up berikutnya: {nextFollowUpDate})?",
+      "errors": [
+        "400: aktivitas harus tertaut ke Customer atau Inquiry.",
+        "400: kontak bukan milik Customer ini."
+      ],
+      "related": [
+        "crm_followup_list",
+        "crm_party_overview",
+        "inq_create"
+      ]
+    },
+    {
+      "name": "crm_activity_delete",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Menghapus aktivitas sales. Hanya pencatatnya, atau pemegang capability doc.cancel.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "uuid"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "uuid",
+          "required": true,
+          "description": "Id aktivitas."
+        }
+      ],
+      "output": {
+        "success": "boolean"
+      },
+      "outputSummary": "{ success: true }",
+      "handler": "DELETE /api/crm/activities/:id",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya data CRM (kontak, aktivitas, tindak lanjut).",
+      "confirm_template": "Hapus aktivitas {id}?"
+    },
+    {
+      "name": "crm_settings_get",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Pengaturan CRM: jam dan hari pengingat pagi, batas hari Quotation tanpa jawaban, faktor toleransi dan minimal invoice radar pesan ulang.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {},
+      "params": [],
+      "output": {
+        "reminderTime": "string"
+      },
+      "outputSummary": "{ reminderEnabled, reminderTime, reminderDays[], quotationNoReplyDays, reorderToleranceFactor, reorderMinInvoices, lastReminderOn }",
+      "handler": "GET /api/crm/settings",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1
+    },
+    {
+      "name": "crm_settings_update",
+      "group": "CRM",
+      "toolset": "penjualan",
+      "module": "crm",
+      "desc": "Mengubah pengaturan CRM: jam dan hari pengingat pagi, batas hari Quotation tanpa jawaban, faktor toleransi dan minimal invoice radar pesan ulang. Butuh izin edit Pengaturan.",
+      "risk": "critical",
+      "roles": [
+        "Admin"
+      ],
+      "input": {
+        "reminderEnabled": "boolean",
+        "reminderTime": "string",
+        "reminderDays": "array<number>",
+        "quotationNoReplyDays": "number",
+        "reorderToleranceFactor": "number",
+        "reorderMinInvoices": "number"
+      },
+      "params": [
+        {
+          "name": "reminderEnabled",
+          "in": "body",
+          "type": "boolean",
+          "required": true,
+          "description": "Aktifkan pengingat pagi."
+        },
+        {
+          "name": "reminderTime",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Jam kirim HH:MM (zona waktu bisnis)."
+        },
+        {
+          "name": "reminderDays",
+          "in": "body",
+          "type": "array<number>",
+          "required": true,
+          "description": "Hari kirim, 1 = Senin sampai 7 = Minggu."
+        },
+        {
+          "name": "quotationNoReplyDays",
+          "in": "body",
+          "type": "number",
+          "required": true,
+          "description": "Quotation terkirim dianggap tanpa jawaban setelah sekian hari."
+        },
+        {
+          "name": "reorderToleranceFactor",
+          "in": "body",
+          "type": "number",
+          "required": true,
+          "description": "Faktor toleransi siklus order (mis. 1.5)."
+        },
+        {
+          "name": "reorderMinInvoices",
+          "in": "body",
+          "type": "number",
+          "required": true,
+          "description": "Minimal invoice agar rata-rata siklus dihitung."
+        }
+      ],
+      "output": {
+        "reminderTime": "string"
+      },
+      "outputSummary": "Pengaturan CRM setelah disimpan.",
+      "handler": "PUT /api/crm/settings",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok. Mengubah jadwal pengingat dan ambang daftar tindak lanjut untuk semua user.",
+      "confirm_template": "Ubah pengaturan CRM (pengingat {reminderTime}, aktif {reminderEnabled})?",
+      "related": [
+        "crm_settings_get"
       ]
     }
   ]

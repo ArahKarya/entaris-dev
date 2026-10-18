@@ -108,8 +108,17 @@ model Party {
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
   paymentRequests        PaymentRequest[]        @relation("PaymentRequestParty")
+  // CRM: PIC sales, siklus order manual (hari; null = rata-rata dari riwayat invoice),
+  // dan jeda radar pesan ulang sampai tanggal tertentu.
+  salesOwnerId           String?                 @map("sales_owner_id")
+  salesOwner             User?                   @relation("PartySalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
+  reorderCycleDays       Int?                    @map("reorder_cycle_days")
+  reorderSnoozedUntil    DateTime?               @map("reorder_snoozed_until")
+  contacts               PartyContact[]          @relation("PartyContacts")
+  crmActivities          CrmActivity[]           @relation("PartyCrmActivities")
 
   @@index([partyType])
+  @@index([salesOwnerId])
   @@map("parties")
 }
 
@@ -529,6 +538,12 @@ model Inquiry {
   createdBy    String     @map("created_by")
   user         User       @relation("InquiryCreator", fields: [createdBy], references: [id])
 
+  // CRM: PIC sales dan waktu follow-up terakhir ditandai selesai (null = belum).
+  salesOwnerId   String?       @map("sales_owner_id")
+  salesOwner     User?         @relation("InquirySalesOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
+  followUpDoneAt DateTime?     @map("follow_up_done_at")
+  crmActivities  CrmActivity[] @relation("InquiryCrmActivities")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -536,6 +551,8 @@ model Inquiry {
   @@index([status])
   @@index([date])
   @@index([fiscalYearId])
+  @@index([salesOwnerId])
+  @@index([followUpDate])
   @@map("inquiries")
 }
 
@@ -917,6 +934,9 @@ model User {
   paymentRequestsPaid                 PaymentRequest[]             @relation("PaymentRequestPaidBy")
   paymentRequestHistory               PaymentRequestHistory[]      @relation("PaymentRequestHistoryActor")
   chatSessions                        ChatSession[]
+  crmOwnedParties                     Party[]                      @relation("PartySalesOwner")
+  crmOwnedInquiries                   Inquiry[]                    @relation("InquirySalesOwner")
+  crmActivities                       CrmActivity[]                @relation("CrmActivityCreator")
   createdAt                           DateTime                     @default(now()) @map("created_at")
   updatedAt                           DateTime                     @updatedAt @map("updated_at")
 
@@ -3776,4 +3796,84 @@ model DemoDataRecord {
   @@unique([model, recordId])
   @@index([batchId])
   @@map("demo_data_records")
+}
+
+// ── CRM ─────────────────────────────────────────────────────────────────────
+
+enum CrmActivityType {
+  Telepon
+  WhatsApp
+  Kunjungan
+  Email
+  Catatan
+}
+
+/// PIC di pihak Customer (bisa lebih dari satu per Customer). Party.phone/email tetap kontak umum.
+model PartyContact {
+  id         String        @id @default(uuid())
+  partyId    String        @map("party_id")
+  party      Party         @relation("PartyContacts", fields: [partyId], references: [id], onDelete: Cascade)
+  name       String
+  position   String?
+  // Disimpan dalam format internasional tanpa "+" (62xxx) agar bisa dibuka lewat wa.me.
+  phone      String?
+  email      String?
+  isPrimary  Boolean       @default(false) @map("is_primary")
+  notes      String?
+  activities CrmActivity[] @relation("ContactCrmActivities")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  @@index([partyId])
+  @@index([phone])
+  @@map("party_contacts")
+}
+
+/// Riwayat interaksi sales (telepon, WA, kunjungan, catatan). Tertaut ke Customer, Inquiry, atau keduanya.
+/// nextFollowUpDate pada aktivitas tanpa Inquiry menjadi follow-up Customer sampai followUpDoneAt terisi.
+model CrmActivity {
+  id               String          @id @default(uuid())
+  partyId          String?         @map("party_id")
+  party            Party?          @relation("PartyCrmActivities", fields: [partyId], references: [id], onDelete: Cascade)
+  inquiryId        String?         @map("inquiry_id")
+  inquiry          Inquiry?        @relation("InquiryCrmActivities", fields: [inquiryId], references: [id], onDelete: Cascade)
+  contactId        String?         @map("contact_id")
+  contact          PartyContact?   @relation("ContactCrmActivities", fields: [contactId], references: [id], onDelete: SetNull)
+  type             CrmActivityType
+  summary          String
+  outcome          String?
+  occurredAt       DateTime        @default(now()) @map("occurred_at")
+  nextFollowUpDate DateTime?       @map("next_follow_up_date")
+  followUpDoneAt   DateTime?       @map("follow_up_done_at")
+  // 'form' | 'aira'
+  source           String          @default("form")
+  createdBy        String          @map("created_by")
+  creator          User            @relation("CrmActivityCreator", fields: [createdBy], references: [id])
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  @@index([partyId, occurredAt])
+  @@index([inquiryId])
+  @@index([nextFollowUpDate])
+  @@map("crm_activities")
+}
+
+/// Pengaturan CRM (singleton slug 'default').
+model CrmSetting {
+  id                     String   @id @default(uuid())
+  slug                   String   @unique @default("default")
+  reminderEnabled        Boolean  @default(true) @map("reminder_enabled")
+  // Jam kirim pengingat pagi, HH:MM zona waktu bisnis.
+  reminderTime           String   @default("07:30") @map("reminder_time")
+  // Hari kirim, ISO 1 = Senin ... 7 = Minggu.
+  reminderDays           Int[]    @default([1, 2, 3, 4, 5, 6]) @map("reminder_days")
+  quotationNoReplyDays   Int      @default(3) @map("quotation_no_reply_days")
+  reorderToleranceFactor Decimal  @default(1.5) @map("reorder_tolerance_factor") @db.Decimal(4, 2)
+  reorderMinInvoices     Int      @default(3) @map("reorder_min_invoices")
+  // Tanggal bisnis (YYYY-MM-DD) pengingat terakhir terkirim, untuk mencegah kirim ganda.
+  lastReminderOn         String?  @map("last_reminder_on")
+  updatedBy              String?  @map("updated_by")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@map("crm_settings")
 }

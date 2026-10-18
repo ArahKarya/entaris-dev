@@ -2,13 +2,13 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **487** tool (read 224 · write 157 · critical 106); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
 | Toolset | Tool | read | write | critical | Ringkas |
 |---|---|---|---|---|---|
-| [Penjualan](penjualan.md) | 75 | 32 | 27 | 16 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
+| [Penjualan](penjualan.md) | 92 | 40 | 35 | 17 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
 | [Pembelian](pembelian.md) | 28 | 12 | 5 | 11 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
@@ -67,6 +67,23 @@ Total **487** tool (read 224 · write 157 · critical 106); semuanya aktif secar
 | [`coa_update`](akuntansi.md#coa_update) | akuntansi | write | tidak | Admin | `PUT /api/coa/:id` |
 | [`cogs_backfill_list`](akuntansi.md#cogs_backfill_list) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/cogs-backfill` |
 | [`cogs_backfill_summary`](akuntansi.md#cogs_backfill_summary) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/cogs-backfill/summary` |
+| [`crm_activity_create`](penjualan.md#crm_activity_create) | penjualan | write | ya | Admin, Accountant | `POST /api/crm/activities` |
+| [`crm_activity_delete`](penjualan.md#crm_activity_delete) | penjualan | write | tidak | Admin, Accountant | `DELETE /api/crm/activities/:id` |
+| [`crm_activity_get`](penjualan.md#crm_activity_get) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/activities/:id` |
+| [`crm_activity_list`](penjualan.md#crm_activity_list) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/activities` |
+| [`crm_contact_create`](penjualan.md#crm_contact_create) | penjualan | write | ya | Admin, Accountant | `POST /api/crm/parties/:id/contacts` |
+| [`crm_contact_delete`](penjualan.md#crm_contact_delete) | penjualan | write | tidak | Admin, Accountant | `DELETE /api/crm/contacts/:id` |
+| [`crm_contact_list`](penjualan.md#crm_contact_list) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/parties/:id/contacts` |
+| [`crm_contact_update`](penjualan.md#crm_contact_update) | penjualan | write | ya | Admin, Accountant | `PUT /api/crm/contacts/:id` |
+| [`crm_followup_list`](penjualan.md#crm_followup_list) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/followups` |
+| [`crm_followup_settle`](penjualan.md#crm_followup_settle) | penjualan | write | ya | Admin, Accountant | `POST /api/crm/followups/settle` |
+| [`crm_party_bulk_owner`](penjualan.md#crm_party_bulk_owner) | penjualan | write | tidak | Admin, Accountant | `POST /api/crm/parties/bulk-owner` |
+| [`crm_party_overview`](penjualan.md#crm_party_overview) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/parties/:id/overview` |
+| [`crm_party_profile_update`](penjualan.md#crm_party_profile_update) | penjualan | write | ya | Admin, Accountant | `PUT /api/crm/parties/:id/profile` |
+| [`crm_reorder_radar`](penjualan.md#crm_reorder_radar) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/reorder-radar` |
+| [`crm_sales_users`](penjualan.md#crm_sales_users) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/sales-users` |
+| [`crm_settings_get`](penjualan.md#crm_settings_get) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/settings` |
+| [`crm_settings_update`](penjualan.md#crm_settings_update) | penjualan | critical | tidak | Admin | `PUT /api/crm/settings` |
 | [`do_cancel`](penjualan.md#do_cancel) | penjualan | critical | tidak | Admin | `POST /api/delivery-orders/:id/cancel` |
 | [`do_create`](penjualan.md#do_create) | penjualan | critical | tidak | Admin, Accountant, StaffProduksi | `POST /api/delivery-orders` |
 | [`do_from_invoice`](penjualan.md#do_from_invoice) | penjualan | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/delivery-orders/from-invoice/:invoiceId` |
