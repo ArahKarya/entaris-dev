@@ -46,7 +46,8 @@ export interface ReorderRow {
   lateAfter: string | null;
   overdueDays: number;
   contactedSinceLate: boolean;
-  avgOrderValue: number;
+  /** null when the viewer may not see sales invoice amounts. */
+  avgOrderValue: number | null;
   salesOwnerId: string | null;
   salesOwnerName: string | null;
   lastContactOn: string | null;
@@ -134,7 +135,7 @@ export interface PartyOverview {
   purchases: {
     last12MonthsTotal: number | null;
     last12MonthsCount: number;
-    lastInvoice: { id: string; invoiceNumber: string; date: string; grandTotal: number | null } | null;
+    lastInvoice: { id: string | null; invoiceNumber: string | null; date: string; grandTotal: number | null } | null;
   };
   reorder: ReorderRow | null;
 }

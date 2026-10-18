@@ -124,7 +124,7 @@ export function RadarTable({ ownerParam }: RadarTableProps) {
         id: 'avgOrder',
         header: t('radar.columns.avgOrder'),
         meta: { hideBelow: 'md', align: 'right', cellClassName: 'num whitespace-nowrap' },
-        cell: ({ row }) => formatRupiah(row.original.avgOrderValue),
+        cell: ({ row }) => (row.original.avgOrderValue === null ? '—' : formatRupiah(row.original.avgOrderValue)),
       },
       {
         id: 'actions',

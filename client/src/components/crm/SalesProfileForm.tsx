@@ -62,7 +62,9 @@ export function SalesProfileForm({ overview, canEdit }: SalesProfileFormProps) {
       className="grid gap-3"
     >
       <Field label={t('customer.profile.owner')}>
-        {(control) => <SalesOwnerSelect id={control.id} value={ownerId} onChange={setOwnerId} disabled={!canEdit} />}
+        {(control) => (
+          <SalesOwnerSelect id={control.id} value={ownerId} onChange={setOwnerId} disabled={!canEdit} currentName={party.salesOwner?.fullName} />
+        )}
       </Field>
       <Field label={t('customer.profile.cycle')} hint={t('customer.profile.cycleHint', { average })} error={cycleError}>
         <Input

@@ -53,6 +53,8 @@ export function ActivityTimeline({ partyId, inquiryId, hideInquiry }: ActivityTi
       toast.success(t('timeline.deleted'));
       setDeleteTarget(null);
       void queryClient.invalidateQueries({ queryKey: crmKeys.all });
+      void queryClient.invalidateQueries({ queryKey: ['inquiries'] });
+      void queryClient.invalidateQueries({ queryKey: ['inquiry'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) =>
       toast.error(err.response?.data?.error ?? t('timeline.deleteFailed')),

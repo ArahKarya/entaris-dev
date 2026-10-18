@@ -224,7 +224,14 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
               </Field>
               {showOwner && (
                 <Field label={tc('inquiry.owner')}>
-                  {(control) => <SalesOwnerSelect id={control.id} value={salesOwnerId} onChange={setSalesOwnerId} />}
+                  {(control) => (
+                    <SalesOwnerSelect
+                      id={control.id}
+                      value={salesOwnerId}
+                      onChange={setSalesOwnerId}
+                      currentName={editTarget?.salesOwner?.fullName}
+                    />
+                  )}
                 </Field>
               )}
             </div>

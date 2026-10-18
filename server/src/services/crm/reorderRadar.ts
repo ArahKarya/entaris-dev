@@ -20,7 +20,8 @@ export interface ReorderRow extends ReorderResult {
   phone: string | null;
   salesOwnerId: string | null;
   salesOwnerName: string | null;
-  avgOrderValue: number;
+  /** null when the viewer may not see sales invoice amounts (see redactReorderRows). */
+  avgOrderValue: number | null;
   lastContactOn: string | null;
   snoozedUntil: string | null;
 }
@@ -100,4 +101,9 @@ export function sortReorderRows(rows: ReorderRow[]): ReorderRow[] {
       (a.lateAfter ?? '9999').localeCompare(b.lateAfter ?? '9999') ||
       a.partyName.localeCompare(b.partyName),
   );
+}
+
+/** Remove invoice-derived amounts for viewers without sales invoice access. */
+export function redactReorderRows(rows: ReorderRow[], canSeeInvoices: boolean): ReorderRow[] {
+  return canSeeInvoices ? rows : rows.map((r) => ({ ...r, avgOrderValue: null }));
 }

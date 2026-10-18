@@ -187,7 +187,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
         throw new BusinessError('Inquiry yang sudah dikonversi tidak dapat diedit.');
       }
 
-      if (body.salesOwnerId) await assertSalesOwner(tx, body.salesOwnerId);
+      // Validate only a changed owner, so an inquiry whose owner left can still be edited.
+      if (body.salesOwnerId && body.salesOwnerId !== existing.salesOwnerId) await assertSalesOwner(tx, body.salesOwnerId);
       const followUpDate = body.followUpDate ? new Date(body.followUpDate) : null;
       // A moved follow-up date opens the follow-up again.
       const followUpMoved = (followUpDate?.getTime() ?? null) !== (existing.followUpDate?.getTime() ?? null);
@@ -239,7 +240,11 @@ router.delete('/:id', async (req, res) => {
     if (existing.status === 'Dikonversi') {
       return res.status(400).json({ error: 'Inquiry yang sudah dikonversi tidak dapat dihapus.' });
     }
-    await prisma.inquiry.delete({ where: { id: existing.id } });
+    await prisma.$transaction([
+      // Activities of a prospect (no Customer) have nowhere left to show; Customer activities stay.
+      prisma.crmActivity.deleteMany({ where: { inquiryId: existing.id, partyId: null } }),
+      prisma.inquiry.delete({ where: { id: existing.id } }),
+    ]);
     return res.json({ success: true });
   } catch (error) {
     return handleRouteError(res, error, 'DELETE /inquiries/:id', 'Gagal menghapus inquiry.');

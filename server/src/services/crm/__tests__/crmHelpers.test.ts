@@ -8,6 +8,7 @@ import {
   parseClock,
 } from '../businessDate';
 import { normalizePhone } from '../phone';
+import { matchesOwner } from '../owner';
 import { evaluateReorder, type ReorderInput } from '../reorder';
 
 describe('businessDate', () => {
@@ -108,5 +109,17 @@ describe('evaluateReorder', () => {
     const today = '2026-10-08';
     expect(evaluateReorder({ ...base, today, lastContactOn: '2026-10-05' }).contactedSinceLate).toBe(true);
     expect(evaluateReorder({ ...base, today, lastContactOn: '2026-10-02' }).contactedSinceLate).toBe(false);
+  });
+});
+
+describe('matchesOwner', () => {
+  it('includes unowned rows unless strict, and supports unassigned', () => {
+    expect(matchesOwner('u1', { ownerId: 'u1' })).toBe(true);
+    expect(matchesOwner(null, { ownerId: 'u1' })).toBe(true);
+    expect(matchesOwner(null, { ownerId: 'u1', strictOwner: true })).toBe(false);
+    expect(matchesOwner('u2', { ownerId: 'u1' })).toBe(false);
+    expect(matchesOwner(null, { ownerId: 'unassigned' })).toBe(true);
+    expect(matchesOwner('u1', { ownerId: 'unassigned' })).toBe(false);
+    expect(matchesOwner('u2', {})).toBe(true);
   });
 });

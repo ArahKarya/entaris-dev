@@ -11,6 +11,7 @@ import { notifyUsers } from '../notificationService';
 import { can } from '../permissionService';
 import { businessDateOf, businessIsoWeekday, businessMinuteOfDay, parseClock } from './businessDate';
 import { loadFollowups, type FollowupItem, type FollowupResult } from './followups';
+import { loadReorderRadar } from './reorderRadar';
 import { getCrmSettings, type CrmSettingsView } from './settings';
 
 export const SEND_WINDOW_MINUTES = 180;
@@ -84,10 +85,21 @@ export async function runCrmMorningReminder(now: Date = new Date()): Promise<num
   });
   if (claimed.count === 0) return 0;
 
+  let users: string[];
+  let reorderRows: Awaited<ReturnType<typeof loadReorderRadar>>;
+  try {
+    // The radar does not depend on the recipient: compute it once and filter per user.
+    [users, reorderRows] = await Promise.all([recipients(), loadReorderRadar(settings, {}, now)]);
+  } catch (err) {
+    // Nothing was sent: release today's claim so the next run retries.
+    await prisma.crmSetting.updateMany({ where: { slug: 'default', lastReminderOn: today }, data: { lastReminderOn: settings.lastReminderOn } });
+    throw err;
+  }
+
   let sent = 0;
-  for (const userId of await recipients()) {
+  for (const userId of users) {
     try {
-      const result = await loadFollowups(settings, { ownerId: userId }, now);
+      const result = await loadFollowups(settings, { ownerId: userId, reorderRows }, now);
       const text = formatReminder(result);
       if (!text) continue;
       sent += await notifyUsers(prisma, {

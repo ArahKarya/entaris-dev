@@ -97,9 +97,23 @@ d('CRM follow-ups', () => {
         const other = await loadFollowups(settings, { ownerId: '00000000-0000-0000-0000-000000000000', strictOwner: true, kinds: ['party'] }, now, tx);
         expect(other.items.some((i) => i.id === activity.id)).toBe(false);
 
-        await settleFollowup(tx, { kind: 'party', id: activity.id }, now);
+        // A note without a next date leaves a follow-up planned for a later day open.
+        const planned = await createActivityInTx(
+          tx,
+          { partyId: party.id, type: 'Telepon', summary: 'Janji telepon minggu depan', nextFollowUpDate: addDays(today, 5) },
+          userId,
+          now,
+        );
+        await createActivityInTx(tx, { partyId: party.id, type: 'Catatan', summary: 'Catatan saja' }, userId, now);
+        const plannedAfter = await tx.crmActivity.findUniqueOrThrow({ where: { id: planned.id } });
+        expect(plannedAfter.followUpDoneAt).toBeNull();
+        // ...while the follow-up due today was closed by the planned call above.
+        const todayAfter = await tx.crmActivity.findUniqueOrThrow({ where: { id: activity.id } });
+        expect(todayAfter.followUpDoneAt).not.toBeNull();
+
+        await expect(settleFollowup(tx, { kind: 'party', id: planned.id }, now)).resolves.toBeUndefined();
         const settled = await loadFollowups(settings, { ownerId: userId, kinds: ['party'] }, now, tx);
-        expect(settled.items.some((i) => i.id === activity.id)).toBe(false);
+        expect(settled.items.some((i) => i.id === activity.id || i.id === planned.id)).toBe(false);
 
         throw new RollbackSentinel();
       });

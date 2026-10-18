@@ -3836,7 +3836,7 @@ model CrmActivity {
   partyId          String?         @map("party_id")
   party            Party?          @relation("PartyCrmActivities", fields: [partyId], references: [id], onDelete: Cascade)
   inquiryId        String?         @map("inquiry_id")
-  inquiry          Inquiry?        @relation("InquiryCrmActivities", fields: [inquiryId], references: [id], onDelete: Cascade)
+  inquiry          Inquiry?        @relation("InquiryCrmActivities", fields: [inquiryId], references: [id], onDelete: SetNull)
   contactId        String?         @map("contact_id")
   contact          PartyContact?   @relation("ContactCrmActivities", fields: [contactId], references: [id], onDelete: SetNull)
   type             CrmActivityType

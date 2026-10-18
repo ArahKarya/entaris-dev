@@ -10,11 +10,16 @@ interface SalesOwnerSelectProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** Name of the current owner, shown when that user is no longer active. */
+  currentName?: string | null;
 }
 
-export function SalesOwnerSelect({ id, value, onChange, disabled }: SalesOwnerSelectProps) {
+export function SalesOwnerSelect({ id, value, onChange, disabled, currentName }: SalesOwnerSelectProps) {
   const { t } = useTranslation('crm');
   const users = useSalesUsers();
+  const list = users.data ?? [];
+  // An owner who was deactivated is not in the list; keep showing them until someone changes it.
+  const missingCurrent = !!value && users.isSuccess && !list.some((u) => u.id === value);
   return (
     <Select value={value || NONE} onValueChange={(v) => onChange(v === NONE ? '' : v)} disabled={disabled}>
       <SelectTrigger id={id}>
@@ -22,7 +27,12 @@ export function SalesOwnerSelect({ id, value, onChange, disabled }: SalesOwnerSe
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={NONE}>{t('owner.none')}</SelectItem>
-        {(users.data ?? []).map((u) => (
+        {missingCurrent && (
+          <SelectItem value={value} disabled>
+            {currentName ?? value}
+          </SelectItem>
+        )}
+        {list.map((u) => (
           <SelectItem key={u.id} value={u.id}>
             {u.fullName}
           </SelectItem>

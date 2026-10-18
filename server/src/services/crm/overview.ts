@@ -4,14 +4,16 @@ import { prisma } from '../../lib/prisma';
 import { BusinessError } from '../../utils/errors';
 import { addDays, businessDateOf, startOfBusinessDate } from './businessDate';
 import { activityInclude } from './activities';
-import { loadReorderRadar, type ReorderRow } from './reorderRadar';
+import { loadReorderRadar, redactReorderRows, type ReorderRow } from './reorderRadar';
 import type { CrmSettingsView } from './settings';
 
 export const OVERVIEW_ACTIVITY_LIMIT = 10;
 
 export interface OverviewOptions {
-  /** Hide money owed when the viewer may not see sales invoices. */
-  includeReceivable: boolean;
+  /** Viewer may see sales invoice amounts (receivable, purchases, invoice number). */
+  canSeeInvoices: boolean;
+  /** Viewer may see Inquiries and Quotations (module quotation). */
+  canSeeQuotations: boolean;
   now?: Date;
 }
 
@@ -78,24 +80,31 @@ export async function loadPartyOverview(partyId: string, settings: CrmSettingsVi
   ]);
 
   const yearTotal = yearInvoices.reduce((sum, inv) => sum.plus(inv.grandTotal.toString()), new Decimal(0));
-  const reorder: ReorderRow | null = radar[0] ?? null;
+  const reorder: ReorderRow | null = redactReorderRows(radar, opts.canSeeInvoices)[0] ?? null;
 
   return {
     party: {
       ...party,
-      outstandingAmount: opts.includeReceivable ? Number(party.outstandingAmount) : null,
+      outstandingAmount: opts.canSeeInvoices ? Number(party.outstandingAmount) : null,
       reorderSnoozedUntil: party.reorderSnoozedUntil ? businessDateOf(party.reorderSnoozedUntil) : null,
     },
     contacts,
     activities,
     activityTotal,
-    inquiries,
-    quotations,
+    // Inquiries and Quotations belong to the quotation module.
+    inquiries: opts.canSeeQuotations ? inquiries : [],
+    quotations: opts.canSeeQuotations ? quotations : [],
     purchases: {
-      last12MonthsTotal: opts.includeReceivable ? yearTotal.toNumber() : null,
+      last12MonthsTotal: opts.canSeeInvoices ? yearTotal.toNumber() : null,
       last12MonthsCount: yearInvoices.length,
+      // The last order date is CRM information; the invoice itself needs invoice access.
       lastInvoice: lastInvoice
-        ? { ...lastInvoice, grandTotal: opts.includeReceivable ? Number(lastInvoice.grandTotal) : null }
+        ? {
+            id: opts.canSeeInvoices ? lastInvoice.id : null,
+            invoiceNumber: opts.canSeeInvoices ? lastInvoice.invoiceNumber : null,
+            date: lastInvoice.date,
+            grandTotal: opts.canSeeInvoices ? Number(lastInvoice.grandTotal) : null,
+          }
         : null,
     },
     reorder,

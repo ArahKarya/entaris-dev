@@ -57,6 +57,9 @@ const ID_BY_RESOURCE: Record<string, Source> = {
   parties: PARTY,
   'stock-transfers': { model: 'stockTransfer', fields: ['transferNumber'] },
   inquiries: { model: 'inquiry', fields: ['inquiryNumber'] },
+  'crm/parties': PARTY,
+  'crm/contacts': { model: 'partyContact', fields: ['name'], ambiguous: true },
+  'crm/activities': { model: 'crmActivity', fields: ['summary'], ambiguous: true },
   'project-guarantees': { model: 'projectGuarantee', fields: ['guaranteeNumber'] },
   'cash-book-drafts': { model: 'cashBookDraft', fields: ['draftNumber'] },
   'stock-opname': { model: 'stockOpname', fields: ['opnameNumber'] },
@@ -96,6 +99,8 @@ const ID_BY_RESOURCE: Record<string, Source> = {
  *  berbeda (itemId, categoryId, typeId, documentId) sengaja tidak dipetakan. */
 const BY_NAME: Record<string, Source> = {
   partyId: PARTY,
+  inquiryId: { model: 'inquiry', fields: ['inquiryNumber'] },
+  contactId: { model: 'partyContact', fields: ['name'], ambiguous: true },
   warehouseId: WAREHOUSE,
   fromWarehouseId: WAREHOUSE,
   toWarehouseId: WAREHOUSE,

@@ -38,17 +38,37 @@ async function phoneWarning(db: Db, partyId: string, phone: string | null): Prom
   return { phoneUsedBy: [...seen].map(([partyId, partyName]) => ({ partyId, partyName })) };
 }
 
-/** Only one primary contact per Customer: setting one clears the others. */
-async function clearOtherPrimary(tx: Prisma.TransactionClient, partyId: string, keepId: string): Promise<void> {
-  await tx.partyContact.updateMany({ where: { partyId, id: { not: keepId }, isPrimary: true }, data: { isPrimary: false } });
+/**
+ * Serialise contact writes per Customer: the party row lock makes the "first contact" count and the
+ * primary switch safe under concurrency (a partial unique index backs the one-primary rule).
+ */
+async function lockParty(tx: Prisma.TransactionClient, partyId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM parties WHERE id = ${partyId} FOR UPDATE`;
+  return rows.length > 0;
+}
+
+/** Only one primary contact per Customer: clear the others before setting one. */
+async function clearOtherPrimary(tx: Prisma.TransactionClient, partyId: string, keepId?: string): Promise<void> {
+  await tx.partyContact.updateMany({
+    where: { partyId, isPrimary: true, ...(keepId ? { id: { not: keepId } } : {}) },
+    data: { isPrimary: false },
+  });
+}
+
+/** After a primary contact is removed or unflagged, promote the oldest remaining one. */
+async function ensurePrimary(tx: Prisma.TransactionClient, partyId: string): Promise<void> {
+  if (await tx.partyContact.count({ where: { partyId, isPrimary: true } })) return;
+  const next = await tx.partyContact.findFirst({ where: { partyId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  if (next) await tx.partyContact.update({ where: { id: next.id }, data: { isPrimary: true } });
 }
 
 export async function createContact(partyId: string, input: ContactInput) {
   const phone = cleanPhone(input.phone);
   return prisma.$transaction(async (tx) => {
-    const party = await tx.party.findUnique({ where: { id: partyId }, select: { id: true } });
-    if (!party) throw new BusinessError('Customer tidak ditemukan.');
+    if (!(await lockParty(tx, partyId))) throw new BusinessError('Customer tidak ditemukan.');
     const isFirst = (await tx.partyContact.count({ where: { partyId } })) === 0;
+    const isPrimary = input.isPrimary ?? isFirst;
+    if (isPrimary) await clearOtherPrimary(tx, partyId);
     const contact = await tx.partyContact.create({
       data: {
         partyId,
@@ -56,11 +76,11 @@ export async function createContact(partyId: string, input: ContactInput) {
         position: input.position?.trim() || null,
         phone,
         email: input.email?.trim() || null,
-        isPrimary: input.isPrimary ?? isFirst,
+        isPrimary,
         notes: input.notes?.trim() || null,
       },
     });
-    if (contact.isPrimary) await clearOtherPrimary(tx, partyId, contact.id);
+    await ensurePrimary(tx, partyId);
     return { contact, warning: await phoneWarning(tx, partyId, phone) };
   });
 }
@@ -70,6 +90,8 @@ export async function updateContact(id: string, input: ContactInput) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.partyContact.findUnique({ where: { id } });
     if (!existing) throw new BusinessError('Kontak tidak ditemukan.');
+    await lockParty(tx, existing.partyId);
+    if (input.isPrimary) await clearOtherPrimary(tx, existing.partyId, id);
     const contact = await tx.partyContact.update({
       where: { id },
       data: {
@@ -81,8 +103,8 @@ export async function updateContact(id: string, input: ContactInput) {
         notes: input.notes?.trim() || null,
       },
     });
-    if (contact.isPrimary) await clearOtherPrimary(tx, contact.partyId, contact.id);
-    return { contact, warning: await phoneWarning(tx, contact.partyId, phone) };
+    await ensurePrimary(tx, contact.partyId);
+    return { contact: await tx.partyContact.findUniqueOrThrow({ where: { id } }), warning: await phoneWarning(tx, contact.partyId, phone) };
   });
 }
 
@@ -90,5 +112,17 @@ export async function listContacts(partyId: string, db: Db = prisma) {
   return db.partyContact.findMany({
     where: { partyId },
     orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }],
+  });
+}
+
+/** Delete a contact; activities keep their text (contact link set null by the FK). */
+export async function deleteContact(id: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.partyContact.findUnique({ where: { id } });
+    if (!existing) return false;
+    await lockParty(tx, existing.partyId);
+    await tx.partyContact.delete({ where: { id } });
+    await ensurePrimary(tx, existing.partyId);
+    return true;
   });
 }

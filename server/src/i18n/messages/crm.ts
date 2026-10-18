@@ -28,6 +28,8 @@ export const CRM_MESSAGES: MessageDictionary = {
   "Inquiry tidak milik Customer ini.": "The Inquiry does not belong to this Customer.",
   "Kontak tidak milik Customer ini.": "The contact does not belong to this Customer.",
   "Nomor telepon tidak valid.": "Invalid phone number.",
+  "Follow-up hanya untuk Inquiry yang masih aktif.": "Follow-ups only apply to active Inquiries.",
+  "Aktivitas ini tidak punya follow-up Customer.": "This activity has no Customer follow-up.",
   "PIC sales harus user aktif.": "The sales owner must be an active user.",
   "PIC sales tidak valid.": "Invalid sales owner.",
   "Nama kontak wajib diisi.": "Contact name is required.",

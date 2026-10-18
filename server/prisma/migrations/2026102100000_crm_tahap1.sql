@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS "party_contacts" (
 );
 CREATE INDEX IF NOT EXISTS "party_contacts_party_id_idx" ON "party_contacts"("party_id");
 CREATE INDEX IF NOT EXISTS "party_contacts_phone_idx" ON "party_contacts"("phone");
+-- At most one primary contact per Customer (partial index; not expressible in schema.prisma).
+CREATE UNIQUE INDEX IF NOT EXISTS "party_contacts_one_primary" ON "party_contacts"("party_id") WHERE "is_primary";
 DO $$ BEGIN
   ALTER TABLE "party_contacts" ADD CONSTRAINT "party_contacts_party_id_fkey"
     FOREIGN KEY ("party_id") REFERENCES "parties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -71,10 +73,10 @@ DO $$ BEGIN
   ALTER TABLE "crm_activities" ADD CONSTRAINT "crm_activities_party_id_fkey"
     FOREIGN KEY ("party_id") REFERENCES "parties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  ALTER TABLE "crm_activities" ADD CONSTRAINT "crm_activities_inquiry_id_fkey"
-    FOREIGN KEY ("inquiry_id") REFERENCES "inquiries"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Deleting an Inquiry keeps its sales history on the Customer (link cleared).
+ALTER TABLE "crm_activities" DROP CONSTRAINT IF EXISTS "crm_activities_inquiry_id_fkey";
+ALTER TABLE "crm_activities" ADD CONSTRAINT "crm_activities_inquiry_id_fkey"
+  FOREIGN KEY ("inquiry_id") REFERENCES "inquiries"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 DO $$ BEGIN
   ALTER TABLE "crm_activities" ADD CONSTRAINT "crm_activities_contact_id_fkey"
     FOREIGN KEY ("contact_id") REFERENCES "party_contacts"("id") ON DELETE SET NULL ON UPDATE CASCADE;

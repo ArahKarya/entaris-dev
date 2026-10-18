@@ -1,13 +1,15 @@
 /**
  * Sales activities (CRM F4/F6). Logging an activity also moves the follow-up along:
  *   on an Inquiry   next date set -> becomes the Inquiry's follow-up date (open again);
- *                   no next date  -> the Inquiry's current follow-up counts as done.
+ *                   no next date  -> the Inquiry's follow-up counts as done if it is already due.
  *                   A new Inquiry (Baru) moves to Diproses.
- *   on a Customer   earlier open Customer follow-ups count as done; a next date opens a new one.
+ *   on a Customer   open Customer follow-ups that are already due count as done; a next date
+ *                   opens a new one. Follow-ups planned for a later day stay open.
  */
 import { CrmActivityType, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { BusinessError } from '../../utils/errors';
+import { addDays, businessDateOf, startOfBusinessDate } from './businessDate';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -70,6 +72,8 @@ export async function createActivityInTx(
 
   const nextFollowUpDate = input.nextFollowUpDate ? dateOnly(input.nextFollowUpDate) : null;
   const occurredAt = input.occurredAt ? dateOnly(input.occurredAt) : now;
+  // Follow-ups dated today or earlier count as handled by this contact.
+  const dueBefore = startOfBusinessDate(addDays(businessDateOf(now), 1));
 
   if (inquiryId) {
     const inquiry = await tx.inquiry.findUniqueOrThrow({ where: { id: inquiryId } });
@@ -78,7 +82,7 @@ export async function createActivityInTx(
       data: {
         ...(nextFollowUpDate
           ? { followUpDate: nextFollowUpDate, followUpDoneAt: null }
-          : inquiry.followUpDate && !inquiry.followUpDoneAt
+          : inquiry.followUpDate && !inquiry.followUpDoneAt && inquiry.followUpDate < dueBefore
             ? { followUpDoneAt: now }
             : {}),
         ...(inquiry.status === 'Baru' ? { status: 'Diproses' as const } : {}),
@@ -86,7 +90,7 @@ export async function createActivityInTx(
     });
   } else if (partyId) {
     await tx.crmActivity.updateMany({
-      where: { partyId, inquiryId: null, nextFollowUpDate: { not: null }, followUpDoneAt: null },
+      where: { partyId, inquiryId: null, nextFollowUpDate: { lt: dueBefore }, followUpDoneAt: null },
       data: { followUpDoneAt: now },
     });
   }
@@ -145,16 +149,25 @@ export async function settleFollowup(
 ): Promise<void> {
   const snoozeTo = input.snoozeTo ? dateOnly(input.snoozeTo) : null;
   if (input.kind === 'inquiry') {
-    const inquiry = await db.inquiry.findUnique({ where: { id: input.id }, select: { id: true } });
+    const inquiry = await db.inquiry.findUnique({ where: { id: input.id }, select: { id: true, status: true } });
     if (!inquiry) throw new BusinessError('Inquiry tidak ditemukan.');
+    if (inquiry.status !== 'Baru' && inquiry.status !== 'Diproses') {
+      throw new BusinessError('Follow-up hanya untuk Inquiry yang masih aktif.');
+    }
     await db.inquiry.update({
       where: { id: input.id },
       data: snoozeTo ? { followUpDate: snoozeTo, followUpDoneAt: null } : { followUpDoneAt: now },
     });
     return;
   }
-  const activity = await db.crmActivity.findUnique({ where: { id: input.id }, select: { id: true } });
+  const activity = await db.crmActivity.findUnique({
+    where: { id: input.id },
+    select: { id: true, inquiryId: true, nextFollowUpDate: true },
+  });
   if (!activity) throw new BusinessError('Aktivitas tidak ditemukan.');
+  if (activity.inquiryId || !activity.nextFollowUpDate) {
+    throw new BusinessError('Aktivitas ini tidak punya follow-up Customer.');
+  }
   await db.crmActivity.update({
     where: { id: input.id },
     data: snoozeTo ? { nextFollowUpDate: snoozeTo, followUpDoneAt: null } : { followUpDoneAt: now },

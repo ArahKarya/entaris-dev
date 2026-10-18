@@ -7,10 +7,10 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { can, hasCap } from '../services/permissionService';
 import { activityInclude, createActivityInTx, listActivities, settleFollowup } from '../services/crm/activities';
-import { createContact, listContacts, updateContact } from '../services/crm/contacts';
+import { createContact, deleteContact, listContacts, updateContact } from '../services/crm/contacts';
 import { FOLLOWUP_KINDS, loadFollowups, type FollowupKind } from '../services/crm/followups';
 import { loadPartyOverview } from '../services/crm/overview';
-import { loadReorderRadar, sortReorderRows } from '../services/crm/reorderRadar';
+import { loadReorderRadar, redactReorderRows, sortReorderRows } from '../services/crm/reorderRadar';
 import { assertSalesOwner, listSalesUsers } from '../services/crm/salesOwner';
 import { getCrmSettings } from '../services/crm/settings';
 import { BusinessError, handleRouteError } from '../utils/errors';
@@ -72,7 +72,8 @@ router.get('/reorder-radar', async (req: AuthRequest, res) => {
     const state = firstString(req.query.state);
     if (state && !REORDER_STATES.has(state)) return res.status(400).json({ error: 'Status radar tidak dikenal.' });
     const settings = await getCrmSettings();
-    const rows = sortReorderRows(await loadReorderRadar(settings, { ownerId: parseOwner(req) }));
+    const canSeeInvoices = await can(req.user!.role, 'sales_invoice', 'view');
+    const rows = redactReorderRows(sortReorderRows(await loadReorderRadar(settings, { ownerId: parseOwner(req) })), canSeeInvoices);
     return res.json({ data: state ? rows.filter((r) => r.state === state) : rows, settings });
   } catch (error) {
     return handleRouteError(res, error, 'GET /crm/reorder-radar', 'Gagal mengambil radar pesan ulang.');
@@ -92,8 +93,11 @@ router.get('/sales-users', async (_req, res) => {
 router.get('/parties/:id/overview', async (req: AuthRequest, res) => {
   try {
     const settings = await getCrmSettings();
-    const includeReceivable = await can(req.user!.role, 'sales_invoice', 'view');
-    return res.json(await loadPartyOverview(req.params.id as string, settings, { includeReceivable }));
+    const [canSeeInvoices, canSeeQuotations] = await Promise.all([
+      can(req.user!.role, 'sales_invoice', 'view'),
+      can(req.user!.role, 'quotation', 'view'),
+    ]);
+    return res.json(await loadPartyOverview(req.params.id as string, settings, { canSeeInvoices, canSeeQuotations }));
   } catch (error) {
     return handleRouteError(res, error, 'GET /crm/parties/:id/overview', 'Gagal mengambil ringkasan Customer.');
   }
@@ -175,9 +179,7 @@ router.put('/contacts/:id', async (req, res) => {
 // DELETE /contacts/:id (activities keep their text; their contact link is cleared)
 router.delete('/contacts/:id', async (req, res) => {
   try {
-    const existing = await prisma.partyContact.findUnique({ where: { id: req.params.id as string } });
-    if (!existing) return res.status(404).json({ error: 'Kontak tidak ditemukan.' });
-    await prisma.partyContact.delete({ where: { id: existing.id } });
+    if (!(await deleteContact(req.params.id as string))) return res.status(404).json({ error: 'Kontak tidak ditemukan.' });
     return res.json({ success: true });
   } catch (error) {
     return handleRouteError(res, error, 'DELETE /crm/contacts/:id', 'Gagal menghapus kontak.');
@@ -255,7 +257,7 @@ router.put('/settings', async (req: AuthRequest, res) => {
   const body = validateBody(CrmSettingsSchema, req.body, res);
   if (!body) return;
   try {
-    const data = { ...body, reminderDays: [...new Set(body.reminderDays)].sort(), updatedBy: req.user!.userId };
+    const data = { ...body, reminderDays: [...new Set(body.reminderDays)].sort((a, b) => a - b), updatedBy: req.user!.userId };
     await prisma.crmSetting.upsert({ where: { slug: 'default' }, create: { slug: 'default', ...data }, update: data });
     return res.json(await getCrmSettings());
   } catch (error) {

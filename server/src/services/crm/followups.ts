@@ -9,8 +9,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { addDays, businessDateOf, daysBetween, startOfBusinessDate } from './businessDate';
-import { loadReorderRadar, sortReorderRows } from './reorderRadar';
-import { ownerClause, type OwnerFilter } from './owner';
+import { loadReorderRadar, sortReorderRows, type ReorderRow } from './reorderRadar';
+import { inquiryOwnerClause, matchesOwner, ownerClause, type OwnerFilter } from './owner';
 import type { CrmSettingsView } from './settings';
 
 type Db = Prisma.TransactionClient | typeof prisma;
@@ -39,6 +39,8 @@ export interface FollowupItem {
 
 export interface FollowupFilter extends OwnerFilter {
   kinds?: FollowupKind[];
+  /** Radar rows computed once for all owners (morning reminder); filtered by owner here. */
+  reorderRows?: ReorderRow[];
 }
 
 export interface FollowupResult {
@@ -67,7 +69,7 @@ async function loadInquiryItems(db: Db, filter: FollowupFilter, today: string): 
       status: { in: ['Baru', 'Diproses'] },
       followUpDate: { lt: startOfBusinessDate(addDays(today, 1)) },
       followUpDoneAt: null,
-      ...ownerClause(filter),
+      ...inquiryOwnerClause(filter),
     },
     select: {
       id: true,
@@ -96,8 +98,8 @@ async function loadInquiryItems(db: Db, filter: FollowupFilter, today: string): 
       dueOn,
       referenceDate: null,
       overdueDays: Math.max(0, daysBetween(dueOn, today)),
-      ownerId: r.salesOwnerId,
-      ownerName: r.salesOwner?.fullName ?? null,
+      ownerId: r.salesOwnerId ?? r.party?.salesOwnerId ?? null,
+      ownerName: r.salesOwner?.fullName ?? r.party?.salesOwner?.fullName ?? null,
       phone: primaryPhone(r.party) ?? r.prospectPhone,
       note: r.notes,
     };
@@ -206,7 +208,9 @@ async function loadReorderItems(
   settings: CrmSettingsView,
   now: Date,
 ): Promise<FollowupItem[]> {
-  const rows = await loadReorderRadar(settings, filter, now, db);
+  const rows = filter.reorderRows
+    ? filter.reorderRows.filter((r) => matchesOwner(r.salesOwnerId, filter))
+    : await loadReorderRadar(settings, filter, now, db);
   return sortReorderRows(rows)
     .filter((r) => r.state === 'late' && !r.contactedSinceLate)
     .map((r) => ({
