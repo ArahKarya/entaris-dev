@@ -1,16 +1,16 @@
 import {
-  Building2, Calendar, Receipt, Shield, KeyRound, Send, HardDrive, Palette, Info, HandCoins,
+  Building2, Calendar, Receipt, Shield, KeyRound, Send, HardDrive, Palette, Info, HandCoins, ListChecks,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { AiraIcon } from '@/components/shell/AiraIcon';
 
 export type SettingsTabId =
   | 'company' | 'fiscal' | 'tax' | 'accounts' | 'payment-request-types' | 'roles'
-  | 'notifications' | 'backup' | 'agentic' | 'appearance' | 'about';
+  | 'notifications' | 'crm' | 'backup' | 'agentic' | 'appearance' | 'about';
 
 export type SettingsNavKey =
   | 'company' | 'fiscal' | 'tax' | 'accounts' | 'paymentRequestTypes' | 'roles'
-  | 'notifications' | 'backup' | 'agentic' | 'appearance' | 'about';
+  | 'notifications' | 'crm' | 'backup' | 'agentic' | 'appearance' | 'about';
 
 export type SettingsNavGroupId = 'company' | 'access' | 'system';
 
@@ -49,6 +49,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
     id: 'system',
     items: [
       { id: 'notifications', key: 'notifications', icon: Send },
+      { id: 'crm', key: 'crm', icon: ListChecks },
       { id: 'backup', key: 'backup', icon: HardDrive },
       { id: 'agentic', key: 'agentic', icon: AiraIcon, rbacOnly: true },
       { id: 'appearance', key: 'appearance', icon: Palette },

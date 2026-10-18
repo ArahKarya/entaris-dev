@@ -165,6 +165,10 @@
         "label": "Notifications",
         "description": "Send system notifications to Telegram."
       },
+      "crm": {
+        "label": "CRM",
+        "description": "Morning reminder and sales follow-up thresholds."
+      },
       "backup": {
         "label": "Backup & Restore",
         "description": "Create, download, upload, and restore database backups."

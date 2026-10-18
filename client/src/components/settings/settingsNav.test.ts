@@ -7,7 +7,7 @@ describe('settingsNav', () => {
     expect(ids).not.toContain('roles');
     expect(ids).not.toContain('agentic');
     expect(visibleSettingsNav(false).map((g) => g.id)).toEqual(['company', 'system']);
-    expect(visibleSettingsNav(true).flatMap((g) => g.items).length).toBe(11);
+    expect(visibleSettingsNav(true).flatMap((g) => g.items).length).toBe(12);
   });
 
   it('resolves ?tab= with a safe fallback', () => {

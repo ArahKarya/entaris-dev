@@ -42,6 +42,7 @@ function item(overrides: Partial<FollowupItem>): FollowupItem {
     title: '',
     documentNumber: null,
     dueOn: '2026-10-19',
+    referenceDate: null,
     overdueDays: 0,
     ownerId: null,
     ownerName: null,

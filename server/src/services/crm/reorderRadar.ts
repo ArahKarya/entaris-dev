@@ -41,11 +41,10 @@ export async function loadReorderRadar(
   const parties = await db.party.findMany({
     where: {
       isActive: true,
-      isDummy: false,
       partyType: { in: ['Customer', 'Both'] },
       ...(filter.partyId ? { id: filter.partyId } : {}),
       ...ownerClause(filter),
-      salesInvoices: { some: { status: { notIn: ['Draft', 'Cancelled'] }, isDummy: false, date: { gte: since } } },
+      salesInvoices: { some: { status: { notIn: ['Draft', 'Cancelled'] }, date: { gte: since } } },
     },
     select: {
       id: true,
@@ -57,7 +56,7 @@ export async function loadReorderRadar(
       salesOwner: { select: { fullName: true } },
       contacts: { where: { isPrimary: true, phone: { not: null } }, select: { phone: true }, take: 1 },
       salesInvoices: {
-        where: { status: { notIn: ['Draft', 'Cancelled'] }, isDummy: false, date: { gte: since } },
+        where: { status: { notIn: ['Draft', 'Cancelled'] }, date: { gte: since } },
         select: { date: true, grandTotal: true },
       },
       crmActivities: { orderBy: { occurredAt: 'desc' }, select: { occurredAt: true }, take: 1 },

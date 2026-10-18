@@ -15,6 +15,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DateInput, Field } from '@/components/shared';
 import { FormError, OverlayBody, OverlayFooter, OverlayHeader } from './sales/dialog-parts-b';
 import { dialogShellClass } from './sales/dialog-classes-b';
+import { can } from '@/lib/permissions';
+import { currentUserId } from '@/lib/crm';
+import { SalesOwnerSelect } from './crm/SalesOwnerSelect';
 
 interface InquiryItem {
   id: string;
@@ -56,7 +59,10 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
   const [items, setItems] = useState<InquiryItem[]>([newRow()]);
   const [notes, setNotes] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
+  const [salesOwnerId, setSalesOwnerId] = useState('');
   const [error, setError] = useState('');
+  const showOwner = can('crm', 'view');
+  const { t: tc } = useTranslation('crm');
 
   const queryClient = useQueryClient();
 
@@ -88,6 +94,7 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
       );
       setNotes(editTarget.notes ?? '');
       setFollowUpDate(editTarget.followUpDate ? new Date(editTarget.followUpDate).toISOString().split('T')[0] : '');
+      setSalesOwnerId(editTarget.salesOwnerId ?? '');
     } else {
       setDate(today);
       setChannel('Lainnya');
@@ -100,6 +107,7 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
       setItems([newRow()]);
       setNotes('');
       setFollowUpDate('');
+      setSalesOwnerId(currentUserId() ?? '');
     }
     setError('');
     // Reset only on open or when a different record is edited; other editTarget fields are a snapshot.
@@ -170,6 +178,7 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
       items: validItems,
       notes: notes.trim() || null,
       followUpDate: followUpDate || null,
+      ...(showOwner ? { salesOwnerId: salesOwnerId || null } : {}),
     });
   };
 
@@ -194,7 +203,7 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
           </OverlayHeader>
 
           <OverlayBody className="gap-5">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className={showOwner ? 'grid gap-3 sm:grid-cols-2 md:grid-cols-4' : 'grid gap-3 sm:grid-cols-3'}>
               <Field label={t('inquiryModal.fields.date')}>
                 <DateInput value={date} onChange={setDate} />
               </Field>
@@ -213,6 +222,11 @@ const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
               <Field label={t('inquiryModal.fields.followUp')}>
                 <DateInput value={followUpDate} onChange={setFollowUpDate} />
               </Field>
+              {showOwner && (
+                <Field label={tc('inquiry.owner')}>
+                  {(control) => <SalesOwnerSelect id={control.id} value={salesOwnerId} onChange={setSalesOwnerId} />}
+                </Field>
+              )}
             </div>
 
             <div className="grid gap-3 rounded-lg border border-dashed border-border bg-muted/30 p-3">

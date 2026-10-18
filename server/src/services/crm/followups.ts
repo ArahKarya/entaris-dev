@@ -28,6 +28,8 @@ export interface FollowupItem {
   /** Inquiry/Quotation number when there is one. */
   documentNumber: string | null;
   dueOn: string;
+  /** Quotation: date sent. Reorder: last order date. Otherwise null. */
+  referenceDate: string | null;
   overdueDays: number;
   ownerId: string | null;
   ownerName: string | null;
@@ -92,6 +94,7 @@ async function loadInquiryItems(db: Db, filter: FollowupFilter, today: string): 
       title: r.itemsText?.slice(0, 120) || r.notes?.slice(0, 120) || r.inquiryNumber,
       documentNumber: r.inquiryNumber,
       dueOn,
+      referenceDate: null,
       overdueDays: Math.max(0, daysBetween(dueOn, today)),
       ownerId: r.salesOwnerId,
       ownerName: r.salesOwner?.fullName ?? null,
@@ -131,6 +134,7 @@ async function loadPartyFollowupItems(db: Db, filter: FollowupFilter, today: str
       title: r.summary.slice(0, 120),
       documentNumber: null,
       dueOn,
+      referenceDate: null,
       overdueDays: Math.max(0, daysBetween(dueOn, today)),
       ownerId: r.party?.salesOwnerId ?? null,
       ownerName: r.party?.salesOwner?.fullName ?? null,
@@ -176,7 +180,8 @@ async function loadQuotationItems(
       return !last || last < cutoff;
     })
     .map((r) => {
-      const dueOn = addDays(businessDateOf(r.sentAt as Date), days);
+      const sentOn = businessDateOf(r.sentAt as Date);
+      const dueOn = addDays(sentOn, days);
       return {
         kind: 'quotation',
         id: r.id,
@@ -185,6 +190,7 @@ async function loadQuotationItems(
         title: r.quotationNumber,
         documentNumber: r.quotationNumber,
         dueOn,
+        referenceDate: sentOn,
         overdueDays: Math.max(0, daysBetween(dueOn, today)),
         ownerId: r.customer.salesOwnerId,
         ownerName: r.customer.salesOwner?.fullName ?? null,
@@ -208,9 +214,10 @@ async function loadReorderItems(
       id: r.partyId,
       partyId: r.partyId,
       partyName: r.partyName,
-      title: r.lastOrderOn ?? '',
+      title: '',
       documentNumber: null,
       dueOn: r.lateAfter as string,
+      referenceDate: r.lastOrderOn,
       overdueDays: r.overdueDays,
       ownerId: r.salesOwnerId,
       ownerName: r.salesOwnerName,

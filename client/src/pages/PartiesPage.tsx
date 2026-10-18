@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Download, FileText, Pencil, Plus, ShoppingCart, Trash2, Upload, Users, Wallet, Scale, PiggyBank } from 'lucide-react';
+import { Download, FileText, ListChecks, Pencil, Plus, ShoppingCart, Trash2, Upload, Users, Wallet, Scale, PiggyBank } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { exportToExcel } from '@/lib/exportExcel';
@@ -131,6 +131,7 @@ function toExportRows(rows: PartyRow[]): Record<string, unknown>[] {
 
 export const PartiesPage = () => {
   const { t } = useTranslation('sales');
+  const { t: tc } = useTranslation('crm');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -147,6 +148,7 @@ export const PartiesPage = () => {
   const [exporting, setExporting] = useState(false);
 
   const canEdit = can('parties', 'edit');
+  const canViewCrm = can('crm', 'view');
   const canDelete = canEdit && cap('doc.cancel');
 
   const params = useMemo(() => (type ? { ...list.params, type } : list.params), [list.params, type]);
@@ -337,6 +339,12 @@ export const PartiesPage = () => {
               actions={[
                 { label: t('partiesPage.actions.edit'), icon: Pencil, hidden: !canEdit, onSelect: () => openEdit(p) },
                 {
+                  label: tc('followups.actions.openCustomer'),
+                  icon: ListChecks,
+                  hidden: !isCustomerSide(p) || !canViewCrm,
+                  onSelect: () => navigate(`/crm/customers/${encodeURIComponent(p.id)}`),
+                },
+                {
                   label: t('partiesPage.actions.viewSalesInvoices'),
                   icon: FileText,
                   hidden: !isCustomerSide(p),
@@ -356,7 +364,7 @@ export const PartiesPage = () => {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canEdit, canDelete, t],
+    [canEdit, canDelete, canViewCrm, t, tc],
   );
 
   const summary = summaryQuery.data;

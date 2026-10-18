@@ -95,7 +95,7 @@ export async function runCrmMorningReminder(now: Date = new Date()): Promise<num
         type: CRM_REMINDER_TYPE,
         title: text.title,
         message: text.message,
-        metadata: { date: today, counts: { ...result.counts } },
+        metadata: { date: today, counts: { ...result.counts }, link: '/crm' },
       });
     } catch (err) {
       logger.error({ err, userId }, 'CRM morning reminder failed for user');

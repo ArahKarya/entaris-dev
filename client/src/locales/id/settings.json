@@ -165,6 +165,10 @@
         "label": "Notifikasi",
         "description": "Kirim notifikasi sistem ke Telegram."
       },
+      "crm": {
+        "label": "CRM",
+        "description": "Pengingat pagi dan ambang tindak lanjut sales."
+      },
       "backup": {
         "label": "Cadangan & Pemulihan",
         "description": "Buat, unduh, unggah, dan pulihkan cadangan database."

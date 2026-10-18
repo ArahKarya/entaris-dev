@@ -39,7 +39,7 @@ export async function loadPartyOverview(partyId: string, settings: CrmSettingsVi
   });
   if (!party) throw new BusinessError('Customer tidak ditemukan.');
 
-  const invoiceWhere = { partyId, status: { notIn: ['Draft', 'Cancelled'] as ('Draft' | 'Cancelled')[] }, isDummy: false };
+  const invoiceWhere = { partyId, status: { notIn: ['Draft', 'Cancelled'] as ('Draft' | 'Cancelled')[] } };
   const [contacts, activities, activityTotal, inquiries, quotations, yearInvoices, lastInvoice, radar] = await Promise.all([
     prisma.partyContact.findMany({ where: { partyId }, orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }] }),
     prisma.crmActivity.findMany({
