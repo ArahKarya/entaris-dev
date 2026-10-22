@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/sistem` · 17 tool (read 14, write 2, critical 1)
+Endpoint MCP target: `/mcp/sistem` · 18 tool (read 15, write 2, critical 1)
 
 ## Tujuan
 
@@ -89,6 +89,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 | Tool | Risk | Draft | Handler |
 |---|---|---|---|
 | [`att_counts`](#att_counts) | read | - | `POST /api/attachments/counts` |
+| [`att_download_link`](#att_download_link) | read | - | `POST /api/attachments/download-link` |
 | [`att_invoice_related`](#att_invoice_related) | read | - | `GET /api/attachments/invoice/:type/:id/related` |
 | [`att_list`](#att_list) | read | - | `GET /api/attachments/:referenceType/:referenceId` |
 | [`audit_facets`](#audit_facets) | read | - | `GET /api/audit-logs/facets` |
@@ -150,6 +151,47 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 **Isi hasil:** Objek {referenceId: jumlah}; {} bila input kosong.
 
 **Tool terkait:** [`att_list`](#att_list)
+
+### att_download_link
+
+**Ringkasan:** Buat TAUTAN UNDUH isi satu lampiran (PDF/JPG/PNG/WebP). Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai), fileName, mimeType, size. Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = membaca dokumen induk lampiran. Cari id lampiran lewat att_list / payreq_get.
+
+- **Risk / tier:** `read` / Auto (POST murni baca)
+- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `attachments` / `view`)
+- **Catatan akses:** Pemeriksaan view dokumen induk saat membuat tautan DAN saat mengunduh.
+- **Handler:** `POST /api/attachments/download-link` (src/routes/attachmentLinks.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `attachmentId` | body | `string` | ya | ID lampiran (UUID) dari att_list / payreq_get. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "att_download_link",
+  "args": {
+    "attachmentId": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<{url, fileName, mimeType, size, expiresInSeconds, oneTimeUse, warning?}. url sudah absolut>"
+}
+```
+
+**Isi hasil:** {url, fileName, mimeType, size, expiresInSeconds, oneTimeUse, warning?}. url sudah absolut bila PUBLIC_BASE_URL terisi.
+
+**Tool terkait:** [`att_list`](#att_list), [`att_counts`](#att_counts), [`payreq_get`](pengajuan-pembayaran.md#payreq_get)
 
 ### att_invoice_related
 

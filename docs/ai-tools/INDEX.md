@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **484** tool (read 222 · write 156 · critical 106); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **485** tool (read 223 · write 156 · critical 106); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -20,7 +20,7 @@ Total **484** tool (read 222 · write 156 · critical 106); semuanya aktif secar
 | [Laporan](laporan.md) | 15 | 15 | 0 | 0 | Laporan keuangan, operasional dan pembelian. |
 | [Dashboard](dashboard.md) | 17 | 17 | 0 | 0 | Ringkasan dan indikator dashboard. |
 | [Master Data](master-data.md) | 12 | 6 | 5 | 1 | Pelanggan & vendor (Party). |
-| [Sistem](sistem.md) | 17 | 14 | 2 | 1 | Jejak audit, notifikasi, pencarian, profil perusahaan, kesehatan sistem. |
+| [Sistem](sistem.md) | 18 | 15 | 2 | 1 | Jejak audit, notifikasi, pencarian, profil perusahaan, kesehatan sistem. |
 | [Obrolan (memori percakapan)](obrolan.md) | 2 | 2 | 0 | 0 | Pencarian dan pembacaan riwayat percakapan panel chat milik pemanggil sendiri. |
 
 ## Semua tool
@@ -42,6 +42,7 @@ Total **484** tool (read 222 · write 156 · critical 106); semuanya aktif secar
 | [`appr_rule_update`](persetujuan.md#appr_rule_update) | persetujuan | critical | tidak | Admin | `PUT /api/approvals/rules/:id` |
 | [`appr_rules_list`](persetujuan.md#appr_rules_list) | persetujuan | read | - | Admin | `GET /api/approvals/rules` |
 | [`att_counts`](sistem.md#att_counts) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `POST /api/attachments/counts` |
+| [`att_download_link`](sistem.md#att_download_link) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `POST /api/attachments/download-link` |
 | [`att_invoice_related`](sistem.md#att_invoice_related) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/attachments/invoice/:type/:id/related` |
 | [`att_list`](sistem.md#att_list) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/attachments/:referenceType/:referenceId` |
 | [`audit_facets`](sistem.md#audit_facets) | sistem | read | - | Admin | `GET /api/audit-logs/facets` |

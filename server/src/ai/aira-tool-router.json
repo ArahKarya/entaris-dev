@@ -16306,6 +16306,46 @@
       ]
     },
     {
+      "name": "att_download_link",
+      "group": "Master & Sistem",
+      "toolset": "sistem",
+      "module": "attachments",
+      "desc": "Buat TAUTAN UNDUH isi satu lampiran (PDF/JPG/PNG/WebP). Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai), fileName, mimeType, size. Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = membaca dokumen induk lampiran. Cari id lampiran lewat att_list / payreq_get.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "attachmentId": "string"
+      },
+      "params": [
+        {
+          "name": "attachmentId",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "ID lampiran (UUID) dari att_list / payreq_get."
+        }
+      ],
+      "output": {},
+      "outputSummary": "{url, fileName, mimeType, size, expiresInSeconds, oneTimeUse, warning?}. url sudah absolut bila PUBLIC_BASE_URL terisi.",
+      "handler": "POST /api/attachments/download-link",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 6,
+      "accessNote": "Pemeriksaan view dokumen induk saat membuat tautan DAN saat mengunduh.",
+      "related": [
+        "att_list",
+        "att_counts",
+        "payreq_get"
+      ],
+      "safeNonGet": true
+    },
+    {
       "name": "coa_create",
       "group": "Akuntansi",
       "toolset": "akuntansi",
