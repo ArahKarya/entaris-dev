@@ -2,15 +2,15 @@
   "app": "simple-erp",
   "version": 3,
   "counts": {
-    "tools": 485,
+    "tools": 486,
     "byRisk": {
       "critical": 106,
       "read": 223,
-      "write": 156
+      "write": 157
     },
     "byToolset": {
       "persetujuan": 14,
-      "sistem": 18,
+      "sistem": 19,
       "penjualan": 74,
       "obrolan": 2,
       "akuntansi": 33,
@@ -24,7 +24,7 @@
       "produksi": 28,
       "master-data": 12
     },
-    "routes": 575
+    "routes": 576
   },
   "toolsets": [
     {
@@ -598,6 +598,7 @@
         "att_download_link",
         "att_invoice_related",
         "att_list",
+        "att_upload",
         "audit_facets",
         "audit_get",
         "audit_list",
@@ -1628,6 +1629,107 @@
       "doc": "### att_list\n\n**Ringkasan:** Daftar metadata lampiran (nama berkas, tipe, ukuran, pengunggah, waktu) untuk satu dokumen. referenceType: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, approval_request, dll.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `attachments` / `view`)\n- **Catatan akses:** Tanpa guard modul/dokumen: semua user login dapat membaca metadata lampiran (tidak ada cek izin per jenis dokumen). Isi berkas tidak diekspos sebagai tool.\n- **Handler:** `GET /api/attachments/:referenceType/:referenceId` (src/routes/attachments.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `referenceType` | path | `string` | ya | Jenis dokumen induk, mis. sales_invoice \\| purchase_invoice \\| payment \\| journal \\| sales_order \\| delivery_order \\| goods_receipt |\n| `referenceId` | path | `string` | ya | ID dokumen induk |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"att_list\",\n  \"args\": {\n    \"referenceType\": \"<referenceType>\",\n    \"referenceId\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<Array lampiran {id, referenceType, referenceId, fileName, mimeType, fileSize, createdAt, u>\"\n}\n```\n\n**Isi hasil:** Array lampiran {id, referenceType, referenceId, fileName, mimeType, fileSize, createdAt, user{fullName}}. Catatan: ikut membawa filePath/storedName internal.\n\n**Tool terkait:** [`att_counts`](#att_counts), [`att_invoice_related`](#att_invoice_related)\n",
       "example": {
         "tool": "att_list",
+        "args": {
+          "referenceType": "<referenceType>",
+          "referenceId": "<id>"
+        }
+      }
+    },
+    {
+      "name": "att_upload",
+      "group": "Master & Sistem",
+      "toolset": "sistem",
+      "module": "attachments",
+      "desc": "Melampirkan SATU berkas (JPG/PNG/WebP/PDF, maks. 5 MB, maks. 5 berkas per dokumen) ke dokumen transaksi apa pun. referenceType: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, quotation, proforma_invoice, purchase_order, sales_return, stock_transfer, stock_opname, production_run, fixed_asset, approval_request. Dua cara: (1) tanpa contentBase64 → salin lampiran dari panel chat Entaris pengguna ini (default: lampiran pada pesan chat saat ini, atau pilih dengan chatAttachmentId); (2) contentBase64+fileName → isi berkas dibawa langsung (batas body MCP 256 KB ≈ 180 KB berkas). Jenis berkas ditentukan dari isi, bukan nama. Izin = edit pada modul dokumen induk. Untuk pengajuan pembayaran pakai payreq_attachment_add.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "referenceType": "string",
+        "referenceId": "string",
+        "fileName": "string",
+        "contentBase64": "string",
+        "mimeType": "string",
+        "chatAttachmentId": "string"
+      },
+      "params": [
+        {
+          "name": "referenceType",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Jenis dokumen induk: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, quotation, proforma_invoice, purchase_order, sales_return, stock_transfer, stock_opname, production_run, fixed_asset, approval_request."
+        },
+        {
+          "name": "referenceId",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "ID dokumen induk (UUID)."
+        },
+        {
+          "name": "fileName",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Nama berkas (wajib bila contentBase64 diisi; opsional untuk mengganti nama lampiran chat)."
+        },
+        {
+          "name": "contentBase64",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Isi berkas base64 (tanpa/dengan prefix data:). Maks. ±180 KB karena batas body MCP; kosongkan untuk memakai lampiran panel chat."
+        },
+        {
+          "name": "mimeType",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Petunjuk jenis (image/jpeg, image/png, image/webp, application/pdf); ditolak bila tak cocok dengan isi berkas."
+        },
+        {
+          "name": "chatAttachmentId",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "ID lampiran panel chat milik pengguna ini. Kosong → lampiran pada pesan chat yang sedang berjalan."
+        }
+      ],
+      "output": {
+        "data": "object"
+      },
+      "outputSummary": "Metadata lampiran tersimpan (array 1 elemen: id, fileName, mimeType, fileSize, referenceType, referenceId).",
+      "handler": "POST /api/attachments/json",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 2,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok; berkas tersimpan sebagai lampiran pengajuan.",
+      "confirm_template": "Lampirkan berkas ke {referenceType} {referenceId}?",
+      "accessNote": "Butuh izin edit modul dokumen induk (approval_request: hanya pengaju). Lampiran chat harus milik pengguna yang sama.",
+      "related": [
+        "att_list",
+        "att_counts",
+        "att_download_link",
+        "payreq_attachment_add"
+      ],
+      "errors": [
+        "400: Tidak ada lampiran pada pesan chat ini",
+        "400: Maksimal 10 lampiran per pengajuan",
+        "400: File tidak dikenali sebagai JPG/PNG/WebP/PDF",
+        "400: Ukuran file maksimal 5 MB",
+        "400: pengajuan tidak bisa diedit",
+        "413: body MCP > 256 KB (pakai lampiran chat)"
+      ],
+      "doc": "### att_upload\n\n**Ringkasan:** Melampirkan SATU berkas (JPG/PNG/WebP/PDF, maks. 5 MB, maks. 5 berkas per dokumen) ke dokumen transaksi apa pun. referenceType: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, quotation, proforma_invoice, purchase_order, sales_return, stock_transfer, stock_opname, production_run, fixed_asset, approval_request. Dua cara: (1) tanpa contentBase64 → salin lampiran dari panel chat Entaris pengguna ini (default: lampiran pada pesan chat saat ini, atau pilih dengan chatAttachmentId); (2) contentBase64+fileName → isi berkas dibawa langsung (batas body MCP 256 KB ≈ 180 KB berkas). Jenis berkas ditentukan dari isi, bukan nama. Izin = edit pada modul dokumen induk. Untuk pengajuan pembayaran pakai payreq_attachment_add.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `attachments` / `edit`)\n- **Catatan akses:** Butuh izin edit modul dokumen induk (approval_request: hanya pengaju). Lampiran chat harus milik pengguna yang sama.\n- **Handler:** `POST /api/attachments/json` (src/routes/attachments.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `referenceType` | body | `string` | ya | Jenis dokumen induk: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, quotation, proforma_invoice, purchase_order, sales_return, stock_transfer, stock_opname, production_run, fixed_asset, approval_request. |\n| `referenceId` | body | `string` | ya | ID dokumen induk (UUID). |\n| `fileName` | body | `string` | tidak | Nama berkas (wajib bila contentBase64 diisi; opsional untuk mengganti nama lampiran chat). |\n| `contentBase64` | body | `string` | tidak | Isi berkas base64 (tanpa/dengan prefix data:). Maks. ±180 KB karena batas body MCP; kosongkan untuk memakai lampiran panel chat. |\n| `mimeType` | body | `string` | tidak | Petunjuk jenis (image/jpeg, image/png, image/webp, application/pdf); ditolak bila tak cocok dengan isi berkas. |\n| `chatAttachmentId` | body | `string` | tidak | ID lampiran panel chat milik pengguna ini. Kosong → lampiran pada pesan chat yang sedang berjalan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"att_upload\",\n  \"args\": {\n    \"referenceType\": \"<referenceType>\",\n    \"referenceId\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Lampirkan berkas ke <referenceType> <id>?\"\n}\n```\n\n**Isi hasil:** Metadata lampiran tersimpan (array 1 elemen: id, fileName, mimeType, fileSize, referenceType, referenceId).\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok; berkas tersimpan sebagai lampiran pengajuan.\n\n**Teks konfirmasi:** Lampirkan berkas ke {referenceType} {referenceId}?\n\n**Error umum**\n\n- 400: Tidak ada lampiran pada pesan chat ini\n- 400: Maksimal 10 lampiran per pengajuan\n- 400: File tidak dikenali sebagai JPG/PNG/WebP/PDF\n- 400: Ukuran file maksimal 5 MB\n- 400: pengajuan tidak bisa diedit\n- 413: body MCP > 256 KB (pakai lampiran chat)\n\n**Tool terkait:** [`att_list`](#att_list), [`att_counts`](#att_counts), [`att_download_link`](#att_download_link), [`payreq_attachment_add`](pengajuan-pembayaran.md#payreq_attachment_add)\n",
+      "example": {
+        "tool": "att_upload",
         "args": {
           "referenceType": "<referenceType>",
           "referenceId": "<id>"
@@ -38778,7 +38880,7 @@
         "GET /api/attachments/file/:p",
         "DELETE /api/attachments/:p"
       ],
-      "reason": "Unggah/unduh/hapus berkas biner (multipart/stream). Tool hanya mengekspos metadata lampiran, bukan isi berkas."
+      "reason": "Unggah/unduh/hapus berkas biner (multipart/stream) tidak bisa lewat JSON-RPC. Padanannya: att_upload (JSON/base64/lampiran chat) dan att_download_link (tautan bertanda tangan)."
     },
     {
       "id": "file-ticket-download",

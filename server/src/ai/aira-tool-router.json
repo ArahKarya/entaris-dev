@@ -16346,6 +16346,99 @@
       "safeNonGet": true
     },
     {
+      "name": "att_upload",
+      "group": "Master & Sistem",
+      "toolset": "sistem",
+      "module": "attachments",
+      "desc": "Melampirkan SATU berkas (JPG/PNG/WebP/PDF, maks. 5 MB, maks. 5 berkas per dokumen) ke dokumen transaksi apa pun. referenceType: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, quotation, proforma_invoice, purchase_order, sales_return, stock_transfer, stock_opname, production_run, fixed_asset, approval_request. Dua cara: (1) tanpa contentBase64 → salin lampiran dari panel chat Entaris pengguna ini (default: lampiran pada pesan chat saat ini, atau pilih dengan chatAttachmentId); (2) contentBase64+fileName → isi berkas dibawa langsung (batas body MCP 256 KB ≈ 180 KB berkas). Jenis berkas ditentukan dari isi, bukan nama. Izin = edit pada modul dokumen induk. Untuk pengajuan pembayaran pakai payreq_attachment_add.",
+      "risk": "write",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "referenceType": "string",
+        "referenceId": "string",
+        "fileName": "string",
+        "contentBase64": "string",
+        "mimeType": "string",
+        "chatAttachmentId": "string"
+      },
+      "params": [
+        {
+          "name": "referenceType",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Jenis dokumen induk: payment, journal, purchase_invoice, sales_invoice, sales_order, delivery_order, goods_receipt, quotation, proforma_invoice, purchase_order, sales_return, stock_transfer, stock_opname, production_run, fixed_asset, approval_request."
+        },
+        {
+          "name": "referenceId",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "ID dokumen induk (UUID)."
+        },
+        {
+          "name": "fileName",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Nama berkas (wajib bila contentBase64 diisi; opsional untuk mengganti nama lampiran chat)."
+        },
+        {
+          "name": "contentBase64",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Isi berkas base64 (tanpa/dengan prefix data:). Maks. ±180 KB karena batas body MCP; kosongkan untuk memakai lampiran panel chat."
+        },
+        {
+          "name": "mimeType",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Petunjuk jenis (image/jpeg, image/png, image/webp, application/pdf); ditolak bila tak cocok dengan isi berkas."
+        },
+        {
+          "name": "chatAttachmentId",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "ID lampiran panel chat milik pengguna ini. Kosong → lampiran pada pesan chat yang sedang berjalan."
+        }
+      ],
+      "output": {
+        "data": "object"
+      },
+      "outputSummary": "Metadata lampiran tersimpan (array 1 elemen: id, fileName, mimeType, fileSize, referenceType, referenceId).",
+      "handler": "POST /api/attachments/json",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 2,
+      "phase": 1,
+      "draftCapable": true,
+      "postingEffect": "Tidak ada efek GL/stok; berkas tersimpan sebagai lampiran pengajuan.",
+      "confirm_template": "Lampirkan berkas ke {referenceType} {referenceId}?",
+      "accessNote": "Butuh izin edit modul dokumen induk (approval_request: hanya pengaju). Lampiran chat harus milik pengguna yang sama.",
+      "related": [
+        "att_list",
+        "att_counts",
+        "att_download_link",
+        "payreq_attachment_add"
+      ],
+      "errors": [
+        "400: Tidak ada lampiran pada pesan chat ini",
+        "400: Maksimal 10 lampiran per pengajuan",
+        "400: File tidak dikenali sebagai JPG/PNG/WebP/PDF",
+        "400: Ukuran file maksimal 5 MB",
+        "400: pengajuan tidak bisa diedit",
+        "413: body MCP > 256 KB (pakai lampiran chat)"
+      ]
+    },
+    {
       "name": "coa_create",
       "group": "Akuntansi",
       "toolset": "akuntansi",
