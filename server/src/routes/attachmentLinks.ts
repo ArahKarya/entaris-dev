@@ -51,6 +51,13 @@ const PDF_MODULE: Record<string, string> = {
   proforma_invoice: 'proforma_invoice',
   sales_order: 'sales_order',
   purchase_order: 'purchase_order',
+  delivery_order: 'delivery_order',
+  goods_receipt: 'goods_receipt',
+  stock_transfer: 'stock_transfer',
+  stock_opname: 'stock_opname',
+  production_run: 'production',
+  sales_invoice: 'sales_invoice',
+  purchase_invoice: 'purchase_invoice',
 };
 
 // POST /api/attachments/pdf-link — tiket unduh PDF dokumen (dirender server dengan templat yang sama dengan UI).
