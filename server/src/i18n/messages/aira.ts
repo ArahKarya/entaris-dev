@@ -46,6 +46,7 @@ export const AIRA_MESSAGES: MessageDictionary = {
   "Gagal menghapus sesi.": "Failed to delete the session.",
   "Lampiran tidak ditemukan.": "Attachment not found.",
   "Input tidak valid.": "Invalid input.",
+  "Gagal melampirkan berkas.": "Failed to attach the file.",
   "attachmentId harus UUID.": "attachmentId must be a UUID.",
   "Jenis dokumen lampiran tidak dikenal.": "Unknown attachment document type.",
   "Gagal membuat tautan unduh.": "Failed to create the download link.",
