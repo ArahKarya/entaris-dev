@@ -42,7 +42,7 @@ router.get('/dl/:ticket', async (req: Request, res: Response) => {
     if (!pdf.ok) return deny(res, pdf.status, pdf.error);
     if (!consumeJti(p.jti, p.exp)) return deny(res, 410, 'Tautan unduh sudah dipakai.');
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', contentDisposition(p.fn || pdf.fileName, false));
+    res.setHeader('Content-Disposition', contentDisposition(pdf.fileName, false));
     res.setHeader('Cache-Control', 'private, no-store');
     return res.send(pdf.buffer);
   } catch (error) {

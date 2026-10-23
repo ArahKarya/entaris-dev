@@ -16439,6 +16439,60 @@
       ]
     },
     {
+      "name": "doc_pdf_get",
+      "group": "Penjualan",
+      "toolset": "penjualan",
+      "module": "sales_order",
+      "desc": "Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order. Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "docType": "string",
+        "docId": "string"
+      },
+      "params": [
+        {
+          "name": "docType",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "enum": [
+            "quotation",
+            "proforma_invoice",
+            "sales_order",
+            "purchase_order"
+          ],
+          "description": "Jenis dokumen: quotation, proforma_invoice, sales_order, purchase_order."
+        },
+        {
+          "name": "docId",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "ID dokumen (UUID)."
+        }
+      ],
+      "output": {},
+      "outputSummary": "{url, docType, docId, mimeType:application/pdf, expiresInSeconds, oneTimeUse, warning?}.",
+      "handler": "POST /api/attachments/pdf-link",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 6,
+      "accessNote": "Butuh izin view modul dokumen; dicek ulang atas nama pengguna saat PDF dirender.",
+      "related": [
+        "att_download_link",
+        "att_upload",
+        "att_list"
+      ],
+      "safeNonGet": true
+    },
+    {
       "name": "coa_create",
       "group": "Akuntansi",
       "toolset": "akuntansi",

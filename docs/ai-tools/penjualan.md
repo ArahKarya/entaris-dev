@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/penjualan` · 74 tool (read 31, write 27, critical 16)
+Endpoint MCP target: `/mcp/penjualan` · 75 tool (read 32, write 27, critical 16)
 
 ## Tujuan
 
@@ -111,6 +111,7 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 | [`do_patch`](#do_patch) | write | tidak | `PATCH /api/delivery-orders/:id` |
 | [`do_pending`](#do_pending) | read | - | `GET /api/delivery-orders/pending` |
 | [`do_update`](#do_update) | critical | tidak | `PUT /api/delivery-orders/:id` |
+| [`doc_pdf_get`](#doc_pdf_get) | read | - | `POST /api/attachments/pdf-link` |
 | [`inq_convert_payload`](#inq_convert_payload) | write | tidak | `GET /api/inquiries/:id/convert-payload` |
 | [`inq_create`](#inq_create) | write | ya | `POST /api/inquiries` |
 | [`inq_delete`](#inq_delete) | write | tidak | `DELETE /api/inquiries/:id` |
@@ -998,6 +999,49 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 - 403: bypass stok minus butuh capability.
 
 **Tool terkait:** [`do_patch`](#do_patch), [`do_cancel`](#do_cancel)
+
+### doc_pdf_get
+
+**Ringkasan:** Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order. Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.
+
+- **Risk / tier:** `read` / Auto (POST murni baca)
+- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `sales_order` / `view`)
+- **Catatan akses:** Butuh izin view modul dokumen; dicek ulang atas nama pengguna saat PDF dirender.
+- **Handler:** `POST /api/attachments/pdf-link` (src/routes/attachmentLinks.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `docType` | body | enum: `quotation`, `proforma_invoice`, `sales_order`, `purchase_order` | ya | Jenis dokumen: quotation, proforma_invoice, sales_order, purchase_order. |
+| `docId` | body | `string` | ya | ID dokumen (UUID). |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "doc_pdf_get",
+  "args": {
+    "docType": "quotation",
+    "docId": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<{url, docType, docId, mimeType:application/pdf, expiresInSeconds, oneTimeUse, warning?}.>"
+}
+```
+
+**Isi hasil:** {url, docType, docId, mimeType:application/pdf, expiresInSeconds, oneTimeUse, warning?}.
+
+**Tool terkait:** [`att_download_link`](sistem.md#att_download_link), [`att_upload`](sistem.md#att_upload), [`att_list`](sistem.md#att_list)
 
 ### inq_convert_payload
 

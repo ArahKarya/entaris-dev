@@ -31,7 +31,7 @@ COPY server/ ./server/
 COPY docs/ai-tools/catalog.json ./docs/ai-tools/catalog.json
 
 # Build client (React + Vite → client/dist/)
-RUN cd client && npm run build
+RUN cd client && npm run build && npm run build:pdf
 
 # Generate Prisma client + build server (TypeScript → server/dist/)
 RUN cd server && npx prisma generate && NODE_OPTIONS=--max-old-space-size=3000 npm run build
@@ -61,6 +61,8 @@ COPY --from=builder /app/server/node_modules/@prisma/client ./server/node_module
 COPY --from=builder /app/server/prisma ./server/prisma
 COPY --from=builder /app/server/prisma.config.ts ./server/prisma.config.ts
 COPY --from=builder /app/client/dist ./client/dist
+# Bundel SSR templat PDF (dipakai server untuk doc_pdf_get; templat sama dengan UI)
+COPY --from=builder /app/client/pdf-dist ./client/pdf-dist
 
 # Entrypoint: migrate + auto-seed + start
 COPY docker-app-entrypoint.sh /docker-app-entrypoint.sh
