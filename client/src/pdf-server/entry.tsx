@@ -12,6 +12,7 @@ import GoodsReceiptPDF from '../lib/pdf/GoodsReceiptPDF';
 import WarehouseTransferPDF from '../lib/pdf/WarehouseTransferPDF';
 import StockOpnamePDF from '../lib/pdf/StockOpnamePDF';
 import ProductionRunPDF from '../lib/pdf/ProductionRunPDF';
+import { buildInvoicePdf, deriveInvoicePdfArgs } from '../components/invoice-detail/buildInvoicePdf';
 import { buildPdfProps } from '../components/production/run-pdf-props';
 
 export type PdfKind =
@@ -23,7 +24,9 @@ export type PdfKind =
   | 'goods_receipt'
   | 'stock_transfer'
   | 'stock_opname'
-  | 'production_run';
+  | 'production_run'
+  | 'sales_invoice'
+  | 'purchase_invoice';
 
 
 
@@ -155,6 +158,12 @@ function build(kind: PdfKind, p: any, company: PdfCompany): { element: React.Rea
         />
       );
       return { element: el, fileName: `stok-opname-${p.opnameNumber}.pdf` };
+    }
+    case 'sales_invoice':
+    case 'purchase_invoice': {
+      const type = kind === 'sales_invoice' ? 'sales' : 'purchase';
+      const el = buildInvoicePdf({ ...deriveInvoicePdfArgs(type, p), company: company as never });
+      return { element: el, fileName: `${p.invoiceNumber}.pdf` };
     }
     case 'production_run':
       return { element: <ProductionRunPDF {...buildPdfProps(p, company as never)} />, fileName: `${p.runNumber}.pdf` };

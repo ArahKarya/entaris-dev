@@ -1002,7 +1002,7 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 
 ### doc_pdf_get
 
-**Ringkasan:** Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order, delivery_order (Surat Jalan), goods_receipt (STT), stock_transfer, stock_opname, production_run. Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.
+**Ringkasan:** Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order, delivery_order (Surat Jalan), goods_receipt (STT), stock_transfer, stock_opname, production_run, sales_invoice (Invoice Penjualan), purchase_invoice (Invoice Pembelian). Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.
 
 - **Risk / tier:** `read` / Auto (POST murni baca)
 - **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `sales_order` / `view`)

@@ -163,6 +163,37 @@ describe('resolveDocumentPdf', () => {
     vi.unstubAllGlobals();
   }, 90_000);
 
+  (hasBundle2 ? it : it.skip)('merender PDF nyata invoice penjualan & pembelian (rincian pembayaran, deposit)', async () => {
+    const it1 = { itemName: 'Pellet Sekam', quantity: 10, unit: 'Ton', rate: 1500000, discount: 0, taxPct: 11, pphPct: 0, amount: 15000000, description: 'curah' };
+    const base = {
+      date: '2026-10-20', dueDate: '2026-11-20', terms: 'NET 30', status: 'PartiallyPaid', grandTotal: 16650000, outstanding: 6650000,
+      taxPct: 11, potongan: 0, biayaLain: 0, items: [it1],
+      paymentAllocations: [{ allocatedAmount: 7000000, payment: { paymentNumber: 'PAY-T-1', status: 'Posted', date: '2026-10-21', amount: 7000000, referenceNo: 'TRF-9', notes: null, account: { accountNumber: '1.1.3', name: 'Bank Mandiri', rootType: 'ASSET' }, splits: [] } }],
+      depositApplications: [{ appliedAmount: 3000000, isCancelled: false, appliedAt: '2026-10-22', depositPayment: { paymentNumber: 'DEP-1', date: '2026-10-15' } }],
+    };
+    const bodies: Record<string, unknown> = {
+      sales_invoice: { ...base, invoiceNumber: 'SI-T-1', customer: { name: 'CV Bumi Pangan', address: 'Jl. A', customerDepositBalance: 500000 } },
+      purchase_invoice: { ...base, invoiceNumber: 'PI-T-1', supplier: { name: 'Pemasok X', depositBalance: 0 } },
+    };
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (typeof url !== 'string' || !url.startsWith('http://127.0.0.1:')) return realFetch(url as never, init);
+      if (url.includes('/api/settings/company')) return new Response(JSON.stringify({ companyName: 'PT Contoh Pangan', invoiceSettings: null }), { status: 200 });
+      return new Response(JSON.stringify(url.includes('/sales/invoices/') ? bodies.sales_invoice : bodies.purchase_invoice), { status: 200 });
+    }));
+    for (const [kind, name] of [['sales_invoice', 'SI-T-1'], ['purchase_invoice', 'PI-T-1']]) {
+      const r = await resolveDocumentPdf({ userId: 'u1', role: 'Admin' }, `${kind}:id-1`);
+      expect(r.ok, kind).toBe(true);
+      if (r.ok) {
+        expect(r.fileName).toBe(`${name}.pdf`);
+        expect(r.buffer.subarray(0, 5).toString()).toBe('%PDF-');
+        expect(r.buffer.length, kind).toBeGreaterThan(2000);
+        if (process.env.PDF_DUMP_DIR) writeFileSync(`${process.env.PDF_DUMP_DIR}/${name}.pdf`, r.buffer);
+      }
+    }
+    vi.unstubAllGlobals();
+  }, 90_000);
+
   it('meneruskan 403/404 dari endpoint detail (RBAC datang dari endpoint itu)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 403 })));
     expect(await resolveDocumentPdf({ userId: 'u1', role: 'Viewer' }, 'quotation:q1')).toMatchObject({ ok: false, status: 403 });

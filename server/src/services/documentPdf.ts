@@ -20,7 +20,9 @@ export type PdfKind =
   | 'goods_receipt'
   | 'stock_transfer'
   | 'stock_opname'
-  | 'production_run';
+  | 'production_run'
+  | 'sales_invoice'
+  | 'purchase_invoice';
 
 /** Dokumen yang didukung: jenis → path GET detail (modul RBAC dicek oleh endpoint itu sendiri). */
 export const PDF_DOCS: Record<PdfKind, { path: (id: string) => string; label: string }> = {
@@ -32,6 +34,8 @@ export const PDF_DOCS: Record<PdfKind, { path: (id: string) => string; label: st
   goods_receipt: { path: (id) => `/api/goods-receipts/${id}`, label: 'STT' },
   stock_transfer: { path: (id) => `/api/stock-transfers/${id}`, label: 'Transfer Stok' },
   stock_opname: { path: (id) => `/api/stock-opname/${id}`, label: 'Stok Opname' },
+  sales_invoice: { path: (id) => `/api/sales/invoices/${id}`, label: 'Invoice Penjualan' },
+  purchase_invoice: { path: (id) => `/api/purchase/invoices/${id}`, label: 'Invoice Pembelian' },
   production_run: { path: (id) => `/api/inventory/production-runs/${id}`, label: 'Produksi' },
 };
 
