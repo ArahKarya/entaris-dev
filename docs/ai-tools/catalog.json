@@ -2,16 +2,16 @@
   "app": "simple-erp",
   "version": 3,
   "counts": {
-    "tools": 486,
+    "tools": 487,
     "byRisk": {
       "critical": 106,
-      "read": 223,
+      "read": 224,
       "write": 157
     },
     "byToolset": {
       "persetujuan": 14,
       "sistem": 19,
-      "penjualan": 74,
+      "penjualan": 75,
       "obrolan": 2,
       "akuntansi": 33,
       "pengajuan-pembayaran": 32,
@@ -24,7 +24,7 @@
       "produksi": 28,
       "master-data": 12
     },
-    "routes": 576
+    "routes": 577
   },
   "toolsets": [
     {
@@ -48,6 +48,7 @@
         "do_patch",
         "do_pending",
         "do_update",
+        "doc_pdf_get",
         "inq_convert_payload",
         "inq_create",
         "inq_delete",
@@ -3932,6 +3933,68 @@
               "unit": "<unit>"
             }
           ]
+        }
+      }
+    },
+    {
+      "name": "doc_pdf_get",
+      "group": "Penjualan",
+      "toolset": "penjualan",
+      "module": "sales_order",
+      "desc": "Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order. Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "docType": "string",
+        "docId": "string"
+      },
+      "params": [
+        {
+          "name": "docType",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "enum": [
+            "quotation",
+            "proforma_invoice",
+            "sales_order",
+            "purchase_order"
+          ],
+          "description": "Jenis dokumen: quotation, proforma_invoice, sales_order, purchase_order."
+        },
+        {
+          "name": "docId",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "ID dokumen (UUID)."
+        }
+      ],
+      "output": {},
+      "outputSummary": "{url, docType, docId, mimeType:application/pdf, expiresInSeconds, oneTimeUse, warning?}.",
+      "handler": "POST /api/attachments/pdf-link",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 6,
+      "accessNote": "Butuh izin view modul dokumen; dicek ulang atas nama pengguna saat PDF dirender.",
+      "related": [
+        "att_download_link",
+        "att_upload",
+        "att_list"
+      ],
+      "safeNonGet": true,
+      "doc": "### doc_pdf_get\n\n**Ringkasan:** Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order. Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.\n\n- **Risk / tier:** `read` / Auto (POST murni baca)\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `sales_order` / `view`)\n- **Catatan akses:** Butuh izin view modul dokumen; dicek ulang atas nama pengguna saat PDF dirender.\n- **Handler:** `POST /api/attachments/pdf-link` (src/routes/attachmentLinks.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `docType` | body | enum: `quotation`, `proforma_invoice`, `sales_order`, `purchase_order` | ya | Jenis dokumen: quotation, proforma_invoice, sales_order, purchase_order. |\n| `docId` | body | `string` | ya | ID dokumen (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"doc_pdf_get\",\n  \"args\": {\n    \"docType\": \"quotation\",\n    \"docId\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{url, docType, docId, mimeType:application/pdf, expiresInSeconds, oneTimeUse, warning?}.>\"\n}\n```\n\n**Isi hasil:** {url, docType, docId, mimeType:application/pdf, expiresInSeconds, oneTimeUse, warning?}.\n\n**Tool terkait:** [`att_download_link`](sistem.md#att_download_link), [`att_upload`](sistem.md#att_upload), [`att_list`](sistem.md#att_list)\n",
+      "example": {
+        "tool": "doc_pdf_get",
+        "args": {
+          "docType": "quotation",
+          "docId": "<id>"
         }
       }
     },

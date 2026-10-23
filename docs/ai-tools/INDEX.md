@@ -2,13 +2,13 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **486** tool (read 223 · write 157 · critical 106); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **487** tool (read 224 · write 157 · critical 106); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
 | Toolset | Tool | read | write | critical | Ringkas |
 |---|---|---|---|---|---|
-| [Penjualan](penjualan.md) | 74 | 31 | 27 | 16 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
+| [Penjualan](penjualan.md) | 75 | 32 | 27 | 16 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
 | [Pembelian](pembelian.md) | 28 | 12 | 5 | 11 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
@@ -75,6 +75,7 @@ Total **486** tool (read 223 · write 157 · critical 106); semuanya aktif secar
 | [`do_patch`](penjualan.md#do_patch) | penjualan | write | tidak | Admin, Accountant, StaffProduksi | `PATCH /api/delivery-orders/:id` |
 | [`do_pending`](penjualan.md#do_pending) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/delivery-orders/pending` |
 | [`do_update`](penjualan.md#do_update) | penjualan | critical | tidak | Admin, Accountant, StaffProduksi | `PUT /api/delivery-orders/:id` |
+| [`doc_pdf_get`](penjualan.md#doc_pdf_get) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `POST /api/attachments/pdf-link` |
 | [`eambill_cancel`](pengajuan-pembayaran.md#eambill_cancel) | pengajuan-pembayaran | critical | tidak | Admin, Accountant | `POST /api/payment-requests/eam/:kind/:id/cancel` |
 | [`eambill_list`](pengajuan-pembayaran.md#eambill_list) | pengajuan-pembayaran | read | - | Admin, Accountant | `GET /api/payment-requests/eam` |
 | [`eambill_pay`](pengajuan-pembayaran.md#eambill_pay) | pengajuan-pembayaran | critical | tidak | Admin, Accountant | `POST /api/payment-requests/eam/:kind/:id/pay` |

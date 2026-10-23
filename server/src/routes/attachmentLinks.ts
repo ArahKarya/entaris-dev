@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma';
 import type { AuthRequest } from '../middleware/auth';
 import { handleRouteError } from '../utils/errors';
 import { checkAttachmentAccess, isAttachmentRefType } from '../services/attachmentAccess';
+import { can } from '../services/permissionService';
+import { isPdfKind, PDF_DOCS } from '../services/documentPdf';
 import { buildDownloadUrl, FILE_TICKET_TTL_SEC, fileTicketSecret, signFileTicket } from '../services/fileTicket';
 
 const router = Router();
@@ -35,6 +37,49 @@ router.post('/download-link', async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     return handleRouteError(res, error, 'POST /attachments/download-link', 'Gagal membuat tautan unduh.');
+  }
+});
+
+const pdfLinkSchema = z.object({
+  docType: z.string().min(1).max(40),
+  docId: z.string().min(1).max(100),
+});
+
+// Modul RBAC per jenis PDF (view). Pemeriksaan penuh tetap terjadi lagi saat unduh (GET detail atas nama pengguna).
+const PDF_MODULE: Record<string, string> = {
+  quotation: 'quotation',
+  proforma_invoice: 'proforma_invoice',
+  sales_order: 'sales_order',
+  purchase_order: 'purchase_order',
+};
+
+// POST /api/attachments/pdf-link — tiket unduh PDF dokumen (dirender server dengan templat yang sama dengan UI).
+router.post('/pdf-link', async (req: AuthRequest, res: Response) => {
+  try {
+    const parsed = pdfLinkSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Input tidak valid.' });
+    const { docType, docId } = parsed.data;
+    if (!isPdfKind(docType)) {
+      return res.status(400).json({ error: `docType harus salah satu dari: ${Object.keys(PDF_DOCS).join(', ')}.` });
+    }
+    if (!req.user || !(await can(req.user.role, PDF_MODULE[docType], 'view'))) {
+      return res.status(403).json({ error: 'Akses ditolak: Tidak memiliki izin.' });
+    }
+    const label = PDF_DOCS[docType].label.replace(/\s+/g, '-');
+    const fn = `${label}-${docId.slice(0, 8)}.pdf`;
+    const ticket = signFileTicket(fileTicketSecret(), { uid: req.user.userId, kind: 'document-pdf', ref: `${docType}:${docId}`, fn });
+    const { url, absolute } = buildDownloadUrl(ticket);
+    return res.json({
+      url,
+      docType,
+      docId,
+      mimeType: 'application/pdf',
+      expiresInSeconds: FILE_TICKET_TTL_SEC,
+      oneTimeUse: true,
+      ...(absolute ? {} : { warning: 'PUBLIC_BASE_URL belum diatur: url relatif, tambahkan alamat publik aplikasi di depannya.' }),
+    });
+  } catch (error) {
+    return handleRouteError(res, error, 'POST /attachments/pdf-link', 'Gagal membuat tautan PDF.');
   }
 });
 

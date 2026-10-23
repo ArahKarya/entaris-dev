@@ -15,6 +15,10 @@ const dir = mkdtempSync(path.join(tmpdir(), 'dl-'));
 const filePath = path.join(dir, 'nota.pdf');
 writeFileSync(filePath, '%PDF-1.4 test');
 
+vi.hoisted(() => {
+  process.env.JWT_SECRET = 'unit-test-jwt-secret-value-0123456789';
+});
+
 const { prismaMock, access } = vi.hoisted(() => ({
   prismaMock: {
     user: { findUnique: vi.fn() },
@@ -138,8 +142,9 @@ describe('GET /files/dl/:ticket', () => {
     expect((await fetch(`${base}/files/dl/${mkTicket()}`)).status).toBe(404);
   });
 
-  it('tiket document-pdf → 501 selama renderer belum tersedia (tidak mengonsumsi tiket)', async () => {
-    const t = signFileTicket(fileTicketSecret(), { uid: 'u1', kind: 'document-pdf', ref: 'quotation:abc', fn: 'q.pdf' });
-    expect((await fetch(`${base}/files/dl/${t}`)).status).toBe(501);
+  it('tiket document-pdf → ref rusak 404 dan tidak mengonsumsi tiket', async () => {
+    const t = signFileTicket(fileTicketSecret(), { uid: 'u1', kind: 'document-pdf', ref: 'tanpa-pemisah', fn: 'q.pdf' });
+    expect((await fetch(`${base}/files/dl/${t}`)).status).toBe(404);
+    expect((await fetch(`${base}/files/dl/${t}`)).status).toBe(404);
   });
 });
