@@ -25,7 +25,7 @@ export function isPdfKind(v: unknown): v is PdfKind {
 }
 
 interface PdfBundle {
-  renderDoc: (kind: PdfKind, payload: unknown, company: unknown, lang?: 'id' | 'en') => Promise<{ buffer: Buffer; fileName: string }>;
+  renderDoc: (kind: PdfKind, payload: unknown, company: unknown, lang?: 'id' | 'en') => Promise<{ buffer: Uint8Array; fileName: string }>;
   companyFromSettings: (data: unknown, fallbackName?: string) => unknown;
 }
 
@@ -76,7 +76,7 @@ export async function resolveDocumentPdf(actor: AttachmentActor, ref: string): P
     const b = loadBundle();
     const company = b.companyFromSettings(settings.status === 200 ? settings.body : null);
     const out = await b.renderDoc(kind, doc.body, company, 'id');
-    return { ok: true, buffer: out.buffer, fileName: out.fileName };
+    return { ok: true, buffer: Buffer.from(out.buffer), fileName: out.fileName };
   } catch (error) {
     logger.error({ error, kind }, 'resolveDocumentPdf gagal');
     return { ok: false, status: 502, error: 'Gagal membuat PDF dokumen.' };

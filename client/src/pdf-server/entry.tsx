@@ -56,7 +56,7 @@ export async function renderDoc(
   payload: unknown,
   company: PdfCompany,
   lang: 'id' | 'en' = 'id',
-): Promise<{ buffer: Buffer; fileName: string }> {
+): Promise<{ buffer: Uint8Array; fileName: string }> {
   await i18n.changeLanguage(lang);
   await i18n.loadNamespaces('pdf');
   const { element, fileName } = build(kind, payload, company);
