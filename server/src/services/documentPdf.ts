@@ -1,6 +1,7 @@
 // Render PDF dokumen di server dengan templat React-PDF YANG SAMA dengan UI (bundel SSR client/pdf-dist/pdf.cjs).
 // Data diambil lewat endpoint GET detail yang sama dengan UI, dengan JWT pendek atas nama pengguna, jadi RBAC,
 // pembatasan data, dan bentuk payload identik dengan yang dilihat pengguna di layar.
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { generateShortLivedToken } from '../utils/auth';
 import { logger } from '../lib/logger';
@@ -31,9 +32,14 @@ interface PdfBundle {
 
 let bundle: PdfBundle | null = null;
 
-/** Lokasi bundel: client/pdf-dist/pdf.cjs (image produksi: /app/client/pdf-dist; dev: ../client/pdf-dist). */
+/**
+ * Lokasi bundel. Image produksi: /app/server/pdf-dist/pdf.cjs (di dalam server/ agar `react` ter-resolusi dari
+ * server/node_modules). Dev/uji: client/pdf-dist/pdf.cjs hasil `npm run build:pdf`.
+ */
 export function pdfBundlePath(): string {
-  return process.env.PDF_BUNDLE_PATH || path.resolve(__dirname, '../../../client/pdf-dist/pdf.cjs');
+  if (process.env.PDF_BUNDLE_PATH) return process.env.PDF_BUNDLE_PATH;
+  const prod = path.resolve(__dirname, '../../pdf-dist/pdf.cjs');
+  return existsSync(prod) ? prod : path.resolve(__dirname, '../../../client/pdf-dist/pdf.cjs');
 }
 
 function loadBundle(): PdfBundle {
