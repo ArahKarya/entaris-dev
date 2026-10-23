@@ -11,7 +11,16 @@ export type DocumentPdfResult =
   | { ok: true; buffer: Buffer; fileName: string }
   | { ok: false; status: 404 | 403 | 501 | 502; error: string };
 
-export type PdfKind = 'quotation' | 'proforma_invoice' | 'sales_order' | 'purchase_order';
+export type PdfKind =
+  | 'quotation'
+  | 'proforma_invoice'
+  | 'sales_order'
+  | 'purchase_order'
+  | 'delivery_order'
+  | 'goods_receipt'
+  | 'stock_transfer'
+  | 'stock_opname'
+  | 'production_run';
 
 /** Dokumen yang didukung: jenis → path GET detail (modul RBAC dicek oleh endpoint itu sendiri). */
 export const PDF_DOCS: Record<PdfKind, { path: (id: string) => string; label: string }> = {
@@ -19,6 +28,11 @@ export const PDF_DOCS: Record<PdfKind, { path: (id: string) => string; label: st
   proforma_invoice: { path: (id) => `/api/proforma-invoices/${id}`, label: 'Proforma Invoice' },
   sales_order: { path: (id) => `/api/sales-orders/${id}`, label: 'Sales Order' },
   purchase_order: { path: (id) => `/api/purchase-orders/${id}`, label: 'Purchase Order' },
+  delivery_order: { path: (id) => `/api/delivery-orders/${id}`, label: 'Surat Jalan' },
+  goods_receipt: { path: (id) => `/api/goods-receipts/${id}`, label: 'STT' },
+  stock_transfer: { path: (id) => `/api/stock-transfers/${id}`, label: 'Transfer Stok' },
+  stock_opname: { path: (id) => `/api/stock-opname/${id}`, label: 'Stok Opname' },
+  production_run: { path: (id) => `/api/inventory/production-runs/${id}`, label: 'Produksi' },
 };
 
 export function isPdfKind(v: unknown): v is PdfKind {
