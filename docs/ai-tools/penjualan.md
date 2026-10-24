@@ -1002,11 +1002,11 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 
 ### doc_pdf_get
 
-**Ringkasan:** Buat TAUTAN UNDUH PDF resmi sebuah dokumen (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). docType: quotation, proforma_invoice, sales_order, purchase_order, delivery_order (Surat Jalan), goods_receipt (STT), stock_transfer, stock_opname, production_run, sales_invoice (Invoice Penjualan), purchase_invoice (Invoice Pembelian). Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen tersebut.
+**Ringkasan:** Buat TAUTAN UNDUH PDF resmi sebuah dokumen atau laporan (dirender server dengan templat yang sama dengan tombol PDF di aplikasi). Dokumen transaksi (docId = ID/UUID): quotation, proforma_invoice, sales_order, purchase_order, delivery_order (Surat Jalan), goods_receipt (STT), stock_transfer, stock_opname, production_run, sales_invoice (Invoice Penjualan), purchase_invoice (Invoice Pembelian). Laporan (docId = parameter, bukan ID; butuh izin modul Laporan): report_profit_loss, report_trial_balance, report_cash_flow → docId 'YYYY-MM-DD..YYYY-MM-DD' (mulai..akhir); report_balance_sheet, report_daily → docId 'YYYY-MM-DD' (tanggal); report_aging → docId 'Customer' (umur piutang) atau 'Supplier' (umur utang, posisi hari ini). Mengembalikan url bertanda tangan (berlaku 5 menit, sekali pakai). Agen mengunduh url itu dengan HTTP GET biasa tanpa header otorisasi. Izin = lihat dokumen/laporan tersebut.
 
 - **Risk / tier:** `read` / Auto (POST murni baca)
 - **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `sales_order` / `view`)
-- **Catatan akses:** Butuh izin view modul dokumen; dicek ulang atas nama pengguna saat PDF dirender.
+- **Catatan akses:** Butuh izin view modul dokumen (laporan: modul Laporan); dicek ulang atas nama pengguna saat PDF dirender.
 - **Handler:** `POST /api/attachments/pdf-link` (src/routes/attachmentLinks.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1014,8 +1014,8 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| `docType` | body | enum: `quotation`, `proforma_invoice`, `sales_order`, `purchase_order` | ya | Jenis dokumen: quotation, proforma_invoice, sales_order, purchase_order. |
-| `docId` | body | `string` | ya | ID dokumen (UUID). |
+| `docType` | body | enum: `quotation`, `proforma_invoice`, `sales_order`, `purchase_order`, `delivery_order`, `goods_receipt`, `stock_transfer`, `stock_opname`, `production_run`, `sales_invoice`, `purchase_invoice`, `report_profit_loss`, `report_balance_sheet`, `report_trial_balance`, `report_cash_flow`, `report_aging`, `report_daily` | ya | Jenis dokumen/laporan: quotation, proforma_invoice, sales_order, purchase_order, delivery_order, goods_receipt, stock_transfer, stock_opname, production_run, sales_invoice, purchase_invoice, report_profit_loss, report_balance_sheet, report_trial_balance, report_cash_flow, report_aging, report_daily. |
+| `docId` | body | `string` | ya | Dokumen transaksi: ID (UUID). Laporan: periode 'YYYY-MM-DD..YYYY-MM-DD' (laba rugi, neraca saldo, arus kas), tanggal 'YYYY-MM-DD' (neraca, laporan harian), atau 'Customer'/'Supplier' (aging). |
 
 **Contoh pemanggilan**
 

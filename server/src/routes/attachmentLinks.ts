@@ -58,6 +58,12 @@ const PDF_MODULE: Record<string, string> = {
   production_run: 'production',
   sales_invoice: 'sales_invoice',
   purchase_invoice: 'purchase_invoice',
+  report_profit_loss: 'reports',
+  report_balance_sheet: 'reports',
+  report_trial_balance: 'reports',
+  report_cash_flow: 'reports',
+  report_aging: 'reports',
+  report_daily: 'reports',
 };
 
 // POST /api/attachments/pdf-link — tiket unduh PDF dokumen (dirender server dengan templat yang sama dengan UI).
@@ -72,8 +78,12 @@ router.post('/pdf-link', async (req: AuthRequest, res: Response) => {
     if (!req.user || !(await can(req.user.role, PDF_MODULE[docType], 'view'))) {
       return res.status(403).json({ error: 'Akses ditolak: Tidak memiliki izin.' });
     }
+    if (!PDF_DOCS[docType].path(encodeURIComponent(docId))) {
+      return res.status(400).json({ error: `docId tidak valid untuk ${docType}. ${PDF_DOCS[docType].hint ?? ''}`.trim() });
+    }
     const label = PDF_DOCS[docType].label.replace(/\s+/g, '-');
-    const fn = `${label}-${docId.slice(0, 8)}.pdf`;
+    const suffix = docType.startsWith('report_') ? docId.replace(/\.\./g, '-sd-') : docId.slice(0, 8);
+    const fn = `${label}-${suffix}.pdf`;
     const ticket = signFileTicket(fileTicketSecret(), { uid: req.user.userId, kind: 'document-pdf', ref: `${docType}:${docId}`, fn });
     const { url, absolute } = buildDownloadUrl(ticket);
     return res.json({
