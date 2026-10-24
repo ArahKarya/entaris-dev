@@ -12,6 +12,8 @@ import GoodsReceiptPDF from '../lib/pdf/GoodsReceiptPDF';
 import WarehouseTransferPDF from '../lib/pdf/WarehouseTransferPDF';
 import StockOpnamePDF from '../lib/pdf/StockOpnamePDF';
 import ProductionRunPDF from '../lib/pdf/ProductionRunPDF';
+import { ProfitLossPDF, BalanceSheetPDF, TrialBalancePDF, CashFlowPDF, AgingPDF } from '../lib/pdf/ReportPDF';
+import { DailyReportPDF } from '../lib/pdf/DailyReportPDF';
 import { buildInvoicePdf, deriveInvoicePdfArgs } from '../components/invoice-detail/buildInvoicePdf';
 import { buildPdfProps } from '../components/production/run-pdf-props';
 
@@ -26,7 +28,16 @@ export type PdfKind =
   | 'stock_opname'
   | 'production_run'
   | 'sales_invoice'
-  | 'purchase_invoice';
+  | 'purchase_invoice'
+  | 'report_profit_loss'
+  | 'report_balance_sheet'
+  | 'report_trial_balance'
+  | 'report_cash_flow'
+  | 'report_aging'
+  | 'report_daily';
+
+/** Parameter laporan yang dikirim server (dari docId): `periode` untuk rentang, `date` untuk tanggal tunggal, `agingType`. */
+export interface ReportParams { startDate?: string; endDate?: string; date?: string; agingType?: 'Customer' | 'Supplier' }
 
 
 
@@ -57,8 +68,52 @@ export function companyFromSettings(data: any, fallbackName = 'Perusahaan'): Pdf
   };
 }
 
-function build(kind: PdfKind, p: any, company: PdfCompany): { element: React.ReactElement; fileName: string } {
+const rangeLabel = (r: ReportParams) => i18n.getFixedT(null, 'reports')('reportsShared.dateRange', { start: r.startDate, end: r.endDate });
+
+function build(kind: PdfKind, p: any, company: PdfCompany, rp: ReportParams = {}): { element: React.ReactElement; fileName: string } {
   switch (kind) {
+    case 'report_profit_loss':
+      return {
+        element: (
+          <ProfitLossPDF company={company} period={rangeLabel(rp)} revenue={p.revenue ?? []} expense={p.expense ?? []}
+            totalRevenue={p.totalRevenue ?? 0} totalExpense={p.totalExpense ?? 0} netProfit={p.netProfit ?? 0} />
+        ),
+        fileName: `Laba-Rugi-${rp.startDate}-sd-${rp.endDate}.pdf`,
+      };
+    case 'report_balance_sheet':
+      return {
+        element: (
+          <BalanceSheetPDF company={company} asOf={rp.date as string} assets={p.assets ?? []} liabilities={p.liabilities ?? []} equity={p.equity ?? []}
+            totalAssets={p.totalAssets ?? 0} totalLiabilities={p.totalLiabilities ?? 0} totalEquity={p.totalEquity ?? 0} />
+        ),
+        fileName: `Neraca-${rp.date}.pdf`,
+      };
+    case 'report_trial_balance': {
+      const rows = (Array.isArray(p) ? p : []).map((item: any) => ({
+        accountNumber: item.accountNumber, accountName: item.name, debit: Number(item.debit), credit: Number(item.credit),
+      }));
+      return { element: <TrialBalancePDF company={company} period={rangeLabel(rp)} rows={rows} />, fileName: `Neraca-Saldo-${rp.startDate}-sd-${rp.endDate}.pdf` };
+    }
+    case 'report_cash_flow': {
+      const items = (xs: any[] | undefined) => (xs ?? []).map((it) => ({ description: it.name, amount: it.amount }));
+      return {
+        element: (
+          <CashFlowPDF company={company} period={rangeLabel(rp)} operating={p.operating ?? 0} investing={p.investing ?? 0} financing={p.financing ?? 0}
+            netChange={p.netChange ?? 0} operatingItems={items(p.details?.operating)} investingItems={items(p.details?.investing)} financingItems={items(p.details?.financing)} />
+        ),
+        fileName: `Arus-Kas-${rp.startDate}-sd-${rp.endDate}.pdf`,
+      };
+    }
+    case 'report_aging': {
+      const src: any[] = Array.isArray(p) ? p : [];
+      const sum = (k: string | number) => src.reduce((a, r) => a + numv(r[k]), 0);
+      const rows = src.map((r) => ({ name: r.name, current: numv(r.current), d1_30: numv(r[1]), d31_60: numv(r[31]), d61_90: numv(r[61]), d91_plus: numv(r[91]), total: numv(r.total) }));
+      const totals = { name: 'TOTAL', current: sum('current'), d1_30: sum(1), d31_60: sum(31), d61_90: sum(61), d91_plus: sum(91), total: sum('total') };
+      const type = rp.agingType ?? 'Customer';
+      return { element: <AgingPDF company={company} type={type} rows={rows} totals={totals} />, fileName: `${type === 'Customer' ? 'Aging-Piutang' : 'Aging-Hutang'}-${new Date().toISOString().slice(0, 10)}.pdf` };
+    }
+    case 'report_daily':
+      return { element: <DailyReportPDF company={company} date={rp.date as string} data={p} />, fileName: `Laporan-Harian-${rp.date}.pdf` };
     case 'quotation':
       return { element: <QuotationPDF quotation={p} company={company as never} />, fileName: `${p.quotationNumber}.pdf` };
     case 'proforma_invoice': {
@@ -176,9 +231,10 @@ export async function renderDoc(
   payload: unknown,
   company: PdfCompany,
   lang: 'id' | 'en' = 'id',
+  reportParams: ReportParams = {},
 ): Promise<{ buffer: Uint8Array; fileName: string }> {
   await i18n.changeLanguage(lang);
-  await i18n.loadNamespaces('pdf');
-  const { element, fileName } = build(kind, payload, company);
+  await i18n.loadNamespaces(['pdf', 'reports']);
+  const { element, fileName } = build(kind, payload, company, reportParams);
   return { buffer: await renderToBuffer(element as never), fileName };
 }

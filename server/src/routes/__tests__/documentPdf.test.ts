@@ -24,7 +24,7 @@ vi.mock('../../services/permissionService', async () => {
 });
 
 import { resetUsedJtiForTests, verifyFileTicket, fileTicketSecret } from '../../services/fileTicket';
-import { pdfBundlePath, resolveDocumentPdf, isPdfKind } from '../../services/documentPdf';
+import { pdfBundlePath, resolveDocumentPdf, isPdfKind, PDF_DOCS, reportParamsOf } from '../../services/documentPdf';
 import attachmentLinks from '../attachmentLinks';
 
 let server: Server;
@@ -201,4 +201,92 @@ describe('resolveDocumentPdf', () => {
     expect(await resolveDocumentPdf({ userId: 'u1', role: 'Admin' }, 'sales_order:nope')).toMatchObject({ ok: false, status: 404 });
     vi.unstubAllGlobals();
   });
+});
+
+describe('laporan (docId = parameter)', () => {
+  it('path laporan valid dibangun; parameter ngawur → null', () => {
+    const p = (k: keyof typeof PDF_DOCS, id: string) => PDF_DOCS[k].path(encodeURIComponent(id));
+    expect(p('report_profit_loss', '2026-01-01..2026-03-31')).toBe('/api/reports/profit-loss?startDate=2026-01-01&endDate=2026-03-31');
+    expect(p('report_balance_sheet', '2026-10-24')).toBe('/api/reports/balance-sheet?date=2026-10-24');
+    expect(p('report_aging', 'Supplier')).toBe('/api/reports/aging?type=Supplier');
+    expect(p('report_daily', '2026-10-24')).toBe('/api/reports/daily?date=2026-10-24');
+    expect(p('report_profit_loss', '2026-03-31..2026-01-01')).toBeNull();
+    expect(p('report_profit_loss', '2026-02-30..2026-03-01')).toBeNull();
+    expect(p('report_trial_balance', '2026-01-01')).toBeNull();
+    expect(p('report_cash_flow', '2026-01-01..2026-01-31&x=1')).toBeNull();
+    expect(p('report_aging', 'customer')).toBeNull();
+    expect(p('report_balance_sheet', '24-10-2026')).toBeNull();
+  });
+
+  it('reportParamsOf memetakan docId → parameter templat', () => {
+    expect(reportParamsOf('report_cash_flow', '2026-01-01..2026-01-31')).toEqual({ startDate: '2026-01-01', endDate: '2026-01-31' });
+    expect(reportParamsOf('report_daily', '2026-10-24')).toEqual({ date: '2026-10-24' });
+    expect(reportParamsOf('report_aging', 'Supplier')).toEqual({ agingType: 'Supplier' });
+    expect(reportParamsOf('quotation', 'abc')).toEqual({});
+  });
+
+  it('tiket: izin modul reports; parameter salah → 400; nama berkas deskriptif', async () => {
+    const ok = await post({ docType: 'report_profit_loss', docId: '2026-01-01..2026-03-31' });
+    expect(ok.status).toBe(200);
+    const j = await ok.json();
+    const ticket = verifyFileTicket(fileTicketSecret(), String(j.url).split('/api/files/dl/')[1]);
+    expect(ticket).toMatchObject({ kind: 'document-pdf', ref: 'report_profit_loss:2026-01-01..2026-03-31', fn: 'Laba-Rugi-2026-01-01-sd-2026-03-31.pdf' });
+    expect(permission.can).toHaveBeenCalledWith('Accountant', 'reports', 'view');
+    const bad = await post({ docType: 'report_profit_loss', docId: 'kemarin' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/YYYY-MM-DD/);
+    permission.can.mockResolvedValue(false);
+    expect((await post({ docType: 'report_balance_sheet', docId: '2026-10-24' })).status).toBe(403);
+  });
+
+  it('resolveDocumentPdf: parameter laporan rusak → 400 tanpa memanggil loopback', async () => {
+    const f = vi.fn();
+    vi.stubGlobal('fetch', f);
+    expect(await resolveDocumentPdf({ userId: 'u1', role: 'Admin' }, 'report_daily:bukan-tanggal')).toMatchObject({ ok: false, status: 400 });
+    vi.unstubAllGlobals();
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  const hasBundleR = existsSync(pdfBundlePath());
+  (hasBundleR ? it : it.skip)('merender PDF nyata untuk 6 laporan', async () => {
+    const accts = [{ name: 'Penjualan', accountNumber: '4.1', balance: 15000000 }];
+    const bodies: Record<string, unknown> = {
+      'profit-loss': { revenue: accts, expense: [{ name: 'Beban Gaji', accountNumber: '5.1', balance: 4000000 }], totalRevenue: 15000000, totalExpense: 4000000, netProfit: 11000000 },
+      'balance-sheet': { assets: [{ name: 'Kas', balance: 9000000 }], liabilities: [{ name: 'Utang Usaha', balance: 2000000 }], equity: [{ name: 'Modal', balance: 7000000 }], totalAssets: 9000000, totalLiabilities: 2000000, totalEquity: 7000000 },
+      'trial-balance': [{ accountNumber: '1.1', name: 'Kas', debit: 9000000, credit: 0 }, { accountNumber: '3.1', name: 'Modal', debit: 0, credit: 9000000 }],
+      'cash-flow': { operating: 5000000, investing: -1000000, financing: 0, netChange: 4000000, details: { operating: [{ name: 'Penerimaan', amount: 5000000 }], investing: [], financing: [] } },
+      aging: [{ name: 'CV Bumi', current: 100, 1: 200, 31: 0, 61: 0, 91: 50, total: 350 }],
+    };
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (typeof url !== 'string' || !url.startsWith('http://127.0.0.1:')) return realFetch(url as never, init);
+      if (url.includes('/api/settings/company')) return new Response(JSON.stringify({ companyName: 'PT Contoh Pangan' }), { status: 200 });
+      const key = Object.keys(bodies).find((k) => url.includes(`/api/reports/${k}`));
+      if (key) return new Response(JSON.stringify(bodies[key]), { status: 200 });
+      return new Response(JSON.stringify({ tidak: 'dipakai' }), { status: 404 });
+    }));
+    const cases: Array<[string, string, string]> = [
+      ['report_profit_loss', '2026-01-01..2026-03-31', 'Laba-Rugi-2026-01-01-sd-2026-03-31.pdf'],
+      ['report_balance_sheet', '2026-03-31', 'Neraca-2026-03-31.pdf'],
+      ['report_trial_balance', '2026-01-01..2026-03-31', 'Neraca-Saldo-2026-01-01-sd-2026-03-31.pdf'],
+      ['report_cash_flow', '2026-01-01..2026-03-31', 'Arus-Kas-2026-01-01-sd-2026-03-31.pdf'],
+    ];
+    for (const [kind, spec, name] of cases) {
+      const r = await resolveDocumentPdf({ userId: 'u1', role: 'Admin' }, `${kind}:${spec}`);
+      expect(r.ok, kind).toBe(true);
+      if (r.ok) {
+        expect(r.fileName).toBe(name);
+        expect(r.buffer.subarray(0, 5).toString()).toBe('%PDF-');
+        expect(r.buffer.length).toBeGreaterThan(2000);
+        if (process.env.PDF_DUMP_DIR) writeFileSync(`${process.env.PDF_DUMP_DIR}/${name}`, r.buffer);
+      }
+    }
+    const ag = await resolveDocumentPdf({ userId: 'u1', role: 'Admin' }, 'report_aging:Customer');
+    expect(ag.ok).toBe(true);
+    if (ag.ok) {
+      expect(ag.fileName).toMatch(/^Aging-Piutang-\d{4}-\d{2}-\d{2}\.pdf$/);
+      if (process.env.PDF_DUMP_DIR) writeFileSync(`${process.env.PDF_DUMP_DIR}/aging.pdf`, ag.buffer);
+    }
+    vi.unstubAllGlobals();
+  }, 90_000);
 });
