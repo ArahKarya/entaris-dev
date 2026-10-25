@@ -94,6 +94,7 @@ describe('explainExecutionError (lapis 3: pesan gagal yang bisa ditindaklanjuti)
     expect(a).toContain('party_search');
     expect(explainExecutionError('Akun kas/bank tidak ditemukan.')).toContain('coa_flat');
     expect(explainExecutionError('Invoice penjualan tidak ditemukan.')).toContain('si_list');
+    expect(explainExecutionError('Akun yang dipilih bukan akun kas/bank.')).toContain('akun kas/bank (1.1.x)');
   });
   it('pesan lain dikembalikan apa adanya', () => {
     expect(explainExecutionError('Stok tidak mencukupi.')).toBe('Stok tidak mencukupi.');

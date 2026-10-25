@@ -105,6 +105,7 @@ export function formatBadIds(issues: IdIssue[]): string {
  */
 const ERROR_HINTS: Array<{ re: RegExp; hint: string }> = [
   { re: /mitra tidak ditemukan|party.*tidak ditemukan|pelanggan.*tidak ditemukan|pemasok.*tidak ditemukan/i, hint: 'partyId tidak cocok dengan data. Minta AIRA mencari ID lewat party_search lalu mengajukan ulang.' },
+  { re: /bukan akun kas\/bank/i, hint: 'accountId harus akun kas/bank (1.1.x), bukan akun lain. Minta AIRA memilih ID akun kas/bank dari coa_flat lalu mengajukan ulang.' },
   { re: /akun kas\/bank tidak ditemukan|akun.*tidak ditemukan/i, hint: 'accountId tidak cocok dengan akun kas/bank. Minta AIRA mencari ID lewat coa_flat lalu mengajukan ulang.' },
   { re: /(invoice|faktur).*tidak ditemukan/i, hint: 'invoiceId tidak cocok dengan data. Minta AIRA mencari ID lewat si_list/si_summary atau pi_list/pi_summary lalu mengajukan ulang.' },
 ];
