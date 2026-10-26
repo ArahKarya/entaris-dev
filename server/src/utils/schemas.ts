@@ -218,6 +218,8 @@ export const CreateInquirySchema = z.object({
   items: z.array(InquiryItemInputSchema).optional().default([]),
   notes: z.string().nullable().optional(),
   followUpDate: z.string().nullable().optional(),
+  // CRM: PIC sales. Absent on create = the creator; absent on update = unchanged.
+  salesOwnerId: z.string().uuid('PIC sales tidak valid.').nullable().optional(),
 }).refine(
   (data) =>
     data.itemsMode !== 'structured' || (data.items && data.items.length > 0) || !!data.itemsText,
@@ -1148,4 +1150,54 @@ export const EamPaySchema = z.object({
   date: z.string().min(1).optional().nullable(),
   dueDate: z.string().min(1).optional().nullable(),
   notes: z.string().max(1000).optional().nullable(),
+});
+
+// CRM
+const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD.');
+
+export const CrmContactSchema = z.object({
+  name: z.string().trim().min(1, 'Nama kontak wajib diisi.').max(120),
+  position: z.string().max(120).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  email: z.string().email('Email tidak valid.').or(z.literal('')).nullable().optional(),
+  isPrimary: z.boolean().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+});
+
+export const CrmActivityCreateSchema = z.object({
+  partyId: z.string().uuid('Customer tidak valid.').nullable().optional(),
+  inquiryId: z.string().uuid('Inquiry tidak valid.').nullable().optional(),
+  contactId: z.string().uuid('Kontak tidak valid.').nullable().optional(),
+  type: z.enum(['Telepon', 'WhatsApp', 'Kunjungan', 'Email', 'Catatan']),
+  summary: z.string().trim().min(1, 'Ringkasan aktivitas wajib diisi.').max(2000),
+  outcome: z.string().max(1000).nullable().optional(),
+  occurredAt: IsoDateSchema.nullable().optional(),
+  nextFollowUpDate: IsoDateSchema.nullable().optional(),
+  source: z.enum(['form', 'aira']).optional(),
+});
+
+export const CrmFollowupSettleSchema = z.object({
+  kind: z.enum(['inquiry', 'party']),
+  id: z.string().uuid('Id tidak valid.'),
+  snoozeTo: IsoDateSchema.nullable().optional(),
+});
+
+export const CrmPartyProfileSchema = z.object({
+  salesOwnerId: z.string().uuid('PIC sales tidak valid.').nullable().optional(),
+  reorderCycleDays: z.number().int().min(1, 'Siklus order minimal 1 hari.').max(730).nullable().optional(),
+  reorderSnoozedUntil: IsoDateSchema.nullable().optional(),
+});
+
+export const CrmBulkOwnerSchema = z.object({
+  partyIds: z.array(z.string().uuid()).min(1, 'Pilih minimal satu Customer.').max(500),
+  salesOwnerId: z.string().uuid('PIC sales tidak valid.').nullable(),
+});
+
+export const CrmSettingsSchema = z.object({
+  reminderEnabled: z.boolean(),
+  reminderTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Jam pengingat harus HH:MM.'),
+  reminderDays: z.array(z.number().int().min(1).max(7)).max(7),
+  quotationNoReplyDays: z.number().int().min(1, 'Minimal 1 hari.').max(60),
+  reorderToleranceFactor: z.number().min(1, 'Faktor toleransi minimal 1.').max(5),
+  reorderMinInvoices: z.number().int().min(2, 'Minimal 2 invoice.').max(20),
 });

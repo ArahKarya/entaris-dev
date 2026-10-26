@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Edit3, Trash2, CheckCircle2, XCircle, FileSignature, Play, ExternalLink } from 'lucide-react';
+import { Edit3, Trash2, CheckCircle2, XCircle, FileSignature, Play, ExternalLink, NotebookPen } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import api from '../lib/api';
@@ -13,6 +13,9 @@ import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHea
 import { ConfirmDialog, Field, LoadingState, StatusBadge } from '@/components/shared';
 import { OverlayBody, OverlayFooter, OverlayHeader, ScrollRegion } from './sales/dialog-parts-b';
 import { dialogShellClass } from './sales/dialog-classes-b';
+import { can } from '@/lib/permissions';
+import { ActivityDialog } from './crm/ActivityDialog';
+import { ActivityTimeline } from './crm/ActivityTimeline';
 
 const CHANNELS = ['WhatsApp', 'Telepon', 'Email', 'WalkIn', 'Referral', 'Lainnya'] as const;
 type Channel = (typeof CHANNELS)[number];
@@ -27,6 +30,10 @@ interface Props {
 
 const InquiryDetailDrawer: React.FC<Props> = ({ inquiryId, onClose, onEdit }) => {
   const { t } = useTranslation('sales');
+  const { t: tc } = useTranslation('crm');
+  const showCrm = can('crm', 'view');
+  const canLogActivity = can('crm', 'edit');
+  const [activityOpen, setActivityOpen] = useState(false);
   const isOpen = inquiryId !== null;
   const channelLabel = (value: unknown): string =>
     isChannel(value) ? t(`inquiryDetailDrawer.channels.${value}`) : String(value ?? '');
@@ -192,6 +199,25 @@ const InquiryDetailDrawer: React.FC<Props> = ({ inquiryId, onClose, onEdit }) =>
                     <p className="whitespace-pre-line text-sm text-muted-foreground">{q.notes}</p>
                   </section>
                 )}
+
+                {showCrm && (
+                  <section aria-labelledby="inq-activities">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 id="inq-activities" className="text-sm font-semibold text-foreground">{tc('inquiry.activities')}</h4>
+                        <p className="text-xs text-muted-foreground">
+                          {tc('inquiry.owner')}: {q.salesOwner?.fullName ?? tc('owner.none')}
+                        </p>
+                      </div>
+                      {canLogActivity && (
+                        <Button type="button" size="sm" variant="outline" onClick={() => setActivityOpen(true)}>
+                          <NotebookPen aria-hidden /> {tc('inquiry.logActivity')}
+                        </Button>
+                      )}
+                    </div>
+                    <ActivityTimeline inquiryId={q.id} hideInquiry />
+                  </section>
+                )}
               </>
             )}
           </SheetBody>
@@ -232,6 +258,16 @@ const InquiryDetailDrawer: React.FC<Props> = ({ inquiryId, onClose, onEdit }) =>
           )}
         </SheetContent>
       </Sheet>
+
+      {q && (
+        <ActivityDialog
+          open={activityOpen}
+          onOpenChange={setActivityOpen}
+          partyId={q.partyId}
+          inquiryId={q.id}
+          subjectName={q.party?.name ?? q.prospectName}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmAction === 'process'}

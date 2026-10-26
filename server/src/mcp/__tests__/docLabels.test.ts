@@ -150,6 +150,8 @@ describe('coverage', () => {
     // Tanpa nomor/nama yang berarti, diakses lewat SQL mentah, atau id milik sub-entitas. Tool baru
     // dengan id lain membuat tes ini gagal: petakan di docLabels.ts atau tambahkan di sini.
     expect([...unlabelled].sort()).toEqual([
+      // id is an Inquiry or an activity depending on `kind`.
+      'POST /api/crm/followups/settle',
       'POST /api/payment-requests/eam/:kind/:id/cancel',
       'POST /api/payment-requests/eam/:kind/:id/pay',
       'approvals/rules',

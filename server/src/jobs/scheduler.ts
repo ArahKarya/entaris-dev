@@ -8,6 +8,7 @@ import { runSettlementReminders } from '../services/paymentRequestNotify';
 import { pollTelegramUpdates } from '../services/telegramService';
 import { purgeExpiredNonces } from '../mcp/tokenService';
 import { purgeArchivedChatSessions } from '../services/chat/retention';
+import { runCrmMorningReminder } from '../services/crm/morningReminder';
 
 /**
  * Postgres advisory lock with a stable bigint key per job, so two instances never run
@@ -129,6 +130,21 @@ export function startScheduler(): void {
         }
       });
     }, { timezone: 'Asia/Jakarta' }),
+  );
+
+  // Every 5 minutes: CRM morning reminder. Time and weekdays come from CrmSetting; the job
+  // sends at most once per business day (claimed in the DB), so this is a cheap no-op otherwise.
+  tasks.push(
+    cron.schedule('*/5 * * * *', () => {
+      void withAdvisoryLock(BigInt('123456789006'), async () => {
+        try {
+          const sent = await runCrmMorningReminder();
+          if (sent > 0) logger.info({ sent }, 'CRM morning reminder sent');
+        } catch (err) {
+          logger.error({ err }, 'CRM morning reminder run failed');
+        }
+      });
+    }),
   );
 
   // Run quotation sweeper once at startup to catch anything missed during downtime.

@@ -1,0 +1,281 @@
+{
+  "page": {
+    "title": "Tindak Lanjut",
+    "description": "Siapa yang perlu dihubungi hari ini: follow-up yang jatuh tempo, Quotation tanpa jawaban, dan Customer yang telat order.",
+    "tabs": {
+      "label": "Bagian tindak lanjut",
+      "followups": "Hari ini",
+      "radar": "Radar pesan ulang"
+    }
+  },
+  "owner": {
+    "label": "PIC sales",
+    "me": "Saya",
+    "all": "Semua sales",
+    "unassigned": "Tanpa PIC",
+    "none": "Tanpa PIC"
+  },
+  "kinds": {
+    "inquiry": "Inquiry",
+    "party": "Follow-up Customer",
+    "quotation": "Quotation tanpa jawaban",
+    "reorder": "Telat order"
+  },
+  "kindHints": {
+    "inquiry": "Tanggal follow-up hari ini atau lewat",
+    "party": "Janji hubungi dari catatan aktivitas",
+    "quotation": "Terkirim, belum ada jawaban",
+    "reorder": "Lewat dari siklus order biasanya"
+  },
+  "followups": {
+    "regionLabel": "Ringkasan tindak lanjut",
+    "listLabel": "Daftar tindak lanjut",
+    "filterLabel": "Saring jenis",
+    "filterAll": "Semua",
+    "dueToday": "Hari ini",
+    "overdue": "Lewat {{days}} hari",
+    "lastOrder": "Order terakhir {{date}}",
+    "sentOn": "Dikirim, menunggu sejak {{date}}",
+    "ownerLine": "PIC {{name}}",
+    "noPhone": "Belum ada nomor",
+    "actions": {
+      "whatsapp": "Buka WhatsApp",
+      "log": "Catat",
+      "done": "Tandai selesai",
+      "snooze": "Tunda",
+      "pauseRadar": "Jeda radar 30 hari",
+      "openInquiry": "Buka Inquiry",
+      "openQuotation": "Buka Quotation",
+      "openCustomer": "Buka Customer",
+      "more": "Aksi lain untuk {{name}}"
+    },
+    "toast": {
+      "done": "Follow-up ditandai selesai.",
+      "snoozed": "Follow-up ditunda ke {{date}}.",
+      "paused": "{{name}} disembunyikan dari radar sampai {{date}}.",
+      "failed": "Gagal memperbarui tindak lanjut."
+    },
+    "empty": {
+      "title": "Tidak ada yang perlu ditindaklanjuti",
+      "description": "Follow-up baru muncul sendiri dari Inquiry, Quotation terkirim, dan riwayat order Customer."
+    },
+    "error": "Daftar tindak lanjut gagal dimuat.",
+    "retry": "Coba lagi"
+  },
+  "radar": {
+    "intro": "Customer dengan pola order berulang. Siklus memakai angka yang diatur per Customer, atau rata-rata jarak invoice bila minimal {{min}} invoice. Telat bila lewat siklus x {{factor}}.",
+    "tableLabel": "Radar pesan ulang",
+    "itemLabel": "Customer",
+    "stateFilter": "Status radar",
+    "columns": {
+      "customer": "Customer",
+      "lastOrder": "Order terakhir",
+      "cycle": "Siklus",
+      "lateAfter": "Telat setelah",
+      "state": "Status",
+      "avgOrder": "Rata-rata order",
+      "actions": "Aksi"
+    },
+    "states": {
+      "all": "Semua",
+      "late": "Telat",
+      "ok": "Sesuai siklus",
+      "snoozed": "Dijeda",
+      "insufficient": "Data kurang"
+    },
+    "cycleManual": "{{days}} hari, diatur",
+    "cycleAverage": "{{days}} hari, rata-rata",
+    "cycleNone": "Belum cukup data",
+    "daysAgo": "{{days}} hari lalu",
+    "contacted": "Sudah dihubungi {{date}}",
+    "snoozedUntil": "Dijeda sampai {{date}}",
+    "actions": {
+      "setCycle": "Atur siklus dan jeda",
+      "more": "Aksi lain untuk {{name}}"
+    },
+    "empty": {
+      "title": "Belum ada Customer dengan pola order",
+      "description": "Radar butuh riwayat invoice. Customer muncul di sini setelah order berulang."
+    },
+    "error": "Radar pesan ulang gagal dimuat."
+  },
+  "quick": {
+    "tomorrow": "Besok",
+    "threeDays": "3 hari",
+    "nextWeek": "1 minggu"
+  },
+  "activity": {
+    "title": "Catat aktivitas",
+    "description": "Untuk {{name}}",
+    "types": {
+      "Telepon": "Telepon",
+      "WhatsApp": "WhatsApp",
+      "Kunjungan": "Kunjungan",
+      "Email": "Email",
+      "Catatan": "Catatan"
+    },
+    "fields": {
+      "type": "Jenis",
+      "contact": "Kontak",
+      "contactNone": "Tanpa kontak tertentu",
+      "summary": "Ringkasan",
+      "summaryPlaceholder": "Contoh: minta harga 5 ton, kirim minggu depan",
+      "outcome": "Hasil",
+      "outcomePlaceholder": "Contoh: setuju harga, tunggu PO",
+      "nextFollowUp": "Follow-up berikutnya",
+      "nextFollowUpHint": "Kosongkan bila tidak perlu dihubungi lagi."
+    },
+    "actions": {
+      "cancel": "Batal",
+      "save": "Simpan",
+      "saving": "Menyimpan..."
+    },
+    "toast": {
+      "saved": "Aktivitas tercatat."
+    },
+    "errors": {
+      "summaryRequired": "Ringkasan wajib diisi.",
+      "saveFailed": "Gagal mencatat aktivitas."
+    }
+  },
+  "snooze": {
+    "title": "Tunda follow-up",
+    "description": "Pilih tanggal follow-up berikutnya.",
+    "date": "Tanggal",
+    "save": "Tunda",
+    "cancel": "Batal"
+  },
+  "timeline": {
+    "label": "Riwayat aktivitas",
+    "empty": "Belum ada aktivitas tercatat.",
+    "next": "Follow-up {{date}}",
+    "done": "selesai",
+    "by": "{{name}}",
+    "viaAira": "lewat AIRA",
+    "contact": "dengan {{name}}",
+    "inquiry": "Inquiry {{number}}",
+    "loadMore": "Muat lebih banyak",
+    "delete": "Hapus aktivitas",
+    "deleteConfirmTitle": "Hapus aktivitas ini?",
+    "deleteConfirmDescription": "Catatan aktivitas dihapus permanen. Follow-up yang sudah selesai tidak dibuka lagi.",
+    "deleted": "Aktivitas dihapus.",
+    "deleteFailed": "Gagal menghapus aktivitas."
+  },
+  "customer": {
+    "back": "Kembali ke Tindak Lanjut",
+    "notFound": "Customer tidak ditemukan.",
+    "error": "Ringkasan Customer gagal dimuat.",
+    "logActivity": "Catat aktivitas",
+    "whatsapp": "WhatsApp",
+    "editMaster": "Ubah data Customer",
+    "inactive": "Nonaktif",
+    "stats": {
+      "label": "Ringkasan Customer",
+      "purchases": "Pembelian 12 bulan",
+      "purchasesHint": "{{count}} invoice",
+      "lastOrder": "Order terakhir",
+      "lastOrderHint": "{{days}} hari lalu",
+      "receivable": "Piutang",
+      "receivableHint": "Sisa tagihan",
+      "cycle": "Siklus order",
+      "hidden": "Tidak ditampilkan"
+    },
+    "sections": {
+      "activities": "Riwayat aktivitas",
+      "openDeals": "Inquiry dan Quotation terbuka",
+      "contacts": "Kontak",
+      "profile": "Profil sales"
+    },
+    "openDeals": {
+      "empty": "Tidak ada Inquiry atau Quotation terbuka.",
+      "followUp": "Follow-up {{date}}",
+      "quotationSent": "Dikirim {{date}}",
+      "quotationDraft": "Draft"
+    },
+    "profile": {
+      "owner": "PIC sales",
+      "cycle": "Siklus order (hari)",
+      "cycleHint": "Kosongkan untuk memakai rata-rata riwayat invoice{{average}}.",
+      "cycleAverage": " ({{days}} hari)",
+      "snooze": "Jeda radar sampai",
+      "snoozeHint": "Customer tidak muncul di radar sampai tanggal ini.",
+      "save": "Simpan profil",
+      "saved": "Profil sales tersimpan.",
+      "failed": "Gagal menyimpan profil sales.",
+      "cycleInvalid": "Siklus harus angka 1 sampai 730."
+    }
+  },
+  "contacts": {
+    "add": "Tambah kontak",
+    "empty": "Belum ada kontak PIC. Tambahkan nomor WA orang yang biasa order.",
+    "primary": "Utama",
+    "edit": "Ubah kontak",
+    "delete": "Hapus kontak",
+    "menu": "Aksi untuk {{name}}",
+    "dialog": {
+      "createTitle": "Tambah kontak",
+      "editTitle": "Ubah kontak",
+      "description": "Kontak PIC untuk {{name}}. Nomor disimpan dalam format 62 agar bisa dibuka di WhatsApp.",
+      "name": "Nama",
+      "position": "Jabatan",
+      "phone": "Nomor WA atau telepon",
+      "email": "Email",
+      "isPrimary": "Jadikan kontak utama",
+      "notes": "Catatan",
+      "cancel": "Batal",
+      "save": "Simpan",
+      "saving": "Menyimpan..."
+    },
+    "toast": {
+      "saved": "Kontak tersimpan.",
+      "deleted": "Kontak dihapus.",
+      "failed": "Gagal menyimpan kontak.",
+      "deleteFailed": "Gagal menghapus kontak.",
+      "phoneUsed": "Nomor ini juga dipakai {{names}}."
+    },
+    "errors": {
+      "nameRequired": "Nama wajib diisi."
+    },
+    "deleteConfirmTitle": "Hapus kontak {{name}}?",
+    "deleteConfirmDescription": "Aktivitas lama tetap ada, hanya tautan ke kontak ini yang dikosongkan."
+  },
+  "settings": {
+    "title": "CRM",
+    "description": "Pengingat pagi dan ambang daftar tindak lanjut untuk semua sales.",
+    "reminder": {
+      "title": "Pengingat pagi",
+      "description": "Setiap sales menerima daftar tindak lanjutnya sebagai notifikasi, dan lewat Telegram bila akunnya sudah tertaut.",
+      "enabled": "Kirim pengingat pagi",
+      "time": "Jam kirim",
+      "days": "Hari kirim",
+      "lastSent": "Terakhir terkirim {{date}}",
+      "neverSent": "Belum pernah terkirim"
+    },
+    "weekdays": {
+      "1": "Sen",
+      "2": "Sel",
+      "3": "Rab",
+      "4": "Kam",
+      "5": "Jum",
+      "6": "Sab",
+      "7": "Min"
+    },
+    "thresholds": {
+      "title": "Ambang tindak lanjut",
+      "noReplyDays": "Quotation tanpa jawaban setelah (hari)",
+      "tolerance": "Faktor toleransi telat order",
+      "toleranceHint": "Customer dianggap telat bila hari sejak order terakhir melewati siklus dikali angka ini.",
+      "minInvoices": "Minimal invoice untuk menghitung siklus"
+    },
+    "save": "Simpan pengaturan",
+    "saved": "Pengaturan CRM tersimpan.",
+    "failed": "Gagal menyimpan pengaturan CRM.",
+    "loadFailed": "Pengaturan CRM gagal dimuat.",
+    "readOnly": "Hanya pengguna dengan izin ubah Pengaturan yang bisa mengubah bagian ini."
+  },
+  "inquiry": {
+    "activities": "Aktivitas",
+    "logActivity": "Catat aktivitas",
+    "owner": "PIC sales"
+  }
+}

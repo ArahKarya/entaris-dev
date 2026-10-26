@@ -15,6 +15,7 @@ import { TaxConfigTab } from './settings/TaxConfigTab';
 import { BackupTab } from './settings/BackupTab';
 import { AboutTab } from './settings/AboutTab';
 import { NotificationsTab } from './settings/NotificationsTab';
+import { CrmTab } from './settings/CrmTab';
 import { RolePermissionsTab } from './settings/RolePermissionsTab';
 import { AgenticSystemTab } from './settings/AgenticSystemTab';
 import { AppearanceTab } from './settings/AppearanceTab';
@@ -28,6 +29,7 @@ const PANELS: Record<SettingsTabId, React.FC> = {
   'payment-request-types': PaymentRequestTypesTab,
   roles: RolePermissionsTab,
   notifications: NotificationsTab,
+  crm: CrmTab,
   backup: BackupTab,
   agentic: AgenticSystemTab,
   appearance: AppearanceTab,

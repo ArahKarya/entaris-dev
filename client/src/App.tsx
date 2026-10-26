@@ -21,6 +21,8 @@ const ProformaInvoices = lazyPage(() => import('./pages/ProformaInvoices'));
 const SalesOrders = lazyPage(() => import('./pages/SalesOrders'));
 const SalesReturnsPage = lazyPage(() => import('./pages/SalesReturnsPage'));
 const Inquiries = lazyPage(() => import('./pages/Inquiries'));
+const CrmFollowups = lazyPage(() => import('./pages/crm/CrmFollowups'));
+const CustomerOverview = lazyPage(() => import('./pages/crm/CustomerOverview'));
 const Warehouses = lazyPage(() => import('./pages/Warehouses'));
 const WarehouseStockDashboard = lazyPage(() => import('./pages/WarehouseStockDashboard'));
 const StockTransfers = lazyPage(() => import('./pages/StockTransfers'));
@@ -95,6 +97,7 @@ const ROUTE_PRELOAD: Record<string, () => void> = {
   '/gl': GeneralLedger.preload,
   '/sales': SalesInvoices.preload,
   '/inquiries': Inquiries.preload,
+  '/crm': CrmFollowups.preload,
   '/quotations': Quotations.preload,
   '/proforma-invoices': ProformaInvoices.preload,
   '/sales-orders': SalesOrders.preload,
@@ -226,6 +229,8 @@ function App() {
             <Route path="/gl" element={<PermRoute module="journal"><GeneralLedger /></PermRoute>} />
             <Route path="/sales" element={<PermRoute module="sales_invoice"><SalesInvoices /></PermRoute>} />
             <Route path="/inquiries" element={<PermRoute module="quotation"><Inquiries /></PermRoute>} />
+            <Route path="/crm" element={<PermRoute module="crm"><CrmFollowups /></PermRoute>} />
+            <Route path="/crm/customers/:id" element={<PermRoute module="crm"><CustomerOverview /></PermRoute>} />
             <Route path="/quotations" element={<PermRoute module="quotation"><Quotations /></PermRoute>} />
             <Route path="/proforma-invoices" element={<PermRoute module="proforma_invoice"><ProformaInvoices /></PermRoute>} />
             <Route path="/sales-orders" element={<PermRoute module="sales_order"><SalesOrders /></PermRoute>} />

@@ -18,6 +18,7 @@ export const MODULES: ModuleDef[] = [
   { key: 'sales_invoice', label: 'Invoice Penjualan', group: 'Penjualan' },
   { key: 'quotation', label: 'Penawaran & Inquiry', group: 'Penjualan' },
   { key: 'proforma_invoice', label: 'Proforma Invoice', group: 'Penjualan' },
+  { key: 'crm', label: 'CRM (Tindak Lanjut, Kontak, Aktivitas)', group: 'Penjualan' },
   { key: 'sales_return', label: 'Retur Penjualan', group: 'Penjualan' },
   { key: 'customer_deposit', label: 'Uang Muka Pelanggan', group: 'Penjualan' },
   { key: 'purchase_order', label: 'Pesanan Pembelian (PO)', group: 'Pembelian' },
@@ -95,7 +96,7 @@ export const BUILTIN_ROLES: BuiltinRoleDef[] = [
  */
 export const DEFAULT_MATRIX: Record<string, Record<string, PermAction>> = {
   Accountant: {
-    sales_order: 'edit', delivery_order: 'edit', sales_invoice: 'edit', quotation: 'edit', proforma_invoice: 'edit',
+    sales_order: 'edit', delivery_order: 'edit', sales_invoice: 'edit', quotation: 'edit', proforma_invoice: 'edit', crm: 'edit',
     sales_return: 'edit', customer_deposit: 'edit',
     purchase_order: 'edit', goods_receipt: 'edit', purchase_invoice: 'edit', vendor_deposit: 'edit',
     inventory: 'edit', stock_transfer: 'edit', stock_opname: 'edit', production: 'edit', warehouse: 'edit',
@@ -110,7 +111,7 @@ export const DEFAULT_MATRIX: Record<string, Record<string, PermAction>> = {
     approvals: 'edit', parties: 'edit',
   },
   Viewer: {
-    sales_order: 'view', delivery_order: 'view', sales_invoice: 'view', quotation: 'view', proforma_invoice: 'view',
+    sales_order: 'view', delivery_order: 'view', sales_invoice: 'view', quotation: 'view', proforma_invoice: 'view', crm: 'view',
     purchase_order: 'view', goods_receipt: 'view',
     inventory: 'view', payment: 'view', project_guarantee: 'view',
     coa: 'view', journal: 'view', fixed_assets: 'view', reports: 'view',
@@ -121,7 +122,7 @@ export const DEFAULT_MATRIX: Record<string, Record<string, PermAction>> = {
  * Modules whose DEFAULT_MATRIX permissions ensureRbacSeed backfills into existing system roles, once per key
  * (only when no RolePermission exists for it) so permissions an Admin revoked are not restored on every boot.
  */
-export const BACKFILL_MODULES: string[] = ['project_guarantee', 'payment_request'];
+export const BACKFILL_MODULES: string[] = ['project_guarantee', 'payment_request', 'crm'];
 
 /** Default capabilities per non-super built-in role. */
 export const DEFAULT_CAPS: Record<string, string[]> = {

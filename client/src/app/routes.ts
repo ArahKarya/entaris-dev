@@ -53,6 +53,7 @@ import {
   Wallet2,
   HandCoins,
   NotebookPen,
+  ListChecks,
 } from 'lucide-react';
 import { AiraIcon } from '@/components/shell/AiraIcon';
 import i18n from '@/i18n';
@@ -175,6 +176,8 @@ export const ROUTES: readonly RouteEntry[] = [
   r({ path: '/notifications', labelKey: 'nav.notifications', section: null, icon: Bell, nav: false, keywords: ['pemberitahuan', 'notification', 'peringatan'] }),
 
   // Penjualan
+  r({ path: '/crm', labelKey: 'nav.crm', section: 'sales', icon: ListChecks, module: 'crm', keywords: ['crm', 'follow-up', 'follow up', 'tindak lanjut', 'radar', 'telat order', 'pesan ulang', 'reorder', 'prospek', 'pengingat'] }),
+  r({ path: '/crm/customers/:id', labelKey: 'nav.customerOverview', section: 'sales', icon: ListChecks, module: 'crm', parent: '/crm', nav: false }),
   r({ path: '/inquiries', labelKey: 'nav.inquiries', section: 'sales', icon: Inbox, module: 'quotation', keywords: ['inquiry', 'pertanyaan pelanggan', 'permintaan', 'tanya harga', 'prospek'] }),
   r({ path: '/quotations', labelKey: 'nav.quotations', section: 'sales', icon: FileSignature, module: 'quotation', keywords: ['quotation', 'sq', 'penawaran harga'] }),
   r({ path: '/proforma-invoices', labelKey: 'nav.proformaInvoices', section: 'sales', icon: FileSignature, module: 'proforma_invoice', keywords: ['proforma', 'proforma invoice', 'invoice proforma', 'tagihan dp', 'uang muka', 'down payment', 'pra-faktur'] }),

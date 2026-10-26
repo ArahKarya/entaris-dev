@@ -12,6 +12,7 @@ import {
   InquiryStatusUpdateSchema,
 } from '../utils/schemas';
 import { logger } from '../lib/logger';
+import { assertSalesOwner } from '../services/crm/salesOwner';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
   buildInquiryWhere,
@@ -44,6 +45,7 @@ router.get('/', async (req, res) => {
           items: true,
           quotation: { select: { id: true, quotationNumber: true, status: true } },
           user: { select: { id: true, fullName: true } },
+          salesOwner: { select: { id: true, fullName: true } },
         },
         orderBy: inquiryOrderBy(sort),
         skip,
@@ -110,6 +112,7 @@ router.get('/:id', async (req, res) => {
         items: true,
         quotation: { select: { id: true, quotationNumber: true, status: true, grandTotal: true } },
         user: { select: { id: true, fullName: true } },
+        salesOwner: { select: { id: true, fullName: true } },
       },
     });
     if (!inquiry) return res.status(404).json({ error: 'Inquiry tidak ditemukan.' });
@@ -129,6 +132,7 @@ router.post('/', async (req: AuthRequest, res) => {
     if (isNaN(date.getTime())) throw new BusinessError('Format tanggal tidak valid.');
 
     const result = await prisma.$transaction(async (tx) => {
+      if (body.salesOwnerId) await assertSalesOwner(tx, body.salesOwnerId);
       const fy = await getOpenFiscalYear(tx, date);
       const inquiryNumber = await generateDocumentNumber(tx, 'INQ', date, fy.id);
       return tx.inquiry.create({
@@ -145,6 +149,7 @@ router.post('/', async (req: AuthRequest, res) => {
           itemsText: body.itemsText || null,
           notes: body.notes || null,
           followUpDate: body.followUpDate ? new Date(body.followUpDate) : null,
+          salesOwnerId: body.salesOwnerId === undefined ? req.user!.userId : body.salesOwnerId,
           fiscalYearId: fy.id,
           createdBy: req.user!.userId,
           items: body.items && body.items.length > 0
@@ -182,6 +187,12 @@ router.put('/:id', async (req: AuthRequest, res) => {
         throw new BusinessError('Inquiry yang sudah dikonversi tidak dapat diedit.');
       }
 
+      // Validate only a changed owner, so an inquiry whose owner left can still be edited.
+      if (body.salesOwnerId && body.salesOwnerId !== existing.salesOwnerId) await assertSalesOwner(tx, body.salesOwnerId);
+      const followUpDate = body.followUpDate ? new Date(body.followUpDate) : null;
+      // A moved follow-up date opens the follow-up again.
+      const followUpMoved = (followUpDate?.getTime() ?? null) !== (existing.followUpDate?.getTime() ?? null);
+
       // Replace items
       await tx.inquiryItem.deleteMany({ where: { inquiryId: existing.id } });
 
@@ -197,7 +208,9 @@ router.put('/:id', async (req: AuthRequest, res) => {
           itemsMode: body.itemsMode,
           itemsText: body.itemsText || null,
           notes: body.notes || null,
-          followUpDate: body.followUpDate ? new Date(body.followUpDate) : null,
+          followUpDate,
+          ...(followUpMoved ? { followUpDoneAt: null } : {}),
+          ...(body.salesOwnerId !== undefined ? { salesOwnerId: body.salesOwnerId } : {}),
           items: body.items && body.items.length > 0
             ? {
                 create: body.items.map((it) => ({
@@ -227,7 +240,11 @@ router.delete('/:id', async (req, res) => {
     if (existing.status === 'Dikonversi') {
       return res.status(400).json({ error: 'Inquiry yang sudah dikonversi tidak dapat dihapus.' });
     }
-    await prisma.inquiry.delete({ where: { id: existing.id } });
+    await prisma.$transaction([
+      // Activities of a prospect (no Customer) have nowhere left to show; Customer activities stay.
+      prisma.crmActivity.deleteMany({ where: { inquiryId: existing.id, partyId: null } }),
+      prisma.inquiry.delete({ where: { id: existing.id } }),
+    ]);
     return res.json({ success: true });
   } catch (error) {
     return handleRouteError(res, error, 'DELETE /inquiries/:id', 'Gagal menghapus inquiry.');

@@ -1,0 +1,281 @@
+{
+  "page": {
+    "title": "Follow-ups",
+    "description": "Who to contact today: follow-ups that are due, Quotations without an answer, and Customers late for their next order.",
+    "tabs": {
+      "label": "Follow-up sections",
+      "followups": "Today",
+      "radar": "Reorder radar"
+    }
+  },
+  "owner": {
+    "label": "Sales owner",
+    "me": "Me",
+    "all": "All sales",
+    "unassigned": "No owner",
+    "none": "No owner"
+  },
+  "kinds": {
+    "inquiry": "Inquiry",
+    "party": "Customer follow-up",
+    "quotation": "Quotation without answer",
+    "reorder": "Late order"
+  },
+  "kindHints": {
+    "inquiry": "Follow-up date today or earlier",
+    "party": "Promised call-back from an activity",
+    "quotation": "Sent, no answer yet",
+    "reorder": "Past their usual order cycle"
+  },
+  "followups": {
+    "regionLabel": "Follow-up summary",
+    "listLabel": "Follow-up list",
+    "filterLabel": "Filter by kind",
+    "filterAll": "All",
+    "dueToday": "Today",
+    "overdue": "{{days}} days overdue",
+    "lastOrder": "Last order {{date}}",
+    "sentOn": "Sent, waiting since {{date}}",
+    "ownerLine": "Owner {{name}}",
+    "noPhone": "No number yet",
+    "actions": {
+      "whatsapp": "Open WhatsApp",
+      "log": "Log",
+      "done": "Mark done",
+      "snooze": "Snooze",
+      "pauseRadar": "Pause radar for 30 days",
+      "openInquiry": "Open Inquiry",
+      "openQuotation": "Open Quotation",
+      "openCustomer": "Open Customer",
+      "more": "More actions for {{name}}"
+    },
+    "toast": {
+      "done": "Follow-up marked done.",
+      "snoozed": "Follow-up moved to {{date}}.",
+      "paused": "{{name}} is hidden from the radar until {{date}}.",
+      "failed": "Failed to update the follow-up."
+    },
+    "empty": {
+      "title": "Nothing to follow up",
+      "description": "New follow-ups appear on their own from Inquiries, sent Quotations, and Customer order history."
+    },
+    "error": "The follow-up list failed to load.",
+    "retry": "Try again"
+  },
+  "radar": {
+    "intro": "Customers with a repeat order pattern. The cycle uses the number set for the Customer, or the average gap between invoices when there are at least {{min}} invoices. Late once past the cycle x {{factor}}.",
+    "tableLabel": "Reorder radar",
+    "itemLabel": "Customers",
+    "stateFilter": "Radar status",
+    "columns": {
+      "customer": "Customer",
+      "lastOrder": "Last order",
+      "cycle": "Cycle",
+      "lateAfter": "Late after",
+      "state": "Status",
+      "avgOrder": "Average order",
+      "actions": "Actions"
+    },
+    "states": {
+      "all": "All",
+      "late": "Late",
+      "ok": "On cycle",
+      "snoozed": "Paused",
+      "insufficient": "Not enough data"
+    },
+    "cycleManual": "{{days}} days, set",
+    "cycleAverage": "{{days}} days, average",
+    "cycleNone": "Not enough data",
+    "daysAgo": "{{days}} days ago",
+    "contacted": "Contacted {{date}}",
+    "snoozedUntil": "Paused until {{date}}",
+    "actions": {
+      "setCycle": "Set cycle and pause",
+      "more": "More actions for {{name}}"
+    },
+    "empty": {
+      "title": "No Customers with an order pattern yet",
+      "description": "The radar needs invoice history. Customers appear here once they order repeatedly."
+    },
+    "error": "The reorder radar failed to load."
+  },
+  "quick": {
+    "tomorrow": "Tomorrow",
+    "threeDays": "3 days",
+    "nextWeek": "1 week"
+  },
+  "activity": {
+    "title": "Log activity",
+    "description": "For {{name}}",
+    "types": {
+      "Telepon": "Phone call",
+      "WhatsApp": "WhatsApp",
+      "Kunjungan": "Visit",
+      "Email": "Email",
+      "Catatan": "Note"
+    },
+    "fields": {
+      "type": "Type",
+      "contact": "Contact",
+      "contactNone": "No specific contact",
+      "summary": "Summary",
+      "summaryPlaceholder": "Example: asked for a price on 5 tons, delivery next week",
+      "outcome": "Outcome",
+      "outcomePlaceholder": "Example: price agreed, waiting for PO",
+      "nextFollowUp": "Next follow-up",
+      "nextFollowUpHint": "Leave empty if no further contact is needed."
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving..."
+    },
+    "toast": {
+      "saved": "Activity logged."
+    },
+    "errors": {
+      "summaryRequired": "Summary is required.",
+      "saveFailed": "Failed to log the activity."
+    }
+  },
+  "snooze": {
+    "title": "Snooze follow-up",
+    "description": "Pick the next follow-up date.",
+    "date": "Date",
+    "save": "Snooze",
+    "cancel": "Cancel"
+  },
+  "timeline": {
+    "label": "Activity history",
+    "empty": "No activity logged yet.",
+    "next": "Follow-up {{date}}",
+    "done": "done",
+    "by": "{{name}}",
+    "viaAira": "via AIRA",
+    "contact": "with {{name}}",
+    "inquiry": "Inquiry {{number}}",
+    "loadMore": "Load more",
+    "delete": "Delete activity",
+    "deleteConfirmTitle": "Delete this activity?",
+    "deleteConfirmDescription": "The activity note is deleted permanently. Follow-ups already done are not reopened.",
+    "deleted": "Activity deleted.",
+    "deleteFailed": "Failed to delete the activity."
+  },
+  "customer": {
+    "back": "Back to Follow-ups",
+    "notFound": "Customer not found.",
+    "error": "The Customer overview failed to load.",
+    "logActivity": "Log activity",
+    "whatsapp": "WhatsApp",
+    "editMaster": "Edit Customer data",
+    "inactive": "Inactive",
+    "stats": {
+      "label": "Customer summary",
+      "purchases": "Purchases, 12 months",
+      "purchasesHint": "{{count}} invoices",
+      "lastOrder": "Last order",
+      "lastOrderHint": "{{days}} days ago",
+      "receivable": "Receivable",
+      "receivableHint": "Amount still owed",
+      "cycle": "Order cycle",
+      "hidden": "Not shown"
+    },
+    "sections": {
+      "activities": "Activity history",
+      "openDeals": "Open Inquiries and Quotations",
+      "contacts": "Contacts",
+      "profile": "Sales profile"
+    },
+    "openDeals": {
+      "empty": "No open Inquiries or Quotations.",
+      "followUp": "Follow-up {{date}}",
+      "quotationSent": "Sent {{date}}",
+      "quotationDraft": "Draft"
+    },
+    "profile": {
+      "owner": "Sales owner",
+      "cycle": "Order cycle (days)",
+      "cycleHint": "Leave empty to use the invoice history average{{average}}.",
+      "cycleAverage": " ({{days}} days)",
+      "snooze": "Pause radar until",
+      "snoozeHint": "The Customer stays off the radar until this date.",
+      "save": "Save profile",
+      "saved": "Sales profile saved.",
+      "failed": "Failed to save the sales profile.",
+      "cycleInvalid": "The cycle must be a number from 1 to 730."
+    }
+  },
+  "contacts": {
+    "add": "Add contact",
+    "empty": "No contacts yet. Add the WhatsApp number of the person who usually orders.",
+    "primary": "Primary",
+    "edit": "Edit contact",
+    "delete": "Delete contact",
+    "menu": "Actions for {{name}}",
+    "dialog": {
+      "createTitle": "Add contact",
+      "editTitle": "Edit contact",
+      "description": "Contact person for {{name}}. Numbers are stored in 62 format so they open in WhatsApp.",
+      "name": "Name",
+      "position": "Position",
+      "phone": "WhatsApp or phone number",
+      "email": "Email",
+      "isPrimary": "Make primary contact",
+      "notes": "Notes",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving..."
+    },
+    "toast": {
+      "saved": "Contact saved.",
+      "deleted": "Contact deleted.",
+      "failed": "Failed to save the contact.",
+      "deleteFailed": "Failed to delete the contact.",
+      "phoneUsed": "This number is also used by {{names}}."
+    },
+    "errors": {
+      "nameRequired": "Name is required."
+    },
+    "deleteConfirmTitle": "Delete contact {{name}}?",
+    "deleteConfirmDescription": "Past activities stay; only their link to this contact is cleared."
+  },
+  "settings": {
+    "title": "CRM",
+    "description": "Morning reminder and follow-up thresholds for all sales staff.",
+    "reminder": {
+      "title": "Morning reminder",
+      "description": "Each salesperson gets their follow-up list as a notification, and on Telegram when their account is linked.",
+      "enabled": "Send the morning reminder",
+      "time": "Send at",
+      "days": "Send on",
+      "lastSent": "Last sent {{date}}",
+      "neverSent": "Never sent yet"
+    },
+    "weekdays": {
+      "1": "Mon",
+      "2": "Tue",
+      "3": "Wed",
+      "4": "Thu",
+      "5": "Fri",
+      "6": "Sat",
+      "7": "Sun"
+    },
+    "thresholds": {
+      "title": "Follow-up thresholds",
+      "noReplyDays": "Quotation counts as unanswered after (days)",
+      "tolerance": "Late order tolerance factor",
+      "toleranceHint": "A Customer is late once the days since their last order exceed the cycle times this number.",
+      "minInvoices": "Minimum invoices to compute a cycle"
+    },
+    "save": "Save settings",
+    "saved": "CRM settings saved.",
+    "failed": "Failed to save CRM settings.",
+    "loadFailed": "CRM settings failed to load.",
+    "readOnly": "Only users allowed to edit Settings can change this section."
+  },
+  "inquiry": {
+    "activities": "Activities",
+    "logActivity": "Log activity",
+    "owner": "Sales owner"
+  }
+}

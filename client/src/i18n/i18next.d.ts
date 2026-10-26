@@ -15,6 +15,7 @@ import type dashboard from '../locales/id/dashboard.json';
 import type approvals from '../locales/id/approvals.json';
 import type aira from '../locales/id/aira.json';
 import type pdf from '../locales/id/pdf.json';
+import type crm from '../locales/id/crm.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
@@ -35,6 +36,7 @@ declare module 'i18next' {
       approvals: typeof approvals;
       aira: typeof aira;
       pdf: typeof pdf;
+      crm: typeof crm;
     };
   }
 }
