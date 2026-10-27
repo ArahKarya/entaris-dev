@@ -177,13 +177,24 @@ model JournalEntry {
   paymentRequestSettlement   PaymentRequest?             @relation("PaymentRequestSettlementJournal")
   submittedAt                DateTime?                   @map("submitted_at")
   isDummy                    Boolean                     @default(false) @map("is_dummy")
+  /// Where the journal came from; NULL = unknown legacy row, treated as "not manual".
+  sourceType                 JournalSourceType?          @map("source_type")
+  sourceKey                  String?                     @map("source_key")
   cancelledAt                DateTime?                   @map("cancelled_at")
+  /// Plain user id, no relation (same as GaWorkOrder.cancelledById).
+  cancelledById              String?                     @map("cancelled_by_id")
+  cancelReason               String?                     @map("cancel_reason")
+  /// Reversing journal that cancels this one (reverse-mode cancellation).
+  reversedById               String?                     @unique @map("reversed_by_id")
+  reversedBy                 JournalEntry?               @relation("JournalReversal", fields: [reversedById], references: [id], onDelete: SetNull)
+  reverses                   JournalEntry?               @relation("JournalReversal")
   createdAt                  DateTime                    @default(now()) @map("created_at")
   updatedAt                  DateTime                    @updatedAt @map("updated_at")
 
   @@index([status])
   @@index([date])
   @@index([fiscalYearId])
+  @@index([sourceType, sourceKey])
   @@map("journal_entries")
 }
 
@@ -1052,6 +1063,19 @@ model SystemAccountMapping {
   @@unique([role, accountId])
   @@index([role])
   @@map("system_account_mappings")
+}
+
+enum JournalSourceType {
+  MANUAL
+  CASH_BOOK
+  RECURRING
+  IMPORT
+  OPENING
+  FY_CLOSE
+  DEPRECIATION
+  DEPOSIT_REFUND
+  DEPOSIT_OFFSET
+  SYSTEM_DOC
 }
 
 enum DocumentStatus {
