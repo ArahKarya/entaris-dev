@@ -689,5 +689,93 @@
     "regards": "Sincerely,",
     "receivedBy": "Received by,",
     "disclaimer": "This proforma invoice is a preliminary bill and not a tax invoice. The order is processed once payment is received. A tax invoice is issued for the actual transaction."
+  },
+  "paymentRequest": {
+    "docTitle": "Payment Request {{number}}",
+    "title": "PAYMENT REQUEST",
+    "settlementDocTitle": "Advance Settlement {{number}}",
+    "settlementTitle": "ADVANCE SETTLEMENT",
+    "settlementShort": "Settlement",
+    "requester": "Requester",
+    "department": "Department: {{name}}",
+    "supervisorLine": "Supervisor: {{name}}",
+    "payeeVendor": "Payee (Supplier)",
+    "payeeEmployee": "Payee",
+    "accountHolder": "Account holder: {{name}}",
+    "neededBy": "Needed By",
+    "total": "Requested Total",
+    "purpose": "Purpose",
+    "inWords": "In words: {{words}}",
+    "advanceNote": "Cash advance: must be settled after use.",
+    "attachments_one": "Attachment ({{count}})",
+    "attachments_other": "Attachments ({{count}})",
+    "signedOn": "Date {{date}}",
+    "columns": {
+      "no": "No",
+      "description": "Description",
+      "date": "Date",
+      "account": "Expense Account",
+      "amount": "Amount (Rp)",
+      "realized": "Actual (Rp)"
+    },
+    "category": {
+      "TRANSPORT": "Transport",
+      "LODGING": "Lodging",
+      "PER_DIEM": "Per diem",
+      "MEALS": "Meals",
+      "OTHER": "Other"
+    },
+    "travel": {
+      "destination": "Destination",
+      "period": "Travel Dates",
+      "participants": "Participants"
+    },
+    "payment": {
+      "title": "PAYMENT",
+      "date": "Date",
+      "source": "Paid From",
+      "reference": "Reference",
+      "journal": "Journal",
+      "paidBy": "Paid by"
+    },
+    "settlement": {
+      "advance": "Advance received",
+      "advancePaid": "Advance Paid On",
+      "realized": "Total actual",
+      "return": "Balance returned",
+      "reimburse": "Amount owed",
+      "exact": "Difference",
+      "empty": "No actual expenses yet.",
+      "postedTitle": "POSTED BY FINANCE",
+      "cash": "Cash/Bank"
+    },
+    "signatures": {
+      "requester": "Requester",
+      "supervisor": "Supervisor",
+      "finance": "Finance",
+      "director": "Director"
+    },
+    "status": {
+      "DRAFT": "Draft",
+      "SUBMITTED": "Awaiting Supervisor",
+      "PENDING_FINANCE": "Awaiting Finance",
+      "PENDING_DIRECTOR": "Awaiting Director",
+      "APPROVED": "Approved",
+      "PAID": "Paid",
+      "REJECTED": "Rejected",
+      "REVISION": "Revision",
+      "CANCELLED": "Cancelled"
+    },
+    "settlementStatus": {
+      "OPEN": "Not Filled",
+      "SUBMITTED": "Awaiting Supervisor",
+      "PENDING_FINANCE": "Awaiting Finance",
+      "REVISION": "Revision",
+      "SETTLED": "Settled"
+    },
+    "buildFailed": "Could not build the payment request PDF.",
+    "mergeLabel": "Merge attachments",
+    "print": "Print PDF",
+    "printSettlement": "Settlement PDF"
   }
 }

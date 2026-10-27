@@ -15,6 +15,8 @@ import { DailyReportPDF } from './DailyReportPDF';
 import { TrialBalancePDF, ProfitLossPDF, BalanceSheetPDF, CashFlowPDF, AgingPDF } from './ReportPDF';
 import VehicleReportPDF from './VehicleReportPDF';
 import InspectionDetailPDF from './InspectionDetailPDF';
+import { PaymentRequestPDF, PaymentRequestSettlementPDF, type PaymentRequestPDFData } from './PaymentRequestPDF';
+import { amountInWords } from './amountInWords';
 import i18n from '@/i18n';
 import { pdfDate, pdfMoneyAuto, pdfMonthShort, pdfNum, pdfRp, pdfRpAuto, pdfT } from './pdfFormat';
 
@@ -34,6 +36,24 @@ const emptyDaily = {
 };
 
 const ncrItems = [{ code: 'A-1', name: 'Gabah', qty: 1250.5, unit: 'Kg' }, { name: 'Karung', qty: 3, unit: 'Pcs', description: 'Putih' }];
+
+const prBase: PaymentRequestPDFData = {
+  number: 'PP-202610-0001', status: 'PAID', type: { name: 'Uang Muka Operasional', kind: 'CASH_ADVANCE' },
+  requester: { fullName: 'Budi' }, supervisor: { fullName: 'Sari' }, department: 'Produksi',
+  payeeKind: 'EMPLOYEE', payeeName: 'Budi', bankName: 'BRI', bankAccountNo: '1234', bankAccountHolder: 'Budi',
+  purpose: 'Beli solar genset', neededBy: day, totalAmount: '2150000.00', createdAt: day, submittedAt: day,
+  paymentDate: day, paymentReference: 'TRF-1', cashAccount: { accountNumber: '1.1.3', name: 'Bank Mandiri' },
+  paidBy: { fullName: 'Kasir' }, journalEntry: { entryNumber: 'JV-202610-0001', status: 'Posted' },
+  lines: [{ lineNo: 1, description: 'Solar 200 L', amount: 2150000, expenseDate: day, expenseAccount: { accountNumber: '6.1', name: 'BBM' } }],
+  history: [
+    { action: 'SUBMIT', fromStatus: 'DRAFT', toStatus: 'SUBMITTED', createdAt: day, actor: { fullName: 'Budi' } },
+    { action: 'APPROVE', fromStatus: 'SUBMITTED', toStatus: 'PENDING_FINANCE', createdAt: day, actor: { fullName: 'Sari' } },
+    { action: 'APPROVE', fromStatus: 'PENDING_FINANCE', toStatus: 'APPROVED', createdAt: day, actor: { fullName: 'Rina' } },
+  ],
+  attachments: [{ fileName: 'nota.pdf', scope: 'REQUEST' }],
+  settlementStatus: 'SETTLED', settlementRealized: 2000000, settlementDate: day,
+  settlementLines: [{ lineNo: 1, description: 'Solar 185 L', amount: 2000000, category: 'TRANSPORT' }],
+};
 
 const cases: Array<[string, () => ReactElement]> = [
   ['InvoicePDF', () => (
@@ -91,7 +111,24 @@ const cases: Array<[string, () => ReactElement]> = [
     <InspectionDetailPDF company={{ name: 'PT Contoh', address: null }} generatedAt={new Date()} printedBy="Admin" photos={[]} categories={[]}
       asset={{ code: 'V-1', name: 'Truk', noPlat: 'BE 1 AB' } as never} inspection={{ tanggal: day, overallResult: 'BAIK', odometer: 1000 } as never} />
   )],
+  ['PaymentRequestPDF (dibayar, uang muka)', () => <PaymentRequestPDF pr={prBase} company={company} />],
+  ['PaymentRequestPDF (draft vendor, perjalanan)', () => (
+    <PaymentRequestPDF company={company} pr={{ ...prBase, status: 'DRAFT', payeeKind: 'VENDOR', type: { name: 'Dinas', kind: 'TRAVEL' }, paymentDate: null,
+      travelDestination: 'Indramayu', travelStartDate: day, travelEndDate: day, travelParticipants: 'Budi, Sari', history: [], attachments: [] }} />
+  )],
+  ['PaymentRequestSettlementPDF', () => <PaymentRequestSettlementPDF pr={prBase} company={company} />],
+  ['PaymentRequestSettlementPDF (kosong)', () => <PaymentRequestSettlementPDF pr={{ ...prBase, settlementStatus: 'OPEN', settlementLines: [], settlementRealized: null }} company={company} />],
 ];
+
+describe('amountInWords', () => {
+  it('spells rupiah in Indonesian and English', () => {
+    expect(amountInWords(2150000, 'id')).toBe('dua juta seratus lima puluh ribu rupiah');
+    expect(amountInWords('1011.75', 'id')).toBe('seribu sebelas rupiah');
+    expect(amountInWords(0, 'id')).toBe('nol rupiah');
+    expect(amountInWords(1_000_000_000, 'id')).toBe('satu miliar rupiah');
+    expect(amountInWords(2150000, 'en')).toBe('two million one hundred fifty thousand rupiah');
+  });
+});
 
 describe('PDF templates render a valid document for a minimal fixture', () => {
   it.each(cases)('%s', async (_name, build) => {
