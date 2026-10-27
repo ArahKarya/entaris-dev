@@ -91,6 +91,7 @@ router.post('/', async (req: AuthRequest, res) => {
           fiscalYearId: fiscalYear.id,
           createdBy: req.user!.userId,
           submittedAt: new Date(),
+          sourceType: 'MANUAL',
           items: {
             create: body.items.map((item) => ({
               accountId: item.accountId,

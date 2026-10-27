@@ -125,7 +125,7 @@ async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): P
   const journals: PostResult['journals'] = [];
   let totalAmount = 0;
   for (const v of valid) {
-    const journal = await postJournalInTx(tx, { date: v.row.rowDate, narration: v.narration, fiscalYearId: v.fiscalYearId, actorId: userId, now, lines: v.lines });
+    const journal = await postJournalInTx(tx, { date: v.row.rowDate, narration: v.narration, fiscalYearId: v.fiscalYearId, actorId: userId, now, lines: v.lines, sourceType: 'CASH_BOOK' });
     await tx.cashBookDraftRow.update({ where: { id: v.row.id }, data: { journalEntryId: journal.id, postedAt: now, error: null } });
     journals.push({ rowIdx: v.row.idx, journalEntryId: journal.id, entryNumber: journal.entryNumber });
     totalAmount += Number(v.row.amount);

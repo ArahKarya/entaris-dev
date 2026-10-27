@@ -512,6 +512,7 @@ router.post('/:id/refund', async (req: AuthRequest, res) => {
               fiscalYearId: fiscalYear.id,
               createdBy: req.user!.userId,
               submittedAt: new Date(),
+              sourceType: 'DEPOSIT_OFFSET',
               items: {
                 create: [
                   { accountId: depositAccount.id, partyId: deposit.partyId, debit: applyNum, credit: 0, description: `Offset UM Pelanggan: ${deposit.paymentNumber}` },
@@ -584,6 +585,7 @@ router.post('/:id/refund', async (req: AuthRequest, res) => {
             fiscalYearId: fiscalYear.id,
             createdBy: req.user!.userId,
             submittedAt: new Date(),
+            sourceType: 'DEPOSIT_REFUND',
             items: {
               create: [
                 { accountId: depositAccount.id, partyId: deposit.partyId, debit: cashNum, credit: 0, description: `Refund UM Pelanggan: ${deposit.paymentNumber}` },
