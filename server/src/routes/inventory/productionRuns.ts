@@ -6,6 +6,7 @@ import { hasCap } from '../../services/permissionService';
 import { validateBody } from '../../utils/validate';
 import { CreateProductionRunSchema, UpdateProductionRunSchema } from '../../utils/schemas';
 import { handleRouteError } from '../../utils/errors';
+import { journalFamilyWhere } from '../../utils/journalFamily';
 import { cancelProductionRunInTx } from '../../services/productionRunCancel';
 import { createDraft } from '../../services/productionRunDraft';
 import { editProductionRunInTx } from '../../services/productionRunEdit';
@@ -146,8 +147,8 @@ router.get('/:id', async (req, res) => {
     // Edits create revision journals JV-<runNumber>-R<n> and cancel the previous one; show the newest active journal.
     const jvPrefix = `JV-${run.runNumber}`;
     const journal = await prisma.journalEntry.findFirst({
-      where: { entryNumber: { startsWith: jvPrefix }, status: { not: 'Cancelled' } },
-      orderBy: { entryNumber: 'desc' },
+      where: { ...journalFamilyWhere(jvPrefix), status: { not: 'Cancelled' } },
+      orderBy: { createdAt: 'desc' },
       include: {
         items: {
           include: { account: { select: { id: true, accountNumber: true, name: true } } },

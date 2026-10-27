@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { updateAccountBalance } from './accountBalance';
+import { journalFamilyWhere } from './journalFamily';
 
 /**
  * Cancel every active journal that belongs to a document: the exact numbers in `baseNumbers`
@@ -44,11 +45,11 @@ export async function cancelDocumentJournals(
 }
 
 /**
- * Cancel ALL active journals whose entryNumber starts with the given prefix,
- * along with their ledger entries, and reverse account balances.
+ * Cancel ALL active journals of one document: the exact `entryNumberPrefix` and its
+ * `<prefix>-…` satellites, along with their ledger entries, and reverse account balances.
  *
- * This handles revision journals (e.g. JV-PR0004, JV-PR0004-R, JV-PR0004-R2)
- * that are created when a production run or stock opname is edited.
+ * This handles revision journals (e.g. JV-PR-202601-0004, -R1, -R2) that are created when a
+ * production run or stock opname is edited, without touching JV-PR-202601-00040.
  *
  * @returns number of journals cancelled
  */
@@ -58,7 +59,7 @@ export async function cancelJournalsByPrefix(
 ): Promise<number> {
   const activeJournals = await tx.journalEntry.findMany({
     where: {
-      entryNumber: { startsWith: entryNumberPrefix },
+      ...journalFamilyWhere(entryNumberPrefix),
       status: { not: 'Cancelled' },
     },
     include: { items: true },

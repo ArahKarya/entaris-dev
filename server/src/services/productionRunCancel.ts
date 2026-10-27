@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { cancelJournalsByPrefix } from '../utils/journalCancel';
+import { journalFamilyWhere } from '../utils/journalFamily';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
@@ -92,7 +93,7 @@ export async function cancelProductionRunInTx(
   const jvNumber = `JV-${run.runNumber}`;
   const relatedJEItems = await tx.journalItem.findMany({
     where: {
-      journalEntry: { entryNumber: { startsWith: jvNumber }, status: { not: 'Cancelled' } },
+      journalEntry: { ...journalFamilyWhere(jvNumber), status: { not: 'Cancelled' } },
     },
     select: { accountId: true },
   });
