@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AuthRequest } from '../../middleware/auth';
-import { computeImpact, updateBalancesForItems } from '../../utils/accountBalance';
+import { updateBalancesForItems } from '../../utils/accountBalance';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { systemAccounts } from '../../services/systemAccounts';
@@ -100,78 +100,56 @@ router.post(
             ? (rawCustomerDepositBalance || rawDepositBalance)
             : rawCustomerDepositBalance;
 
-          // Find existing party by name or create new
+          // Find existing party by name or create new. An existing party keeps its balances and
+          // journals: re-import only refreshes profile fields (audit G-25 / S-21).
           let party = await prisma.party.findFirst({
             where: { name: row.name, partyType: row.partyType },
           });
-          const partyFields = {
-            ...partyData,
-            outstandingAmount: openingBalance,
-            depositBalance,
-            customerDepositBalance,
-          };
+          const hasOpeningBalances = openingBalance > 0 || depositBalance > 0 || customerDepositBalance > 0;
           if (party) {
             party = await prisma.party.update({
               where: { id: party.id },
-              data: partyFields,
+              data: partyData,
             });
-          } else {
-            party = await prisma.party.create({
-              data: partyFields,
-            });
+            if (hasOpeningBalances) {
+              errors.push({
+                row: 0,
+                message: `Mitra "${row.name}" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.`,
+              });
+            }
+            success++;
+            continue;
           }
+          // Resolve system accounts and the fiscal year before creating the party, so a setup gap
+          // fails the row without leaving a party whose balances have no journal behind them.
+          const isCustomer = row.partyType === 'Customer' || row.partyType === 'Both';
+          const isSupplier = row.partyType === 'Supplier' || row.partyType === 'Both';
+          const now = new Date();
+          const openingSetup = hasOpeningBalances
+            ? {
+                arAccount: await systemAccounts.getAccount('AR'),
+                apAccount: await systemAccounts.getAccount('AP'),
+                vendorDepositAccount: await systemAccounts.getAccount('VENDOR_DEPOSIT'),
+                customerDepositAccount: await systemAccounts.getAccount('CUSTOMER_DEPOSIT'),
+                openingEquityAccount: await systemAccounts.getAccount('OPENING_EQUITY'),
+                fiscalYear: await getOpenFiscalYear(prisma as any, now),
+              }
+            : null;
+
+          party = await prisma.party.create({
+            data: {
+              ...partyData,
+              outstandingAmount: openingBalance,
+              depositBalance,
+              customerDepositBalance,
+            },
+          });
 
           // Create opening balance journals if needed
-          const needsJournal = openingBalance > 0 || depositBalance > 0 || customerDepositBalance > 0;
-          if (needsJournal) {
-            const isCustomer = row.partyType === 'Customer' || row.partyType === 'Both';
-            const isSupplier = row.partyType === 'Supplier' || row.partyType === 'Both';
-            const arAccount = await systemAccounts.getAccount('AR');
-            const apAccount = await systemAccounts.getAccount('AP');
-            const vendorDepositAccount = await systemAccounts.getAccount('VENDOR_DEPOSIT');
-            const customerDepositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
-            const openingEquityAccount = await systemAccounts.getAccount('OPENING_EQUITY');
+          if (openingSetup) {
+            const { arAccount, apAccount, vendorDepositAccount, customerDepositAccount, openingEquityAccount, fiscalYear } = openingSetup;
 
             {
-              const now = new Date();
-              const fiscalYear = await getOpenFiscalYear(prisma as any, now);
-
-              // Delete existing opening balance journals for this party to prevent duplicates on re-import
-              const existingPartyJournals = await prisma.journalEntry.findMany({
-                where: {
-                  narration: { contains: row.name },
-                  status: 'Submitted',
-                  OR: [
-                    { narration: { startsWith: 'Saldo awal piutang:' } },
-                    { narration: { startsWith: 'Saldo awal hutang:' } },
-                    { narration: { startsWith: 'Saldo awal uang muka vendor:' } },
-                    { narration: { startsWith: 'Saldo awal uang muka pelanggan:' } },
-                  ],
-                },
-                select: { id: true, items: { select: { accountId: true, debit: true, credit: true } } },
-              });
-              for (const ej of existingPartyJournals) {
-                await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-                  for (const item of ej.items) {
-                    const acc = await tx.account.findUnique({ where: { id: item.accountId }, select: { rootType: true } });
-                    if (acc) {
-                      const reverseImpact = computeImpact(acc.rootType, item.debit, item.credit);
-                      await tx.account.update({ where: { id: item.accountId }, data: { balance: { decrement: reverseImpact } } });
-                    }
-                  }
-                  await tx.accountingLedgerEntry.deleteMany({ where: { referenceId: ej.id } });
-                  await tx.journalItem.deleteMany({ where: { journalEntryId: ej.id } });
-                  await tx.journalEntry.delete({ where: { id: ej.id } });
-                });
-              }
-              // Also delete existing vendor deposit payments for this party
-              const existingDepositPayments = await prisma.payment.findMany({
-                where: { partyId: party.id, notes: { contains: 'Saldo awal uang muka' } },
-                select: { id: true },
-              });
-              for (const ep of existingDepositPayments) {
-                await prisma.payment.delete({ where: { id: ep.id } });
-              }
 
               // AR/AP opening balance journal
               if (openingBalance > 0) {

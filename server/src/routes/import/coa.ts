@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AuthRequest } from '../../middleware/auth';
-import { computeImpact, updateBalancesForItems } from '../../utils/accountBalance';
+import { updateBalancesForItems } from '../../utils/accountBalance';
+import { BusinessError } from '../../utils/errors';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { systemAccounts } from '../../services/systemAccounts';
@@ -156,26 +157,23 @@ router.post(
               const accountCredit = (isDebitNormal === isPositive) ? 0 : absAmount;
 
               await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-                // Delete existing opening balance journals for this account to prevent duplicates on re-import
-                const existingJournals = await tx.journalEntry.findMany({
+                // Re-import never deletes posted journals (audit G-25): an account that already has
+                // an active opening-balance journal keeps it, and the row is reported instead.
+                const existingOpening = await tx.journalEntry.findFirst({
                   where: {
-                    narration: { startsWith: `Saldo awal akun: ${row.accountNumber}` },
                     status: 'Submitted',
+                    OR: [
+                      { narration: { startsWith: `Saldo awal akun: ${row.accountNumber} - ` } },
+                      // Opening balance set from the COA screen (PATCH /coa/:id/balance).
+                      { narration: { startsWith: `Saldo Awal: ${row.accountNumber} - ` } },
+                    ],
                   },
-                  select: { id: true, items: { select: { accountId: true, debit: true, credit: true } } },
+                  select: { entryNumber: true },
                 });
-                for (const ej of existingJournals) {
-                  // Reverse the balance impact of old entries
-                  for (const item of ej.items) {
-                    const acc = await tx.account.findUnique({ where: { id: item.accountId }, select: { rootType: true } });
-                    if (acc) {
-                      const reverseImpact = computeImpact(acc.rootType, item.debit, item.credit);
-                      await tx.account.update({ where: { id: item.accountId }, data: { balance: { decrement: reverseImpact } } });
-                    }
-                  }
-                  await tx.accountingLedgerEntry.deleteMany({ where: { referenceId: ej.id } });
-                  await tx.journalItem.deleteMany({ where: { journalEntryId: ej.id } });
-                  await tx.journalEntry.delete({ where: { id: ej.id } });
+                if (existingOpening) {
+                  throw new BusinessError(
+                    `saldo awal sudah tercatat di jurnal ${existingOpening.entryNumber}. Impor ulang tidak mengubah saldo awal; koreksi lewat jurnal manual.`,
+                  );
                 }
 
                 const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
@@ -221,7 +219,13 @@ router.post(
 
           success++;
         } catch (err: any) {
-          errors.push({ row: 0, message: `Gagal insert akun "${row.accountNumber}": ${err.message}` });
+          if (err instanceof BusinessError) {
+            // The account itself was saved; only its opening balance was left as it was.
+            success++;
+            errors.push({ row: 0, message: `Akun "${row.accountNumber}" disimpan, tetapi ${err.message}` });
+          } else {
+            errors.push({ row: 0, message: `Gagal insert akun "${row.accountNumber}": ${err.message}` });
+          }
         }
       }
 

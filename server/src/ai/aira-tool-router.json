@@ -6580,7 +6580,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Pratinjau (tanpa mengubah data) perubahan yang akan dilakukan perbaikan otomatis. Hanya untuk check: ale-sync, account-balance-drift, orphan-ale. Perbaikan itu sendiri (fix) tidak tersedia sebagai tool.",
+      "desc": "Pratinjau (tanpa mengubah data) perubahan yang akan dilakukan perbaikan otomatis. Hanya untuk check: ale-sync, account-balance-drift, orphan-ale. Perbaikan itu sendiri (fix) tidak tersedia sebagai tool; perbaikan ale-sync dan orphan-ale juga dinonaktifkan di aplikasi karena bisa mengubah tahun buku tertutup, jadi pratinjaunya hanya informasi.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -15279,7 +15279,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "journal",
-      "desc": "Membatalkan jurnal dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Jurnal otomatis dari pembayaran, faktur penjualan/pembelian, HPP, dan aplikasi uang muka ditolak: batalkan dari modul asalnya.",
+      "desc": "Membatalkan jurnal manual dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Ditolak: jurnal di tahun buku tertutup, jurnal tutup buku dan penyusutan, jurnal dari dokumen sumber (pembayaran, faktur, STT, produksi, HPP, revisi harga PI), jurnal modul uang muka vendor, dan jurnal yang terhubung ke stok, GA, pengajuan dana, atau uang jaminan: batalkan dari modul asalnya atau buat jurnal koreksi.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -15310,12 +15310,14 @@
       "postingEffect": "Membalik saldo akun & saldo pihak; efek samping aplikasi uang muka/refund pelanggan yang ditautkan ikut dibalik. Tidak ada efek stok. Catatan kode: tidak ada capability doc.cancel pada endpoint ini.",
       "confirm_template": "Batalkan (reverse) jurnal {id}?",
       "prerequisites": [
-        "Jurnal berstatus Submitted dan bukan jurnal otomatis (JV-PAY/SI/PI/COGS) atau Aplikasi Uang Muka."
+        "Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka."
       ],
       "errors": [
         "404: tidak ditemukan",
         "400: sudah dibatalkan",
-        "400: jurnal terkait pembayaran/dokumen sumber"
+        "400: jurnal terkait pembayaran/dokumen sumber",
+        "400: tahun buku sudah ditutup",
+        "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)"
       ],
       "related": [
         "je_get",

@@ -25,6 +25,9 @@ import {
 
 const router = Router();
 
+/** Fixes that rewrite or cancel ledger entries across all years, closed ones included (audit G-26). */
+export const DISABLED_FIXES: ReadonlySet<string> = new Set(['ale-sync', 'orphan-ale']);
+
 // GET /api/health-check: Run all diagnostic checks in parallel
 router.get('/', async (_req, res) => {
   try {
@@ -91,6 +94,13 @@ router.post('/fix/:check', async (req: AuthRequest, res) => {
     'account-balance-drift': 'FIX_ACCOUNT_BALANCE_DRIFT',
     'orphan-ale': 'FIX_ORPHAN_ALE',
   };
+
+  if (DISABLED_FIXES.has(check)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Perbaikan otomatis ini dinonaktifkan karena bisa mengubah buku besar tahun yang sudah ditutup. Koreksi selisih lewat jurnal di periode berjalan.',
+    });
+  }
 
   if (!actionMap[check]) {
     return res.status(400).json({ success: false, error: 'Check tidak dapat diperbaiki otomatis' });
