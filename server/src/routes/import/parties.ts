@@ -155,8 +155,9 @@ router.post(
               if (openingBalance > 0) {
                 const receivableAccount = isCustomer ? arAccount : apAccount;
                 {
-                  const jvNumber = await generateDocumentNumber(prisma as any, 'JV', now, fiscalYear.id);
                   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+                    // Inside the transaction so the advisory lock is held until the journal is created.
+                    const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
                     const journal = await tx.journalEntry.create({
                       data: {
                         entryNumber: jvNumber,
