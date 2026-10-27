@@ -35,96 +35,77 @@ export async function generateDocumentNumber(
   // The series prefix embeds year+month, so no date/fiscalYear filter is needed
   // (and deleted/backdated rows can never cause collisions).
   const seriesPrefix = `${prefix}-${yearMonth}-`;
-  const startsWith = { startsWith: seriesPrefix };
+  const { table, column } = SERIES_SOURCE[prefix];
+  const documentMax = await maxNumericSuffix(tx, table, column, seriesPrefix);
 
-  let lastNumber: string | null = null;
-  if (prefix === 'SI') {
-    const r = await tx.salesInvoice.findFirst({ where: { invoiceNumber: startsWith }, orderBy: { invoiceNumber: 'desc' }, select: { invoiceNumber: true } });
-    lastNumber = r?.invoiceNumber ?? null;
-  } else if (prefix === 'PI') {
-    const r = await tx.purchaseInvoice.findFirst({ where: { invoiceNumber: startsWith }, orderBy: { invoiceNumber: 'desc' }, select: { invoiceNumber: true } });
-    lastNumber = r?.invoiceNumber ?? null;
-  } else if (prefix === 'PAY') {
-    const r = await tx.payment.findFirst({ where: { paymentNumber: startsWith }, orderBy: { paymentNumber: 'desc' }, select: { paymentNumber: true } });
-    lastNumber = r?.paymentNumber ?? null;
-  } else if (prefix === 'SM') {
-    const r = await tx.stockMovement.findFirst({ where: { movementNumber: startsWith }, orderBy: { movementNumber: 'desc' }, select: { movementNumber: true } });
-    lastNumber = r?.movementNumber ?? null;
-  } else if (prefix === 'PR') {
-    const r = await tx.productionRun.findFirst({ where: { runNumber: startsWith }, orderBy: { runNumber: 'desc' }, select: { runNumber: true } });
-    lastNumber = r?.runNumber ?? null;
-  } else if (prefix === 'SO') {
-    const r = await tx.stockOpname.findFirst({ where: { opnameNumber: startsWith }, orderBy: { opnameNumber: 'desc' }, select: { opnameNumber: true } });
-    lastNumber = r?.opnameNumber ?? null;
-  } else if (prefix === 'QO') {
-    const r = await tx.quotation.findFirst({ where: { quotationNumber: startsWith }, orderBy: { quotationNumber: 'desc' }, select: { quotationNumber: true } });
-    lastNumber = r?.quotationNumber ?? null;
-  } else if (prefix === 'PRO') {
-    const r = await tx.proformaInvoice.findFirst({ where: { proformaNumber: startsWith }, orderBy: { proformaNumber: 'desc' }, select: { proformaNumber: true } });
-    lastNumber = r?.proformaNumber ?? null;
-  } else if (prefix === 'INQ') {
-    const r = await tx.inquiry.findFirst({ where: { inquiryNumber: startsWith }, orderBy: { inquiryNumber: 'desc' }, select: { inquiryNumber: true } });
-    lastNumber = r?.inquiryNumber ?? null;
-  } else if (prefix === 'ST') {
-    const r = await tx.stockTransfer.findFirst({ where: { transferNumber: startsWith }, orderBy: { transferNumber: 'desc' }, select: { transferNumber: true } });
-    lastNumber = r?.transferNumber ?? null;
-  } else if (prefix === 'DO') {
-    const r = await tx.deliveryOrder.findFirst({ where: { doNumber: startsWith }, orderBy: { doNumber: 'desc' }, select: { doNumber: true } });
-    lastNumber = r?.doNumber ?? null;
-  } else if (prefix === 'STT') {
-    const r = await tx.goodsReceipt.findFirst({ where: { sttNumber: startsWith }, orderBy: { sttNumber: 'desc' }, select: { sttNumber: true } });
-    lastNumber = r?.sttNumber ?? null;
-  } else if (prefix === 'PO') {
-    const r = await tx.purchaseOrder.findFirst({ where: { poNumber: startsWith }, orderBy: { poNumber: 'desc' }, select: { poNumber: true } });
-    lastNumber = r?.poNumber ?? null;
-  } else if (prefix === 'PSN') {
-    const r = await tx.salesOrder.findFirst({ where: { soNumber: startsWith }, orderBy: { soNumber: 'desc' }, select: { soNumber: true } });
-    lastNumber = r?.soNumber ?? null;
-  } else if (prefix === 'RN') {
-    const r = await tx.salesReturn.findFirst({ where: { returnNumber: startsWith }, orderBy: { returnNumber: 'desc' }, select: { returnNumber: true } });
-    lastNumber = r?.returnNumber ?? null;
-  } else if (prefix === 'UJ') {
-    const r = await tx.projectGuarantee.findFirst({ where: { guaranteeNumber: startsWith }, orderBy: { guaranteeNumber: 'desc' }, select: { guaranteeNumber: true } });
-    lastNumber = r?.guaranteeNumber ?? null;
-  } else if (prefix === 'PP') {
-    const r = await tx.paymentRequest.findFirst({ where: { number: startsWith }, orderBy: { number: 'desc' }, select: { number: true } });
-    lastNumber = r?.number ?? null;
-  } else if (prefix === 'DPR') {
-    const r = await tx.productionRunDraft.findFirst({ where: { draftNumber: startsWith }, orderBy: { draftNumber: 'desc' }, select: { draftNumber: true } });
-    lastNumber = r?.draftNumber ?? null;
-  } else if (prefix === 'DKB') {
-    const r = await tx.cashBookDraft.findFirst({ where: { draftNumber: startsWith }, orderBy: { draftNumber: 'desc' }, select: { draftNumber: true } });
-    lastNumber = r?.draftNumber ?? null;
-  } else {
-    // JV, OB and any other journal-backed prefixes share journalEntry
-    const r = await tx.journalEntry.findFirst({ where: { entryNumber: startsWith }, orderBy: { entryNumber: 'desc' }, select: { entryNumber: true } });
-    lastNumber = r?.entryNumber ?? null;
-  }
+  // Most documents name their journal `JV-<documentNumber>` (sales also `JV-COGS-<documentNumber>`),
+  // so an orphan journal left by a deleted document would hit P2002 at submit. Continue after those too.
+  const journals = SERIES_SOURCE.JV;
+  const journalMax = OWN_JOURNAL_NAME.has(prefix)
+    ? 0
+    : Math.max(
+        await maxNumericSuffix(tx, journals.table, journals.column, `JV-${seriesPrefix}`),
+        await maxNumericSuffix(tx, journals.table, journals.column, `JV-COGS-${seriesPrefix}`),
+      );
 
-  // Parse the numeric suffix of the last used number; 0 when series is empty.
-  // parseInt is resilient to a longer suffix (e.g. 5 digits once past 9999).
-  let lastSeq = 0;
-  if (lastNumber) {
-    const suffix = lastNumber.slice(seriesPrefix.length);
-    const parsed = parseInt(suffix, 10);
-    if (!Number.isNaN(parsed)) lastSeq = parsed;
-  }
+  return `${prefix}-${yearMonth}-${String(Math.max(documentMax, journalMax) + 1).padStart(4, '0')}`;
+}
 
-  // Most documents name their journal `JV-<documentNumber>`, so an orphan JV left by a
-  // deleted document would hit P2002 at submit. Skip sequences whose JV name is taken.
-  const derivesJournal = prefix !== 'JV' && prefix !== 'OB' && prefix !== 'DPR' && prefix !== 'DKB' && prefix !== 'PRO';
-  let seq = lastSeq + 1;
-  if (derivesJournal) {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      const candidate = `${prefix}-${yearMonth}-${String(seq).padStart(4, '0')}`;
-      const taken = await tx.journalEntry.findFirst({
-        where: { entryNumber: { in: [`JV-${candidate}`, `JV-COGS-${candidate}`] } },
-        select: { id: true },
-      });
-      if (!taken) break;
-      seq += 1;
-    }
-  }
+type DocumentPrefix = Parameters<typeof generateDocumentNumber>[1];
 
-  return `${prefix}-${yearMonth}-${String(seq).padStart(4, '0')}`;
+/** Prefixes whose journals are not named after the document number. */
+const OWN_JOURNAL_NAME = new Set<DocumentPrefix>(['JV', 'OB', 'DPR', 'DKB', 'PRO']);
+
+const source = (table: string, column: string) => ({
+  table: Prisma.raw(`"${table}"`),
+  column: Prisma.raw(`"${column}"`),
+});
+
+/** Table and column holding each series. Fixed identifiers only: they are spliced into raw SQL. */
+const SERIES_SOURCE: Record<DocumentPrefix, { table: Prisma.Sql; column: Prisma.Sql }> = {
+  SI: source('sales_invoices', 'invoice_number'),
+  PI: source('purchase_invoices', 'invoice_number'),
+  PAY: source('payments', 'payment_number'),
+  SM: source('stock_movements', 'movement_number'),
+  PR: source('production_runs', 'run_number'),
+  SO: source('stock_opnames', 'opname_number'),
+  QO: source('quotations', 'quotation_number'),
+  PRO: source('proforma_invoices', 'proforma_number'),
+  INQ: source('inquiries', 'inquiry_number'),
+  ST: source('stock_transfers', 'transfer_number'),
+  DO: source('delivery_orders', 'do_number'),
+  STT: source('goods_receipts', 'stt_number'),
+  PO: source('purchase_orders', 'po_number'),
+  PSN: source('sales_orders', 'so_number'),
+  RN: source('sales_returns', 'return_number'),
+  UJ: source('project_guarantees', 'guarantee_number'),
+  PP: source('payment_requests', 'number'),
+  DPR: source('production_run_drafts', 'draft_number'),
+  DKB: source('cash_book_drafts', 'draft_number'),
+  JV: source('journal_entries', 'entry_number'),
+  OB: source('journal_entries', 'entry_number'),
+};
+
+/**
+ * Highest all-digit suffix after `series` in `table.column`, compared as a number: text order
+ * puts `-9999` after `-10000`, which made every series stall at 9999. Suffixes that are not all
+ * digits (`-REV`, `-CXL`, `-R2`, `-CORR`) are skipped. `table` and `column` must be fixed
+ * identifiers built with Prisma.raw, never user input; `series` is sent as a parameter.
+ *
+ * @returns 0 when the series has no numbered rows yet
+ */
+export async function maxNumericSuffix(
+  tx: Prisma.TransactionClient,
+  table: Prisma.Sql,
+  column: Prisma.Sql,
+  series: string
+): Promise<number> {
+  const from = series.length + 1;
+  // At most 15 digits so the value stays exact as a JS number and the cast cannot overflow.
+  const rows = await tx.$queryRaw<Array<{ last: bigint | number | null }>>(Prisma.sql`
+    SELECT COALESCE(MAX(substring(${column} FROM ${from}::int)::bigint), 0) AS last
+    FROM ${table}
+    WHERE starts_with(${column}, ${series}::text)
+      AND substring(${column} FROM ${from}::int) ~ '^[0-9]{1,15}$'`);
+  return Number(rows[0]?.last ?? 0);
 }
