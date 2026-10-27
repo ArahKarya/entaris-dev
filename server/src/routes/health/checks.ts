@@ -63,7 +63,8 @@ export async function checkAleSync(): Promise<CheckResult> {
       : 'ALE dan JournalItem sinkron',
     count: mismatches.length,
     details: mismatches.slice(0, 20),
-    fixable: true,
+    // Auto-fix disabled: rebuilding ALE across all years rewrites closed periods (audit G-26).
+    fixable: false,
   };
 }
 
@@ -203,7 +204,8 @@ export async function checkOrphanAle(): Promise<CheckResult> {
       : 'Tidak ada ALE orphan',
     count: orphans.length,
     details: orphans.slice(0, 20),
-    fixable: true,
+    // Auto-fix disabled: it cancels ALE in closed fiscal years (audit G-26).
+    fixable: false,
   };
 }
 

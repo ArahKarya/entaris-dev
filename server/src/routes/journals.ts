@@ -9,7 +9,8 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
 import { CreateJournalSchema } from '../utils/schemas';
-import { handleRouteError } from '../utils/errors';
+import { BusinessError, handleRouteError } from '../utils/errors';
+import { journalMenuCancelBlockReason } from '../services/journalCancelGuard';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -185,35 +186,24 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
         items: {
           include: { account: { select: { accountNumber: true, rootType: true } } },
         },
-        payment: { select: { id: true } },
       },
     });
 
     if (!entry) return res.status(404).json({ error: 'Jurnal tidak ditemukan.' });
     if (entry.status === 'Cancelled') return res.status(400).json({ error: 'Jurnal sudah dibatalkan.' });
-    if (entry.payment) return res.status(400).json({ error: 'Jurnal ini terkait pembayaran. Batalkan dari modul Pembayaran.' });
-
-    // Safety net: block cancel for any journal auto-generated from a source document.
-    // Pola entryNumber: JV-PAY-* (pembayaran), JV-SI-* (faktur penjualan),
-    // JV-PI-* (faktur pembelian), JV-COGS-* (HPP otomatis).
-    if (/^JV-(PAY|SI|PI|COGS)/.test(entry.entryNumber)) {
-      return res.status(400).json({
-        error:
-          'Jurnal ini dibuat otomatis dari transaksi sumber (Pembayaran/Invoice/HPP). Batalkan dari modul asalnya, bukan dari Buku Besar.',
-      });
-    }
-
-    // Deposit application journals (customer and vendor) may lack the JV-PAY prefix and
-    // slip past the regex above; cancelling here would leave the application and invoice
-    // outstanding unrestored, so also match on the narration.
-    if (/^Aplikasi Uang Muka:/.test(entry.narration ?? '')) {
-      return res.status(400).json({
-        error:
-          'Jurnal ini adalah aplikasi Uang Muka ke invoice. Batalkan dari modul Uang Muka Customer/Supplier (tombol batalkan aplikasi), bukan dari Buku Besar.',
-      });
-    }
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Claim the journal first so a double click or a concurrent AIRA call cannot reverse it twice.
+      const claimed = await tx.journalEntry.updateMany({
+        where: { id, status: { not: 'Cancelled' } },
+        data: { status: 'Cancelled', cancelledAt: new Date() },
+      });
+      if (claimed.count === 0) throw new BusinessError('Jurnal sudah dibatalkan.');
+
+      // Only hand-made journals in an open fiscal year; module journals are undone from their module.
+      const blockReason = await journalMenuCancelBlockReason(tx, entry.id);
+      if (blockReason) throw new BusinessError(blockReason);
+
       // Reverse account balances (swap debit↔credit to undo)
       await updateBalancesForItems(
         tx,
@@ -276,12 +266,6 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
           });
         }
       }
-
-      // Mark cancelled
-      await tx.journalEntry.update({
-        where: { id },
-        data: { status: 'Cancelled', cancelledAt: new Date() },
-      });
 
       // Soft-cancel the original ALE rows, like the other cancel handlers. Adding [BATAL]
       // reversal rows instead would double ALE totals vs JournalItem and fail the health check.

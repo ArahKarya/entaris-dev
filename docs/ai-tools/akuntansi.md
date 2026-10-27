@@ -1221,7 +1221,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### je_cancel
 
-**Ringkasan:** Membatalkan jurnal dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Jurnal otomatis dari pembayaran, faktur penjualan/pembelian, HPP, dan aplikasi uang muka ditolak: batalkan dari modul asalnya.
+**Ringkasan:** Membatalkan jurnal manual dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Ditolak: jurnal di tahun buku tertutup, jurnal tutup buku dan penyusutan, jurnal dari dokumen sumber (pembayaran, faktur, STT, produksi, HPP, revisi harga PI), jurnal modul uang muka vendor, dan jurnal yang terhubung ke stok, GA, pengajuan dana, atau uang jaminan: batalkan dari modul asalnya atau buat jurnal koreksi.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1266,13 +1266,15 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Prasyarat**
 
-- Jurnal berstatus Submitted dan bukan jurnal otomatis (JV-PAY/SI/PI/COGS) atau Aplikasi Uang Muka.
+- Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka.
 
 **Error umum**
 
 - 404: tidak ditemukan
 - 400: sudah dibatalkan
 - 400: jurnal terkait pembayaran/dokumen sumber
+- 400: tahun buku sudah ditutup
+- 400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)
 
 **Tool terkait:** [`je_get`](#je_get), [`je_create`](#je_create)
 
