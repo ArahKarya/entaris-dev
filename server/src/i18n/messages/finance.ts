@@ -328,4 +328,13 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "saldo awal sudah tercatat di jurnal {0}. Impor ulang tidak mengubah saldo awal; koreksi lewat jurnal manual.": "the opening balance is already recorded in journal {0}. Re-importing does not change opening balances; correct it with a manual journal.",
   "Akun \"{0}\" disimpan, tetapi {1}": "Account \"{0}\" was saved, but {1}",
   "Mitra \"{0}\" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.": "Partner \"{0}\" already exists: profile updated, opening balance unchanged. Correct the balance with a manual journal.",
+  // Period guard (utils/periodGuard.ts); the {label} nouns below translate inside the patterns.
+  "Tahun buku untuk {0} tidak ditemukan. Buat tahun buku untuk tanggal ini terlebih dahulu.": "No fiscal year found for this {0}. Create a fiscal year covering this date first.",
+  "Tahun buku {0} sudah ditutup; {1} di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.": "Fiscal year {0} is closed; this {1} cannot be posted, changed or cancelled in that period. Make the correction in the current period.",
+  "jurnal": "journal",
+  "pembayaran": "payment",
+  "uang muka": "deposit",
+  "uang jaminan": "guarantee",
+  "penyusutan": "depreciation",
+  "dokumen": "document",
 };
