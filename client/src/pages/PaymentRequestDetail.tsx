@@ -7,7 +7,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, BookOpen, Check, ClipboardCheck, Pencil, RotateCcw, Save, Send, Undo2, X, Banknote } from 'lucide-react';
+import { Ban, BookOpen, Check, ClipboardCheck, FileDown, Pencil, RotateCcw, Save, Send, Undo2, X, Banknote } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -15,6 +15,8 @@ import { formatDate, formatDateTime, toNumber } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { usePaymentRequestPdf } from '@/lib/pdf/usePaymentRequestPdf';
 import { ConfirmDialog, EmptyState, Field, LoadingState, PageHeader, StatusBadge } from '@/components/shared';
 import { AccountPicker, type AccountOption } from '@/components/fixed-assets/AccountPicker';
 import { apiError } from '@/components/fixed-assets/errors';
@@ -70,6 +72,9 @@ export const PaymentRequestDetailPage = () => {
   const [posting, setPosting] = useState(false);
   const [approveNote, setApproveNote] = useState('');
   const [accountEdits, setAccountEdits] = useState<Record<string, string>>({});
+  const [mergeAttachments, setMergeAttachments] = useState(true);
+  const { t: tPdf } = useTranslation('pdf');
+  const { download: downloadPdf, busy: pdfBusy } = usePaymentRequestPdf();
 
   const detailQuery = useQuery({
     queryKey: ['payment-requests', 'detail', id],
@@ -176,6 +181,25 @@ export const PaymentRequestDetailPage = () => {
           : null;
 
   const busy = act.isPending;
+  const hasSettlementPdf = advanceKind && !!pr.settlementStatus && pr.settlementStatus !== 'OPEN';
+  const pdfActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Checkbox checked={mergeAttachments} onCheckedChange={(v) => setMergeAttachments(!!v)} aria-label={tPdf('paymentRequest.mergeLabel')} />
+        {tPdf('paymentRequest.mergeLabel')}
+      </label>
+      <Button variant="outline" onClick={() => downloadPdf(pr, 'request', mergeAttachments)} loading={pdfBusy === 'request'} disabled={!!pdfBusy}>
+        <FileDown aria-hidden />
+        {tPdf('paymentRequest.print')}
+      </Button>
+      {hasSettlementPdf && (
+        <Button variant="outline" onClick={() => downloadPdf(pr, 'settlement', mergeAttachments)} loading={pdfBusy === 'settlement'} disabled={!!pdfBusy}>
+          <FileDown aria-hidden />
+          {tPdf('paymentRequest.printSettlement')}
+        </Button>
+      )}
+    </div>
+  );
   const actionButtons = (
     <>
       {actions?.edit && (
@@ -260,6 +284,7 @@ export const PaymentRequestDetailPage = () => {
       <PageHeader
         title={pr.number}
         description={pr.purpose}
+        actions={pdfActions}
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <StatusBadge status={pr.status} docType="payment_request" />

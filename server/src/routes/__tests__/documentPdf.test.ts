@@ -194,6 +194,65 @@ describe('resolveDocumentPdf', () => {
     vi.unstubAllGlobals();
   }, 90_000);
 
+  (hasBundle2 ? it : it.skip)('merender PDF nyata Pengajuan Pembayaran & Pertanggungjawaban (payload GET /payment-requests/:id)', async () => {
+    const day = '2026-10-20T00:00:00.000Z';
+    const body = {
+      id: 'pr-1', number: 'PP-202610-0007', status: 'PAID', type: { name: 'Uang Muka Operasional', kind: 'CASH_ADVANCE' },
+      requester: { fullName: 'Budi Santoso' }, supervisor: { fullName: 'Sari' }, department: 'Produksi',
+      payeeKind: 'EMPLOYEE', payeeName: 'Budi Santoso', bankName: 'BRI', bankAccountNo: '0123456789', bankAccountHolder: 'Budi Santoso',
+      purpose: 'Pembelian solar genset dan oli mesin giling', neededBy: day, totalAmount: '2150000.00', createdAt: day, submittedAt: day,
+      paymentDate: day, paymentReference: 'TRF-88', cashAccount: { accountNumber: '1.1.3', name: 'Bank Mandiri' }, paidBy: { fullName: 'Rina' },
+      journalEntry: { entryNumber: 'JV-202610-0101', status: 'Posted' },
+      lines: [
+        { lineNo: 1, description: 'Solar 200 L', amount: '1800000.00', expenseDate: day, expenseAccount: null },
+        { lineNo: 2, description: 'Oli mesin 10 L', amount: '350000.00', expenseDate: day, expenseAccount: null },
+      ],
+      history: [
+        { action: 'SUBMIT', fromStatus: 'DRAFT', toStatus: 'SUBMITTED', createdAt: day, actor: { fullName: 'Budi Santoso' } },
+        { action: 'APPROVE', fromStatus: 'SUBMITTED', toStatus: 'PENDING_FINANCE', createdAt: day, actor: { fullName: 'Sari' } },
+        { action: 'APPROVE', fromStatus: 'PENDING_FINANCE', toStatus: 'APPROVED', createdAt: day, actor: { fullName: 'Rina' } },
+        { action: 'SETTLE_SUBMIT', fromStatus: 'OPEN', toStatus: 'SUBMITTED', createdAt: day, actor: { fullName: 'Budi Santoso' } },
+        { action: 'SETTLE_APPROVE', fromStatus: 'SUBMITTED', toStatus: 'PENDING_FINANCE', createdAt: day, actor: { fullName: 'Sari' } },
+        { action: 'SETTLE_POST', fromStatus: 'PENDING_FINANCE', toStatus: 'SETTLED', createdAt: day, actor: { fullName: 'Rina' } },
+      ],
+      attachments: [{ id: 'a1', fileName: 'nota-solar.jpg', mimeType: 'image/jpeg', scope: 'REQUEST' }, { id: 'a2', fileName: 'kwitansi.pdf', mimeType: 'application/pdf', scope: 'SETTLEMENT' }],
+      settlementStatus: 'SETTLED', settlementRealized: '2000000.00', settlementDate: day, settlementReference: 'SETOR-1',
+      settlementCashAccount: { accountNumber: '1.1.3', name: 'Bank Mandiri' }, settlementJournal: { entryNumber: 'JV-202610-0140', status: 'Posted' },
+      settlementLines: [
+        { lineNo: 1, description: 'Solar 185 L', amount: '1650000.00', expenseDate: day, expenseAccount: { accountNumber: '6.4.1', name: 'BBM Genset' } },
+        { lineNo: 2, description: 'Oli mesin 10 L', amount: '350000.00', expenseDate: day, expenseAccount: { accountNumber: '6.4.2', name: 'Pemeliharaan Mesin' } },
+      ],
+    };
+    const calls: string[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (typeof url !== 'string' || !url.startsWith('http://127.0.0.1:')) return realFetch(url as never, init);
+      calls.push(url);
+      if (url.includes('/api/settings/company')) return new Response(JSON.stringify({ companyName: 'PT Contoh Pangan', address: 'Indramayu' }), { status: 200 });
+      return new Response(JSON.stringify(body), { status: 200 });
+    }));
+    for (const [kind, name] of [['payment_request', 'PP-202610-0007.pdf'], ['payment_request_settlement', 'PP-202610-0007_pertanggungjawaban.pdf']]) {
+      const r = await resolveDocumentPdf({ userId: 'u1', role: 'Admin' }, `${kind}:pr-1`);
+      expect(r.ok, kind).toBe(true);
+      if (r.ok) {
+        expect(r.fileName).toBe(name);
+        expect(r.buffer.subarray(0, 5).toString()).toBe('%PDF-');
+        expect(r.buffer.length, kind).toBeGreaterThan(2000);
+        if (process.env.PDF_DUMP_DIR) writeFileSync(`${process.env.PDF_DUMP_DIR}/${name}`, r.buffer);
+      }
+    }
+    vi.unstubAllGlobals();
+    expect(calls.filter((c) => c.includes('/api/payment-requests/pr-1')).length).toBe(2);
+  }, 90_000);
+
+  it('tiket pdf-link pengajuan memakai izin modul payment_request', async () => {
+    for (const docType of ['payment_request', 'payment_request_settlement']) {
+      const r = await post({ docType, docId: 'pr-1' });
+      expect(r.status, docType).toBe(200);
+      expect(permission.can).toHaveBeenLastCalledWith('Accountant', 'payment_request', 'view');
+    }
+  });
+
   it('meneruskan 403/404 dari endpoint detail (RBAC datang dari endpoint itu)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 403 })));
     expect(await resolveDocumentPdf({ userId: 'u1', role: 'Viewer' }, 'quotation:q1')).toMatchObject({ ok: false, status: 403 });

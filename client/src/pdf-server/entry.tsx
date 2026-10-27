@@ -16,6 +16,7 @@ import { ProfitLossPDF, BalanceSheetPDF, TrialBalancePDF, CashFlowPDF, AgingPDF 
 import { DailyReportPDF } from '../lib/pdf/DailyReportPDF';
 import { buildInvoicePdf, deriveInvoicePdfArgs } from '../components/invoice-detail/buildInvoicePdf';
 import { buildPdfProps } from '../components/production/run-pdf-props';
+import { PaymentRequestPDF, PaymentRequestSettlementPDF } from '../lib/pdf/PaymentRequestPDF';
 
 export type PdfKind =
   | 'quotation'
@@ -29,6 +30,8 @@ export type PdfKind =
   | 'production_run'
   | 'sales_invoice'
   | 'purchase_invoice'
+  | 'payment_request'
+  | 'payment_request_settlement'
   | 'report_profit_loss'
   | 'report_balance_sheet'
   | 'report_trial_balance'
@@ -222,6 +225,10 @@ function build(kind: PdfKind, p: any, company: PdfCompany, rp: ReportParams = {}
     }
     case 'production_run':
       return { element: <ProductionRunPDF {...buildPdfProps(p, company as never)} />, fileName: `${p.runNumber}.pdf` };
+    case 'payment_request':
+      return { element: <PaymentRequestPDF pr={p} company={pdfCompany(company)} />, fileName: `${p.number}.pdf` };
+    case 'payment_request_settlement':
+      return { element: <PaymentRequestSettlementPDF pr={p} company={pdfCompany(company)} />, fileName: `${p.number}_pertanggungjawaban.pdf` };
   }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

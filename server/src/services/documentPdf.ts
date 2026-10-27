@@ -23,6 +23,8 @@ export type PdfKind =
   | 'production_run'
   | 'sales_invoice'
   | 'purchase_invoice'
+  | 'payment_request'
+  | 'payment_request_settlement'
   | 'report_profit_loss'
   | 'report_balance_sheet'
   | 'report_trial_balance'
@@ -75,6 +77,8 @@ export const PDF_DOCS: Record<PdfKind, { path: (id: string) => string | null; la
   sales_invoice: { path: (id) => `/api/sales/invoices/${id}`, label: 'Invoice Penjualan' },
   purchase_invoice: { path: (id) => `/api/purchase/invoices/${id}`, label: 'Invoice Pembelian' },
   production_run: { path: (id) => `/api/inventory/production-runs/${id}`, label: 'Produksi' },
+  payment_request: { path: (id) => `/api/payment-requests/${id}`, label: 'Pengajuan Pembayaran' },
+  payment_request_settlement: { path: (id) => `/api/payment-requests/${id}`, label: 'Pertanggungjawaban' },
   report_profit_loss: { path: reportPath('/api/reports/profit-loss', rangeQuery), label: 'Laba Rugi', hint: REPORT_SPEC_HELP.range },
   report_balance_sheet: { path: reportPath('/api/reports/balance-sheet', asOfQuery('date')), label: 'Neraca', hint: REPORT_SPEC_HELP.asOf },
   report_trial_balance: { path: reportPath('/api/reports/trial-balance', rangeQuery), label: 'Neraca Saldo', hint: REPORT_SPEC_HELP.range },

@@ -58,6 +58,8 @@ const PDF_MODULE: Record<string, string> = {
   production_run: 'production',
   sales_invoice: 'sales_invoice',
   purchase_invoice: 'purchase_invoice',
+  payment_request: 'payment_request',
+  payment_request_settlement: 'payment_request',
   report_profit_loss: 'reports',
   report_balance_sheet: 'reports',
   report_trial_balance: 'reports',
