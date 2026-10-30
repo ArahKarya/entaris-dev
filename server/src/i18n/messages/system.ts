@@ -262,6 +262,7 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Transaksi berulang gagal dijalankan: {0}": "The recurring transaction failed to run: {0}",
   "Tahun buku untuk {0} sudah ditutup. Buka kembali tahun buku itu sebelum membuat data uji coba.": "The fiscal year for {0} is closed. Reopen it before creating demo data.",
   "Belum ada tahun buku untuk {0}. Buat tahun buku yang mencakup tanggal itu di Pengaturan > Tahun Buku.": "There is no fiscal year for {0}. Create one that covers that date in Settings > Fiscal Years.",
+  "Periode s.d. {0} dikunci, sedangkan data uji coba dimulai {1}. Mundurkan kunci periode ke sebelum {1} di Pengaturan > Tahun Buku sebelum membuat data uji coba.": "The period up to {0} is locked, but the demo data starts on {1}. Move the period lock back to before {1} in Settings > Fiscal Years before creating demo data.",
   "Pemetaan Akun Sistem belum lengkap ({0}). Lengkapi di Pengaturan > Akun Sistem.": "System account mapping is incomplete ({0}). Complete it in Settings > System Accounts.",
   "Gagal menghapus data uji coba.": "Failed to delete demo data.",
   "Gunakan Hapus data uji coba untuk menghapus data uji coba lintas modul.": "Use Delete demo data to remove the cross-module demo data.",

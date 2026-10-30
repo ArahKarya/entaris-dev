@@ -10,6 +10,23 @@ type FlatAccount = { id: string; accountNumber: string; name: string; rootType: 
 
 export class DemoSetupError extends Error {}
 
+/** First day the demo posts on: fixed assets are acquired up to three days before the span (see backOffice.ts). */
+const firstDemoDay = (today: Date): Date => addDays(today, -DEMO_SPAN_DAYS - 4);
+
+/**
+ * The demo posts through the real API on every day of its span, and the period lock (which a demo
+ * wipe keeps) rejects postings on or before its date. Refuse up front instead of failing halfway.
+ */
+export async function ensurePeriodUnlocked(today: Date): Promise<void> {
+  const row = await prisma.periodLock.findUnique({ where: { id: 1 }, select: { lockDate: true } });
+  if (!row?.lockDate) return;
+  const lockDate = row.lockDate.toISOString().slice(0, 10);
+  const first = ymd(firstDemoDay(today));
+  if (lockDate >= first) {
+    throw new DemoSetupError(`Periode s.d. ${lockDate} dikunci, sedangkan data uji coba dimulai ${first}. Mundurkan kunci periode ke sebelum ${first} di Pengaturan > Tahun Buku sebelum membuat data uji coba.`);
+  }
+}
+
 /**
  * Make sure open fiscal years cover every day of the demo span. Days in a calendar year that has no
  * fiscal year at all get a calendar-year FY; anything else (a closed FY, or a gap next to a custom
@@ -19,8 +36,7 @@ export async function ensureFiscalYears(api: DemoApi, admin: DemoActor, today: D
   const years = await prisma.fiscalYear.findMany({ select: { startDate: true, endDate: true, isClosed: true } });
   const coveredBy = (d: Date) => years.filter((fy) => fy.startDate <= d && fy.endDate >= d);
   const missingYears = new Set<number>();
-  // Fixed assets may be acquired up to three days before the span (see backOffice.ts).
-  for (let d = addDays(today, -DEMO_SPAN_DAYS - 4); d <= today; d = addDays(d, 1)) {
+  for (let d = firstDemoDay(today); d <= today; d = addDays(d, 1)) {
     const fys = coveredBy(d);
     if (fys.some((fy) => !fy.isClosed)) continue;
     if (fys.length) throw new DemoSetupError(`Tahun buku untuk ${ymd(d)} sudah ditutup. Buka kembali tahun buku itu sebelum membuat data uji coba.`);
