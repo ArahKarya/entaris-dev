@@ -190,6 +190,9 @@ export async function cancelStockTransferInTx(
   transferId: string,
   opts: CancelStockTransferOptions = {},
 ) {
+  // Row lock: a second concurrent cancel waits here, then sees status Cancelled, so the stock
+  // checks below never run against a reversal that is about to commit.
+  await tx.$queryRaw`SELECT id FROM stock_transfers WHERE id = ${transferId} FOR UPDATE`;
   const transfer = await tx.stockTransfer.findUnique({
     where: { id: transferId },
     include: { items: true },
@@ -226,6 +229,8 @@ export async function cancelStockTransferInTx(
     qtyByItem.set(ti.itemId, (qtyByItem.get(ti.itemId) ?? new Decimal(0)).plus(ti.quantity.toString()));
   }
   for (const [itemId, qty] of qtyByItem) {
+    // Lock the destination row first; the read below then sees any outbound movement that committed meanwhile.
+    await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE item_id = ${itemId} AND warehouse_id = ${transfer.toWarehouseId} FOR UPDATE`;
     const stockRow = await tx.inventoryStock.findUnique({
       where: { itemId_warehouseId: { itemId, warehouseId: transfer.toWarehouseId } },
     });

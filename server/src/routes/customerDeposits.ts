@@ -12,7 +12,11 @@ import { BusinessError, handleRouteError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
-import { assertDepositNotRefunded } from '../services/depositCancelGuard';
+import {
+  assertDepositNotRefunded,
+  assertDepositNotFromSalesReturn,
+  findUnlinkedDepositJournal,
+} from '../services/depositCancelGuard';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -201,6 +205,7 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
         throw new BusinessError('Deposit sudah digunakan untuk invoice. Batalkan penggunaan terlebih dahulu.');
       }
       assertDepositNotRefunded(deposit);
+      await assertDepositNotFromSalesReturn(tx, deposit.id);
 
       // The journal's year when there is one; legacy deposits without a journal use their own.
       await assertPeriodOpen(tx, { fiscalYearId: deposit.journalEntry?.fiscalYearId ?? deposit.fiscalYearId }, 'uang muka');
@@ -208,26 +213,18 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       const depositAmount = Number(deposit.amount);
 
       // Void the journal in place (JE Cancelled, ALE isCancelled, balances reversed per item).
-      if (deposit.journalEntry) {
-        await voidJournalInTx(tx, deposit.journalEntry, 'uang muka');
+      // Deposits posted before the payment→journal link still have their journal, found unlinked.
+      const journal = deposit.journalEntry ?? (await findUnlinkedDepositJournal(tx, { ...deposit, paymentType: 'CustomerDeposit' }));
+      if (journal) {
+        await voidJournalInTx(tx, journal, 'uang muka');
       } else {
-        // No linked journal (legacy imports) — reverse account balances directly
+        // No journal and no ledger rows at all — reverse account balances directly.
+        // Never add a [BATAL] reversal JV: there is no original to pair it with.
         const customerDepositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
         const openingEquityAccount = await systemAccounts.getAccount('OPENING_EQUITY');
-
-        {
-          // Reverse: DR Customer Deposit / CR Ekuitas Saldo Awal
-          await updateAccountBalance(tx, customerDepositAccount.id, depositAmount, 0);
-          await updateAccountBalance(tx, openingEquityAccount.id, 0, depositAmount);
-
-          // Never add a [BATAL] reversal JV: the original is soft-cancelled elsewhere, so it
-          // would double-reverse the balance. Defensively soft-cancel legacy imported ALE rows.
-          // Matched by the payment id; a description match also caught any row that mentions the number.
-          await tx.accountingLedgerEntry.updateMany({
-            where: { referenceId: deposit.id, isCancelled: false },
-            data: { isCancelled: true },
-          });
-        }
+        // Reverse: DR Customer Deposit / CR Ekuitas Saldo Awal
+        await updateAccountBalance(tx, customerDepositAccount.id, depositAmount, 0);
+        await updateAccountBalance(tx, openingEquityAccount.id, 0, depositAmount);
       }
 
       // Restore party deposit balance

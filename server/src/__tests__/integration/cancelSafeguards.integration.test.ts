@@ -6,11 +6,15 @@
  *   movement picked the TransferIn batch, or the destination stock fell below the transferred qty
  *   (only inventory.negative_stock may force the second case).
  * - A customer or supplier deposit with a refund cannot be cancelled; the remainder stays usable.
- * - A legacy deposit without a journal soft-cancels only its own ledger rows (by referenceId).
+ * - Two concurrent cancels of one transfer reverse the stock once.
+ * - A legacy deposit without a journal link voids its unlinked create journal (found by number or
+ *   exact narration), never another journal's rows, and never reverses an already voided one.
+ * - A deposit created by a sales return cannot be cancelled on its own.
  * - A full delivery note edit leaves the old lines in audit_trail.oldValues.
  *
  * Route handlers and services run through the route harness, whose `$transaction` is a
- * savepoint; everything runs in a rollback transaction in a far-future year.
+ * savepoint; everything runs in a rollback transaction in a far-future year, except the concurrent
+ * transfer cancel, which commits its fixture and deletes it after.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -33,7 +37,11 @@ import {
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
 import { editDeliveryOrderInTx } from '../../services/deliveryOrderEdit';
 import { submitPaymentInTx } from '../../services/paymentSubmit';
-import { DEPOSIT_CANCEL_REFUNDED } from '../../services/depositCancelGuard';
+import { DEPOSIT_CANCEL_REFUNDED, DEPOSIT_CANCEL_SALES_RETURN } from '../../services/depositCancelGuard';
+import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
+import { submitSalesReturnInTx } from '../../services/salesReturnSubmit';
+import { systemAccounts } from '../../services/systemAccounts';
+import { updateAccountBalance } from '../../utils/accountBalance';
 import { invalidatePermissionCache } from '../../services/permissionService';
 import stockTransfersRouter from '../../routes/stockTransfers';
 import customerDepositsRouter from '../../routes/customerDeposits';
@@ -207,6 +215,63 @@ d('stock transfer cancel after the destination used the goods', () => {
   });
 });
 
+d('stock transfer cancel run twice at once', () => {
+  // Needs committed rows on two connections, so the fixture is created for real and deleted after.
+  it('the second cancel waits for the first, then fails; 1,000 kg moves back once', async () => {
+    const fy = await createFiscalYear(prisma as unknown as Tx, { year: 2089 });
+    const [a, b] = await Promise.all([warehouse(prisma as unknown as Tx), warehouse(prisma as unknown as Tx)]);
+    const item = await prisma.inventoryItem.create({
+      data: { code: `IT-E1R3-${tag()}`, name: `Uji batal ganda ${tag()}`, unit: 'kg', currentStock: 1_000, averageCost: 9_000, isActive: true },
+    });
+    // State right after a 1,000 kg transfer A -> B.
+    await prisma.inventoryStock.createMany({
+      data: [{ itemId: item.id, warehouseId: a.id, currentStock: 0 }, { itemId: item.id, warehouseId: b.id, currentStock: 1_000 }],
+    });
+    const transfer = await prisma.stockTransfer.create({
+      data: {
+        transferNumber: `ST-E1R3-${tag()}`, date: new Date('2089-03-10'), fromWarehouseId: a.id, toWarehouseId: b.id,
+        status: 'Submitted', fiscalYearId: fy.id, createdBy: userId, submittedAt: new Date(),
+        items: { create: [{ itemId: item.id, quantity: 1_000 }] },
+      },
+    });
+    try {
+      let release!: () => void;
+      const held = new Promise<void>((r) => { release = r; });
+      let firstDone!: () => void;
+      const firstApplied = new Promise<void>((r) => { firstDone = r; });
+      const first = prisma.$transaction(async (t) => {
+        await cancelStockTransferInTx(t, transfer.id);
+        firstDone();
+        await held; // keep the first cancel uncommitted while the second one starts
+      }, { timeout: 20000 });
+      await firstApplied;
+
+      let settled = false;
+      const second = prisma.$transaction((t) => cancelStockTransferInTx(t, transfer.id), { timeout: 20000 })
+        .then(() => 'NO_ERROR', (e: unknown) => (e instanceof Error ? e.message : String(e)))
+        .finally(() => { settled = true; });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false);
+
+      release();
+      await first;
+      expect(await second).toBe('Transfer sudah dibatalkan.');
+
+      const stock = await prisma.inventoryStock.findMany({ where: { itemId: item.id } });
+      const at = (whId: string) => Number(stock.find((s) => s.warehouseId === whId)?.currentStock ?? NaN);
+      expect(at(a.id)).toBe(1_000);
+      expect(at(b.id)).toBe(0);
+      expect((await prisma.stockTransfer.findUniqueOrThrow({ where: { id: transfer.id } })).status).toBe('Cancelled');
+    } finally {
+      await prisma.stockTransfer.delete({ where: { id: transfer.id } });
+      await prisma.inventoryStock.deleteMany({ where: { itemId: item.id } });
+      await prisma.inventoryItem.delete({ where: { id: item.id } });
+      await prisma.warehouse.deleteMany({ where: { id: { in: [a.id, b.id] } } });
+      await prisma.fiscalYear.delete({ where: { id: fy.id } });
+    }
+  });
+});
+
 d('deposit cancel after a refund', () => {
   it('rejects a customer deposit of 10 jt with 4 jt refunded; 6 jt remains', async () => {
     await inRollback(async (tx) => {
@@ -259,38 +324,157 @@ d('deposit cancel after a refund', () => {
       expect(Number((await tx.party.findUniqueOrThrow({ where: { id: supplier.id } })).depositBalance)).toBe(6_000_000);
     });
   });
+});
 
-  it('a legacy deposit without a journal cancels only its own ledger rows', async () => {
+/**
+ * A deposit posted before payment.journalEntryId was set: its journal exists, unlinked, and its
+ * ledger rows reference the journal and carry the create narration `<prefix>: <paymentNumber>`.
+ */
+async function legacyDeposit(
+  tx: Tx,
+  kind: 'CustomerDeposit' | 'VendorDeposit',
+  opts: { entryNumber?: string; narration: string; journalStatus?: 'Submitted' | 'Cancelled' },
+) {
+  const fy = await createFiscalYear(tx, { year: Y });
+  const p = await party(tx, kind === 'CustomerDeposit' ? 'Customer' : 'Supplier');
+  const depositAccountId = await systemAccounts.getAccountId(kind === 'CustomerDeposit' ? 'CUSTOMER_DEPOSIT' : 'VENDOR_DEPOSIT');
+  const amount = 10_000_000;
+  const paymentNumber = `PAY-E1R3-${tag()}`;
+  const date = new Date(`${Y}-04-01`);
+  const narration = opts.narration.replace('{n}', paymentNumber);
+  // Customer: DR cash / CR deposit liability. Supplier: DR deposit asset / CR cash.
+  const lines = kind === 'CustomerDeposit'
+    ? [{ accountId: cashAccountId, partyId: null, debit: amount, credit: 0 }, { accountId: depositAccountId, partyId: p.id, debit: 0, credit: amount }]
+    : [{ accountId: depositAccountId, partyId: p.id, debit: amount, credit: 0 }, { accountId: cashAccountId, partyId: null, debit: 0, credit: amount }];
+  const cancelled = opts.journalStatus === 'Cancelled';
+  const journal = await tx.journalEntry.create({
+    data: {
+      entryNumber: opts.entryNumber?.replace('{n}', paymentNumber) ?? `JV-E1R3-${tag()}`,
+      date, narration, status: opts.journalStatus ?? 'Submitted', fiscalYearId: fy.id, createdBy: userId, submittedAt: date,
+      items: { create: lines.map((l) => ({ ...l, description: narration })) },
+    },
+  });
+  const rows = [];
+  for (const l of lines) {
+    rows.push(await tx.accountingLedgerEntry.create({
+      data: { date, ...l, referenceType: 'JournalEntry', referenceId: journal.id, description: narration, fiscalYearId: fy.id, isCancelled: cancelled },
+    }));
+  }
+  // A cancelled journal already had its balances reversed (voided from the ledger before the guard).
+  if (!cancelled) for (const l of lines) await updateAccountBalance(tx, l.accountId, l.debit, l.credit);
+  await tx.party.update({
+    where: { id: p.id },
+    data: kind === 'CustomerDeposit' ? { customerDepositBalance: amount } : { depositBalance: amount },
+  });
+  const payment = await tx.payment.create({
+    data: {
+      paymentNumber, date, paymentType: kind, partyId: p.id, accountId: cashAccountId, amount,
+      status: 'Submitted', createdBy: userId, fiscalYearId: fy.id, submittedAt: date,
+    },
+  });
+  // Another journal whose narration also holds the number (refund shape) must stay active.
+  const otherJournal = await tx.journalEntry.create({
+    data: { entryNumber: `JV-E1R3-RF-${tag()}`, date, narration: 'refund', status: 'Submitted', fiscalYearId: fy.id, createdBy: userId, submittedAt: date },
+  });
+  const otherRow = await tx.accountingLedgerEntry.create({
+    data: {
+      date, accountId: depositAccountId, partyId: p.id, debit: 0, credit: 0, referenceType: 'JournalEntry', referenceId: otherJournal.id,
+      description: `Refund UM ${kind === 'CustomerDeposit' ? 'Pelanggan' : 'Supplier'}: ${paymentNumber}`, fiscalYearId: fy.id,
+    },
+  });
+  return { party: p, payment, journal, rows, otherRow };
+}
+
+async function balanceOf(tx: Tx, accountId: string) {
+  return Number((await tx.account.findUniqueOrThrow({ where: { id: accountId } })).balance);
+}
+
+async function isCancelledRow(tx: Tx, id: string) {
+  return (await tx.accountingLedgerEntry.findUniqueOrThrow({ where: { id } })).isCancelled;
+}
+
+d('legacy deposit cancel without a journal link', () => {
+  it('voids the unlinked journal JV-<number> of a 10 jt customer deposit and only its ledger rows', async () => {
     await inRollback(async (tx) => {
-      const fy = await createFiscalYear(tx, { year: Y });
-      const customer = await party(tx, 'Customer');
-      await tx.party.update({ where: { id: customer.id }, data: { customerDepositBalance: 5_000_000 } });
-      const payment = await tx.payment.create({
-        data: {
-          paymentNumber: `PAY-E1R3-${tag()}`,
-          date: new Date(`${Y}-04-01`),
-          paymentType: 'CustomerDeposit',
-          partyId: customer.id,
-          accountId: cashAccountId,
-          amount: 5_000_000,
-          status: 'Submitted',
-          createdBy: userId,
-          fiscalYearId: fy.id,
-          submittedAt: new Date(),
-        },
-      });
-      const row = (referenceId: string) => ({
-        date: new Date(`${Y}-04-01`), accountId: cashAccountId, debit: 5_000_000, credit: 0,
-        referenceType: 'Payment', referenceId, description: `UM lama ${payment.paymentNumber}`, fiscalYearId: fy.id,
-      });
-      const own = await tx.accountingLedgerEntry.create({ data: row(payment.id) });
-      // Another document that only mentions the number in its description.
-      const other = await tx.accountingLedgerEntry.create({ data: row('00000000-0000-4000-8000-000000000000') });
+      const depositAccountId = await systemAccounts.getAccountId('CUSTOMER_DEPOSIT');
+      const before = { cash: await balanceOf(tx, cashAccountId), deposit: await balanceOf(tx, depositAccountId) };
+      const fx = await legacyDeposit(tx, 'CustomerDeposit', { entryNumber: 'JV-{n}', narration: 'Uang Muka Pelanggan: {n}' });
+      expect(await balanceOf(tx, depositAccountId)).toBe(before.deposit + 10_000_000);
 
-      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId });
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
-      expect((await tx.accountingLedgerEntry.findUniqueOrThrow({ where: { id: own.id } })).isCancelled).toBe(true);
-      expect((await tx.accountingLedgerEntry.findUniqueOrThrow({ where: { id: other.id } })).isCancelled).toBe(false);
+
+      expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: fx.journal.id } })).status).toBe('Cancelled');
+      for (const r of fx.rows) expect(await isCancelledRow(tx, r.id)).toBe(true);
+      expect(await isCancelledRow(tx, fx.otherRow.id)).toBe(false);
+      expect(await balanceOf(tx, cashAccountId)).toBe(before.cash);
+      expect(await balanceOf(tx, depositAccountId)).toBe(before.deposit);
+      expect(Number((await tx.party.findUniqueOrThrow({ where: { id: fx.party.id } })).customerDepositBalance)).toBe(0);
+      expect((await tx.payment.findUniqueOrThrow({ where: { id: fx.payment.id } })).status).toBe('Cancelled');
+    });
+  });
+
+  it('finds a supplier deposit journal by its exact ledger narration when the number differs', async () => {
+    await inRollback(async (tx) => {
+      const depositAccountId = await systemAccounts.getAccountId('VENDOR_DEPOSIT');
+      const before = await balanceOf(tx, depositAccountId);
+      const fx = await legacyDeposit(tx, 'VendorDeposit', { narration: 'Uang Muka: {n}' });
+
+      const cancel = await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId });
+      expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
+
+      expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: fx.journal.id } })).status).toBe('Cancelled');
+      for (const r of fx.rows) expect(await isCancelledRow(tx, r.id)).toBe(true);
+      expect(await isCancelledRow(tx, fx.otherRow.id)).toBe(false);
+      expect(await balanceOf(tx, depositAccountId)).toBe(before);
+      expect(Number((await tx.party.findUniqueOrThrow({ where: { id: fx.party.id } })).depositBalance)).toBe(0);
+    });
+  });
+
+  it('does not reverse balances again when the unlinked journal was already cancelled', async () => {
+    await inRollback(async (tx) => {
+      const depositAccountId = await systemAccounts.getAccountId('CUSTOMER_DEPOSIT');
+      const openingEquityId = await systemAccounts.getAccountId('OPENING_EQUITY');
+      const before = { deposit: await balanceOf(tx, depositAccountId), equity: await balanceOf(tx, openingEquityId) };
+      const fx = await legacyDeposit(tx, 'CustomerDeposit', { entryNumber: 'JV-{n}', narration: 'Uang Muka Pelanggan: {n}', journalStatus: 'Cancelled' });
+
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId });
+      expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
+      expect(await balanceOf(tx, depositAccountId)).toBe(before.deposit);
+      expect(await balanceOf(tx, openingEquityId)).toBe(before.equity);
+      expect((await tx.payment.findUniqueOrThrow({ where: { id: fx.payment.id } })).status).toBe('Cancelled');
+    });
+  });
+});
+
+d('deposit created by a sales return', () => {
+  it('rejects cancelling the 1 jt credit of a sales return; the return still owns it', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: Y });
+      const customer = await party(tx, 'Customer');
+      const invoice = await submitSalesInvoiceInTx(
+        tx,
+        { date: `${Y}-06-01`, partyId: customer.id, items: [{ itemName: 'Jasa uji retur', itemType: 'service', quantity: 1, rate: 1_000_000 }] } as any,
+        userId,
+      );
+      // Already paid, so the whole return becomes customer credit.
+      await tx.salesInvoice.update({ where: { id: invoice.id }, data: { outstanding: 0 } });
+      const line = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      const ret = await submitSalesReturnInTx(
+        tx,
+        { salesInvoiceId: invoice.id, date: `${Y}-06-10`, items: [{ salesInvoiceItemId: line.id, quantity: 1, restock: false }] } as any,
+        userId,
+      );
+      if (!ret) throw new Error('Return not created.');
+      const { customerDepositId } = await tx.salesReturn.findUniqueOrThrow({ where: { id: ret.id } });
+      if (!customerDepositId) throw new Error('Return created no credit deposit.');
+      const balance = Number((await tx.party.findUniqueOrThrow({ where: { id: customer.id } })).customerDepositBalance);
+
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: customerDepositId }, userId });
+      expect(cancel.status, JSON.stringify(cancel.body)).toBe(400);
+      expect(cancel.body.code).toBe(DEPOSIT_CANCEL_SALES_RETURN);
+      expect((await tx.payment.findUniqueOrThrow({ where: { id: customerDepositId } })).status).toBe('Submitted');
+      expect(Number((await tx.party.findUniqueOrThrow({ where: { id: customer.id } })).customerDepositBalance)).toBe(balance);
     });
   });
 });
