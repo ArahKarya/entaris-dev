@@ -3,12 +3,20 @@
 // accountant to review. --apply writes only rows still NULL and only at or above --min-confidence
 // (default high); everything else stays NULL, which the cancel paths treat as "not manual".
 //
+// --from-csv <file> reads that CSV back after the accountant filled in its approved_type column
+// and writes those types instead of the classifier's: only filled rows, only valid source types,
+// only journals still NULL. Any invalid row stops the run before anything is written. Also a dry
+// run unless --apply is given. Run it before the plain --apply, so a reviewed row keeps the
+// accountant's type rather than the classifier's.
+//
 // Usage (from server/, DATABASE_URL set):
 //   node dist/scripts/repair/e1-journal-source-backfill.js [--dry-run] [--out file.csv]
 //        [--apply] [--min-confidence high|medium|low]
+//   node dist/scripts/repair/e1-journal-source-backfill.js --from-csv reviewed.csv [--apply]
 //   (or `npx tsx src/scripts/repair/e1-journal-source-backfill.ts …` from a source checkout)
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { JournalSourceType } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { csvCell } from '../../utils/csv';
 import {
@@ -20,6 +28,7 @@ import {
   type ImportBatch,
   type LegacyClassification,
 } from '../../services/ledger/journalSource';
+import { parseReviewedSourceCsv, planReviewedRows } from '../../services/ledger/journalSourceReview';
 
 const PAGE = 500;
 const CONFIDENCES: readonly ClassifyConfidence[] = ['high', 'medium', 'low'];
@@ -28,15 +37,20 @@ interface Options {
   apply: boolean;
   out: string | null;
   minConfidence: ClassifyConfidence;
+  fromCsv: string | null;
 }
 
 function parseArgs(argv: readonly string[]): Options {
-  const opts: Options = { apply: false, out: null, minConfidence: 'high' };
+  const opts: Options = { apply: false, out: null, minConfidence: 'high', fromCsv: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--apply') opts.apply = true;
     else if (a === '--dry-run') opts.apply = false;
     else if (a === '--out') opts.out = argv[++i] ?? null;
+    else if (a === '--from-csv') {
+      opts.fromCsv = argv[++i] ?? null;
+      if (!opts.fromCsv) throw new Error('--from-csv needs a file.');
+    }
     else if (a === '--min-confidence') {
       const v = argv[++i] as ClassifyConfidence;
       if (!CONFIDENCES.includes(v)) throw new Error(`--min-confidence must be one of ${CONFIDENCES.join(', ')}`);
@@ -44,6 +58,9 @@ function parseArgs(argv: readonly string[]): Options {
     } else throw new Error(`Unknown argument: ${a}`);
   }
   if (argv.includes('--apply') && argv.includes('--dry-run')) throw new Error('Use either --apply or --dry-run.');
+  if (opts.fromCsv && (argv.includes('--min-confidence') || opts.out)) {
+    throw new Error('--from-csv applies the reviewed types only; it takes no --min-confidence or --out.');
+  }
   return opts;
 }
 
@@ -146,8 +163,57 @@ async function classifyPage(
   });
 }
 
+/** --from-csv: writes the accountant's reviewed types to journals that are still NULL. */
+async function applyReviewedCsv(file: string, apply: boolean): Promise<void> {
+  const parsed = parseReviewedSourceCsv(readFileSync(file, 'utf8'));
+  if (parsed.errors.length > 0) {
+    console.error(`${file}: ${parsed.errors.length} error(s); nothing written.`);
+    for (const e of parsed.errors) console.error(`  ${e}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const journals = await prisma.journalEntry.findMany({
+    where: { id: { in: parsed.rows.map((r) => r.id) } },
+    select: { id: true, sourceType: true, fiscalYearId: true },
+  });
+  const plan = planReviewedRows(parsed.rows, new Map(journals.map((j) => [j.id, j.sourceType])));
+  const fiscalYearOf = new Map(journals.map((j) => [j.id, j.fiscalYearId]));
+
+  let applied = 0;
+  let raced = 0;
+  const counts = new Map<string, number>();
+  for (const row of plan.apply) {
+    counts.set(row.type, (counts.get(row.type) ?? 0) + 1);
+    if (!apply) continue;
+    // Same key the classifier gives a closing journal; other types carry none.
+    const sourceKey = row.type === JournalSourceType.FY_CLOSE ? `FY_CLOSE:${fiscalYearOf.get(row.id)}` : null;
+    // Only rows still NULL: a writer or the plain --apply may have tagged it meanwhile.
+    const res = await prisma.journalEntry.updateMany({
+      where: { id: row.id, sourceType: null },
+      data: { sourceType: row.type, ...(sourceKey ? { sourceKey } : {}) },
+    });
+    if (res.count === 1) applied++;
+    else raced++;
+  }
+
+  console.log(`${apply ? 'APPLY' : 'DRY RUN'} --from-csv ${file}`);
+  console.log(`  reviewed rows: ${parsed.rows.length} (blank approved_type, left NULL: ${parsed.blank})`);
+  console.log(`  ${apply ? 'to write' : 'would write'}: ${plan.apply.length}`);
+  for (const [type, n] of [...counts.entries()].sort()) console.log(`    ${type}: ${n}`);
+  console.log(`  already tagged, skipped: ${plan.alreadyTagged.length}`);
+  for (const r of plan.alreadyTagged) console.log(`    line ${r.line} ${r.id}: is ${r.current}, reviewed ${r.type}`);
+  console.log(`  not found, skipped: ${plan.notFound.length}`);
+  for (const r of plan.notFound) console.log(`    line ${r.line} ${r.id}`);
+  if (apply) console.log(`Applied: ${applied}${raced > 0 ? ` (${raced} tagged meanwhile, skipped)` : ''}`);
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.fromCsv) {
+    await applyReviewedCsv(opts.fromCsv, opts.apply);
+    return;
+  }
   const ctx = await loadContext();
   const recurringIds = await recurringJournalIds();
   const rows: CsvRow[] = [];
@@ -184,9 +250,10 @@ async function main() {
   }
 
   if (opts.out) {
-    const header = 'id,entry_number,date,status,is_dummy,narration,source_type,source_key,confidence,reason,applied';
+    // approved_type stays empty: the accountant fills it in for --from-csv.
+    const header = 'id,entry_number,date,status,is_dummy,narration,source_type,source_key,confidence,reason,applied,approved_type';
     const lines = rows.map((r) =>
-      [r.id, r.entryNumber, r.date, r.status, r.isDummy, r.narration, r.c.type, r.c.sourceKey, r.c.confidence, r.c.reason, r.applied]
+      [r.id, r.entryNumber, r.date, r.status, r.isDummy, r.narration, r.c.type, r.c.sourceKey, r.c.confidence, r.c.reason, r.applied, '']
         .map(csvCell)
         .join(','),
     );
