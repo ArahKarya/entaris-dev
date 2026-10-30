@@ -608,11 +608,11 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Error umum**
 
-- 400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)
+- 400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi "Refund UM ..."), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)
 - 400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual
-- 400: uang muka tidak ditemukan, bukan tipe uang muka pelanggan, atau sudah dibatalkan
+- 400: uang muka tidak ditemukan atau bukan tipe uang muka pelanggan (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -620,7 +620,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### cdep_refund_list
 
-**Ringkasan:** Daftar refund kas satu uang muka pelanggan (jurnal refund), terbaru dulu, termasuk yang sudah dibatalkan: nomor jurnal, tanggal, jumlah, akun kas/bank, status, dan siapa/alasan pembatalannya.
+**Ringkasan:** Daftar refund kas satu uang muka pelanggan (jurnal refund), terbaru dulu, termasuk yang sudah dibatalkan: nomor jurnal, tanggal, jumlah, akun kas/bank, status, dan siapa/alasan pembatalannya. Jurnal lama tanpa tanda sumber hanya tampil bila bentuknya persis jurnal refund modul Uang Muka (jurnal manual bernarasi serupa tidak ikut).
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `view`)
