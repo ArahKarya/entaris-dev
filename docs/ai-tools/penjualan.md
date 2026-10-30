@@ -421,6 +421,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - Tahun buku dokumen dan jurnalnya masih terbuka.
 - Belum ada refund (refundedAmount = 0).
+- Bukan uang muka hasil Retur Penjualan (yang itu dibatalkan lewat retur).
 - User memiliki capability doc.cancel.
 
 **Error umum**
@@ -430,6 +431,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: sudah dibatalkan.
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
+- 400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan
 - 403: tanpa capability doc.cancel
 
 ### cdep_list
