@@ -34,7 +34,7 @@ export async function cancelProductionRunInTx(
   if (!run) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (run.isCancelled) throw new BusinessError('Proses produksi sudah dibatalkan.');
   // Its journals and auto-settle journals check their own years when voided; this covers the run.
-  await assertPeriodsOpen(tx, [{ date: run.date }, { fiscalYearId: run.fiscalYearId }], 'produksi');
+  await assertPeriodsOpen(tx, [{ date: run.date }, { fiscalYearId: run.fiscalYearId, date: run.date }], 'produksi');
 
   const movements = await tx.stockMovement.findMany({
     where: { referenceType: 'ProductionRun', referenceId: runId, isCancelled: false },

@@ -495,8 +495,8 @@ export async function cancelPaymentRequestPaymentInTx(tx: Tx, id: string, actor:
   assertOk(checkCancelPayment(pr, actor));
   if (pr.journalEntryId) {
     // Checked before the claim so a closed year leaves the request untouched (cancelJournalInTx checks again).
-    const je = await tx.journalEntry.findUnique({ where: { id: pr.journalEntryId }, select: { fiscalYearId: true } });
-    if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'pembayaran');
+    const je = await tx.journalEntry.findUnique({ where: { id: pr.journalEntryId }, select: { fiscalYearId: true, date: true } });
+    if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'pembayaran');
   }
   await claimStatus(tx, id, ['PAID'], {
     status: 'APPROVED',

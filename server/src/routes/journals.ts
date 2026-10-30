@@ -218,7 +218,7 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
 
       // Closed fiscal year first so the client gets the PERIOD_CLOSED code; then only hand-made
       // journals pass, module journals are undone from their module.
-      await assertPeriodOpen(tx, { fiscalYearId: entry.fiscalYearId }, 'jurnal');
+      await assertPeriodOpen(tx, { fiscalYearId: entry.fiscalYearId, date: entry.date }, 'jurnal');
       // Deposit refunds have their own cancel on the deposit page, which also lowers refundedAmount.
       if (isDepositRefundJournal(entry)) {
         throw new BusinessError(DEPOSIT_REFUND_MENU_MESSAGE, JOURNAL_USE_DEPOSIT_REFUND_CANCEL);

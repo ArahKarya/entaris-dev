@@ -55,7 +55,7 @@ export async function cancelGoodsReceiptInTx(
   });
   // The cancel voids the STT's own journal, so the STT's date and stored fiscal year must be open
   // (the journal's own year is checked again when it is voided).
-  await assertPeriodsOpen(tx, [{ date: stt.date }, { fiscalYearId: stt.fiscalYearId }], 'penerimaan barang');
+  await assertPeriodsOpen(tx, [{ date: stt.date }, { fiscalYearId: stt.fiscalYearId, date: stt.date }], 'penerimaan barang');
 
   if (stt.isLegacyBackfill) {
     throw new BusinessError(

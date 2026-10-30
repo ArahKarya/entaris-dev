@@ -27,7 +27,7 @@ export async function voidJournalInTx(
   label: PeriodLabel = 'jurnal',
   trail?: CancelTrail,
 ): Promise<boolean> {
-  await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId }, label);
+  await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId, date: journal.date }, label);
   if (journal.status === 'Cancelled') return false;
 
   const claimed = await tryClaimCancel(tx.journalEntry, journal.id, {

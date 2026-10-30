@@ -26,9 +26,11 @@ async function caught(p: Promise<unknown>): Promise<BusinessError> {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('assertPeriodOpen', () => {
-  it('returns the open fiscal year by id', async () => {
-    const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: lockRows(openFy) });
-    await expect(assertPeriodOpen(tx, { fiscalYearId: 'fy-1' }, 'jurnal')).resolves.toEqual(openFy);
+  it('returns the open fiscal year by id, not by the date that comes with it', async () => {
+    const { tx, fn } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: lockRows(openFy) });
+    await expect(assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'jurnal')).resolves.toEqual(openFy);
+    expect(fn('fiscalYear.findUnique')).toHaveBeenCalledWith({ where: { id: 'fy-1' } });
+    expect(fn('fiscalYear.findFirst')).not.toHaveBeenCalled();
   });
 
   it('throws FISCAL_YEAR_MISSING when no fiscal year exists', async () => {
@@ -40,7 +42,7 @@ describe('assertPeriodOpen', () => {
 
   it('throws PERIOD_CLOSED for a closed fiscal year', async () => {
     const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => closedFy, $queryRaw: lockRows(closedFy) });
-    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-0' }, 'pembayaran'));
+    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-0', date: new Date('2025-03-01T00:00:00Z') }, 'pembayaran'));
     expect(e.code).toBe(PERIOD_CLOSED);
     expect(e.message).toMatch(/Tahun buku 2025 sudah ditutup; pembayaran/);
   });
@@ -107,7 +109,7 @@ describe('assertPeriodOpen', () => {
   it('share-locks the fiscal-year row and trusts its committed isClosed over the first read', async () => {
     // A close committed while this transaction waited on the row lock.
     const { tx, fn } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: lockRows({ ...openFy, isClosed: true }) });
-    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-1' }, 'invoice'));
+    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'invoice'));
     expect(e.code).toBe(PERIOD_CLOSED);
     const [sql, id] = fn('$queryRaw').mock.calls[0]!;
     expect(sql.join('?')).toMatch(/FROM fiscal_years WHERE id = \? FOR SHARE/);
@@ -122,12 +124,12 @@ describe('assertPeriodOpen', () => {
 
   it('reports FISCAL_YEAR_MISSING when the row is gone by the time it is locked', async () => {
     const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy });
-    expect((await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-1' }, 'jurnal'))).code).toBe(FISCAL_YEAR_MISSING);
+    expect((await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'jurnal'))).code).toBe(FISCAL_YEAR_MISSING);
   });
 
   it('messages translate to English with the label', async () => {
     const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => closedFy, $queryRaw: lockRows(closedFy) });
-    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-0' }, 'jurnal'));
+    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-0', date: new Date('2025-03-01T00:00:00Z') }, 'jurnal'));
     expect(translateMessage(e.message, 'en')).toBe(
       'Fiscal year 2025 is closed; this journal cannot be posted, changed or cancelled in that period. Make the correction in the current period.',
     );
@@ -142,7 +144,7 @@ describe('assertPeriodsOpen', () => {
       $queryRaw: lockRows(openFy),
     });
     const day = new Date('2026-03-01T00:00:00Z');
-    await assertPeriodsOpen(tx, [{ date: day }, { fiscalYearId: 'fy-1' }, null, { date: new Date(day) }, { fiscalYearId: 'fy-1' }, undefined], 'mutasi stok');
+    await assertPeriodsOpen(tx, [{ date: day }, { fiscalYearId: 'fy-1', date: day }, null, { date: new Date(day) }, { fiscalYearId: 'fy-1', date: new Date('2026-04-01T00:00:00Z') }, undefined], 'mutasi stok');
     expect(fn('fiscalYear.findFirst')).toHaveBeenCalledTimes(1);
     expect(fn('fiscalYear.findUnique')).toHaveBeenCalledTimes(1);
   });
@@ -153,7 +155,7 @@ describe('assertPeriodsOpen', () => {
       'fiscalYear.findUnique': () => closedFy,
       $queryRaw: lockRows(openFy, closedFy),
     });
-    const e = await caught(assertPeriodsOpen(tx, [{ date: new Date('2026-03-01T00:00:00Z') }, { fiscalYearId: 'fy-0' }], 'surat jalan'));
+    const e = await caught(assertPeriodsOpen(tx, [{ date: new Date('2026-03-01T00:00:00Z') }, { fiscalYearId: 'fy-0', date: new Date('2025-03-01T00:00:00Z') }], 'surat jalan'));
     expect(e.code).toBe(PERIOD_CLOSED);
     expect(e.message).toMatch(/surat jalan di periode ini/);
   });

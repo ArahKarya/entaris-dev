@@ -32,7 +32,7 @@ export async function cancelSalesInvoiceInTx(
   // Invoice Rp 0 (sumbangan) otomatis Paid tanpa pembayaran → tetap boleh dibatalkan.
   if (invoice.status === 'Paid' && Number(invoice.grandTotal) !== 0) throw new BusinessError('Invoice sudah lunas, tidak bisa dibatalkan.');
   // A closed year stays as reported; the correction is a manual journal in the open period.
-  await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId }, 'invoice');
+  await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId, date: invoice.date }, 'invoice');
 
   const allocations = await tx.paymentAllocation.findMany({
     where: { invoiceType: 'SalesInvoice', invoiceId: invoice.id },
@@ -116,7 +116,7 @@ export async function cancelPurchaseInvoiceInTx(
   await claimCancel(tx.purchaseInvoice, invoice.id, { status: 'Cancelled', outstanding: 0, cancelledAt: new Date() });
   if (invoice.status === 'Paid') throw new BusinessError('Invoice sudah lunas, tidak bisa dibatalkan.');
   // Also covers the legacy branch below that reverses balances without a journal.
-  await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId }, 'invoice');
+  await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId, date: invoice.date }, 'invoice');
 
   const allocations = await tx.paymentAllocation.findMany({
     where: { invoiceType: 'PurchaseInvoice', invoiceId: invoice.id },

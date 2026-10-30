@@ -475,7 +475,8 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       // the same order as a single post and an un-post, so none of them deadlock with this run.
       const assetIds = [...new Set(dueEntries.map((e) => e.fixedAssetId))].sort();
       await tx.$queryRaw`SELECT id FROM fixed_assets WHERE id IN (${Prisma.join(assetIds)}) ORDER BY id FOR UPDATE`;
-      await assertPeriodOpen(tx, { fiscalYearId: fiscalYear.id }, 'penyusutan');
+      // Dated the month's last day, the latest periodDate of the run.
+      await assertPeriodOpen(tx, { fiscalYearId: fiscalYear.id, date: lastDay.gte }, 'penyusutan');
       // Pull starting JE number once, increment locally to avoid N round-trips
       const startCount = await tx.journalEntry.count();
       const jeNumbers: string[] = [];

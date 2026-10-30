@@ -1,11 +1,11 @@
-// Period guard for postings and cancellations: the fiscal year must exist and be open.
-// Unlike getOpenFiscalYear it tells "no fiscal year" apart from "closed" through a stable
-// BusinessError code, and it finds the year by business day (WIB), not by raw instant, so a
-// posting late on 31 Dec or early on 1 Jan lands in the right year.
+// Period guard for postings and cancellations: the fiscal year must exist and be open. Every
+// posting path reaches it, directly or through getOpenFiscalYear. It tells "no fiscal year" apart
+// from "closed" through a stable BusinessError code, and it finds the year by business day (WIB),
+// not by raw instant, so a posting late on 31 Dec or early on 1 Jan lands in the right year.
 
 import type { FiscalYear, Prisma } from '@prisma/client';
 import { BusinessError } from './errors';
-import { businessUtcOffset, localDayRange } from './listQuery';
+import { businessDayOf, businessDayRange } from './businessDate';
 
 type Tx = Prisma.TransactionClient;
 
@@ -14,7 +14,11 @@ export const FISCAL_YEAR_MISSING = 'FISCAL_YEAR_MISSING';
 /** Reserved for the period lock date; nothing raises it until that column exists. */
 export const PERIOD_LOCKED = 'PERIOD_LOCKED';
 
-export type PeriodRef = { date: Date } | { fiscalYearId: string };
+/**
+ * The document or journal being checked. `date` is always its own date; `fiscalYearId`, when
+ * given, is the year it is booked to, and that year is checked instead of the one found by date.
+ */
+export type PeriodRef = { date: Date; fiscalYearId?: string };
 
 /**
  * What is being posted or cancelled, as it reads mid-sentence in the error message.
@@ -36,20 +40,16 @@ export type PeriodLabel =
   | 'penerimaan barang'
   | 'dokumen';
 
-const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Calendar day (YYYY-MM-DD) of an instant in the business time zone. An instant at exact UTC
- * midnight is a date-only value (new Date('YYYY-MM-DD')) and keeps its UTC calendar day; a
- * negative offset would otherwise move it to the day before.
+ * Business day (YYYY-MM-DD) of an instant. An instant at exact UTC midnight is a date-only value
+ * (new Date('YYYY-MM-DD')) and keeps its UTC calendar day; a negative offset would otherwise move
+ * it to the day before.
  */
-function businessDay(date: Date, offset: string): string {
+function businessDay(date: Date): string {
   if (date.getTime() % MS_PER_DAY === 0) return date.toISOString().slice(0, 10);
-  const sign = offset.startsWith('-') ? -1 : 1;
-  const [h, m] = offset.slice(1).split(':').map(Number);
-  const shifted = new Date(date.getTime() + sign * (h! * 60 + m!) * MS_PER_MINUTE);
-  return shifted.toISOString().slice(0, 10);
+  return businessDayOf(date);
 }
 
 const earlier = (a: Date, b: Date): Date => (a.getTime() <= b.getTime() ? a : b);
@@ -59,15 +59,15 @@ const earlier = (a: Date, b: Date): Date => (a.getTime() <= b.getTime() ? a : b)
  * Fiscal-year bounds are stored at UTC or local midnight of their calendar day. Each range end
  * is the earlier of the two midnights (of this day, and of the next day), which accepts either
  * form of this day and neither form of a neighbouring day, for positive and negative offsets.
+ * When an odd end time makes two years touch one day, the later year wins.
  */
 async function findFiscalYearForDate(tx: Tx, date: Date): Promise<FiscalYear | null> {
-  const offset = businessUtcOffset();
-  const day = businessDay(date, offset);
-  const local = localDayRange(day, day, offset);
+  const day = businessDay(date);
+  const local = businessDayRange(day);
   const utcStart = new Date(`${day}T00:00:00.000Z`);
   const utcNext = new Date(utcStart.getTime() + MS_PER_DAY);
   return tx.fiscalYear.findFirst({
-    where: { startDate: { lt: earlier(local.lt!, utcNext) }, endDate: { gte: earlier(local.gte!, utcStart) } },
+    where: { startDate: { lt: earlier(local.lt, utcNext) }, endDate: { gte: earlier(local.gte, utcStart) } },
     orderBy: { startDate: 'desc' },
   });
 }
@@ -89,7 +89,7 @@ async function lockFiscalYearRow(tx: Tx, id: string): Promise<boolean | null> {
  */
 export async function assertPeriodOpen(tx: Tx, ref: PeriodRef, label: PeriodLabel): Promise<FiscalYear> {
   const found =
-    'fiscalYearId' in ref
+    ref.fiscalYearId !== undefined
       ? await tx.fiscalYear.findUnique({ where: { id: ref.fiscalYearId } })
       : await findFiscalYearForDate(tx, ref.date);
   const isClosed = found ? await lockFiscalYearRow(tx, found.id) : null;
@@ -122,7 +122,7 @@ export async function assertPeriodsOpen(
   const seen = new Set<string>();
   for (const ref of refs) {
     if (!ref) continue;
-    const key = 'fiscalYearId' in ref ? `fy:${ref.fiscalYearId}` : `date:${ref.date.getTime()}`;
+    const key = ref.fiscalYearId !== undefined ? `fy:${ref.fiscalYearId}` : `date:${ref.date.getTime()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     await assertPeriodOpen(tx, ref, label);

@@ -79,7 +79,7 @@ d('assertPeriodOpen', () => {
   it('reports a date with no fiscal year as FISCAL_YEAR_MISSING', async () => {
     await inRollback(async (tx) => {
       expect(await codeOf(assertPeriodOpen(tx, { date: new Date('2094-06-15T03:00:00Z') }, 'jurnal'))).toBe(FISCAL_YEAR_MISSING);
-      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: 'missing-fy-id' }, 'dokumen'))).toBe(FISCAL_YEAR_MISSING);
+      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: 'missing-fy-id', date: new Date('2094-06-15T03:00:00Z') }, 'dokumen'))).toBe(FISCAL_YEAR_MISSING);
     });
   });
 
@@ -87,8 +87,8 @@ d('assertPeriodOpen', () => {
     await inRollback(async (tx) => {
       const { closed, open } = await closedThenOpenYears(tx, 2095);
       expect(await codeOf(assertPeriodOpen(tx, { date: new Date('2095-08-01T03:00:00Z') }, 'invoice'))).toBe(PERIOD_CLOSED);
-      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: closed.id }, 'invoice'))).toBe(PERIOD_CLOSED);
-      expect((await assertPeriodOpen(tx, { fiscalYearId: open.id }, 'invoice')).id).toBe(open.id);
+      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: closed.id, date: new Date('2095-08-01T03:00:00Z') }, 'invoice'))).toBe(PERIOD_CLOSED);
+      expect((await assertPeriodOpen(tx, { fiscalYearId: open.id, date: new Date('2096-02-01T03:00:00Z') }, 'invoice')).id).toBe(open.id);
       // The first business day of the open year is not swallowed by the closed one.
       expect((await assertPeriodOpen(tx, { date: new Date('2095-12-31T18:00:00Z') }, 'invoice')).id).toBe(open.id);
     });
@@ -115,7 +115,7 @@ d('assertPeriodOpen', () => {
           await closer.query('UPDATE fiscal_years SET is_closed = true WHERE id = $1', [fyId]);
 
           let settled = false;
-          const guard = codeOf(prisma.$transaction((tx) => assertPeriodOpen(tx, { fiscalYearId: fyId }, 'invoice'))).finally(() => {
+          const guard = codeOf(prisma.$transaction((tx) => assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2096-06-15T03:00:00Z') }, 'invoice'))).finally(() => {
             settled = true;
           });
           await new Promise((r) => setTimeout(r, 300));
@@ -137,7 +137,7 @@ d('assertPeriodOpen', () => {
         let locked!: () => void;
         const isLocked = new Promise<void>((r) => { locked = r; });
         const cancel = prisma.$transaction(async (tx) => {
-          await assertPeriodOpen(tx, { fiscalYearId: fyId }, 'invoice');
+          await assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2097-06-15T03:00:00Z') }, 'invoice');
           locked();
           await held;
         });

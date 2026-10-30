@@ -476,7 +476,7 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       if (guarantee.settlements.length > 0) {
         throw new BusinessError('Sudah ada settlement aktif. Batalkan settlement terlebih dahulu.');
       }
-      await assertPeriodOpen(tx, { fiscalYearId: guarantee.fiscalYearId }, 'uang jaminan');
+      await assertPeriodOpen(tx, { fiscalYearId: guarantee.fiscalYearId, date: guarantee.date }, 'uang jaminan');
 
       if (guarantee.journalEntryId) {
         await voidJournalByIdInTx(tx, guarantee.journalEntryId, 'uang jaminan', trail);

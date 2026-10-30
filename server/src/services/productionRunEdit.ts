@@ -41,7 +41,7 @@ export async function editProductionRunInTx(
   // open. Checked before anything is reversed, and again here when an approved edit is executed.
   const txDate = new Date(body.date);
   if (isNaN(txDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
-  await assertPeriodsOpen(tx, [{ date: oldRun.date }, { fiscalYearId: oldRun.fiscalYearId }], 'produksi');
+  await assertPeriodsOpen(tx, [{ date: oldRun.date }, { fiscalYearId: oldRun.fiscalYearId, date: oldRun.date }], 'produksi');
   const fiscalYear = await assertPeriodOpen(tx, { date: txDate }, 'produksi');
 
   const oldMovements = await tx.stockMovement.findMany({
