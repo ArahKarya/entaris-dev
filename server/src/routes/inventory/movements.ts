@@ -8,7 +8,7 @@ import { BusinessError, handleRouteError } from '../../utils/errors';
 import { documentMovementLockMessage } from '../../services/documentMovementLock';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
-import { assertPeriodOpen, assertPeriodsOpen } from '../../utils/periodGuard';
+import { assertPeriodOpen } from '../../utils/periodGuard';
 import { updateAccountBalance, recalculateAccountBalances } from '../../utils/accountBalance';
 import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
@@ -338,10 +338,11 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
       }
 
       // The edit voids the old journal and auto-settle and re-posts on body.date, so the old and
-      // the new period must both be open, also when no journal is posted (unit cost 0).
+      // the new period must both be open, also when no journal is posted (unit cost 0). The stored
+      // fiscalYearId is not checked: older edits never updated it, and the journals check their own year.
       const movementDate = new Date(body.date);
       if (isNaN(movementDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
-      await assertPeriodsOpen(tx, [{ date: oldMov.date }, { fiscalYearId: oldMov.fiscalYearId }], 'mutasi stok');
+      await assertPeriodOpen(tx, { date: oldMov.date }, 'mutasi stok');
       const fiscalYear = await assertPeriodOpen(tx, { date: movementDate }, 'mutasi stok');
 
       const oldIsIn = oldMov.movementType === 'In' || oldMov.movementType === 'AdjustmentIn';
@@ -542,7 +543,8 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
       const cancelLock = documentMovementLockMessage(movement.referenceType, 'cancel');
       if (cancelLock) throw new BusinessError(cancelLock);
-      await assertPeriodsOpen(tx, [{ date: movement.date }, { fiscalYearId: movement.fiscalYearId }], 'mutasi stok');
+      // By date only, as on edit: the journal and auto-settle journals check their own year below.
+      await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
 
       const isIn = movement.movementType === 'In' || movement.movementType === 'AdjustmentIn';
       const isOut = movement.movementType === 'Out' || movement.movementType === 'AdjustmentOut';

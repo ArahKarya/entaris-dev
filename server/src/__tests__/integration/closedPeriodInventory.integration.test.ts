@@ -254,22 +254,51 @@ d('closed fiscal year: stock movements', () => {
       expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: mov.journalEntryId! } })).status).toBe('Cancelled');
     });
   });
+
+  it('edits and cancels an open-year movement whose stored fiscal year is a stale closed year', async () => {
+    await inRollback(async (tx) => {
+      const { old, next } = await years(tx);
+      const item = await stockItem(tx, 100, 1_000);
+      const edited = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentIn', quantity: 10, unitCost: 1_000, date: `${Y + 1}-01-05` });
+      const cancelled = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentOut', quantity: 5, unitCost: 1_000, date: `${Y + 1}-01-05` });
+      // Older edits moved the date across the year end but kept the earlier fiscal year.
+      await tx.stockMovement.updateMany({ where: { id: { in: [edited.id, cancelled.id] } }, data: { fiscalYearId: old.id } });
+      await close(tx, old);
+
+      const r = await callRoute(movementsRouter, 'put', '/:id', {
+        params: { id: edited.id },
+        body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-10` },
+        userId,
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: edited.id } })).fiscalYearId).toBe(next.id);
+
+      const c = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: cancelled.id }, userId });
+      expect(c.status, JSON.stringify(c.body)).toBe(200);
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: cancelled.id } })).isCancelled).toBe(true);
+    });
+  });
 });
 
 d('closed fiscal year: stock opname', () => {
+  /** POST /stock-opname on 20 Dec of Y, counting `actualStock`; returns the opname and its journals. */
+  async function opname(tx: Tx, itemId: string, actualStock: number) {
+    // A Draft opname blocks a new one; set any leftover aside inside the rollback.
+    await tx.stockOpname.updateMany({ where: { status: 'Draft' }, data: { status: 'Cancelled' } });
+    const r = await callRoute(stockOpnameRouter, 'post', '/', {
+      body: { date: `${Y}-12-20`, warehouseId, items: [{ itemId, actualStock }] },
+      userId,
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    const so = await tx.stockOpname.findUniqueOrThrow({ where: { id: r.body.id } });
+    return { so, jeIds: await journalIdsOf(tx, so.opnameNumber) };
+  }
+
   it('rejects cancelling an opname of 20 Dec', async () => {
     await inRollback(async (tx) => {
       const { old } = await years(tx);
       const item = await stockItem(tx, 100, 5_000);
-      // Draft opnames block a new one; none should exist in a test database, but stay safe.
-      if (await tx.stockOpname.findFirst({ where: { status: 'Draft' } })) return;
-      const r = await callRoute(stockOpnameRouter, 'post', '/', {
-        body: { date: `${Y}-12-20`, warehouseId, items: [{ itemId: item.id, actualStock: 90 }] },
-        userId,
-      });
-      expect(r.status, JSON.stringify(r.body)).toBe(201);
-      const so = await tx.stockOpname.findUniqueOrThrow({ where: { id: r.body.id } });
-      const jeIds = await journalIdsOf(tx, so.opnameNumber);
+      const { so, jeIds } = await opname(tx, item.id, 90);
       expect(jeIds.length).toBeGreaterThan(0);
       await close(tx, old);
 
@@ -277,6 +306,19 @@ d('closed fiscal year: stock opname', () => {
       expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId }));
       expect(await snapshot(tx, [item.id], jeIds)).toEqual(before);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).not.toBe('Cancelled');
+    });
+  });
+
+  it('rejects cancelling a 20 Dec opname without a difference, which posted no journal', async () => {
+    await inRollback(async (tx) => {
+      const { old } = await years(tx);
+      const item = await stockItem(tx, 100, 5_000);
+      const { so, jeIds } = await opname(tx, item.id, 100);
+      expect(jeIds).toEqual([]);
+      await close(tx, old);
+
+      expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId }));
+      expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).toBe('Submitted');
     });
   });
 });
