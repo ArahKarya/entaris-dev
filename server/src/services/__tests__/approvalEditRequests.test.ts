@@ -5,7 +5,7 @@ const { notifyAdmins, notifyUsers, editRun, reviseInv, db } = vi.hoisted(() => (
   notifyUsers: vi.fn().mockResolvedValue(1),
   editRun: vi.fn(),
   reviseInv: vi.fn(),
-  db: { approvalRequest: {}, productionRun: {}, purchaseInvoice: {}, inventoryItem: {}, user: {}, transactionAttachment: {}, $transaction: undefined } as any,
+  db: { approvalRequest: {}, productionRun: {}, purchaseInvoice: {}, inventoryItem: {}, user: {}, transactionAttachment: {}, fiscalYear: {}, $transaction: undefined, $queryRaw: undefined } as any,
 }));
 vi.mock('../notificationService', () => ({ notifyAdmins: (...a: any[]) => notifyAdmins(...a), notifyUsers: (...a: any[]) => notifyUsers(...a) }));
 vi.mock('../productionRunEdit', () => ({ editProductionRunInTx: (...a: any[]) => editRun(...a) }));
@@ -27,13 +27,14 @@ import { decideApproval } from '../approvalDecision';
 import { GATED_DOCUMENT_TYPES, GATED_LABELS } from '../approvalGate';
 
 const RUN = {
-  runNumber: 'PR-0001', date: new Date('2026-10-01T00:00:00Z'), isCancelled: false, computedHpp: 8000,
+  runNumber: 'PR-0001', date: new Date('2026-10-01T00:00:00Z'), fiscalYearId: 'fy-2026', isCancelled: false, computedHpp: 8000,
   items: [
     { itemId: 'gkp', lineType: 'Input', quantity: 1000, item: { name: 'GKP' } },
     { itemId: 'brs', lineType: 'Output', quantity: 600, item: { name: 'Beras' } },
     { itemId: 'sek', lineType: 'ByProduct', quantity: 200, item: { name: 'Sekam' } },
   ],
 };
+const FY_2026 = { id: 'fy-2026', name: '2026', isClosed: false };
 const RUN_BODY = {
   date: '2026-10-01', inputs: [{ itemId: 'gkp', quantity: 1100 }],
   outputs: [{ itemId: 'brs', quantity: 600 }, { itemId: 'sek', quantity: 200, isByProduct: true, unitPrice: 100 }],
@@ -94,6 +95,9 @@ describe('queueEditApproval', () => {
     db.inventoryItem.findMany = vi.fn().mockResolvedValue([{ id: 'gkp', name: 'GKP' }]);
     db.user.findUnique = vi.fn().mockResolvedValue({ fullName: 'Staf' });
     db.$transaction = vi.fn(async (fn: any) => fn(db));
+    db.fiscalYear.findUnique = vi.fn().mockResolvedValue(FY_2026);
+    db.fiscalYear.findFirst = vi.fn().mockResolvedValue(FY_2026);
+    db.$queryRaw = vi.fn(async (_sql: unknown, id: string) => (id === FY_2026.id ? [{ is_closed: FY_2026.isClosed }] : []));
   });
 
   it('queues a production edit with target number at request time, snapshot and notification', async () => {
@@ -118,6 +122,19 @@ describe('queueEditApproval', () => {
     arrange();
     const r = await queueEditApproval(db, { documentType: type, targetId: 't', body: type === 'ProductionRunEdit' ? RUN_BODY : PI_BODY, rawBody: {}, userId: 'u' });
     expect(r).toMatchObject({ ok: false, status });
+    expect(db.approvalRequest.create).not.toHaveBeenCalled();
+  });
+  it('rejects a production edit in a closed year with PERIOD_CLOSED, without queueing', async () => {
+    db.fiscalYear.findUnique = vi.fn().mockResolvedValue({ ...FY_2026, isClosed: true });
+    db.$queryRaw = vi.fn(async () => [{ is_closed: true }]);
+    const r = await queueEditApproval(db, { documentType: 'ProductionRunEdit', targetId: 'run1', body: RUN_BODY, rawBody: RUN_BODY, userId: 'u1' });
+    expect(r).toMatchObject({ ok: false, status: 400, code: 'PERIOD_CLOSED', error: expect.stringContaining('sudah ditutup') });
+    expect(db.approvalRequest.create).not.toHaveBeenCalled();
+  });
+  it('checks the new date too and reports a missing fiscal year as 400, not 404', async () => {
+    db.fiscalYear.findFirst = vi.fn(async ({ where }: any) => (where.endDate.gte < new Date('2027-01-01T00:00:00Z') ? FY_2026 : null));
+    const r = await queueEditApproval(db, { documentType: 'ProductionRunEdit', targetId: 'run1', body: { ...RUN_BODY, date: '2027-01-05' }, rawBody: {}, userId: 'u1' });
+    expect(r).toMatchObject({ ok: false, status: 400, code: 'FISCAL_YEAR_MISSING' });
     expect(db.approvalRequest.create).not.toHaveBeenCalled();
   });
   it('rejects unknown invoice line', async () => {
@@ -171,6 +188,14 @@ describe('decideApproval for edit types', () => {
     editRun.mockRejectedValue(new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.'));
     const r = await decideApproval({ requestId: 'r1', action: 'approve', actorUserId: 'admin' });
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('dibatalkan') });
+    expect(db.approvalRequest.update).not.toHaveBeenCalled();
+  });
+  it('production edit in a closed year: PERIOD_CLOSED reaches the caller and the request stays Pending', async () => {
+    db.approvalRequest.findUnique = vi.fn().mockResolvedValue(req('ProductionRunEdit', RUN_BODY));
+    const { BusinessError } = await import('../../utils/errors');
+    editRun.mockRejectedValue(new BusinessError('Tahun buku 2025 sudah ditutup; produksi di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.', 'PERIOD_CLOSED'));
+    const r = await decideApproval({ requestId: 'r1', action: 'approve', actorUserId: 'admin' });
+    expect(r).toMatchObject({ ok: false, code: 'PERIOD_CLOSED' });
     expect(db.approvalRequest.update).not.toHaveBeenCalled();
   });
   it('invalid stored payload fails with clear error', async () => {

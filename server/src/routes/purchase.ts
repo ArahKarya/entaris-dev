@@ -250,7 +250,7 @@ router.post('/:id/revise-price', async (req: AuthRequest, res) => {
     // Approval gate: revisi harga mengubah nilai persediaan/GL → non-bypass hanya mengantrekan.
     if (await needsApproval(req.user!.role)) {
       const q = await queueEditApproval(prisma, { documentType: 'PurchaseInvoiceRevisePrice', targetId: req.params.id as string, body, rawBody: req.body, userId: req.user!.userId });
-      return q.ok ? res.status(q.status).json(q.body) : res.status(q.status).json({ error: q.error });
+      return q.ok ? res.status(q.status).json(q.body) : res.status(q.status).json({ error: q.error, ...(q.code ? { code: q.code } : {}) });
     }
     const result = await prisma.$transaction(
       (tx) => revisePurchaseInvoiceInTx(tx, { invoiceId: req.params.id as string, lines: body.lines, reason: body.reason }, req.user!.userId),
