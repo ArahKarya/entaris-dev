@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { logger } from '../lib/logger';
+import { assertPeriodOpen } from '../utils/periodGuard';
 
 type Tx = Prisma.TransactionClient;
 
@@ -39,6 +40,8 @@ export async function closeCogsBackfillForSalesInvoice(
     }
     const je = await tx.journalEntry.findUnique({ where: { id: jeId }, include: { items: true } });
     if (!je || je.status === 'Cancelled') continue;
+    // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
+    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
     await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date() } });
     await tx.accountingLedgerEntry.updateMany({ where: { referenceId: jeId }, data: { isCancelled: true } });
     for (const ji of je.items) affectedAccountIds.add(ji.accountId);
@@ -86,6 +89,8 @@ export async function reverseCogsSettlementsByTrigger(
   for (const jeId of jeIds) {
     const je = await tx.journalEntry.findUnique({ where: { id: jeId }, include: { items: true } });
     if (!je || je.status === 'Cancelled') continue;
+    // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
+    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
     await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date() } });
     await tx.accountingLedgerEntry.updateMany({ where: { referenceId: jeId }, data: { isCancelled: true } });
     for (const ji of je.items) affectedAccountIds.add(ji.accountId);
