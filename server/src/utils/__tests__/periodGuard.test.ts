@@ -290,9 +290,21 @@ describe('period lock date', () => {
     expect(fn('fiscalYear.findUnique')).toHaveBeenCalledTimes(1);
   });
 
+  // The earliest open fiscal year ending on or after the day after the lock, as findFirst answers it.
+  const yearTx = (lockDate: string | null, year: { startDate: Date } | null) =>
+    makeAutoTx({ 'fiscalYear.findFirst': () => year, $queryRaw: withLock(lockDate) });
+  const fy2026 = { ...openFy, startDate: new Date('2026-01-01T00:00:00Z') };
+  const fy2027 = { id: 'fy-2', name: '2027', isClosed: false, startDate: new Date('2027-01-01T00:00:00Z') };
+
   it('firstOpenBusinessDay is the day after the lock date, or null without a lock', async () => {
-    expect(await firstOpenBusinessDay(lockedTx('2026-03-31').tx)).toBe('2026-04-01');
-    expect(await firstOpenBusinessDay(lockedTx('2026-12-31').tx)).toBe('2027-01-01');
-    expect(await firstOpenBusinessDay(lockedTx(null).tx)).toBeNull();
+    expect(await firstOpenBusinessDay(yearTx('2026-03-31', fy2026).tx)).toBe('2026-04-01');
+    expect(await firstOpenBusinessDay(yearTx('2026-12-31', fy2027).tx)).toBe('2027-01-01');
+    expect(await firstOpenBusinessDay(yearTx(null, fy2026).tx)).toBeNull();
+  });
+
+  it('firstOpenBusinessDay moves to the start of the next open year, and throws when there is none', async () => {
+    // Lock 31 Mar 2026 while 2026 is closed: the earliest open year is 2027.
+    expect(await firstOpenBusinessDay(yearTx('2026-03-31', fy2027).tx)).toBe('2027-01-01');
+    expect((await caught(firstOpenBusinessDay(yearTx('2026-03-31', null).tx))).code).toBe(FISCAL_YEAR_MISSING);
   });
 });
