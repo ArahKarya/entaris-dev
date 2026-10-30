@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/penjualan` · 92 tool (read 40, write 35, critical 17)
+Endpoint MCP target: `/mcp/penjualan` · 94 tool (read 41, write 35, critical 18)
 
 ## Tujuan
 
@@ -48,6 +48,7 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 | `cdep_apply` | Tidak ada | DR 2.1.2 Uang Muka Pelanggan / CR 1.2.1 Piutang Usaha |
 | `cdep_refund` | Tidak ada | Offset: DR 2.1.2 / CR 1.2.1 (FIFO ke faktur terlama); refund kas: DR 2.1.2 / CR Kas/Bank (1.1.x) |
 | `cdep_cancel`, `cdep_apply_cancel` | Tidak ada | Jurnal asal dibalik (soft-cancel ledger, bukan jurnal pembalik) |
+| `cdep_refund_cancel` | Tidak ada | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pelanggan pulih. Menu Jurnal (`je_cancel`) menolak jurnal refund (`JOURNAL_USE_DEPOSIT_REFUND_CANCEL`) |
 
 Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLoaded` baris invoice -> `averageCost` item (WAC). Pembayaran invoice ada di toolset kas-bank (`pay_record`: DR Kas/Bank / CR Piutang).
 
@@ -55,7 +56,7 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 
 - **Retur Penjualan** (`sret_create`): bila role pemanggil tidak punya capability `approval.bypass` (default hanya Admin), dokumen TIDAK dibuat; payload masuk antrian `ApprovalRequest` tipe `SalesReturn` (HTTP 202) dan dieksekusi saat disetujui (aktor = pengaju). Admin/role bypass langsung memposting (201).
 - **Surat Jalan** (`do_create`): antrian approval tipe `DeliveryOrder` hanya muncul pada kasus stok minus: `allowNegativeStock=true` tanpa capability `inventory.negative_stock`. Perhatikan: `so_generate_do` dan `do_update` TIDAK mengantrikan approval — keduanya menolak dengan 403 bila bypass stok minus diminta tanpa capability.
-- **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.
+- **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `cdep_refund_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.
 - Keputusan approval dilakukan di toolset persetujuan; tool penjualan hanya mengantrikan.
 
 ### CRM: tindak lanjut dan catat lewat chat
@@ -123,6 +124,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | [`cdep_cancel`](#cdep_cancel) | critical | tidak | `PATCH /api/customer-deposits/:id/cancel` |
 | [`cdep_list`](#cdep_list) | read | - | `GET /api/customer-deposits` |
 | [`cdep_refund`](#cdep_refund) | critical | tidak | `POST /api/customer-deposits/:id/refund` |
+| [`cdep_refund_cancel`](#cdep_refund_cancel) | critical | tidak | `POST /api/customer-deposits/:id/refunds/:journalId/cancel` |
+| [`cdep_refund_list`](#cdep_refund_list) | read | - | `GET /api/customer-deposits/:id/refunds` |
 | [`cdep_summary`](#cdep_summary) | read | - | `GET /api/customer-deposits/summary` |
 | [`crm_activity_create`](#crm_activity_create) | write | ya | `POST /api/crm/activities` |
 | [`crm_activity_delete`](#crm_activity_delete) | write | tidak | `DELETE /api/crm/activities/:id` |
@@ -433,7 +436,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: bukan tipe uang muka pelanggan.
 - 400: sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
+- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat cdep_refund_cancel)
 - 400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
@@ -488,7 +491,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### cdep_refund
 
-**Ringkasan:** Menyelesaikan sisa uang muka pelanggan: offset ke piutang faktur terlama (FIFO) dan/atau refund tunai ke kas/bank. Total offset+refund tidak boleh melebihi sisa uang muka.
+**Ringkasan:** Menyelesaikan sisa uang muka pelanggan: offset ke piutang faktur terlama (FIFO) dan/atau refund tunai ke kas/bank. Total offset+refund tidak boleh melebihi sisa uang muka. Refund kas bisa dibatalkan lewat cdep_refund_cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -548,7 +551,116 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: piutang pelanggan tidak cukup untuk offset.
 - 400: akun yang dipilih bukan kas/bank.
 
-**Tool terkait:** [`cdep_balance`](#cdep_balance)
+**Tool terkait:** [`cdep_balance`](#cdep_balance), [`cdep_refund_list`](#cdep_refund_list), [`cdep_refund_cancel`](#cdep_refund_cancel)
+
+### cdep_refund_cancel
+
+**Ringkasan:** Membatalkan satu refund kas uang muka pelanggan: jurnal refund di-void, refundedAmount uang muka turun sebesar refund, saldo uang muka pelanggan dipulihkan. Pakai journalEntryId dari cdep_refund_list. Setelah semua refund dibatalkan, uang mukanya bisa dibatalkan (cdep_cancel). Butuh capability doc.cancel.
+
+- **Risk / tier:** `critical` / Wajib-Approve
+- **Draft-capable:** tidak (efek langsung)
+- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)
+- **Handler:** `POST /api/customer-deposits/:id/refunds/:journalId/cancel` (src/routes/customerDeposits.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID Payment uang muka. |
+| `journalId` | path | `string` | ya | ID jurnal refund (journalEntryId dari cdep_refund_list). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal refund. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "cdep_refund_cancel",
+  "args": {
+    "id": "<id>",
+    "journalId": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "action",
+  "status": "pending_approval",
+  "approvalId": "<id>",
+  "confirm": "Batalkan refund <id> dari uang muka pelanggan <id>? Jurnal refund di-void dan saldo uang muka dipulihkan."
+}
+```
+
+**Isi hasil:** { message: 'Refund uang muka dibatalkan.', journalEntryId, entryNumber, amount, refundedAmount }.
+
+**Efek pembukuan/stok:** Void jurnal refund (DR 2.1.2 Uang Muka Pelanggan / CR Kas/Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. refundedAmount uang muka berkurang sebesar refund, party.customerDepositBalance bertambah.
+
+**Teks konfirmasi:** Batalkan refund {journalId} dari uang muka pelanggan {id}? Jurnal refund di-void dan saldo uang muka dipulihkan.
+
+**Prasyarat**
+
+- Jurnal refund belum dibatalkan dan tahun bukunya masih terbuka.
+- User memiliki capability doc.cancel.
+
+**Error umum**
+
+- 400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)
+- 400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
+- 400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual
+- 400: uang muka tidak ditemukan, bukan tipe uang muka pelanggan, atau sudah dibatalkan
+- 403: tanpa capability doc.cancel
+- 400: alasan pembatalan maksimal 500 karakter
+
+**Tool terkait:** [`cdep_refund_list`](#cdep_refund_list), [`cdep_cancel`](#cdep_cancel)
+
+### cdep_refund_list
+
+**Ringkasan:** Daftar refund kas satu uang muka pelanggan (jurnal refund), terbaru dulu, termasuk yang sudah dibatalkan: nomor jurnal, tanggal, jumlah, akun kas/bank, status, dan siapa/alasan pembatalannya.
+
+- **Risk / tier:** `read` / Auto
+- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `view`)
+- **Handler:** `GET /api/customer-deposits/:id/refunds` (src/routes/customerDeposits.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID Payment uang muka. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "cdep_refund_list",
+  "args": {
+    "id": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<{ data: [{ journalEntryId, entryNumber, date, amount, status, narration, cashAccount, canc>"
+}
+```
+
+**Isi hasil:** { data: [{ journalEntryId, entryNumber, date, amount, status, narration, cashAccount, cancelledAt, cancelledById, cancelReason }] }.
+
+**Error umum**
+
+- 404: uang muka pelanggan tidak ditemukan
+
+**Tool terkait:** [`cdep_refund`](#cdep_refund), [`cdep_refund_cancel`](#cdep_refund_cancel)
 
 ### cdep_summary
 

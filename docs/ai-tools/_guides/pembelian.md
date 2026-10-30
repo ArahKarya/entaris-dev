@@ -55,6 +55,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 | PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik, STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
+| Batal refund uang muka (`vdep_refund_cancel`) | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pemasok pulih |
 | Batal uang muka (`vdep_cancel`) | Soft-cancel jurnal (DR 1.3 / CR Kas-Bank dibalik) |
 
 Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai **landed cost**. Total debit selalu sama dengan total kredit.
@@ -64,7 +65,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - **Gate `needsApproval(role)`**: role tanpa capability `approval.bypass` (default hanya Admin yang bypass). Untuk `pi_create` role non-bypass menghasilkan **HTTP 202** `{ pendingApproval: true, request }` dan **tidak ada** dokumen/GL/stok sampai disetujui (`ApprovalRequest` tipe `PurchaseInvoice`; eksekusi memakai pengaju sebagai aktor). Admin langsung memposting.
 - `pi_revise_price` non-bypass: antrian `PurchaseInvoiceRevisePrice` (HTTP 202). Satu permintaan Pending per PI (409 bila duplikat). Payload menyimpan snapshot `_before` untuk perbandingan.
 - PO: persetujuan berbasis `ApprovalRule` (nilai minimum), bukan role. Hasil: PO Draft + `approvalStatus=Pending`.
-- Pembatalan (`po_cancel`, `po_close`, `gr_cancel`, `pi_cancel`, `vdep_apply_cancel`) butuh capability `doc.cancel` (default hanya Admin). Catatan: `vdep_cancel` (batal uang muka) **tidak** dijaga capability, hanya izin edit modul `vendor_deposit`.
+- Pembatalan (`po_cancel`, `po_close`, `gr_cancel`, `pi_cancel`, `vdep_apply_cancel`, `vdep_refund_cancel`) butuh capability `doc.cancel` (default hanya Admin). Catatan: `vdep_cancel` (batal uang muka) **tidak** dijaga capability, hanya izin edit modul `vendor_deposit`.
 - STT dan `vdep_apply`/`vdep_refund` tidak melewati antrian approval: langsung memposting.
 
 ### Jebakan umum

@@ -2,14 +2,14 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **508** tool (read 234 · write 165 · critical 109); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
 | Toolset | Tool | read | write | critical | Ringkas |
 |---|---|---|---|---|---|
-| [Penjualan](penjualan.md) | 92 | 40 | 35 | 17 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
-| [Pembelian](pembelian.md) | 28 | 12 | 5 | 11 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
+| [Penjualan](penjualan.md) | 94 | 41 | 35 | 18 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
+| [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
 | [Akuntansi](akuntansi.md) | 33 | 14 | 8 | 11 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
@@ -56,6 +56,8 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`cdep_cancel`](penjualan.md#cdep_cancel) | penjualan | critical | tidak | Admin, Accountant | `PATCH /api/customer-deposits/:id/cancel` |
 | [`cdep_list`](penjualan.md#cdep_list) | penjualan | read | - | Admin, Accountant | `GET /api/customer-deposits` |
 | [`cdep_refund`](penjualan.md#cdep_refund) | penjualan | critical | tidak | Admin, Accountant | `POST /api/customer-deposits/:id/refund` |
+| [`cdep_refund_cancel`](penjualan.md#cdep_refund_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/customer-deposits/:id/refunds/:journalId/cancel` |
+| [`cdep_refund_list`](penjualan.md#cdep_refund_list) | penjualan | read | - | Admin, Accountant | `GET /api/customer-deposits/:id/refunds` |
 | [`cdep_summary`](penjualan.md#cdep_summary) | penjualan | read | - | Admin, Accountant | `GET /api/customer-deposits/summary` |
 | [`chat_ambil_sesi`](obrolan.md#chat_ambil_sesi) | obrolan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/chat-history/sessions/:id` |
 | [`chat_cari_riwayat`](obrolan.md#chat_cari_riwayat) | obrolan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/chat-history/search` |
@@ -524,6 +526,8 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`vdep_cancel`](pembelian.md#vdep_cancel) | pembelian | critical | tidak | Admin, Accountant | `PATCH /api/vendor-deposits/:id/cancel` |
 | [`vdep_list`](pembelian.md#vdep_list) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/vendor-deposits` |
 | [`vdep_refund`](pembelian.md#vdep_refund) | pembelian | critical | tidak | Admin, Accountant | `POST /api/vendor-deposits/:id/refund` |
+| [`vdep_refund_cancel`](pembelian.md#vdep_refund_cancel) | pembelian | critical | tidak | Admin, Accountant | `POST /api/vendor-deposits/:id/refunds/:journalId/cancel` |
+| [`vdep_refund_list`](pembelian.md#vdep_refund_list) | pembelian | read | - | Admin, Accountant | `GET /api/vendor-deposits/:id/refunds` |
 | [`vdep_summary`](pembelian.md#vdep_summary) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/vendor-deposits/summary` |
 | [`wh_create`](persediaan.md#wh_create) | persediaan | write | tidak | Admin, Accountant | `POST /api/warehouses` |
 | [`wh_delete`](persediaan.md#wh_delete) | persediaan | critical | tidak | Admin, Accountant | `DELETE /api/warehouses/:id` |
