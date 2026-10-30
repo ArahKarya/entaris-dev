@@ -81,7 +81,7 @@ function makeTx(pr: ReturnType<typeof makeRequest>, opts: { fiscalYear?: object 
       const fy = await fiscalYear.findUnique();
       return fy ? [{ is_closed: fy.isClosed }] : [];
     }),
-    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026' })) },
+    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026', date: new Date('2026-03-10T00:00:00Z') })) },
     accountingLedgerEntry: { createMany: vi.fn(async () => ({ count: 2 })) },
   };
   return tx;
