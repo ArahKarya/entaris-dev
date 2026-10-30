@@ -337,4 +337,17 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "uang jaminan": "guarantee",
   "penyusutan": "depreciation",
   "dokumen": "document",
+  // Account guard (services/ledger/accountGuard.ts); {0} is the caller's label, the kind names follow.
+  "{0}: akun tidak ditemukan.": "{0}: account not found.",
+  "{0}: {1} {2} adalah akun grup; pilih akun detail.": "{0}: {1} {2} is a group account; choose a detail account.",
+  "{0}: akun {1} {2} tidak aktif.": "{0}: account {1} {2} is inactive.",
+  "{0}: akun {1} {2} bertipe {3}, seharusnya {4}.": "{0}: account {1} {2} is of type {3}; expected {4}.",
+  "{0}: akun {1} {2} adalah akun kontrol {3} dan tidak boleh diposting langsung.{4}": "{0}: account {1} {2} is a control account ({3}) and cannot be posted to directly.{4}",
+  "Piutang Usaha": "Accounts Receivable",
+  "Hutang Usaha": "Accounts Payable",
+  "Hutang Belum Tagih": "Goods Received Not Invoiced",
+  "Persediaan": "Inventory",
+  "Persediaan item": "item inventory",
+  "PPN Masukan": "Input VAT",
+  "PPN Keluaran": "Output VAT",
 };
