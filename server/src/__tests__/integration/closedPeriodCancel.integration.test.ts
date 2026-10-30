@@ -301,8 +301,9 @@ d('closed fiscal year: COGS backfill auto-settle journals', () => {
   /** A queue on the invoice's first line with one settlement whose auto-settle journal is `journalId`. */
   async function settledQueue(tx: Tx, invoiceId: string, fiscalYearId: string, journalId: string, triggerRefId: string) {
     const line = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoiceId } });
-    const item = await tx.inventoryItem.findFirst();
-    if (!item) throw new Error('Need an inventory item.');
+    const item = await tx.inventoryItem.create({
+      data: { code: `IT-E1-ITEM-${tag()}`, name: `Barang uji tutup buku ${tag()}`, unit: 'kg', isActive: true },
+    });
     return tx.cogsBackfillQueue.create({
       data: {
         salesInvoiceId: invoiceId, salesInvoiceItemId: line.id, inventoryItemId: item.id,
@@ -600,8 +601,10 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
   it('rejects cancelling a vehicle service log journal in a closed year and keeps the link', async () => {
     await inRollback(async (tx) => {
       const { old } = await years(tx);
-      const [category, branch] = await Promise.all([tx.gaAssetCategory.findFirst(), tx.gaBranch.findFirst()]);
-      if (!category || !branch) throw new Error('Need a GA asset category and branch.');
+      const [category, branch] = await Promise.all([
+        tx.gaAssetCategory.create({ data: { code: `IT-GAC-${tag()}`, name: 'Kendaraan uji tutup buku' } }),
+        tx.gaBranch.create({ data: { code: `IT-GAB-${tag()}`, name: 'Cabang uji tutup buku' } }),
+      ]);
       const asset = await tx.gaAsset.create({ data: { code: `IT-GA-${tag()}`, name: 'Mobil uji tutup buku', categoryId: category.id, branchId: branch.id } });
       const je = await manualJournal(tx, old.id, `JV-GA-${tag()}`, `${Y}-09-15`, 750_000);
       const log = await tx.gaVehicleServiceLog.create({
