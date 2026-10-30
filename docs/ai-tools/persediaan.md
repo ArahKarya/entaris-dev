@@ -1304,13 +1304,12 @@ Aturan wajib:
 
 **Error umum**
 
-- 400: transfer sudah dibatalkan
+- 400: transfer sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 404: transfer tidak ditemukan
 - 400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu
 - 400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock
-- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 
 **Tool terkait:** [`stf_get`](#stf_get)
 

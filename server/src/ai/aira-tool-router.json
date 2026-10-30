@@ -13327,12 +13327,11 @@
       "errors": [
         "400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.",
         "400: bukan tipe uang muka pelanggan.",
-        "400: sudah dibatalkan.",
+        "400: sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
         "400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan",
         "403: tanpa capability doc.cancel",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
@@ -15480,10 +15479,9 @@
       "confirm_template": "Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
-        "400: Uang jaminan sudah dibatalkan",
+        "400: Uang jaminan sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Sudah ada settlement aktif - batalkan settlement dulu",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
@@ -15999,13 +15997,12 @@
       "postingEffect": "Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).",
       "confirm_template": "Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.",
       "errors": [
-        "400: transfer sudah dibatalkan",
+        "400: transfer sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "404: transfer tidak ditemukan",
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
+        "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock"
       ],
       "related": [
         "stf_get"
@@ -16061,13 +16058,12 @@
       "postingEffect": "Reverse jurnal uang muka (asal: DR Uang Muka Vendor 1.3 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dan depositBalance pemasok dibalik.",
       "confirm_template": "Batalkan uang muka vendor {id}? Jurnal kas/bank terkait akan dibalik.",
       "errors": [
-        "400: Deposit sudah dibatalkan",
+        "400: Deposit sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu",
         "400: Bukan tipe uang muka vendor",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
         "403: tanpa capability doc.cancel",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
@@ -16923,10 +16919,9 @@
       "confirm_template": "Batalkan pemakaian uang muka (aplikasi {id})?",
       "errors": [
         "400: aplikasi tidak ditemukan.",
-        "400: aplikasi sudah dibatalkan.",
+        "400: aplikasi sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
@@ -23980,10 +23975,9 @@
       "confirm_template": "Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
-        "400: Settlement sudah dibatalkan",
+        "400: Settlement sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Uang jaminan induk sudah dibatalkan",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
@@ -26033,9 +26027,8 @@
       "confirm_template": "Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
-        "400: retur sudah dibatalkan.",
+        "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
@@ -27188,10 +27181,9 @@
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Aplikasi uang muka tidak ditemukan",
-        "400: Aplikasi sudah dibatalkan",
+        "400: Aplikasi sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [

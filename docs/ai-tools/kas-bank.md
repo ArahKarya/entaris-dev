@@ -1191,10 +1191,9 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Error umum**
 
-- 400: Uang jaminan sudah dibatalkan
+- 400: Uang jaminan sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400: Sudah ada settlement aktif - batalkan settlement dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)
@@ -1478,10 +1477,9 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Error umum**
 
-- 400: Settlement sudah dibatalkan
+- 400: Settlement sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400: Uang jaminan induk sudah dibatalkan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)

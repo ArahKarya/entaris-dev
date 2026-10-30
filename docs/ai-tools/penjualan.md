@@ -329,10 +329,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 **Error umum**
 
 - 400: aplikasi tidak ditemukan.
-- 400: aplikasi sudah dibatalkan.
+- 400: aplikasi sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
-- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
 ### cdep_balance
@@ -432,12 +431,11 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.
 - 400: bukan tipe uang muka pelanggan.
-- 400: sudah dibatalkan.
+- 400: sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
 - 400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan
 - 403: tanpa capability doc.cancel
-- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
 ### cdep_list
@@ -4544,9 +4542,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 **Error umum**
 
 - 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.
-- 400: retur sudah dibatalkan.
+- 400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
 ### sret_create
