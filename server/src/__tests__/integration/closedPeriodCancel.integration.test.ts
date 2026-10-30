@@ -15,7 +15,7 @@ import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { BusinessError } from '../../utils/errors';
-import { PERIOD_CLOSED } from '../../utils/periodGuard';
+import { FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../../utils/periodGuard';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -29,6 +29,8 @@ import { cancelSalesInvoiceInTx, cancelPurchaseInvoiceInTx } from '../../service
 import { cancelSalesReturnInTx } from '../../services/salesReturnCancel';
 import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise';
 import { cancelJournalInTx } from '../../services/gaFinance';
+import { cancelVehicleServiceJournalInTx } from '../../services/gaVehicleServiceJournal';
+import { reverseCogsSettlementsByTrigger } from '../../services/cogsBackfillReverse';
 import paymentsRouter from '../../routes/payments';
 import customerDepositsRouter from '../../routes/customerDeposits';
 import vendorDepositsRouter from '../../routes/vendorDeposits';
@@ -295,6 +297,59 @@ d('closed fiscal year: sales and purchase invoices', () => {
   });
 });
 
+d('closed fiscal year: COGS backfill auto-settle journals', () => {
+  /** A queue on the invoice's first line with one settlement whose auto-settle journal is `journalId`. */
+  async function settledQueue(tx: Tx, invoiceId: string, fiscalYearId: string, journalId: string, triggerRefId: string) {
+    const line = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoiceId } });
+    const item = await tx.inventoryItem.findFirst();
+    if (!item) throw new Error('Need an inventory item.');
+    return tx.cogsBackfillQueue.create({
+      data: {
+        salesInvoiceId: invoiceId, salesInvoiceItemId: line.id, inventoryItemId: item.id,
+        qtyPending: 0, qtyOriginal: 10, costAtSale: 0, status: 'Settled', fiscalYearId,
+        settlements: {
+          create: [{ qtySettled: 10, costAtSettle: 100_000, differential: 1_000_000, journalEntryId: journalId, triggerSource: 'StockMovement', triggerRefId }],
+        },
+      },
+    });
+  }
+
+  it('rejects cancelling an open-year invoice whose auto-settle journal sits in a closed year', async () => {
+    await inRollback(async (tx) => {
+      const { old, next } = await years(tx);
+      const customer = await party(tx, 'Customer');
+      const invoice = await serviceInvoice(tx, customer.id, `${Y + 1}-01-05`, 2_000_000);
+      // Not a JV-<invoice> satellite: only closeCogsBackfillForSalesInvoice reaches it.
+      const settle = await manualJournal(tx, old.id, `JV-CBF-${tag()}`, `${Y}-12-28`);
+      await settledQueue(tx, invoice.id, next.id, settle.id, settle.id);
+      await close(tx, old);
+      const before = await ledgerState(tx, [settle.id]);
+
+      expect(await codeOf(inRouteTx((t) => cancelSalesInvoiceInTx(t, invoice.id)))).toBe(PERIOD_CLOSED);
+
+      expect((await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('Submitted');
+      expect(await ledgerState(tx, [settle.id])).toEqual(before);
+    });
+  });
+
+  it('rejects reversing a stock-in whose auto-settle journal sits in a closed year', async () => {
+    await inRollback(async (tx) => {
+      const { old, next } = await years(tx);
+      const customer = await party(tx, 'Customer');
+      const invoice = await serviceInvoice(tx, customer.id, `${Y + 1}-01-05`, 2_000_000);
+      const settle = await manualJournal(tx, old.id, `JV-CBF-${tag()}`, `${Y}-12-28`);
+      const queue = await settledQueue(tx, invoice.id, next.id, settle.id, settle.id);
+      await close(tx, old);
+      const before = await ledgerState(tx, [settle.id]);
+
+      expect(await codeOf(inRouteTx((t) => reverseCogsSettlementsByTrigger(t, 'StockMovement', settle.id)))).toBe(PERIOD_CLOSED);
+
+      expect(await tx.cogsBackfillSettlement.count({ where: { queueId: queue.id } })).toBe(1);
+      expect(await ledgerState(tx, [settle.id])).toEqual(before);
+    });
+  });
+});
+
 d('closed fiscal year: cash, deposits and returns', () => {
   it('rejects a payment cancel', async () => {
     await inRollback(async (tx) => {
@@ -393,6 +448,71 @@ d('closed fiscal year: cash, deposits and returns', () => {
     });
   });
 
+  it('rejects cancelling a supplier deposit application whose journal sits in a closed year', async () => {
+    await inRollback(async (tx) => {
+      const { old } = await years(tx);
+      const supplier = await party(tx, 'Supplier');
+      const pi = await submitPurchaseInvoiceInTx(
+        tx,
+        { date: `${Y}-12-01`, partyId: supplier.id, items: [{ itemName: 'Jasa angkut', itemType: 'service', quantity: 1, rate: 4_000_000 }] } as any,
+        userId,
+      );
+      const { payment } = await submitPaymentInTx(
+        tx,
+        { date: `${Y}-11-01`, partyId: supplier.id, amount: 4_000_000, paymentType: 'VendorDeposit', accountId: cashAccountId } as any,
+        userId,
+      );
+      clockAt(`${Y}-12-20T03:00:00.000Z`);
+      const applied = await callRoute(vendorDepositsRouter, 'post', '/apply', {
+        body: { depositPaymentId: payment.id, purchaseInvoiceId: pi.id, amount: 4_000_000 }, userId,
+      });
+      expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+      vi.useRealTimers();
+      const application = await tx.vendorDepositApplication.findFirstOrThrow({ where: { depositPaymentId: payment.id } });
+      expect(application.journalEntryId).not.toBeNull();
+      await close(tx, old);
+      const before = await ledgerState(tx, [application.journalEntryId!]);
+
+      expectPeriodClosed(await callRoute(vendorDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, userId }));
+
+      expect((await tx.vendorDepositApplication.findUniqueOrThrow({ where: { id: application.id } })).isCancelled).toBe(false);
+      expect(Number((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).outstanding)).toBe(0);
+      expect(await ledgerState(tx, [application.journalEntryId!])).toEqual(before);
+    });
+  });
+
+  it('rejects cancelling a legacy deposit application without a journal, applied in a closed year', async () => {
+    await inRollback(async (tx) => {
+      const { old } = await years(tx);
+      const customer = await party(tx, 'Customer');
+      const invoice = await serviceInvoice(tx, customer.id, `${Y}-12-01`, 4_000_000);
+      const { payment } = await submitPaymentInTx(
+        tx,
+        { date: `${Y}-11-01`, partyId: customer.id, amount: 4_000_000, paymentType: 'CustomerDeposit', accountId: cashAccountId } as any,
+        userId,
+      );
+      clockAt(`${Y}-12-20T03:00:00.000Z`);
+      const applied = await callRoute(customerDepositsRouter, 'post', '/apply', {
+        body: { depositPaymentId: payment.id, salesInvoiceId: invoice.id, amount: 4_000_000 }, userId,
+      });
+      expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+      vi.useRealTimers();
+      // A legacy row: no journal link, applied on 20 Dec.
+      const application = await tx.customerDepositApplication.findFirstOrThrow({ where: { depositPaymentId: payment.id } });
+      await tx.customerDepositApplication.update({
+        where: { id: application.id },
+        data: { journalEntryId: null, appliedAt: new Date(`${Y}-12-20T03:00:00.000Z`) },
+      });
+      await close(tx, old);
+
+      expectPeriodClosed(await callRoute(customerDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, userId }));
+
+      expect((await tx.customerDepositApplication.findUniqueOrThrow({ where: { id: application.id } })).isCancelled).toBe(false);
+      expect(Number((await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).outstanding)).toBe(0);
+      expect(Number((await tx.party.findUniqueOrThrow({ where: { id: customer.id } })).customerDepositBalance)).toBe(0);
+    });
+  });
+
   it('rejects a sales return cancel', async () => {
     await inRollback(async (tx) => {
       const { old } = await years(tx);
@@ -477,6 +597,26 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
     });
   });
 
+  it('rejects cancelling a vehicle service log journal in a closed year and keeps the link', async () => {
+    await inRollback(async (tx) => {
+      const { old } = await years(tx);
+      const [category, branch] = await Promise.all([tx.gaAssetCategory.findFirst(), tx.gaBranch.findFirst()]);
+      if (!category || !branch) throw new Error('Need a GA asset category and branch.');
+      const asset = await tx.gaAsset.create({ data: { code: `IT-GA-${tag()}`, name: 'Mobil uji tutup buku', categoryId: category.id, branchId: branch.id } });
+      const je = await manualJournal(tx, old.id, `JV-GA-${tag()}`, `${Y}-09-15`, 750_000);
+      const log = await tx.gaVehicleServiceLog.create({
+        data: { assetId: asset.id, tanggal: new Date(`${Y}-09-15`), jenisService: 'OLI', deskripsi: 'Ganti oli', biaya: 750_000, journalEntryId: je.id },
+      });
+      await close(tx, old);
+      const before = await ledgerState(tx, [je.id]);
+
+      expect(await codeOf(inRouteTx((t) => cancelVehicleServiceJournalInTx(t, log.id)))).toBe(PERIOD_CLOSED);
+
+      expect((await tx.gaVehicleServiceLog.findUniqueOrThrow({ where: { id: log.id } })).journalEntryId).toBe(je.id);
+      expect(await ledgerState(tx, [je.id])).toEqual(before);
+    });
+  });
+
   it('journal menu returns the PERIOD_CLOSED code and keeps the journal', async () => {
     await inRollback(async (tx) => {
       const { old } = await years(tx);
@@ -490,33 +630,38 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
     });
   });
 
+  /** An Active asset with one unposted 100 rb entry on 1 Dec of `Y`. */
+  async function assetWithDecemberEntry(tx: Tx, fiscalYearId: string) {
+    const [assetAcc, expenseAcc, accumAcc] = await Promise.all([
+      tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true } }),
+      tx.account.findFirst({ where: { rootType: 'EXPENSE', isGroup: false, isActive: true } }),
+      tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true }, skip: 1 }),
+    ]);
+    if (!assetAcc || !expenseAcc || !accumAcc) throw new Error('Need asset and expense detail accounts.');
+    return tx.fixedAsset.create({
+      data: {
+        assetNumber: `IT-FA-${tag()}`,
+        name: 'Mesin uji tutup buku',
+        category: 'Mesin',
+        acquisitionDate: new Date(`${Y}-01-01`),
+        acquisitionCost: 1_200_000,
+        usefulLifeMonths: 12,
+        bookValue: 1_200_000,
+        assetAccountId: assetAcc.id,
+        depreciationAccountId: expenseAcc.id,
+        accumulatedDepAccountId: accumAcc.id,
+        fiscalYearId,
+        createdBy: userId,
+        depreciationEntries: { create: [{ periodDate: new Date(`${Y}-12-01T00:00:00.000Z`), amount: 100_000 }] },
+      },
+      include: { depreciationEntries: true },
+    });
+  }
+
   it('rejects posting December depreciation into a closed year, single and bulk, with 400', async () => {
     await inRollback(async (tx) => {
       const { old } = await years(tx);
-      const [assetAcc, expenseAcc, accumAcc] = await Promise.all([
-        tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true } }),
-        tx.account.findFirst({ where: { rootType: 'EXPENSE', isGroup: false, isActive: true } }),
-        tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true }, skip: 1 }),
-      ]);
-      if (!assetAcc || !expenseAcc || !accumAcc) throw new Error('Need asset and expense detail accounts.');
-      const asset = await tx.fixedAsset.create({
-        data: {
-          assetNumber: `IT-FA-${tag()}`,
-          name: 'Mesin uji tutup buku',
-          category: 'Mesin',
-          acquisitionDate: new Date(`${Y}-01-01`),
-          acquisitionCost: 1_200_000,
-          usefulLifeMonths: 12,
-          bookValue: 1_200_000,
-          assetAccountId: assetAcc.id,
-          depreciationAccountId: expenseAcc.id,
-          accumulatedDepAccountId: accumAcc.id,
-          fiscalYearId: old.id,
-          createdBy: userId,
-          depreciationEntries: { create: [{ periodDate: new Date(`${Y}-12-01T00:00:00.000Z`), amount: 100_000 }] },
-        },
-        include: { depreciationEntries: true },
-      });
+      const asset = await assetWithDecemberEntry(tx, old.id);
       await close(tx, old);
       const entry = asset.depreciationEntries[0]!;
 
@@ -525,6 +670,20 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
 
       expect((await tx.depreciationEntry.findUniqueOrThrow({ where: { id: entry.id } })).isPosted).toBe(false);
       expect(Number((await tx.fixedAsset.findUniqueOrThrow({ where: { id: asset.id } })).accumulatedDepreciation)).toBe(0);
+    });
+  });
+
+  it('bulk depreciation for a month without a fiscal year answers 400 FISCAL_YEAR_MISSING', async () => {
+    await inRollback(async (tx) => {
+      // Only Y+1 exists; the asset's December entry falls in Y.
+      const next = await createFiscalYear(tx, { year: Y + 1 });
+      const asset = await assetWithDecemberEntry(tx, next.id);
+
+      const r = await callRoute(fixedAssetsRouter, 'post', '/depreciate-bulk', { body: { month: `${Y}-12` }, userId });
+
+      expect(r.status, JSON.stringify(r.body)).toBe(400);
+      expect(r.body.code).toBe(FISCAL_YEAR_MISSING);
+      expect((await tx.depreciationEntry.findUniqueOrThrow({ where: { id: asset.depreciationEntries[0]!.id } })).isPosted).toBe(false);
     });
   });
 });
