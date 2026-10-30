@@ -10,6 +10,7 @@ export const SALES_MESSAGES: MessageDictionary = {
   "Bukan tipe uang muka customer.": "Not a customer deposit.",
   "Deposit sudah dibatalkan.": "Deposit is already cancelled.",
   "Deposit sudah digunakan untuk invoice. Batalkan penggunaan terlebih dahulu.": "Deposit has already been applied to an invoice. Cancel the application first.",
+  "Uang muka ini sudah di-refund sebagian, jadi tidak bisa dibatalkan. Sisa uang muka tetap bisa dipakai di Invoice atau di-refund.": "This deposit has already been partly refunded, so it cannot be cancelled. The remaining balance can still be applied to an invoice or refunded.",
   "Uang muka customer dibatalkan.": "Customer deposit cancelled.",
   "Gagal membatalkan uang muka customer.": "Failed to cancel the customer deposit.",
   "Pembayaran bukan tipe Uang Muka Customer.": "Payment is not a Customer Deposit.",

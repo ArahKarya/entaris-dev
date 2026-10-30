@@ -12,6 +12,7 @@ import { BusinessError, handleRouteError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
+import { assertDepositNotRefunded } from '../services/depositCancelGuard';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -179,8 +180,8 @@ router.get('/balance/:partyId', async (req, res) => {
   }
 });
 
-// PATCH /api/vendor-deposits/:id/cancel — cancel a vendor deposit payment
-router.patch('/:id/cancel', async (req: AuthRequest, res) => {
+// PATCH /api/vendor-deposits/:id/cancel — cancel a vendor deposit payment (requires doc.cancel)
+router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
 
   try {
@@ -202,6 +203,7 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
       if (deposit.depositApplications.length > 0) {
         throw new BusinessError('Deposit sudah digunakan untuk invoice. Batalkan penggunaan terlebih dahulu.');
       }
+      assertDepositNotRefunded(deposit);
 
       // The journal's year when there is one; legacy deposits without a journal use their own.
       await assertPeriodOpen(tx, { fiscalYearId: deposit.journalEntry?.fiscalYearId ?? deposit.fiscalYearId }, 'uang muka');
@@ -223,8 +225,9 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
 
           // Never add a [BATAL] reversal JV: the original is soft-cancelled elsewhere, so it
           // would double-reverse the balance. Defensively soft-cancel legacy imported ALE rows.
+          // Matched by the payment id; a description match also caught any row that mentions the number.
           await tx.accountingLedgerEntry.updateMany({
-            where: { description: { contains: deposit.paymentNumber }, isCancelled: false },
+            where: { referenceId: deposit.id, isCancelled: false },
             data: { isCancelled: true },
           });
         }
