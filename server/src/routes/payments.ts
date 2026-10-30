@@ -5,7 +5,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
 import { validateBody } from '../utils/validate';
-import { CreatePaymentSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreatePaymentSchema } from '../utils/schemas';
+import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
@@ -172,6 +173,9 @@ router.post('/', async (req: AuthRequest, res) => {
 
 // POST /api/payments/:id/cancel — cancel payment and reverse allocations
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
+  const trail = cancelTrail(req.user!.userId, body.reason);
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const payment = await tx.payment.findUnique({
@@ -180,6 +184,9 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
       });
       if (!payment) throw new BusinessError('Pembayaran tidak ditemukan.');
       if (payment.status === 'Cancelled') throw new BusinessError('Pembayaran sudah dibatalkan.');
+      // First write: a concurrent second cancel gets STALE_STATUS instead of reopening the invoices
+      // and reversing the balances again. The rejections below roll the claim back.
+      await claimCancel(tx.payment, payment.id, { status: 'Cancelled', cancelledAt: new Date(), ...trail });
       await assertPeriodOpen(tx, { fiscalYearId: payment.fiscalYearId }, 'pembayaran');
 
       const numAmount = new Decimal(payment.amount.toString());
@@ -242,7 +249,7 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
         await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId }, 'pembayaran');
         await tx.journalEntry.update({
           where: { id: journal.id },
-          data: { status: 'Cancelled', cancelledAt: new Date() },
+          data: { status: 'Cancelled', cancelledAt: new Date(), ...trail },
         });
         await tx.accountingLedgerEntry.updateMany({
           where: { referenceId: journal.id },
@@ -276,12 +283,6 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
 
       // Recalc party outstanding from invoice data (source of truth)
       await recalcPartyOutstanding(tx, payment.partyId);
-
-      // Mark payment as cancelled
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'Cancelled', cancelledAt: new Date() },
-      });
 
       return { id: payment.id, status: 'Cancelled' };
     }, { timeout: 15000 });

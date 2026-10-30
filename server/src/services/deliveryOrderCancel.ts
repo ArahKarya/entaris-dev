@@ -5,6 +5,7 @@ import { adjustWarehouseStock } from '../utils/warehouseStock';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { recomputeDeliveredQtyInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
+import { claimCancel } from '../utils/cancelClaim';
 
 type Tx = Prisma.TransactionClient;
 
@@ -28,6 +29,8 @@ export async function cancelDeliveryOrderInTx(
   if (deliveryOrder.status === 'Cancelled') {
     throw new BusinessError('Surat jalan sudah dibatalkan.');
   }
+  // First write, and before the SO recompute below so the cancelled note's lines drop out of it.
+  await claimCancel(tx.deliveryOrder, doId, { status: 'Cancelled', cancelledAt: new Date() });
   if (deliveryOrder.invoiceId) {
     throw new BusinessError('Batalkan invoice terkait dulu sebelum batalkan surat jalan.');
   }
@@ -61,12 +64,6 @@ export async function cancelDeliveryOrderInTx(
       data: { isCancelled: true },
     });
   }
-
-  // Flip status FIRST so the cancelled DO's lines drop out of the recompute.
-  await tx.deliveryOrder.update({
-    where: { id: doId },
-    data: { status: 'Cancelled', cancelledAt: new Date() },
-  });
 
   // Surat Jalan Sementara yang tertaut ke DO ini kembali Terbuka
   await unlinkTemporaryNotesFromDoInTx(tx, doId);

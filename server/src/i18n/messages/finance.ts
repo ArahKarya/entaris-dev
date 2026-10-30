@@ -83,6 +83,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Jurnal tidak seimbang. Total Debit ({0}) ≠ Total Kredit ({1}).": "Journal is not balanced. Total Debit ({0}) ≠ Total Credit ({1}).",
   "Gagal menyimpan jurnal.": "Failed to save the journal.",
   "Jurnal sudah dibatalkan.": "Journal is already cancelled.",
+  "Alasan pembatalan maksimal 500 karakter.": "The cancel reason can be at most 500 characters.",
+  "Status pengajuan sudah berubah. Muat ulang halaman lalu coba lagi.": "The status has already changed. Reload the page and try again.",
   "Jurnal ini terkait pembayaran. Batalkan dari modul Pembayaran.": "This journal belongs to a payment. Cancel it from the Payments module.",
   "Jurnal ini dibuat otomatis dari transaksi sumber (Pembayaran/Invoice/HPP). Batalkan dari modul asalnya, bukan dari Buku Besar.": "This journal was created automatically from a source transaction (Payment/Invoice/COGS). Cancel it from its source module, not from the General Ledger.",
   "Jurnal ini adalah aplikasi Uang Muka ke invoice. Batalkan dari modul Uang Muka Customer/Supplier (tombol batalkan aplikasi), bukan dari Buku Besar.": "This journal applies a deposit to an invoice. Cancel it from the Customer/Supplier Deposit module (cancel application button), not from the General Ledger.",

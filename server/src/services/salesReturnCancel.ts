@@ -3,6 +3,7 @@ import { BusinessError } from '../utils/errors';
 import { recalcPartyOutstanding } from '../utils/accountBalance';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
+import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 
 type Tx = Prisma.TransactionClient;
 
@@ -16,10 +17,12 @@ type Tx = Prisma.TransactionClient;
  *   - cancel the linked CustomerDeposit Payment (blocked if already applied)
  *   - recompute party outstanding
  * Rejected with PERIOD_CLOSED when the return's fiscal year, or a journal's, is closed.
+ * `trail` (who and why) is stored on the voided journals and the cancelled deposit.
  */
 export async function cancelSalesReturnInTx(
   tx: Tx,
   returnId: string,
+  trail?: CancelTrail,
 ): Promise<{ id: string; status: 'Cancelled' }> {
   // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
   await tx.$queryRaw`SELECT id FROM sales_returns WHERE id = ${returnId} FOR UPDATE`;
@@ -29,6 +32,8 @@ export async function cancelSalesReturnInTx(
   });
   if (!ret) throw new BusinessError('Retur tidak ditemukan.');
   if (ret.status === 'Cancelled') throw new BusinessError('Retur sudah dibatalkan.');
+  // First write; any rejection below rolls it back.
+  await claimCancel(tx.salesReturn, ret.id, { status: 'Cancelled', cancelledAt: new Date() });
   await assertPeriodOpen(tx, { fiscalYearId: ret.fiscalYearId }, 'retur');
 
   // Block if the credit (customer deposit) it created has been applied.
@@ -47,7 +52,7 @@ export async function cancelSalesReturnInTx(
   for (const jvNumber of [`JV-${ret.returnNumber}`, `JV-COGS-${ret.returnNumber}`]) {
     const journal = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber }, include: { items: true } });
     if (!journal || journal.status === 'Cancelled') continue;
-    await voidJournalInTx(tx, journal, 'retur');
+    await voidJournalInTx(tx, journal, 'retur', trail);
   }
 
   // Cancel stock movements created by this return + decrement stock back.
@@ -81,7 +86,7 @@ export async function cancelSalesReturnInTx(
   if (ret.customerDepositId) {
     const dep = await tx.payment.update({
       where: { id: ret.customerDepositId },
-      data: { status: 'Cancelled', cancelledAt: new Date() },
+      data: { status: 'Cancelled', cancelledAt: new Date(), ...trail },
     });
     // Mirror of submitSalesReturnInTx: roll back the cached deposit balance.
     await tx.party.update({
@@ -90,10 +95,6 @@ export async function cancelSalesReturnInTx(
     });
   }
 
-  await tx.salesReturn.update({
-    where: { id: ret.id },
-    data: { status: 'Cancelled', cancelledAt: new Date() },
-  });
   await recalcPartyOutstanding(tx, ret.partyId);
 
   return { id: ret.id, status: 'Cancelled' };

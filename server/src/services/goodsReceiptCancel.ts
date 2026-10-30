@@ -5,6 +5,7 @@ import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { logger } from '../lib/logger';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
+import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 
 /** Error code: reversal would drive stock negative; the client offers a forced cancel. */
 export const GOODS_RECEIPT_CANCEL_INSUFFICIENT_STOCK = 'GR_CANCEL_INSUFFICIENT_STOCK';
@@ -15,6 +16,8 @@ interface CancelOptions {
   /** Skip the "enough stock to reverse" guard (the route requires a negativeStockReason). */
   allowNegativeStock?: boolean;
   negativeStockReason?: string | null;
+  /** Optional cancel reason, stored with the user on the STT and its original journal. */
+  reason?: string | null;
 }
 
 /**
@@ -32,11 +35,20 @@ export async function cancelGoodsReceiptInTx(
     where: { id: sttId },
     include: {
       items: { include: { stockMovement: true, inventoryItem: { select: { name: true } } } },
-      invoice: { select: { id: true, invoiceNumber: true, status: true, outstanding: true } },
     },
   });
   if (!stt) throw new BusinessError('STT tidak ditemukan.');
   if (stt.status === 'Cancelled') throw new BusinessError('STT sudah dibatalkan.');
+  // First write: a second concurrent cancel gets STALE_STATUS here instead of reversing the stock,
+  // the PO qtyReceived and the journal a second time. Any later rejection rolls the claim back.
+  const trail = cancelTrail(userId, opts.reason);
+  await claimCancel(tx.goodsReceipt, stt.id, { status: 'Cancelled', cancelledAt: new Date(), ...trail });
+  // Re-read the PI link under the claim's row lock: a PI submit that linked this STT after the
+  // read above (the claim waited for it) must block the cancel like any other linked PI.
+  const { invoice } = await tx.goodsReceipt.findUniqueOrThrow({
+    where: { id: stt.id },
+    select: { invoice: { select: { invoiceNumber: true, status: true } } },
+  });
   // The cancel journal is booked to the STT's fiscal year (moving it to the cancel date's year is
   // a later change), so that year, the STT's date and the original journal's year must be open.
   await assertPeriodsOpen(tx, [{ date: stt.date }, { fiscalYearId: stt.fiscalYearId }], 'penerimaan barang');
@@ -48,16 +60,16 @@ export async function cancelGoodsReceiptInTx(
   }
 
   // Block if PI linked & paid
-  if (stt.invoice) {
-    if (stt.invoice.status === 'Paid' || stt.invoice.status === 'PartiallyPaid') {
+  if (invoice) {
+    if (invoice.status === 'Paid' || invoice.status === 'PartiallyPaid') {
       throw new BusinessError(
-        `STT ${stt.sttNumber} terkait invoice ${stt.invoice.invoiceNumber} yang sudah ada pembayaran. ` +
+        `STT ${stt.sttNumber} terkait invoice ${invoice.invoiceNumber} yang sudah ada pembayaran. ` +
           'Untuk membatalkan STT, batalkan dulu pembayaran + invoice.',
       );
     }
-    if (stt.invoice.status === 'Submitted') {
+    if (invoice.status === 'Submitted') {
       throw new BusinessError(
-        `STT ${stt.sttNumber} terkait invoice ${stt.invoice.invoiceNumber} (Submitted, belum dibayar). ` +
+        `STT ${stt.sttNumber} terkait invoice ${invoice.invoiceNumber} (Submitted, belum dibayar). ` +
           'Batalkan invoice tersebut dulu.',
       );
     }
@@ -189,14 +201,11 @@ export async function cancelGoodsReceiptInTx(
 
     await tx.journalEntry.update({
       where: { id: originalJv.id },
-      data: { status: 'Cancelled', cancelledAt: new Date() },
+      data: { status: 'Cancelled', cancelledAt: new Date(), ...trail },
     });
   }
 
-  const updated = await tx.goodsReceipt.update({
-    where: { id: stt.id },
-    data: { status: 'Cancelled', cancelledAt: new Date(), updatedAt: new Date() },
-  });
+  const updated = await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } });
 
   logger.info({ sttId, sttNumber: stt.sttNumber }, 'Goods receipt cancelled (stock reversed + JV flipped)');
   return updated;

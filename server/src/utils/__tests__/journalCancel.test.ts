@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { BusinessError } from '../errors';
 import { cancelDocumentJournals, cancelJournalsByPrefix, voidJournalByIdInTx } from '../journalCancel';
 import { PERIOD_CLOSED } from '../periodGuard';
+import { cancelTrail } from '../cancelClaim';
 
 type Line = { accountId: string; debit: number; credit: number };
 
@@ -201,6 +202,19 @@ describe('cancelDocumentJournals', () => {
     // Asset AR was debited 11.1 jt; the void credits it back (balance decrement).
     expect(tx.account.update).toHaveBeenCalledWith({ where: { id: 'ar' }, data: { balance: { increment: expect.anything() } } });
     expect(tx.account.update).toHaveBeenCalledTimes(4);
+  });
+
+  it('stores who cancelled and why on every voided journal when the cancel is a user action', async () => {
+    const tx = makeTx([makeJournal('j1', 'JV-SI-1', lines), makeJournal('j2', 'JV-SI-1-CORR', lines)]) as any;
+
+    await cancelDocumentJournals(tx, ['JV-SI-1'], cancelTrail('u-1', 'salah customer'));
+
+    for (const id of ['j1', 'j2']) {
+      expect(tx.journalEntry.updateMany).toHaveBeenCalledWith({
+        where: { id, status: { not: 'Cancelled' } },
+        data: { status: 'Cancelled', cancelledAt: expect.any(Date), cancelledById: 'u-1', cancelReason: 'salah customer' },
+      });
+    }
   });
 
   it('refuses when any journal (also a satellite) sits in a closed fiscal year', async () => {

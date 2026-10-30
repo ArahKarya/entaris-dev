@@ -4,7 +4,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
 import { clearable } from '../utils/clearable';
-import { CreatePurchaseInvoiceSchema, RevisePurchaseInvoiceSchema, UpdateInvoiceMetaSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreatePurchaseInvoiceSchema, RevisePurchaseInvoiceSchema, UpdateInvoiceMetaSchema } from '../utils/schemas';
+import { cancelTrail } from '../utils/cancelClaim';
 import { handleRouteError } from '../utils/errors';
 import { cancelPurchaseInvoiceInTx } from '../services/invoiceCancellation';
 import { submitPurchaseInvoiceInTx } from '../services/purchaseInvoiceSubmit';
@@ -265,9 +266,11 @@ router.post('/:id/revise-price', async (req: AuthRequest, res) => {
 
 // POST /api/purchase/invoices/:id/cancel — cancel purchase invoice
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
   try {
     const result = await prisma.$transaction(
-      (tx) => cancelPurchaseInvoiceInTx(tx, req.params.id as string),
+      (tx) => cancelPurchaseInvoiceInTx(tx, req.params.id as string, cancelTrail(req.user!.userId, body.reason)),
       { timeout: 15000 },
     );
     return res.json(result);

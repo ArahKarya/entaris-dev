@@ -4,6 +4,7 @@ import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
+import { claimCancel } from '../utils/cancelClaim';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
@@ -199,6 +200,8 @@ export async function cancelStockTransferInTx(
   });
   if (!transfer) throw new BusinessError('Transfer tidak ditemukan.');
   if (transfer.status === 'Cancelled') throw new BusinessError('Transfer sudah dibatalkan.');
+  // First write; any rejection below rolls it back.
+  await claimCancel(tx.stockTransfer, transferId, { status: 'Cancelled', cancelledAt: new Date() });
   await assertPeriodsOpen(tx, [{ date: transfer.date }, { fiscalYearId: transfer.fiscalYearId }], 'transfer stok');
 
   // Block when an outbound movement picked one of the TransferIn batches; cancelling would
@@ -270,8 +273,5 @@ export async function cancelStockTransferInTx(
     data: { isCancelled: true },
   });
 
-  return tx.stockTransfer.update({
-    where: { id: transferId },
-    data: { status: 'Cancelled', cancelledAt: new Date() },
-  });
+  return tx.stockTransfer.findUniqueOrThrow({ where: { id: transferId } });
 }

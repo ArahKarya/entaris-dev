@@ -13292,7 +13292,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -13301,6 +13302,13 @@
           "type": "string",
           "required": true,
           "description": "ID Payment uang muka."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya."
         }
       ],
       "output": {
@@ -13319,11 +13327,12 @@
       "errors": [
         "400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.",
         "400: bukan tipe uang muka pelanggan.",
-        "400: sudah dibatalkan.",
+        "400: sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
         "400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka.",
@@ -15308,7 +15317,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -15317,6 +15327,13 @@
           "type": "string",
           "required": true,
           "description": "ID dokumen/rekaman (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal."
         }
       ],
       "output": {
@@ -15340,7 +15357,9 @@
         "400: sudah dibatalkan",
         "400: jurnal terkait pembayaran/dokumen sumber",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)"
+        "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "je_get",
@@ -15426,7 +15445,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -15435,6 +15455,13 @@
           "type": "string",
           "required": true,
           "description": "ID uang jaminan (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang jaminan dan jurnalnya."
         }
       ],
       "output": {
@@ -15452,9 +15479,10 @@
       "confirm_template": "Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
-        "400: Uang jaminan sudah dibatalkan",
+        "400: Uang jaminan sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Sudah ada settlement aktif - batalkan settlement dulu",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pg_settlement_cancel",
@@ -15969,7 +15997,7 @@
       "postingEffect": "Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).",
       "confirm_template": "Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.",
       "errors": [
-        "400: transfer sudah dibatalkan",
+        "400: transfer sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "404: transfer tidak ditemukan",
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
@@ -15997,7 +16025,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -16006,6 +16035,13 @@
           "type": "string",
           "required": true,
           "description": "ID pembayaran uang muka vendor (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya."
         }
       ],
       "output": {
@@ -16022,12 +16058,13 @@
       "postingEffect": "Reverse jurnal uang muka (asal: DR Uang Muka Vendor 1.3 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dan depositBalance pemasok dibalik.",
       "confirm_template": "Batalkan uang muka vendor {id}? Jurnal kas/bank terkait akan dibalik.",
       "errors": [
-        "400: Deposit sudah dibatalkan",
+        "400: Deposit sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu",
         "400: Bukan tipe uang muka vendor",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "vdep_apply_cancel",
@@ -16848,7 +16885,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -16857,6 +16895,13 @@
           "type": "string",
           "required": true,
           "description": "ID CustomerDepositApplication."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi."
         }
       ],
       "output": {
@@ -16874,9 +16919,10 @@
       "confirm_template": "Batalkan pemakaian uang muka (aplikasi {id})?",
       "errors": [
         "400: aplikasi tidak ditemukan.",
-        "400: aplikasi sudah dibatalkan.",
+        "400: aplikasi sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku"
+        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -17082,7 +17128,8 @@
       "errors": [
         "400: batalkan invoice terkait dulu.",
         "400: surat jalan sudah dibatalkan.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
       ],
       "prerequisites": [
         "Tahun buku tanggal SJ masih terbuka."
@@ -20643,7 +20690,8 @@
       "input": {
         "id": "string",
         "allowNegativeStock": "boolean",
-        "negativeStockReason": "string"
+        "negativeStockReason": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -20666,6 +20714,13 @@
           "type": "string",
           "required": false,
           "description": "Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di STT dan jurnal aslinya."
         }
       ],
       "output": {
@@ -20693,7 +20748,9 @@
         "400: ada PI Paid / PI belum dibatalkan",
         "400: stok tidak cukup untuk dibalikkan",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pi_cancel",
@@ -23615,7 +23672,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -23624,6 +23682,13 @@
           "type": "string",
           "required": true,
           "description": "ID pembayaran (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di pembayaran dan jurnalnya."
         }
       ],
       "output": {
@@ -23644,7 +23709,9 @@
         "400: Pembayaran sudah dibatalkan",
         "400: Gunakan endpoint Uang Muka untuk membatalkan deposit",
         "400: Refund belum mendukung cancel otomatis",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pay_get",
@@ -23874,7 +23941,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -23883,6 +23951,13 @@
           "type": "string",
           "required": true,
           "description": "ID settlement (bukan ID jaminan)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di settlement dan jurnalnya."
         }
       ],
       "output": {
@@ -23900,9 +23975,10 @@
       "confirm_template": "Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
-        "400: Settlement sudah dibatalkan",
+        "400: Settlement sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Uang jaminan induk sudah dibatalkan",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pg_get",
@@ -24528,7 +24604,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -24537,6 +24614,13 @@
           "type": "string",
           "required": true,
           "description": "ID invoice pembelian (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice."
         }
       ],
       "output": {
@@ -24558,7 +24642,9 @@
         "400: Invoice sudah lunas",
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pay_cancel",
@@ -25907,7 +25993,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -25916,6 +26003,13 @@
           "type": "string",
           "required": true,
           "description": "ID retur."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal retur dan uang muka kreditnya."
         }
       ],
       "output": {
@@ -25933,8 +26027,9 @@
       "confirm_template": "Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
-        "400: retur sudah dibatalkan.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -26201,7 +26296,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -26210,6 +26306,13 @@
           "type": "string",
           "required": true,
           "description": "ID invoice."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice."
         }
       ],
       "output": {
@@ -26229,7 +26332,9 @@
         "400: invoice sudah lunas.",
         "400: ada pembayaran teralokasi — batalkan pembayaran dulu.",
         "400: ada alokasi uang muka aktif — batalkan alokasi dulu.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -27041,7 +27146,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -27050,6 +27156,13 @@
           "type": "string",
           "required": true,
           "description": "ID VendorDepositApplication (bukan ID uang muka)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi."
         }
       ],
       "output": {
@@ -27068,9 +27181,10 @@
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Aplikasi uang muka tidak ditemukan",
-        "400: Aplikasi sudah dibatalkan",
+        "400: Aplikasi sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku"
+        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "vdep_apply",
