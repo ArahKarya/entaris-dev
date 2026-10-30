@@ -1,12 +1,13 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { validateBody } from '../utils/validate';
-import { handleRouteError } from '../utils/errors';
+import { BusinessError, handleRouteError } from '../utils/errors';
 import { CancelReasonSchema } from '../utils/schemas';
-import { cancelTrail } from '../utils/cancelClaim';
+import { cancelTrail, STALE_STATUS } from '../utils/cancelClaim';
 import { assertPeriodOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
 import Decimal from 'decimal.js';
 import { parseListPaging, parseSort } from '../utils/listQuery';
@@ -276,11 +277,22 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
       include: { fixedAsset: true },
     });
     if (!entry) return res.status(404).json({ error: 'Jadwal depresiasi tidak ditemukan.' });
-    if (entry.isPosted) return res.status(400).json({ error: 'Depresiasi sudah diposting.' });
+    if (entry.isPosted) return res.status(400).json({ error: 'Depresiasi sudah diposting.', code: STALE_STATUS });
 
     const asset = entry.fixedAsset;
+    const amount = Number(entry.amount);
 
     const result = await prisma.$transaction(async (tx) => {
+      // The asset row is locked before the fiscal year and the account rows, in the same order as an
+      // un-post (fixedAssetDepreciationCancel.ts), so the two never deadlock and run one after the other.
+      // The row is claimed under the lock: a double click or a post racing this one gets STALE_STATUS.
+      await tx.$queryRaw`SELECT id FROM fixed_assets WHERE id = ${asset.id} FOR UPDATE`;
+      const claimed = await tx.depreciationEntry.updateMany({
+        where: { id: entry.id, isPosted: false },
+        data: { isPosted: true },
+      });
+      if (claimed.count !== 1) throw new BusinessError('Depresiasi sudah diposting.', STALE_STATUS);
+
       // Year by business day of the period; a closed or missing year is a 400 with its code.
       const fiscalYear = await assertPeriodOpen(tx, { date: entry.periodDate }, 'penyusutan');
 
@@ -300,8 +312,8 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
           sourceType: 'DEPRECIATION',
           items: {
             create: [
-              { accountId: asset.depreciationAccountId, debit: Number(entry.amount), credit: 0, description: `Beban depresiasi ${asset.name}` },
-              { accountId: asset.accumulatedDepAccountId, debit: 0, credit: Number(entry.amount), description: `Akm. depresiasi ${asset.name}` },
+              { accountId: asset.depreciationAccountId, debit: amount, credit: 0, description: `Beban depresiasi ${asset.name}` },
+              { accountId: asset.accumulatedDepAccountId, debit: 0, credit: amount, description: `Akm. depresiasi ${asset.name}` },
             ],
           },
         },
@@ -330,20 +342,18 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
         await updateAccountBalance(tx, item.accountId, item.debit, item.credit);
       }
 
-      // Mark depreciation as posted
       await tx.depreciationEntry.update({
         where: { id: entry.id },
-        data: { isPosted: true, journalEntryId: journal.id },
+        data: { journalEntryId: journal.id },
       });
 
-      // Update asset
-      const newAccDep = new Decimal(asset.accumulatedDepreciation.toString()).plus(entry.amount.toString());
-      const newBookValue = new Decimal(asset.acquisitionCost.toString()).minus(newAccDep);
+      // Relative to the locked row, not to the figures read before the transaction: an un-post
+      // committed in between has already moved them.
       await tx.fixedAsset.update({
         where: { id: asset.id },
         data: {
-          accumulatedDepreciation: newAccDep.toNumber(),
-          bookValue: newBookValue.toNumber(),
+          accumulatedDepreciation: { increment: amount },
+          bookValue: { decrement: amount },
         },
       });
 
@@ -461,16 +471,28 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
     const userId = req.user!.userId;
 
     const result = await prisma.$transaction(async (tx) => {
+      // Lock every asset of the run first, in id order, before the fiscal year and the account rows:
+      // the same order as a single post and an un-post, so none of them deadlock with this run.
+      const assetIds = [...new Set(dueEntries.map((e) => e.fixedAssetId))].sort();
+      await tx.$queryRaw`SELECT id FROM fixed_assets WHERE id IN (${Prisma.join(assetIds)}) ORDER BY id FOR UPDATE`;
       await assertPeriodOpen(tx, { fiscalYearId: fiscalYear.id }, 'penyusutan');
       // Pull starting JE number once, increment locally to avoid N round-trips
       const startCount = await tx.journalEntry.count();
       const jeNumbers: string[] = [];
+      let postedAmount = 0;
 
-      for (let i = 0; i < dueEntries.length; i++) {
-        const entry = dueEntries[i];
+      for (const entry of dueEntries) {
+        // Claimed under the asset lock: a row posted by another request since the list was read, or
+        // whose asset was disposed meanwhile, is skipped.
+        const claimed = await tx.depreciationEntry.updateMany({
+          where: { id: entry.id, isPosted: false, fixedAsset: { status: 'Active' } },
+          data: { isPosted: true },
+        });
+        if (claimed.count !== 1) continue;
+
         const asset = entry.fixedAsset;
         const amount = Number(entry.amount);
-        const entryNumber = `DEP-${String(startCount + 1 + i).padStart(6, '0')}`;
+        const entryNumber = `DEP-${String(startCount + 1 + jeNumbers.length).padStart(6, '0')}`;
 
         const je = await tx.journalEntry.create({
           data: {
@@ -507,23 +529,23 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
 
         await tx.depreciationEntry.update({
           where: { id: entry.id },
-          data: { isPosted: true, journalEntryId: je.id },
+          data: { journalEntryId: je.id },
         });
 
-        const newAccDep = new Decimal(asset.accumulatedDepreciation.toString()).plus(amount.toString());
-        const newBookValue = new Decimal(asset.acquisitionCost.toString()).minus(newAccDep);
+        // Relative to the locked row (see POST /:id/depreciate).
         await tx.fixedAsset.update({
           where: { id: asset.id },
           data: {
-            accumulatedDepreciation: newAccDep.toNumber(),
-            bookValue: newBookValue.toNumber(),
+            accumulatedDepreciation: { increment: amount },
+            bookValue: { decrement: amount },
           },
         });
 
         jeNumbers.push(entryNumber);
+        postedAmount += amount;
       }
 
-      return { posted: dueEntries.length, totalAmount, jeNumbers };
+      return { posted: jeNumbers.length, totalAmount: postedAmount, jeNumbers };
     }, { timeout: 120_000 });
 
     logger.info(
@@ -533,7 +555,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
 
     return res.json({
       ...result,
-      skipped: 0,
+      skipped: dueEntries.length - result.posted,
       message: `Berhasil post ${result.posted} entry depresiasi (${result.posted} jurnal) untuk periode ${yy}-${String(mm).padStart(2, '0')}.`,
     });
   } catch (error) {
