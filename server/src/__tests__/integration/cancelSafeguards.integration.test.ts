@@ -22,6 +22,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
+import { createCapUser } from '../helpers/rbacFixture';
 import { BusinessError } from '../../utils/errors';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
@@ -52,7 +53,9 @@ const d = hasDb ? describe : describe.skip;
 
 let prisma: PrismaClient;
 let pool: Pool;
+/** The acting user and its role; the concurrent test creates and deletes its own user. */
 let userId: string;
+let role: string;
 let warehouseId: string;
 let cashAccountId: string;
 
@@ -60,9 +63,6 @@ beforeAll(async () => {
   if (!hasDb) return;
   pool = new Pool({ connectionString: process.env.DATABASE_URL });
   prisma = new PrismaClient({ adapter: new PrismaPg(pool as any) });
-  const user = await prisma.user.findFirst({ where: { role: 'Admin', isActive: true } });
-  if (!user) throw new Error('No admin user.');
-  userId = user.id;
   const wh = await prisma.warehouse.findFirst({ where: { isActive: true }, orderBy: { code: 'asc' } });
   if (!wh) throw new Error('No active warehouse.');
   warehouseId = wh.id;
@@ -87,6 +87,8 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
       // The role cache is loaded through the harness; never reuse one from another transaction.
       invalidatePermissionCache();
       try {
+        // Transfer and deposit cancels require doc.cancel; a forced transfer cancel also inventory.negative_stock.
+        ({ userId, role } = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']));
         await fn(tx);
       } finally {
         state.tx = null;
@@ -195,17 +197,17 @@ d('stock transfer cancel after the destination used the goods', () => {
       );
       expect(await stockAt(tx, item.id, b.id)).toBe(200);
 
-      const rejected = await callRoute(stockTransfersRouter, 'patch', '/:id/cancel', { params: { id: transfer.id }, userId });
+      const rejected = await callRoute(stockTransfersRouter, 'patch', '/:id/cancel', { params: { id: transfer.id }, userId, role });
       expect(rejected.status, JSON.stringify(rejected.body)).toBe(400);
       expect(rejected.body.code).toBe(STOCK_TRANSFER_CANCEL_INSUFFICIENT_STOCK);
       expect(await stockAt(tx, item.id, b.id)).toBe(200);
       expect(await stockAt(tx, item.id, warehouseId)).toBe(0);
 
-      // The harness user is Admin, which holds inventory.negative_stock.
+      // The harness role holds inventory.negative_stock.
       const forced = await callRoute(stockTransfersRouter, 'patch', '/:id/cancel', {
         params: { id: transfer.id },
         body: { allowNegativeStock: true, negativeStockReason: 'Koreksi transfer salah gudang' },
-        userId,
+        userId, role,
       });
       expect(forced.status, JSON.stringify(forced.body)).toBe(200);
       expect(forced.body.status).toBe('Cancelled');
@@ -219,6 +221,7 @@ d('stock transfer cancel run twice at once', () => {
   // Needs committed rows on two connections, so the fixture is created for real and deleted after.
   it('the second cancel waits for the first, then fails; 1,000 kg moves back once', async () => {
     const fy = await createFiscalYear(prisma as unknown as Tx, { year: 2089 });
+    const actor = await createCapUser(prisma as unknown as Tx, []);
     const [a, b] = await Promise.all([warehouse(prisma as unknown as Tx), warehouse(prisma as unknown as Tx)]);
     const item = await prisma.inventoryItem.create({
       data: { code: `IT-E1R3-${tag()}`, name: `Uji batal ganda ${tag()}`, unit: 'kg', currentStock: 1_000, averageCost: 9_000, isActive: true },
@@ -230,7 +233,7 @@ d('stock transfer cancel run twice at once', () => {
     const transfer = await prisma.stockTransfer.create({
       data: {
         transferNumber: `ST-E1R3-${tag()}`, date: new Date('2089-03-10'), fromWarehouseId: a.id, toWarehouseId: b.id,
-        status: 'Submitted', fiscalYearId: fy.id, createdBy: userId, submittedAt: new Date(),
+        status: 'Submitted', fiscalYearId: fy.id, createdBy: actor.userId, submittedAt: new Date(),
         items: { create: [{ itemId: item.id, quantity: 1_000 }] },
       },
     });
@@ -268,6 +271,8 @@ d('stock transfer cancel run twice at once', () => {
       await prisma.inventoryItem.delete({ where: { id: item.id } });
       await prisma.warehouse.deleteMany({ where: { id: { in: [a.id, b.id] } } });
       await prisma.fiscalYear.delete({ where: { id: fy.id } });
+      await prisma.user.delete({ where: { id: actor.userId } });
+      await prisma.role.delete({ where: { key: actor.role } });
     }
   });
 });
@@ -285,11 +290,11 @@ d('deposit cancel after a refund', () => {
       const refund = await callRoute(customerDepositsRouter, 'post', '/:id/refund', {
         params: { id: payment.id },
         body: { date: `${Y}-04-05`, cashAmount: 4_000_000, cashAccountId },
-        userId,
+        userId, role,
       });
       expect(refund.status, JSON.stringify(refund.body)).toBe(200);
 
-      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId });
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId, role });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(400);
       expect(cancel.body.code).toBe(DEPOSIT_CANCEL_REFUNDED);
 
@@ -312,11 +317,11 @@ d('deposit cancel after a refund', () => {
       const refund = await callRoute(vendorDepositsRouter, 'post', '/:id/refund', {
         params: { id: payment.id },
         body: { date: `${Y}-04-05`, cashAmount: 4_000_000, cashAccountId },
-        userId,
+        userId, role,
       });
       expect(refund.status, JSON.stringify(refund.body)).toBe(200);
 
-      const cancel = await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId });
+      const cancel = await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId, role });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(400);
       expect(cancel.body.code).toBe(DEPOSIT_CANCEL_REFUNDED);
 
@@ -401,7 +406,7 @@ d('legacy deposit cancel without a journal link', () => {
       const fx = await legacyDeposit(tx, 'CustomerDeposit', { entryNumber: 'JV-{n}', narration: 'Uang Muka Pelanggan: {n}' });
       expect(await balanceOf(tx, depositAccountId)).toBe(before.deposit + 10_000_000);
 
-      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId });
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId, role });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
 
       expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: fx.journal.id } })).status).toBe('Cancelled');
@@ -420,7 +425,7 @@ d('legacy deposit cancel without a journal link', () => {
       const before = await balanceOf(tx, depositAccountId);
       const fx = await legacyDeposit(tx, 'VendorDeposit', { narration: 'Uang Muka: {n}' });
 
-      const cancel = await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId });
+      const cancel = await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId, role });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
 
       expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: fx.journal.id } })).status).toBe('Cancelled');
@@ -438,7 +443,7 @@ d('legacy deposit cancel without a journal link', () => {
       const before = { deposit: await balanceOf(tx, depositAccountId), equity: await balanceOf(tx, openingEquityId) };
       const fx = await legacyDeposit(tx, 'CustomerDeposit', { entryNumber: 'JV-{n}', narration: 'Uang Muka Pelanggan: {n}', journalStatus: 'Cancelled' });
 
-      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId });
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: fx.payment.id }, userId, role });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
       expect(await balanceOf(tx, depositAccountId)).toBe(before.deposit);
       expect(await balanceOf(tx, openingEquityId)).toBe(before.equity);
@@ -470,7 +475,7 @@ d('deposit created by a sales return', () => {
       if (!customerDepositId) throw new Error('Return created no credit deposit.');
       const balance = Number((await tx.party.findUniqueOrThrow({ where: { id: customer.id } })).customerDepositBalance);
 
-      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: customerDepositId }, userId });
+      const cancel = await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: customerDepositId }, userId, role });
       expect(cancel.status, JSON.stringify(cancel.body)).toBe(400);
       expect(cancel.body.code).toBe(DEPOSIT_CANCEL_SALES_RETURN);
       expect((await tx.payment.findUniqueOrThrow({ where: { id: customerDepositId } })).status).toBe('Submitted');
