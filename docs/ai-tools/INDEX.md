@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **508** tool (read 234 · write 165 · critical 109); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **509** tool (read 234 · write 165 · critical 110); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -12,7 +12,7 @@ Total **508** tool (read 234 · write 165 · critical 109); semuanya aktif secar
 | [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
-| [Akuntansi](akuntansi.md) | 33 | 14 | 8 | 11 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
+| [Akuntansi](akuntansi.md) | 34 | 14 | 8 | 12 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
 | [Kas & Bank](kas-bank.md) | 37 | 15 | 13 | 9 | Pembayaran/penerimaan, rekonsiliasi bank, transaksi berulang, uang jaminan proyek. |
 | [Aset & Umum (EAM)](aset-umum.md) | 141 | 49 | 68 | 24 | Aset, kendaraan, gedung, equipment, maintenance, dokumen legal, inventaris umum, MR. |
 | [Pengajuan Pembayaran](pengajuan-pembayaran.md) | 32 | 9 | 11 | 12 | Pengajuan pembayaran, verifikasi, pembayaran, pertanggungjawaban, antrian Tagihan EAM. |
@@ -103,6 +103,7 @@ Total **508** tool (read 234 · write 165 · critical 109); semuanya aktif secar
 | [`fa_create`](akuntansi.md#fa_create) | akuntansi | write | tidak | Admin, Accountant | `POST /api/fixed-assets` |
 | [`fa_depreciate`](akuntansi.md#fa_depreciate) | akuntansi | critical | tidak | Admin, Accountant | `POST /api/fixed-assets/:id/depreciate` |
 | [`fa_depreciate_bulk`](akuntansi.md#fa_depreciate_bulk) | akuntansi | critical | tidak | Admin, Accountant | `POST /api/fixed-assets/depreciate-bulk` |
+| [`fa_depreciation_cancel`](akuntansi.md#fa_depreciation_cancel) | akuntansi | critical | tidak | Admin, Accountant | `POST /api/fixed-assets/:id/depreciation/:entryId/cancel` |
 | [`fa_dispose`](akuntansi.md#fa_dispose) | akuntansi | critical | tidak | Admin, Accountant | `POST /api/fixed-assets/:id/dispose` |
 | [`fa_get`](akuntansi.md#fa_get) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/fixed-assets/:id` |
 | [`fa_import`](akuntansi.md#fa_import) | akuntansi | write | tidak | Admin, Accountant | `POST /api/fixed-assets/import` |
