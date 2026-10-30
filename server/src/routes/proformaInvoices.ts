@@ -130,7 +130,8 @@ router.post('/', async (req: AuthRequest, res) => {
         if (so.status === 'Cancelled') throw new BusinessError('Sales Order sudah dibatalkan.');
         if (so.partyId !== body.partyId) throw new BusinessError('Customer tidak sama dengan Sales Order asal.');
       }
-      const fiscalYear = await getOpenFiscalYear(tx, date);
+      // No GL or stock effect: the year only numbers the document, so the period lock does not apply.
+      const fiscalYear = await getOpenFiscalYear(tx, date, { ignoreLock: true });
       const proformaNumber = await generateDocumentNumber(tx, 'PRO', date, fiscalYear.id);
       const items = resolveItems(body.items);
       const totals = computeTotals(items, body.potongan ?? 0, body.biayaLain ?? 0);

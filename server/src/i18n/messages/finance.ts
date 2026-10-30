@@ -354,6 +354,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Tahun buku untuk {0} tidak ditemukan. Buat tahun buku untuk tanggal ini terlebih dahulu.": "No fiscal year found for this {0}. Create a fiscal year covering this date first.",
   "Tahun buku {0} sudah ditutup; {1} di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.": "Fiscal year {0} is closed; this {1} cannot be posted, changed or cancelled in that period. Make the correction in the current period.",
   "Tahun buku {0} sedang ditutup atau dibuka kembali; {1} belum bisa diproses. Coba lagi beberapa saat lagi.": "Fiscal year {0} is being closed or reopened; this {1} cannot be processed yet. Try again in a moment.",
+  "Periode s.d. {0} sudah dikunci; {1} bertanggal {2} tidak bisa diposting, diubah, atau dibatalkan. Minta pemegang hak Kunci Periode memundurkan kunci.": "The period up to {0} is locked; this {1} dated {2} cannot be posted, changed or cancelled. Ask a holder of the Period Lock right to move the lock back.",
   "jurnal": "journal",
   "pembayaran": "payment",
   "uang muka": "deposit",

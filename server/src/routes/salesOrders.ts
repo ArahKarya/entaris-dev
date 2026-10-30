@@ -166,7 +166,8 @@ router.post('/', async (req: AuthRequest, res) => {
   try {
     const result = await prisma.$transaction(async (tx) => {
       const date = new Date(body.date);
-      const fy = await getOpenFiscalYear(tx, date);
+      // No GL or stock effect: the year only numbers the document, so the period lock does not apply.
+      const fy = await getOpenFiscalYear(tx, date, { ignoreLock: true });
       if (body.quotationId) await assertQuotationLinkable(tx, body.quotationId, body.partyId);
       const soNumber = await generateDocumentNumber(tx, 'PSN', date, fy.id);
       const { subtotal, grandTotal } = computeTotals({

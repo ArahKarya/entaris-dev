@@ -133,7 +133,8 @@ router.post('/', async (req: AuthRequest, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       if (body.salesOwnerId) await assertSalesOwner(tx, body.salesOwnerId);
-      const fy = await getOpenFiscalYear(tx, date);
+      // No GL or stock effect: the year only numbers the document, so the period lock does not apply.
+      const fy = await getOpenFiscalYear(tx, date, { ignoreLock: true });
       const inquiryNumber = await generateDocumentNumber(tx, 'INQ', date, fy.id);
       return tx.inquiry.create({
         data: {

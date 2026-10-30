@@ -1033,6 +1033,30 @@ model AuditLog {
   @@map("audit_trail")
 }
 
+/// Monthly period lock (single row, id = 1): postings, edits and cancels dated on or before
+/// lockDate are rejected with PERIOD_LOCKED (utils/periodGuard.ts). NULL = no lock.
+model PeriodLock {
+  id        Int       @id @default(1) @db.SmallInt
+  lockDate  DateTime? @map("lock_date") @db.Date
+  updatedBy String?   @map("updated_by")
+  updatedAt DateTime  @default(now()) @map("updated_at")
+
+  @@map("period_lock")
+}
+
+/// Every change of the period lock date; reason is required when the date moves back or is cleared.
+model PeriodLockLog {
+  id        String    @id @default(uuid())
+  oldDate   DateTime? @map("old_date") @db.Date
+  newDate   DateTime? @map("new_date") @db.Date
+  reason    String?
+  userId    String    @map("user_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("period_lock_logs")
+}
+
 model CompanySettings {
   id                   String    @id @default(uuid())
   slug                 String    @unique @default("default")

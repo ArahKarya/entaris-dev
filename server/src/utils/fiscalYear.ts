@@ -1,5 +1,5 @@
 import type { FiscalYear, Prisma } from '@prisma/client';
-import { assertPeriodOpen, type PeriodLabel } from './periodGuard';
+import { assertPeriodOpen, type PeriodGuardOptions, type PeriodLabel } from './periodGuard';
 
 /**
  * The open fiscal year for a new document dated `date`, found by its business day (WIB by
@@ -7,12 +7,13 @@ import { assertPeriodOpen, type PeriodLabel } from './periodGuard';
  * transaction ends, so a posting either commits before a running year close sums the year, or
  * waits for it (bounded, see YEAR_LOCK_WAIT_MS) and is rejected.
  * Throws BusinessError FISCAL_YEAR_MISSING when no year covers the day, PERIOD_CLOSED when it is closed,
- * PERIOD_BUSY when a close or reopen of that year is still running after YEAR_LOCK_WAIT_MS.
+ * PERIOD_BUSY when a close or reopen of that year is still running after YEAR_LOCK_WAIT_MS,
+ * PERIOD_LOCKED when the day is on or before the period lock date (unless `ignoreLock`).
  */
 export function getOpenFiscalYear(
   tx: Prisma.TransactionClient,
   date: Date,
-  opts: { label?: PeriodLabel } = {},
+  opts: { label?: PeriodLabel } & PeriodGuardOptions = {},
 ): Promise<FiscalYear> {
-  return assertPeriodOpen(tx, { date }, opts.label ?? 'dokumen');
+  return assertPeriodOpen(tx, { date }, opts.label ?? 'dokumen', { ignoreLock: opts.ignoreLock });
 }
