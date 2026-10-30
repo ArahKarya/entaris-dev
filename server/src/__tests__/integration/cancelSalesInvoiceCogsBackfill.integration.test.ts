@@ -13,6 +13,7 @@ import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { cancelSalesInvoiceInTx } from '../../services/invoiceCancellation';
 import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../../services/cogsBackfillReverse';
+import { cancelTrail } from '../../utils/cancelClaim';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -91,14 +92,17 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
         const qMid = await tx.cogsBackfillQueue.findUniqueOrThrow({ where: { id: queue.id } });
         expect(qMid.status).toBe('PartiallySettled');
 
-        await cancelSalesInvoiceInTx(tx, invoice.id);
+        await cancelSalesInvoiceInTx(tx, invoice.id, cancelTrail(userId, 'salah customer'));
 
         const qAfter = await tx.cogsBackfillQueue.findUniqueOrThrow({ where: { id: queue.id } });
         expect(qAfter.status).toBe('Cancelled');
         expect(await tx.cogsBackfillSettlement.count({ where: { queueId: queue.id } })).toBe(0);
 
+        // The auto-settle JV is voided by the user's cancel, so it carries the same trail.
         const je = await tx.journalEntry.findUniqueOrThrow({ where: { id: jeId } });
         expect(je.status).toBe('Cancelled');
+        expect(je.cancelledById).toBe(userId);
+        expect(je.cancelReason).toBe('salah customer');
         const ale = await tx.accountingLedgerEntry.findMany({ where: { referenceId: jeId } });
         expect(ale.length).toBe(2);
         expect(ale.every((a) => a.isCancelled)).toBe(true);
@@ -154,6 +158,30 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
         await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', refId);
         const q = await tx.cogsBackfillQueue.findUniqueOrThrow({ where: { id: a.queue.id } });
         expect(q.status).toBe('Cancelled');
+
+        throw new RollbackSentinel();
+      });
+    } catch (err) {
+      if (!(err instanceof RollbackSentinel)) throw err;
+    }
+  });
+
+  it('stores the trail on auto-settle JVs reversed for a cancelled purchase invoice', async () => {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const a = await seedInvoiceWithQueue(tx, 'PIT', 20, 10_000);
+        const refId = `TEST-PI-${a.item.id}`;
+        const settled = await settleCogsBackfillForItem(tx, {
+          itemId: a.item.id, qtyAvailable: 20, unitCostNow: 11_000, fiscalYearId: a.invoice.fiscalYearId,
+          userId, settleDate: new Date(), source: { type: 'PurchaseInvoice', refId },
+        });
+        const jeId = settled!.journalEntryId!;
+
+        await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', refId, cancelTrail(userId, 'harga salah'));
+        const je = await tx.journalEntry.findUniqueOrThrow({ where: { id: jeId } });
+        expect(je.status).toBe('Cancelled');
+        expect(je.cancelledById).toBe(userId);
+        expect(je.cancelReason).toBe('harga salah');
 
         throw new RollbackSentinel();
       });

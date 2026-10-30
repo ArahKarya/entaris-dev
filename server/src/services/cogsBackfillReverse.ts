@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { logger } from '../lib/logger';
 import { assertPeriodOpen } from '../utils/periodGuard';
+import { cancelTrailData, type CancelTrail } from '../utils/cancelClaim';
 
 type Tx = Prisma.TransactionClient;
 
@@ -12,11 +13,13 @@ const NEAR_ZERO_QTY = 0.0005;
  * Close the COGS backfill queue of a sales invoice being cancelled: the invoice's own COGS JV is
  * voided, so every auto-settle differential booked against its queue is void too. Cancels those
  * auto-settle JVs + ALE, deletes the settlement rows and marks the queue entries 'Cancelled' so
- * later stock-ins no longer settle them. No-op when the invoice has no queue entries.
+ * later stock-ins no longer settle them. No-op when the invoice has no queue entries. `trail` (the
+ * user cancel that voids them) is stored on those JVs.
  */
 export async function closeCogsBackfillForSalesInvoice(
   tx: Tx,
   salesInvoiceId: string,
+  trail?: CancelTrail,
 ): Promise<{ queuesClosed: number; journalsCancelled: number }> {
   const queues = await tx.cogsBackfillQueue.findMany({
     where: { salesInvoiceId, status: { not: 'Cancelled' } },
@@ -42,7 +45,7 @@ export async function closeCogsBackfillForSalesInvoice(
     if (!je || je.status === 'Cancelled') continue;
     // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
     await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
-    await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date() } });
+    await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date(), ...cancelTrailData(trail) } });
     await tx.accountingLedgerEntry.updateMany({ where: { referenceId: jeId }, data: { isCancelled: true } });
     for (const ji of je.items) affectedAccountIds.add(ji.accountId);
     journalsCancelled++;
@@ -68,12 +71,14 @@ export async function closeCogsBackfillForSalesInvoice(
 /**
  * Reverse every COGS backfill auto-settle triggered by one stock-in document (on cancel or before
  * re-create on edit): cancels the auto-settle JVs + ALE, restores queue qtyPending/status, deletes
- * the settlement rows. No-op without settlements.
+ * the settlement rows. No-op without settlements. `trail` is stored on the voided JVs when a user
+ * cancel triggers the reversal.
  */
 export async function reverseCogsSettlementsByTrigger(
   tx: Tx,
   triggerSource: 'ProductionRun' | 'PurchaseInvoice' | 'StockMovement',
   triggerRefId: string,
+  trail?: CancelTrail,
 ): Promise<{ reversed: number; journalsCancelled: number }> {
   const settlements = await tx.cogsBackfillSettlement.findMany({
     where: { triggerSource, triggerRefId },
@@ -91,7 +96,7 @@ export async function reverseCogsSettlementsByTrigger(
     if (!je || je.status === 'Cancelled') continue;
     // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
     await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
-    await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date() } });
+    await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date(), ...cancelTrailData(trail) } });
     await tx.accountingLedgerEntry.updateMany({ where: { referenceId: jeId }, data: { isCancelled: true } });
     for (const ji of je.items) affectedAccountIds.add(ji.accountId);
     journalsCancelled++;

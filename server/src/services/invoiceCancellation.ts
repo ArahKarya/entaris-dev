@@ -55,7 +55,7 @@ export async function cancelSalesInvoiceInTx(
 
   // Deferred COGS of this invoice is void with it: close its backfill queue and reverse its
   // auto-settle JVs, otherwise later stock-ins keep moving inventory value into HPP.
-  await closeCogsBackfillForSalesInvoice(tx, invoice.id);
+  await closeCogsBackfillForSalesInvoice(tx, invoice.id, trail);
 
   // Only direct-sale movements are reversed; from-DO movements belong to the DO and stay valid.
   const stockMovements = await tx.stockMovement.findMany({
@@ -167,7 +167,7 @@ export async function cancelPurchaseInvoiceInTx(
     });
   }
 
-  await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', invoice.id);
+  await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', invoice.id, trail);
 
   // Release linked STTs for invoicing; their items and stock movements stay untouched.
   await tx.goodsReceipt.updateMany({
