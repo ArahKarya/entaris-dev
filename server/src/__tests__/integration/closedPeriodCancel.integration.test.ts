@@ -14,6 +14,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
+import { createCapUser } from '../helpers/rbacFixture';
 import { BusinessError } from '../../utils/errors';
 import { FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../../utils/periodGuard';
 
@@ -107,6 +108,11 @@ function clockAt(iso: string) {
 /** A service call in its own savepoint, like the route transaction that wraps it in production. */
 function inRouteTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   return appPrisma.$transaction(fn as (tx: unknown) => Promise<T>) as Promise<T>;
+}
+
+/** The cancel routes are gated by requireCap('doc.cancel'); CI has no built-in roles to lean on. */
+function canceller(tx: Tx) {
+  return createCapUser(tx, ['doc.cancel']);
 }
 
 async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
@@ -369,7 +375,7 @@ d('closed fiscal year: cash, deposits and returns', () => {
       const ids = await journalIdsOf(tx, payment.paymentNumber);
       const before = await ledgerState(tx, ids);
 
-      expectPeriodClosed(await callRoute(paymentsRouter, 'post', '/:id/cancel', { params: { id: payment.id }, userId }));
+      expectPeriodClosed(await callRoute(paymentsRouter, 'post', '/:id/cancel', { params: { id: payment.id }, ...(await canceller(tx)) }));
 
       expect((await tx.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).not.toBe('Cancelled');
       expect((await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe('Paid');
@@ -390,7 +396,7 @@ d('closed fiscal year: cash, deposits and returns', () => {
       const ids = payment.journalEntryId ? [payment.journalEntryId] : await journalIdsOf(tx, payment.paymentNumber);
       const before = await ledgerState(tx, ids);
 
-      expectPeriodClosed(await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId }));
+      expectPeriodClosed(await callRoute(customerDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, ...(await canceller(tx)) }));
 
       expect((await tx.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).not.toBe('Cancelled');
       expect(Number((await tx.party.findUniqueOrThrow({ where: { id: customer.id } })).customerDepositBalance)).toBe(10_000_000);
@@ -411,7 +417,7 @@ d('closed fiscal year: cash, deposits and returns', () => {
       const ids = payment.journalEntryId ? [payment.journalEntryId] : await journalIdsOf(tx, payment.paymentNumber);
       const before = await ledgerState(tx, ids);
 
-      expectPeriodClosed(await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, userId }));
+      expectPeriodClosed(await callRoute(vendorDepositsRouter, 'patch', '/:id/cancel', { params: { id: payment.id }, ...(await canceller(tx)) }));
 
       expect((await tx.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).not.toBe('Cancelled');
       expect(Number((await tx.party.findUniqueOrThrow({ where: { id: supplier.id } })).depositBalance)).toBe(10_000_000);
@@ -441,7 +447,7 @@ d('closed fiscal year: cash, deposits and returns', () => {
       await close(tx, old);
       const before = await ledgerState(tx, [application.journalEntryId!]);
 
-      expectPeriodClosed(await callRoute(customerDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, userId }));
+      expectPeriodClosed(await callRoute(customerDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, ...(await canceller(tx)) }));
 
       expect((await tx.customerDepositApplication.findUniqueOrThrow({ where: { id: application.id } })).isCancelled).toBe(false);
       expect(Number((await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).outstanding)).toBe(0);
@@ -474,7 +480,7 @@ d('closed fiscal year: cash, deposits and returns', () => {
       await close(tx, old);
       const before = await ledgerState(tx, [application.journalEntryId!]);
 
-      expectPeriodClosed(await callRoute(vendorDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, userId }));
+      expectPeriodClosed(await callRoute(vendorDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, ...(await canceller(tx)) }));
 
       expect((await tx.vendorDepositApplication.findUniqueOrThrow({ where: { id: application.id } })).isCancelled).toBe(false);
       expect(Number((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).outstanding)).toBe(0);
@@ -506,7 +512,7 @@ d('closed fiscal year: cash, deposits and returns', () => {
       });
       await close(tx, old);
 
-      expectPeriodClosed(await callRoute(customerDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, userId }));
+      expectPeriodClosed(await callRoute(customerDepositsRouter, 'post', '/apply/:id/cancel', { params: { id: application.id }, ...(await canceller(tx)) }));
 
       expect((await tx.customerDepositApplication.findUniqueOrThrow({ where: { id: application.id } })).isCancelled).toBe(false);
       expect(Number((await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).outstanding)).toBe(0);
@@ -563,7 +569,7 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
       const ids = [settlement.journalEntryId!, g.journalEntryId!];
       const before = await ledgerState(tx, ids);
 
-      expectPeriodClosed(await callRoute(projectGuaranteesRouter, 'post', '/settlements/:id/cancel', { params: { id: settlement.id }, userId }));
+      expectPeriodClosed(await callRoute(projectGuaranteesRouter, 'post', '/settlements/:id/cancel', { params: { id: settlement.id }, ...(await canceller(tx)) }));
 
       expect((await tx.projectGuaranteeSettlement.findUniqueOrThrow({ where: { id: settlement.id } })).isCancelled).toBe(false);
       expect((await tx.projectGuarantee.findUniqueOrThrow({ where: { id: g.id } })).status).toBe('Selesai');
@@ -579,7 +585,7 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
       await close(tx, old);
       const before = await ledgerState(tx, [g.journalEntryId!]);
 
-      expectPeriodClosed(await callRoute(projectGuaranteesRouter, 'patch', '/:id/cancel', { params: { id: g.id }, userId }));
+      expectPeriodClosed(await callRoute(projectGuaranteesRouter, 'patch', '/:id/cancel', { params: { id: g.id }, ...(await canceller(tx)) }));
 
       expect((await tx.projectGuarantee.findUniqueOrThrow({ where: { id: g.id } })).status).toBe('Disetor');
       expect(await ledgerState(tx, [g.journalEntryId!])).toEqual(before);
