@@ -930,7 +930,7 @@
     "create": "Buat Jurnal",
     "help": {
       "label": "Cara kerja pembatalan jurnal",
-      "body": "Jurnal otomatis (<num>JV-PAY</num>, <num>JV-SI</num>, <num>JV-PI</num>, <num>JV-COGS</num>) dibatalkan dari modul asalnya agar invoice, pembayaran, dan saldo ikut diperbarui. Halaman ini hanya membatalkan jurnal manual."
+      "body": "Hanya jurnal yang dibuat manual (input langsung, impor, jurnal berulang, atau Buku Kas) yang bisa dibatalkan di sini. Jurnal dari modul lain (mis. <num>JV-PAY</num>, <num>JV-SI</num>, <num>JV-STT</num>, uang muka, tutup buku, penyusutan) dibatalkan dari dokumen asalnya agar invoice, pembayaran, dan saldo ikut diperbarui. Jurnal lama yang asalnya tidak tercatat dikoreksi dengan jurnal balik manual."
     },
     "filters": {
       "searchLabel": "Cari jurnal",
