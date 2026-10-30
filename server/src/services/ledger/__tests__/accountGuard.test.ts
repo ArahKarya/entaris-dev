@@ -64,18 +64,18 @@ describe('postableAccountProblem', () => {
 
   it('rejects a control account unless allowed', () => {
     const ar = acc({ accountNumber: '1.2.1', name: 'Piutang Usaha (Dagang)', rootType: 'ASSET' });
-    const p = postableAccountProblem(ar, { ...rule, controlHint: 'Gunakan modul Pembayaran.' }, 'AR');
+    const p = postableAccountProblem(ar, { ...rule, controlHint: 'Gunakan modul Pembayaran.' }, ['AR']);
     expect(p?.code).toBe(ACCOUNT_CONTROL);
     expect(p?.message).toBe(
       'Akun lawan: akun 1.2.1 Piutang Usaha (Dagang) adalah akun kontrol Piutang Usaha dan tidak boleh diposting langsung. Gunakan modul Pembayaran.',
     );
-    expect(postableAccountProblem(ar, { ...rule, allowControl: true }, 'AR')).toBeNull();
-    expect(postableAccountProblem(ar, { ...rule, allowControl: ['AR'] }, 'AR')).toBeNull();
-    expect(postableAccountProblem(ar, { ...rule, allowControl: ['AP'] }, 'AR')?.code).toBe(ACCOUNT_CONTROL);
+    expect(postableAccountProblem(ar, { ...rule, allowControl: true }, ['AR'])).toBeNull();
+    expect(postableAccountProblem(ar, { ...rule, allowControl: ['AR'] }, ['AR'])).toBeNull();
+    expect(postableAccountProblem(ar, { ...rule, allowControl: ['AP'] }, ['AR'])?.code).toBe(ACCOUNT_CONTROL);
   });
 
   it('messages translate to English', () => {
-    const p = postableAccountProblem(acc({ accountNumber: '1.4.1', name: 'Persediaan Beras', rootType: 'ASSET' }), rule, INVENTORY_ITEM);
+    const p = postableAccountProblem(acc({ accountNumber: '1.4.1', name: 'Persediaan Beras', rootType: 'ASSET' }), rule, [INVENTORY_ITEM]);
     expect(translateMessage(p!.message, 'en')).toBe(
       'Akun lawan: account 1.4.1 Persediaan Beras is a control account (item inventory) and cannot be posted to directly.',
     );
@@ -144,6 +144,23 @@ describe('assertPostableAccounts', () => {
     const { tx: t, fn } = tx();
     await assertPostableAccount(t, 'ar', { ...rule, allowControl: true });
     expect(fn('systemAccountMapping.findMany')).not.toHaveBeenCalled();
+  });
+
+  it('an account mapped under several roles is postable only when every role is allowed', async () => {
+    // 2.1.1 doubles as AP and GRNI; rows come back in either order.
+    for (const rows of [
+      [{ role: 'AP', accountId: 'ap' }, { role: 'ACCRUED_PAYABLE', accountId: 'ap' }],
+      [{ role: 'ACCRUED_PAYABLE', accountId: 'ap' }, { role: 'AP', accountId: 'ap' }],
+    ]) {
+      const { tx: t } = makeAutoTx({
+        'account.findMany': () => [acc({ id: 'ap', accountNumber: '2.1.1', name: 'Hutang Usaha', rootType: 'LIABILITY' })],
+        'systemAccountMapping.findMany': () => rows,
+      });
+      expect(await codeOf(assertPostableAccount(t, 'ap', { ...rule, allowControl: ['ACCRUED_PAYABLE'] }))).toBe(ACCOUNT_CONTROL);
+      expect(await codeOf(assertPostableAccount(t, 'ap', { ...rule, allowControl: ['AP'] }))).toBe(ACCOUNT_CONTROL);
+      await expect(assertPostableAccount(t, 'ap', { ...rule, allowControl: ['AP', 'ACCRUED_PAYABLE'] })).resolves.toMatchObject({ id: 'ap' });
+      expect(await isControlAccount(t, 'ap')).toBe('AP');
+    }
   });
 
   it('reports missing and group accounts', async () => {

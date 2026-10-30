@@ -80,13 +80,14 @@ const ACCOUNT_LITE_SELECT = {
 } as const;
 
 /**
- * Account id -> restricted kind for the control roles (plus extraRoles) and item inventory
- * accounts. A role mapping wins over the item-account kind for the same account.
+ * Account id -> restricted kinds for the control roles (plus extraRoles) and item inventory
+ * accounts. One account can be mapped under several roles; it keeps all of them, in `roles`
+ * order. Role mappings replace the item-account kind for the same account.
  */
 export async function loadControlAccountMap(
   tx: Tx,
   extraRoles: readonly SystemAccountRole[] = [],
-): Promise<Map<string, RestrictedKind>> {
+): Promise<Map<string, readonly RestrictedKind[]>> {
   const roles = [...new Set<string>([...CONTROL_ACCOUNT_ROLES, ...extraRoles])];
   const [mappings, items] = await Promise.all([
     tx.systemAccountMapping.findMany({ where: { role: { in: roles } }, select: { role: true, accountId: true } }),
@@ -96,15 +97,20 @@ export async function loadControlAccountMap(
       distinct: ['accountId'],
     }),
   ]);
-  const map = new Map<string, RestrictedKind>();
-  for (const item of items) if (item.accountId) map.set(item.accountId, INVENTORY_ITEM);
-  for (const m of mappings) map.set(m.accountId, m.role as RestrictedKind);
+  const byRole = new Map<string, RestrictedKind[]>();
+  for (const role of roles) {
+    const ids = mappings.filter((m) => m.role === role).map((m) => m.accountId);
+    for (const id of new Set(ids)) byRole.set(id, [...(byRole.get(id) ?? []), role as RestrictedKind]);
+  }
+  const map = new Map<string, readonly RestrictedKind[]>();
+  for (const item of items) if (item.accountId) map.set(item.accountId, [INVENTORY_ITEM]);
+  for (const [id, kinds] of byRole) map.set(id, kinds);
   return map;
 }
 
-/** The control kind of an account, or null when it is not a control account. */
+/** The control kind of an account (the first in CONTROL_ACCOUNT_ROLES order), or null. */
 export async function isControlAccount(tx: Tx, accountId: string): Promise<ControlKind | null> {
-  return ((await loadControlAccountMap(tx)).get(accountId) as ControlKind | undefined) ?? null;
+  return ((await loadControlAccountMap(tx)).get(accountId)?.[0] as ControlKind | undefined) ?? null;
 }
 
 function controlAllowed(kind: RestrictedKind, allow: PostableRule['allowControl']): boolean {
@@ -112,11 +118,14 @@ function controlAllowed(kind: RestrictedKind, allow: PostableRule['allowControl'
   return Array.isArray(allow) && allow.includes(kind);
 }
 
-/** Why the account cannot be posted under the rule, or null. `restricted` = its kind from the control map. */
+/**
+ * Why the account cannot be posted under the rule, or null. `restricted` = its kinds from the
+ * control map; the account is postable only when the rule allows every one of them.
+ */
 export function postableAccountProblem(
   acc: AccountLite | null,
   rule: PostableRule,
-  restricted: RestrictedKind | null,
+  restricted: readonly RestrictedKind[] | null,
 ): AccountProblem | null {
   if (!acc) {
     return { code: ACCOUNT_NOT_FOUND, message: `${rule.label}: akun tidak ditemukan.` };
@@ -133,8 +142,9 @@ export function postableAccountProblem(
       message: `${rule.label}: akun ${acc.accountNumber} ${acc.name} bertipe ${acc.rootType}, seharusnya ${rule.rootTypes.join('/')}.`,
     };
   }
-  if (restricted && !controlAllowed(restricted, rule.allowControl)) {
-    const kindLabel = KIND_LABELS[restricted] ?? restricted;
+  const blocked = restricted?.find((kind) => !controlAllowed(kind, rule.allowControl));
+  if (blocked) {
+    const kindLabel = KIND_LABELS[blocked] ?? blocked;
     const hint = rule.controlHint ? ` ${rule.controlHint}` : '';
     return {
       code: ACCOUNT_CONTROL,
@@ -154,7 +164,7 @@ export async function assertPostableAccounts(
   const needsControlMap = rule.allowControl !== true;
   const [accounts, control] = await Promise.all([
     tx.account.findMany({ where: { id: { in: unique } }, select: ACCOUNT_LITE_SELECT }),
-    needsControlMap ? loadControlAccountMap(tx, rule.alsoRestrict) : Promise.resolve(new Map<string, RestrictedKind>()),
+    needsControlMap ? loadControlAccountMap(tx, rule.alsoRestrict) : Promise.resolve(new Map<string, readonly RestrictedKind[]>()),
   ]);
   const byId = new Map(accounts.map((a) => [a.id, a]));
   for (const id of unique) {
