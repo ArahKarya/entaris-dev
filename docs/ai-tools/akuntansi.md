@@ -670,7 +670,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Error umum**
 
 - 404: jadwal tidak ditemukan
-- 400: depresiasi sudah diposting
+- 400 STALE_STATUS: depresiasi sudah diposting (juga klik ganda/retry atau posting lain yang lebih dulu; tidak diposting dua kali)
 - 400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
 
@@ -719,7 +719,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Isi hasil:** { posted, totalAmount, jeNumbers, skipped, items[] } (dryRun: dryRun=true tanpa posting).
 
-**Efek pembukuan/stok:** Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. dryRun=true: tidak ada efek.
+**Efek pembukuan/stok:** Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. Baris yang sudah diposting permintaan lain atau asetnya dilepas sejak daftar dibaca dilewati (skipped). dryRun=true: tidak ada efek.
 
 **Teks konfirmasi:** Posting penyusutan massal bulan {month} (dryRun={dryRun})?
 
@@ -784,7 +784,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Prasyarat**
 
-- Aset berstatus Active dan baris jadwal yang dibatalkan adalah baris terposting dengan periode paling akhir.
+- Aset berstatus Active (aset yang sudah dilepas tidak bisa dibatalkan posting penyusutannya; koreksi lewat jurnal manual) dan baris jadwal yang dibatalkan adalah baris terposting dengan periode paling akhir.
 - Tahun buku jurnal penyusutan masih terbuka.
 - User memiliki capability doc.cancel.
 
@@ -793,7 +793,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400 DEPRECIATION_NOT_LAST: masih ada baris periode lebih akhir yang terposting; batalkan dari periode terakhir dulu
 - 400 STALE_STATUS: baris belum diposting atau postingnya sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku jurnal penyusutan tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 FIXED_ASSET_NOT_ACTIVE: aset sudah dilepas (Disposed); pelepasan harus dibatalkan dulu
+- 400 FIXED_ASSET_NOT_ACTIVE: aset sudah dilepas (Disposed); pelepasan tidak bisa dibatalkan, jadi posting penyusutannya dikoreksi lewat jurnal manual
 - 400 DEPRECIATION_ENTRY_NOT_FOUND: baris jadwal tidak ditemukan atau bukan milik aset ini
 - 400 DEPRECIATION_JOURNAL_MISSING: jurnal penyusutan baris ini tidak ada atau sudah dibatalkan di luar modul Aset Tetap; koreksi lewat jurnal manual
 - 400: aset tidak ditemukan

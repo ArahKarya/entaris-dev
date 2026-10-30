@@ -67,7 +67,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // Depreciation un-post (services/fixedAssetDepreciationCancel.ts)
   "Jadwal penyusutan ini bukan milik aset tersebut.": "This depreciation schedule row does not belong to that asset.",
   "Penyusutan periode ini belum diposting atau postingnya sudah dibatalkan. Muat ulang halaman lalu coba lagi.": "Depreciation for this period is not posted, or its posting was already cancelled. Reload the page and try again.",
-  "Aset ini sudah tidak aktif (dilepas). Batalkan pelepasannya dulu sebelum membatalkan posting penyusutan.": "This asset is no longer active (disposed). Undo the disposal before cancelling a depreciation posting.",
+  "Aset ini sudah dilepas, jadi posting penyusutannya tidak bisa dibatalkan di sini. Koreksi dengan jurnal manual.": "This asset has been disposed, so its depreciation posting cannot be cancelled here. Correct it with a manual journal.",
   "Penyusutan periode {0} masih terposting. Batalkan posting mulai dari periode terakhir.": "Depreciation for period {0} is still posted. Cancel postings starting from the latest period.",
   "Jurnal penyusutan periode ini tidak ditemukan atau sudah dibatalkan di luar modul Aset Tetap, jadi posting tidak bisa dibatalkan di sini. Koreksi dengan jurnal manual.": "The depreciation journal for this period was not found or was already cancelled outside the Fixed Assets module, so the posting cannot be cancelled here. Correct it with a manual journal.",
   "Posting penyusutan dibatalkan.": "Depreciation posting cancelled.",

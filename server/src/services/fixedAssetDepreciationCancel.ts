@@ -20,7 +20,8 @@ type Tx = Prisma.TransactionClient;
 export const DEPRECIATION_ENTRY_NOT_FOUND = 'DEPRECIATION_ENTRY_NOT_FOUND';
 /** Error code: a later row of the same asset is still posted; un-post that one first. */
 export const DEPRECIATION_NOT_LAST = 'DEPRECIATION_NOT_LAST';
-/** Error code: the asset is no longer Active (disposed); undo the disposal first. */
+/** Error code: the asset is no longer Active (disposed). Disposal cannot be undone, so the posting is
+ * corrected with a manual journal instead. */
 export const FIXED_ASSET_NOT_ACTIVE = 'FIXED_ASSET_NOT_ACTIVE';
 /** Error code: the posted row has no live journal (missing, or voided outside this module). */
 export const DEPRECIATION_JOURNAL_MISSING = 'DEPRECIATION_JOURNAL_MISSING';
@@ -75,7 +76,7 @@ export async function cancelDepreciationEntryInTx(
   if (!entry.isPosted) throw new BusinessError(NOT_POSTED_MESSAGE, STALE_STATUS);
   if (asset.status !== 'Active') {
     throw new BusinessError(
-      'Aset ini sudah tidak aktif (dilepas). Batalkan pelepasannya dulu sebelum membatalkan posting penyusutan.',
+      'Aset ini sudah dilepas, jadi posting penyusutannya tidak bisa dibatalkan di sini. Koreksi dengan jurnal manual.',
       FIXED_ASSET_NOT_ACTIVE,
     );
   }
@@ -98,7 +99,7 @@ export async function cancelDepreciationEntryInTx(
   if (!journal) throw new BusinessError(JOURNAL_MISSING_MESSAGE, DEPRECIATION_JOURNAL_MISSING);
 
   // The row claim is the first write: of two cancels only one gets count 1 (the asset lock already
-  // serialises them; this also covers a post or cancel path that does not take that lock).
+  // serialises them, and the posting routes take the same lock first; the claim is a second guard).
   const claimed = await tx.depreciationEntry.updateMany({
     where: { id: entry.id, isPosted: true },
     data: { isPosted: false, journalEntryId: null },
