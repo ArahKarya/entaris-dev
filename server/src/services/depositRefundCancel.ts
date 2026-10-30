@@ -13,6 +13,7 @@ import { BusinessError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { cancelTrail, STALE_STATUS } from '../utils/cancelClaim';
 import { STALE_STATUS_ERROR } from './paymentRequestRules';
+import { systemAccounts } from './systemAccounts';
 
 type Tx = Prisma.TransactionClient;
 
@@ -30,6 +31,8 @@ export const DEPOSIT_REFUND_MENU_MESSAGE =
 
 interface SideConfig {
   paymentType: 'CustomerDeposit' | 'VendorDeposit';
+  /** System account role of the deposit line the refund writer posts. */
+  depositRole: 'CUSTOMER_DEPOSIT' | 'VENDOR_DEPOSIT';
   /** Narration prefix the refund writer uses: `<prefix>: <paymentNumber> - <party name>`. */
   narrationPrefix: string;
   /** Side of the deposit-account line: a customer refund debits the liability, a supplier refund credits the asset. */
@@ -40,12 +43,14 @@ interface SideConfig {
 const SIDES: Record<DepositSide, SideConfig> = {
   customer: {
     paymentType: 'CustomerDeposit',
+    depositRole: 'CUSTOMER_DEPOSIT',
     narrationPrefix: 'Refund UM Pelanggan',
     depositLine: 'debit',
     notThisType: 'Bukan tipe uang muka customer.',
   },
   vendor: {
     paymentType: 'VendorDeposit',
+    depositRole: 'VENDOR_DEPOSIT',
     narrationPrefix: 'Refund UM Vendor',
     depositLine: 'credit',
     notThisType: 'Bukan tipe uang muka supplier.',
@@ -59,14 +64,20 @@ export function depositRefundSourceKey(depositId: string): string {
   return `DEPOSIT_REFUND:${depositId}`;
 }
 
-/** True for a deposit refund journal, tagged or (legacy, untagged) by its narration. */
+/**
+ * True for a deposit refund journal: tagged DEPOSIT_REFUND, or legacy and unclassified (no source
+ * type) with a refund narration. A journal tagged anything else (e.g. MANUAL) is not a refund, even
+ * with that narration, and follows the normal Journal-menu rules.
+ */
 export function isDepositRefundJournal(entry: { sourceType: JournalSourceType | null; narration: string | null }): boolean {
-  return entry.sourceType === JournalSourceType.DEPOSIT_REFUND || REFUND_NARRATION.test(entry.narration ?? '');
+  if (entry.sourceType === JournalSourceType.DEPOSIT_REFUND) return true;
+  return entry.sourceType === null && REFUND_NARRATION.test(entry.narration ?? '');
 }
 
 interface DepositRef {
   id: string;
   paymentNumber: string;
+  partyId: string;
 }
 
 /** Narration start of a legacy refund of this deposit; the " - " stops PAY-1 matching PAY-10. */
@@ -104,6 +115,49 @@ function isRefundOf(
 }
 
 type JournalItemLike = { partyId: string | null; debit: Prisma.Decimal; credit: Prisma.Decimal };
+type RefundJournalItem = JournalItemLike & { accountId: string; description: string | null; account: { accountNumber: string } };
+
+interface LegacyCandidate {
+  id: string;
+  sourceKey: string | null;
+  items: readonly RefundJournalItem[];
+}
+
+/**
+ * Ids of the untagged candidates that are exactly what the refund writer posts: two lines with the
+ * short description `<prefix>: <paymentNumber>` (POST /journals defaults it to the whole narration),
+ * the party's line on the system deposit account on the refund side, the other line on a cash
+ * account without party for the same amount, and no audit row of POST /journals. Anything else is a
+ * hand-made journal that only shares the narration; it never moved refundedAmount, so cancelling it
+ * here would lower refundedAmount below what was really refunded.
+ */
+async function legacyWriterShapeIds(db: Tx, cfg: SideConfig, deposit: DepositRef, journals: readonly LegacyCandidate[]): Promise<Set<string>> {
+  const legacy = journals.filter((j) => j.sourceKey === null);
+  if (legacy.length === 0) return new Set();
+  const depositAccountIds = new Set(await systemAccounts.getAccountIds(cfg.depositRole));
+  const description = `${cfg.narrationPrefix}: ${deposit.paymentNumber}`;
+  const manual = await db.auditLog.findMany({
+    where: { entityType: 'journals', action: 'CREATE', entityId: { in: legacy.map((j) => j.id) } },
+    select: { entityId: true },
+  });
+  const manualIds = new Set(manual.map((a) => a.entityId));
+
+  const ids = new Set<string>();
+  for (const j of legacy) {
+    if (manualIds.has(j.id) || j.items.length !== 2) continue;
+    if (!j.items.every((i) => i.description === description)) continue;
+    const depositLine = j.items.find((i) => i.partyId === deposit.partyId && depositAccountIds.has(i.accountId));
+    const cashLine = j.items.find((i) => i !== depositLine);
+    if (!depositLine || !cashLine || cashLine.partyId !== null) continue;
+    const amount = refundLineAmount(cfg, deposit.partyId, [depositLine]);
+    const cashSide = cfg.depositLine === 'debit' ? cashLine.credit : cashLine.debit;
+    const cashOther = cfg.depositLine === 'debit' ? cashLine.debit : cashLine.credit;
+    if (!amount || !amount.eq(cashSide.toString()) || !new Decimal(cashOther.toString()).isZero()) continue;
+    if (!(await systemAccounts.isCashAccount(cashLine.account.accountNumber))) continue;
+    ids.add(j.id);
+  }
+  return ids;
+}
 
 /**
  * The refunded amount: the one deposit-account line, which carries the deposit's party on the
@@ -132,7 +186,10 @@ export interface DepositRefundRow {
   cancelReason: string | null;
 }
 
-/** Refund journals of a deposit, newest first, cancelled ones included. Null when the deposit is not found. */
+/**
+ * Refund journals of a deposit, newest first, cancelled ones included. Untagged legacy rows are
+ * listed only when they have the refund writer's exact shape. Null when the deposit is not found.
+ */
 export async function listDepositRefunds(
   db: Tx,
   side: DepositSide,
@@ -145,11 +202,13 @@ export async function listDepositRefunds(
   });
   if (!deposit || deposit.paymentType !== cfg.paymentType) return null;
 
-  const journals = await db.journalEntry.findMany({
+  const found = await db.journalEntry.findMany({
     where: refundJournalWhere(cfg, deposit),
     include: { items: { include: { account: { select: { id: true, accountNumber: true, name: true } } } } },
     orderBy: [{ date: 'desc' }, { entryNumber: 'desc' }],
   });
+  const legacyOk = await legacyWriterShapeIds(db, cfg, deposit, found);
+  const journals = found.filter((j) => j.sourceKey !== null || legacyOk.has(j.id));
   return journals.map((j) => {
     const cash = j.items.find((i) => i.partyId !== deposit.partyId) ?? null;
     return {
@@ -188,7 +247,7 @@ export interface CancelDepositRefundResult {
  * and give the amount back to the party's deposit balance.
  *
  * Rejects (BusinessError): a journal that is not a refund of this deposit or cannot be matched
- * safely (DEPOSIT_REFUND_MISMATCH), an already cancelled refund (STALE_STATUS), a closed fiscal
+ * safely, including an untagged journal without the refund writer's shape (DEPOSIT_REFUND_MISMATCH), an already cancelled refund (STALE_STATUS), a closed fiscal
  * year of the refund journal (PERIOD_CLOSED), and a refund larger than refundedAmount
  * (DEPOSIT_REFUND_OVER_CANCEL). The deposit row is locked first, so two cancels of refunds of one
  * deposit run one after the other.
@@ -198,18 +257,29 @@ export async function cancelDepositRefundInTx(tx: Tx, input: CancelDepositRefund
   await tx.$queryRaw`SELECT id FROM payments WHERE id = ${input.depositId} FOR UPDATE`;
   const deposit = await tx.payment.findUnique({
     where: { id: input.depositId },
-    select: { id: true, paymentNumber: true, paymentType: true, status: true, partyId: true, refundedAmount: true },
+    select: { id: true, paymentNumber: true, paymentType: true, partyId: true, refundedAmount: true },
   });
   if (!deposit) throw new BusinessError('Uang muka tidak ditemukan.');
   if (deposit.paymentType !== cfg.paymentType) throw new BusinessError(cfg.notThisType);
-  // A refunded deposit cannot be cancelled (assertDepositNotRefunded); this is for legacy data.
-  if (deposit.status === 'Cancelled') throw new BusinessError('Uang muka sudah dibatalkan.');
+  // A Cancelled deposit is allowed on purpose. Before assertDepositNotRefunded, a partly refunded
+  // deposit could be cancelled: that reversed the whole deposit (account and party balance) while
+  // its refund stayed posted, so both are off by the refund. Voiding the refund with the same
+  // effects below (balances back, party balance +refund, refundedAmount -refund) is the correction.
 
-  const journal = await tx.journalEntry.findUnique({ where: { id: input.journalEntryId }, include: { items: true } });
+  const journal = await tx.journalEntry.findUnique({
+    where: { id: input.journalEntryId },
+    include: { items: { include: { account: { select: { accountNumber: true } } } } },
+  });
   if (!journal || !isRefundOf(cfg, deposit, journal)) {
     throw new BusinessError('Jurnal ini bukan refund dari uang muka tersebut.', DEPOSIT_REFUND_MISMATCH);
   }
   if (journal.status === 'Cancelled') throw new BusinessError(STALE_STATUS_ERROR, STALE_STATUS);
+  if (journal.sourceKey === null && !(await legacyWriterShapeIds(tx, cfg, deposit, [journal])).has(journal.id)) {
+    throw new BusinessError(
+      'Jurnal lama ini memakai narasi refund uang muka tetapi bentuknya bukan jurnal refund dari modul Uang Muka (mungkin jurnal manual). Koreksi dengan jurnal manual.',
+      DEPOSIT_REFUND_MISMATCH,
+    );
+  }
 
   const amount = refundLineAmount(cfg, deposit.partyId, journal.items);
   if (!amount) {

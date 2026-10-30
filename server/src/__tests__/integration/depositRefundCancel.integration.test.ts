@@ -8,7 +8,11 @@
  * - A second cancel gets STALE_STATUS, a closed year PERIOD_CLOSED, another deposit's refund
  *   journal DEPOSIT_REFUND_MISMATCH, a role without doc.cancel 403.
  * - The Journal menu rejects refund journals with JOURNAL_USE_DEPOSIT_REFUND_CANCEL.
- * - Legacy refunds without a source key are matched by the exact deposit number in the narration.
+ * - Legacy refunds without a source key are matched by the exact deposit number in the narration
+ *   and the refund writer's exact line shape; a hand-made journal with that narration is neither
+ *   listed nor cancellable there.
+ * - A legacy deposit cancelled while partly refunded can still have its refund cancelled, which
+ *   brings the ledger, the party deposit balance and refundedAmount back to zero.
  *
  * Route handlers run through the route harness, whose `$transaction` is a savepoint; everything
  * runs in a rollback transaction in a far-future year with fixtures made here.
@@ -101,6 +105,8 @@ interface Fixture {
   refundJournalId: string;
   /** Account balances (deposit and cash account) right before the refund. */
   balancesBeforeRefund: Record<string, number>;
+  /** Balances of every account right before the deposit. */
+  balancesBeforeDeposit: Record<string, number>;
   depositAccountId: string;
 }
 
@@ -118,6 +124,8 @@ async function partyBalance(tx: Tx, side: Side, partyId: string): Promise<number
 async function depositWithRefund(tx: Tx, side: Side): Promise<Fixture> {
   const s = SIDE[side];
   const party = await tx.party.create({ data: { name: `IT-RFC-${s.partyType}-${tag()}`, partyType: s.partyType, isActive: true } });
+  const all = await tx.account.findMany({ select: { id: true } });
+  const balancesBeforeDeposit = await accountBalances(tx, all.map((a) => a.id));
   const { payment } = await submitPaymentInTx(
     tx,
     { date: `${Y}-04-01`, partyId: party.id, amount: 10_000_000, paymentType: s.paymentType, accountId: cashAccountId } as any,
@@ -136,7 +144,7 @@ async function depositWithRefund(tx: Tx, side: Side): Promise<Fixture> {
   expect(refund.status, JSON.stringify(refund.body)).toBe(200);
   return {
     side, partyId: party.id, depositId: payment.id, depositNumber: payment.paymentNumber,
-    refundJournalId: refund.body.cashJournalId, balancesBeforeRefund, depositAccountId,
+    refundJournalId: refund.body.cashJournalId, balancesBeforeRefund, balancesBeforeDeposit, depositAccountId,
   };
 }
 
@@ -293,6 +301,71 @@ for (const side of ['customer', 'vendor'] as const) {
         expect(r.status, JSON.stringify(r.body)).toBe(200);
         expect(Number((await tx.payment.findUniqueOrThrow({ where: { id: fx.depositId } })).refundedAmount)).toBe(0);
         expect(await partyBalance(tx, side, fx.partyId)).toBe(10_000_000);
+      });
+    });
+
+    it('neither lists nor cancels a hand-made journal that only shares the legacy refund narration', async () => {
+      await inRollback(async (tx) => {
+        const fy = await createFiscalYear(tx, { year: Y });
+        const fx = await depositWithRefund(tx, side);
+        const party = await tx.party.findUniqueOrThrow({ where: { id: fx.partyId } });
+        const narration = `${side === 'customer' ? 'Refund UM Pelanggan' : 'Refund UM Vendor'}: ${fx.depositNumber} - ${party.name}`;
+        const short = narration.split(' - ')[0];
+        const depositSide = side === 'customer' ? { debit: 4_000_000, credit: 0 } : { debit: 0, credit: 4_000_000 };
+        const cashSide = { debit: depositSide.credit, credit: depositSide.debit };
+        const manualJournal = (n: string, description: string) => tx.journalEntry.create({
+          data: {
+            entryNumber: `JV-${Y}04-${tag()}`, date: new Date(`${Y}-04-06`), status: 'Submitted', narration,
+            fiscalYearId: fy.id, createdBy: actor.userId,
+            items: {
+              create: [
+                { accountId: fx.depositAccountId, partyId: fx.partyId, ...depositSide, description },
+                { accountId: cashAccountId, ...cashSide, description: `${description}${n}` },
+              ],
+            },
+          },
+        });
+        // POST /journals defaults each line description to the narration.
+        const defaulted = await manualJournal('', narration);
+        // Writer-shaped lines, but POST /journals left its audit row.
+        const audited = await manualJournal('', short);
+        await tx.auditLog.create({ data: { userId: actor.userId, action: 'CREATE', entityType: 'journals', entityId: audited.id } });
+        // A line description the writer never used.
+        const edited = await manualJournal(' (koreksi)', short);
+
+        const listed = await callRoute(SIDE[side].router, 'get', '/:id/refunds', { params: { id: fx.depositId }, ...actor });
+        expect(listed.body.data.map((r: { journalEntryId: string }) => r.journalEntryId)).toEqual([fx.refundJournalId]);
+        for (const je of [defaulted, audited, edited]) {
+          expectCode(await cancelRefund(fx, je.id), DEPOSIT_REFUND_MISMATCH);
+          expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: je.id } })).status).toBe('Submitted');
+        }
+        await expectRefundIntact(tx, fx);
+      });
+    });
+
+    it('cancels the refund of a legacy deposit that was cancelled while partly refunded', async () => {
+      await inRollback(async (tx) => {
+        await createFiscalYear(tx, { year: Y });
+        const fx = await depositWithRefund(tx, side);
+        // The deposit cancel before the DEPOSIT_REFUNDED guard: hide refundedAmount from the guard,
+        // cancel, then put it back. The whole 10 jt was reversed while the 4 jt refund stayed posted.
+        await tx.payment.update({ where: { id: fx.depositId }, data: { refundedAmount: 0 } });
+        const cancelDeposit = await callRoute(SIDE[side].router, 'patch', '/:id/cancel', { params: { id: fx.depositId }, ...actor });
+        expect(cancelDeposit.status, JSON.stringify(cancelDeposit.body)).toBe(200);
+        await tx.payment.update({ where: { id: fx.depositId }, data: { refundedAmount: 4_000_000 } });
+        expect(await partyBalance(tx, side, fx.partyId)).toBe(-4_000_000);
+
+        const r = await cancelRefund(fx);
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        expect(r.body).toMatchObject({ amount: 4_000_000, refundedAmount: 0 });
+        expect(await partyBalance(tx, side, fx.partyId)).toBe(0);
+        const ids = [fx.depositAccountId, cashAccountId];
+        const before = Object.fromEntries(ids.map((id) => [id, fx.balancesBeforeDeposit[id]]));
+        expect(await accountBalances(tx, ids)).toEqual(before);
+        const live = await tx.accountingLedgerEntry.count({
+          where: { accountId: fx.depositAccountId, partyId: fx.partyId, isCancelled: false },
+        });
+        expect(live).toBe(0);
       });
     });
 

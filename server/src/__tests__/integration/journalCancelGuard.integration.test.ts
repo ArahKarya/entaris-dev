@@ -152,6 +152,18 @@ d('journalMenuCancelBlockReason', () => {
   });
 
   it.each([
+    'Refund UM Pelanggan: PAY-6 koreksi',
+    'Refund UM Vendor: PAY-7 - PT C',
+  ])('leaves a MANUAL journal narrated "%s" to the normal manual rules', async (narration) => {
+    await inRollback(async (tx) => {
+      const fy = await fiscalYear(tx, false);
+      const je = await journal(tx, fy.id, `JV-209903-${uniq()}`, narration);
+      await tx.journalEntry.update({ where: { id: je.id }, data: { sourceType: 'MANUAL' } });
+      expect(await journalMenuCancelBlockReason(tx, je.id)).toBeNull();
+    });
+  });
+
+  it.each([
     ['a customer refund by narration', 'Refund UM Pelanggan: PAY-6 - PT B', null],
     ['a supplier refund by narration', 'Refund UM Vendor: PAY-7 - PT C', null],
     ['a refund tagged DEPOSIT_REFUND', 'Pengembalian uang muka', 'DEPOSIT_REFUND'],

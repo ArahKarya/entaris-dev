@@ -326,6 +326,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Jurnal ini adalah refund uang muka. Batalkan dari tombol \"Batalkan refund\" di menu Uang Muka Customer/Supplier.": "This journal is a deposit refund. Cancel it with the \"Cancel refund\" button in Customer/Supplier Deposits.",
   "Jurnal ini bukan refund dari uang muka tersebut.": "This journal is not a refund of that deposit.",
   "Jurnal refund lama ini tidak bisa dicocokkan dengan aman ke uang muka (baris uang mukanya tidak jelas). Koreksi dengan jurnal manual.": "This older refund journal cannot be matched safely to the deposit (its deposit line is unclear). Correct it with a manual journal.",
+  "Jurnal lama ini memakai narasi refund uang muka tetapi bentuknya bukan jurnal refund dari modul Uang Muka (mungkin jurnal manual). Koreksi dengan jurnal manual.": "This older journal uses a deposit refund narration but is not shaped like a refund posted by the Deposits module (it may be a manual journal). Correct it with a manual journal.",
   "Refund ini Rp {0}, lebih besar dari total refund tercatat Rp {1} pada uang muka ini. Koreksi dengan jurnal manual.": "This refund is Rp {0}, more than the Rp {1} recorded as refunded on this deposit. Correct it with a manual journal.",
   "Refund uang muka dibatalkan.": "Deposit refund cancelled.",
   "Gagal membatalkan refund uang muka.": "Failed to cancel the deposit refund.",

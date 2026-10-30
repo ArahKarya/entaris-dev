@@ -48,6 +48,11 @@ describe('classifyLegacyJournal', () => {
     expect(classify({ narration: n }).type).toBe('DEPOSIT_REFUND');
   });
 
+  it('a refund narration posted through POST /journals is MANUAL, not DEPOSIT_REFUND', () => {
+    expect(classify({ narration: 'Refund UM Pelanggan: PAY-2 - CV B', manualAudit: true }))
+      .toMatchObject({ type: 'MANUAL', confidence: 'high' });
+  });
+
   it.each(['Offset UM Vendor: PAY-1 → PI-1', 'Offset UM Pelanggan: PAY-2 → SI-2'])('"%s" is DEPOSIT_OFFSET', (n) => {
     expect(classify({ narration: n }).type).toBe('DEPOSIT_OFFSET');
   });
