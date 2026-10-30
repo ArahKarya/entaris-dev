@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
 import { Wallet, CheckCircle2, Paperclip } from 'lucide-react';
 import { formatRupiah } from '@/lib/format';
+import { todayLocal } from '@/lib/date';
 import AttachmentUpload from './AttachmentUpload';
 import { RupiahField } from './purchase-cash/RupiahField';
 import AttachmentPreview from './AttachmentPreview';
@@ -26,9 +27,7 @@ interface CustomerDepositModalProps {
 
 const CustomerDepositModal: React.FC<CustomerDepositModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('sales');
-  const today = new Date().toISOString().split('T')[0];
-
-  const [date, setDate] = useState(today);
+  const [date, setDate] = useState(() => todayLocal());
   const [partyId, setPartyId] = useState('');
   const [amount, setAmount] = useState<number | ''>('');
   const [accountId, setAccountId] = useState('');
@@ -43,7 +42,7 @@ const CustomerDepositModal: React.FC<CustomerDepositModalProps> = ({ isOpen, onC
 
   useEffect(() => {
     if (isOpen) {
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setPartyId('');
       setAmount('');
       setAccountId('');

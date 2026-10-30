@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Trans, useTranslation } from 'react-i18next';
 import { Plus, X, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
 import { formatRupiah, formatNumber, LOCALE } from '@/lib/format';
+import { todayLocal } from '@/lib/date';
 import { NumberInput } from '@/components/ui/number-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -42,8 +43,8 @@ interface PurchaseInvoiceModalProps {
 
 const PurchaseInvoiceModal: React.FC<PurchaseInvoiceModalProps> = ({ isOpen, onClose, prefill, resubmitRequestId }) => {
   const { t } = useTranslation('purchasing');
-  const [invoiceDate, setInvoiceDate] = useState(() => prefill?.date ?? new Date().toISOString().split('T')[0]);
-  const [dueDate, setDueDate] = useState(() => prefill?.dueDate ?? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState(() => prefill?.date ?? todayLocal());
+  const [dueDate, setDueDate] = useState(() => prefill?.dueDate ?? todayLocal(30));
   const [partyId, setPartyId] = useState(prefill?.partyId ?? '');
   const [notes, setNotes] = useState(prefill?.notes ?? '');
   const [biayaLain, setBiayaLain] = useState(prefill?.biayaLain ?? 0);
@@ -52,8 +53,8 @@ const PurchaseInvoiceModal: React.FC<PurchaseInvoiceModalProps> = ({ isOpen, onC
   // Reset state when prefill changes (e.g. user edits a different invoice)
   React.useEffect(() => {
     if (isOpen && prefill) {
-      setInvoiceDate(prefill.date ?? new Date().toISOString().split('T')[0]);
-      setDueDate(prefill.dueDate ?? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
+      setInvoiceDate(prefill.date ?? todayLocal());
+      setDueDate(prefill.dueDate ?? todayLocal(30));
       setPartyId(prefill.partyId ?? '');
       setNotes(prefill.notes ?? '');
       setBiayaLain(prefill.biayaLain ?? 0);
@@ -196,8 +197,8 @@ const PurchaseInvoiceModal: React.FC<PurchaseInvoiceModalProps> = ({ isOpen, onC
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
       queryClient.invalidateQueries({ queryKey: ['coa'] });
       queryClient.invalidateQueries({ queryKey: ['attachments'] });
-      setInvoiceDate(new Date().toISOString().split('T')[0]);
-      setDueDate(new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
+      setInvoiceDate(todayLocal());
+      setDueDate(todayLocal(30));
       setPartyId('');
       setNotes('');
       setBiayaLain(0);
