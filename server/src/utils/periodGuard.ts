@@ -73,14 +73,27 @@ async function findFiscalYearForDate(tx: Tx, date: Date): Promise<FiscalYear | n
 }
 
 /**
- * Returns the fiscal year for the reference when it exists and is open.
+ * Share-locks the fiscal-year row until the transaction ends and returns its committed isClosed
+ * (null when the row is gone). Year close and reopen take FOR UPDATE on the same row, so a
+ * posting or cancel either finishes before the close sums the year, or waits and sees it closed.
+ */
+async function lockFiscalYearRow(tx: Tx, id: string): Promise<boolean | null> {
+  const rows = await tx.$queryRaw<{ is_closed: boolean }[]>`SELECT is_closed FROM fiscal_years WHERE id = ${id} FOR SHARE`;
+  return rows[0]?.is_closed ?? null;
+}
+
+/**
+ * Returns the fiscal year for the reference when it exists and is open, and holds a share lock
+ * on its row for the rest of the transaction (see lockFiscalYearRow).
  * Throws BusinessError FISCAL_YEAR_MISSING when none covers it, PERIOD_CLOSED when it is closed.
  */
 export async function assertPeriodOpen(tx: Tx, ref: PeriodRef, label: PeriodLabel): Promise<FiscalYear> {
-  const fy =
+  const found =
     'fiscalYearId' in ref
       ? await tx.fiscalYear.findUnique({ where: { id: ref.fiscalYearId } })
       : await findFiscalYearForDate(tx, ref.date);
+  const isClosed = found ? await lockFiscalYearRow(tx, found.id) : null;
+  const fy = found && isClosed !== null ? { ...found, isClosed } : null;
   if (!fy) {
     throw new BusinessError(
       `Tahun buku untuk ${label} tidak ditemukan. Buat tahun buku untuk tanggal ini terlebih dahulu.`,

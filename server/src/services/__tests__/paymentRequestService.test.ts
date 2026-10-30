@@ -35,6 +35,10 @@ function makeRequest(over: Record<string, unknown> = {}) {
 }
 
 function makeTx(pr: ReturnType<typeof makeRequest>, opts: { fiscalYear?: object | null; claimCount?: number } = {}) {
+  const fiscalYear = {
+    findFirst: vi.fn(async () => (opts.fiscalYear === undefined ? { id: 'fy-2026' } : opts.fiscalYear)),
+    findUnique: vi.fn(async (): Promise<{ id: string; name: string; isClosed: boolean } | null> => ({ id: 'fy-2026', name: '2026', isClosed: false })),
+  };
   const journalCreate = vi.fn(async ({ data }: { data: { items: { create: Array<Record<string, number | string>> } } }) => ({
     id: 'je-1',
     entryNumber: 'JV-202610-0001',
@@ -71,10 +75,12 @@ function makeTx(pr: ReturnType<typeof makeRequest>, opts: { fiscalYear?: object 
     },
     systemAccountMapping: { count: vi.fn(async () => 1), findFirst: vi.fn(async () => ({ accountId: 'acc-adv' })) },
     approvalRule: { findMany: vi.fn(async () => [{ minAmount: '100000', requiredRole: 'Direktur', isActive: true }]) },
-    fiscalYear: {
-      findFirst: vi.fn(async () => (opts.fiscalYear === undefined ? { id: 'fy-2026' } : opts.fiscalYear)),
-      findUnique: vi.fn(async (): Promise<{ id: string; name: string; isClosed: boolean } | null> => ({ id: 'fy-2026', name: '2026', isClosed: false })),
-    },
+    fiscalYear,
+    // assertPeriodOpen's FOR SHARE row read: the committed isClosed of whatever findUnique returns.
+    $queryRaw: vi.fn(async () => {
+      const fy = await fiscalYear.findUnique();
+      return fy ? [{ is_closed: fy.isClosed }] : [];
+    }),
     journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026' })) },
     accountingLedgerEntry: { createMany: vi.fn(async () => ({ count: 2 })) },
   };
