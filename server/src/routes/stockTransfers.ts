@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, requireCap } from '../middleware/auth';
+import { hasCap } from '../services/permissionService';
 import { handleRouteError } from '../utils/errors';
 import { validateBody } from '../utils/validate';
 import { submitStockTransferInTx, cancelStockTransferInTx } from '../services/stockTransfer';
@@ -161,11 +162,25 @@ router.post('/:id/mark-printed', async (req: AuthRequest, res) => {
   }
 });
 
-// PATCH /:id/cancel — reverse the transfer
-router.patch('/:id/cancel', async (req: AuthRequest, res) => {
+const CancelTransferSchema = z.object({
+  // Let the destination warehouse go negative; needs inventory.negative_stock and a reason.
+  allowNegativeStock: z.boolean().optional().default(false),
+  negativeStockReason: z.string().max(500).nullable().optional(),
+}).refine((d) => !d.allowNegativeStock || (d.negativeStockReason?.trim().length ?? 0) >= 10, {
+  message: 'Alasan bypass stok minus wajib diisi (minimal 10 karakter).',
+  path: ['negativeStockReason'],
+});
+
+// PATCH /:id/cancel — reverse the transfer (requires the doc.cancel capability)
+router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelTransferSchema, req.body ?? {}, res);
+  if (!body) return;
+  if (body.allowNegativeStock && !(await hasCap(req.user!.role, 'inventory.negative_stock'))) {
+    return res.status(403).json({ error: 'Hanya Admin yang dapat bypass validasi stok.' });
+  }
   try {
     const result = await prisma.$transaction(
-      (tx) => cancelStockTransferInTx(tx, req.params.id as string),
+      (tx) => cancelStockTransferInTx(tx, req.params.id as string, body),
     );
     return res.json(result);
   } catch (error) {
