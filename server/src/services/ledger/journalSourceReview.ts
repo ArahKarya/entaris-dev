@@ -1,7 +1,8 @@
 // Reads the accountant-reviewed backfill CSV (e1-journal-source-backfill --from-csv). The dry run
 // writes one row per legacy journal with an empty approved_type column; the accountant fills in
-// a JournalSourceType for the rows they decided and leaves the rest blank. Pure: the script loads
-// the journals and writes; this module parses, validates and decides which rows may be applied.
+// a JournalSourceType for the rows they decided and leaves the rest blank (a blank row is left to
+// the classifier, not kept NULL). Pure: the script loads the journals and writes; this module
+// parses, validates and decides which rows may be applied.
 
 import { parse } from 'csv-parse/sync';
 import { JournalSourceType } from '@prisma/client';
@@ -15,7 +16,7 @@ export interface ReviewedRow {
 
 export interface ReviewedCsv {
   rows: ReviewedRow[];
-  /** Rows with an empty approved_type: not reviewed, left alone. */
+  /** Rows with an empty approved_type: not written by --from-csv; the plain --apply may still tag them. */
   blank: number;
   /** Any error means nothing may be applied. */
   errors: string[];

@@ -392,7 +392,7 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
       const applyAmountNum = applyAmount.toNumber();
 
       // Void the application journal; rejected when its fiscal year (the apply date's) is closed,
-      // or when it was already cancelled (balances were restored then; never twice).
+      // or when it was already cancelled (the old Journal menu already reversed the deposit balance).
       // Legacy applications without a journal are checked against the apply date's year.
       if (application.journalEntry) {
         await voidDepositApplicationJournalInTx(tx, application.journalEntry, cancelTrail(req.user!.userId, body.reason));

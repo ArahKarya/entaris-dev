@@ -7,7 +7,10 @@
 // and writes those types instead of the classifier's: only filled rows, only valid source types,
 // only journals still NULL. Any invalid row stops the run before anything is written. Also a dry
 // run unless --apply is given. Run it before the plain --apply, so a reviewed row keeps the
-// accountant's type rather than the classifier's.
+// accountant's type rather than the classifier's. A blank approved_type is not a "keep NULL":
+// the plain --apply that follows still tags the row when the classifier rated it high enough. To
+// keep a journal out of the Journal menu, the accountant enters a type the menu does not cancel
+// (SYSTEM_DOC, OPENING, ...).
 //
 // Usage (from server/, DATABASE_URL set):
 //   node dist/scripts/repair/e1-journal-source-backfill.js [--dry-run] [--out file.csv]
@@ -198,7 +201,7 @@ async function applyReviewedCsv(file: string, apply: boolean): Promise<void> {
   }
 
   console.log(`${apply ? 'APPLY' : 'DRY RUN'} --from-csv ${file}`);
-  console.log(`  reviewed rows: ${parsed.rows.length} (blank approved_type, left NULL: ${parsed.blank})`);
+  console.log(`  reviewed rows: ${parsed.rows.length} (blank approved_type, not written here: ${parsed.blank}; a plain --apply still tags the high-confidence ones)`);
   console.log(`  ${apply ? 'to write' : 'would write'}: ${plan.apply.length}`);
   for (const [type, n] of [...counts.entries()].sort()) console.log(`    ${type}: ${n}`);
   console.log(`  already tagged, skipped: ${plan.alreadyTagged.length}`);

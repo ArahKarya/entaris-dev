@@ -334,7 +334,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: aplikasi tidak ditemukan.
 - 400: aplikasi sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di tempat lain, jadi saldo invoice dan uang muka sudah dipulihkan saat itu; aplikasi tidak dibatalkan lagi (koreksi oleh akuntan)
+- 400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di luar modul Uang Muka (menu Jurnal lama): jurnal dan saldo uang muka mitra sudah dibalik, tetapi outstanding invoice dan aplikasinya tidak; aplikasi tidak dibatalkan lagi, akuntan mengoreksi outstanding invoice
 - 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter

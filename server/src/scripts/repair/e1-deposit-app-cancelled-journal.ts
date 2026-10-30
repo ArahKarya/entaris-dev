@@ -1,9 +1,11 @@
 // Read-only report of deposit applications (customer and supplier) that are still active while
-// their journal is Cancelled. Before E1 the Journal menu cancelled customer offset journals and
-// restored the invoice and deposit balance itself; those applications should already be marked
-// cancelled, but any row listed here was not. Cancelling it now is refused
-// (DEPOSIT_APPLICATION_JOURNAL_CANCELLED) so nothing is restored twice; the accountant decides
-// the correction. It never writes to the database.
+// their journal is Cancelled. Only the old Journal menu left them like this: it reversed the
+// ledger and the party's deposit balance, but not the application, the invoice outstanding or
+// the deposit's remaining amount (from April 2026 it unwound linked customer applications itself,
+// supplier applications never). Cancelling such an application now is refused
+// (DEPOSIT_APPLICATION_JOURNAL_CANCELLED) so the deposit balance is not reversed twice; each
+// invoice listed here still has its outstanding reduced by the applied amount, and the accountant
+// corrects it. It never writes to the database.
 //
 // Usage (from server/, DATABASE_URL set):
 //   node dist/scripts/repair/e1-deposit-app-cancelled-journal.js [--out file.csv]
@@ -34,6 +36,9 @@ interface ReportRow {
   appliedAmount: string;
   depositNumber: string;
   invoiceNumber: string;
+  /** Current outstanding and status: still reduced by this application. */
+  invoiceOutstanding: string;
+  invoiceStatus: string;
   party: string;
   journalNumber: string;
   journalCancelledAt: Date | null;
@@ -50,7 +55,7 @@ async function main() {
       orderBy: { appliedAt: 'asc' },
       include: {
         depositPayment: { select: { paymentNumber: true } },
-        salesInvoice: { select: { invoiceNumber: true, customer: { select: { name: true } } } },
+        salesInvoice: { select: { invoiceNumber: true, outstanding: true, status: true, customer: { select: { name: true } } } },
         journalEntry: { select: journalSelect },
       },
     }),
@@ -59,7 +64,7 @@ async function main() {
       orderBy: { appliedAt: 'asc' },
       include: {
         depositPayment: { select: { paymentNumber: true } },
-        purchaseInvoice: { select: { invoiceNumber: true, supplier: { select: { name: true } } } },
+        purchaseInvoice: { select: { invoiceNumber: true, outstanding: true, status: true, supplier: { select: { name: true } } } },
         journalEntry: { select: journalSelect },
       },
     }),
@@ -69,19 +74,21 @@ async function main() {
     ...customer.map((a): ReportRow => ({
       side: 'customer', applicationId: a.id, appliedAt: a.appliedAt, appliedAmount: a.appliedAmount.toString(),
       depositNumber: a.depositPayment.paymentNumber, invoiceNumber: a.salesInvoice.invoiceNumber,
+      invoiceOutstanding: a.salesInvoice.outstanding.toString(), invoiceStatus: a.salesInvoice.status,
       party: a.salesInvoice.customer.name, journalNumber: a.journalEntry!.entryNumber, journalCancelledAt: a.journalEntry!.cancelledAt,
     })),
     ...supplier.map((a): ReportRow => ({
       side: 'supplier', applicationId: a.id, appliedAt: a.appliedAt, appliedAmount: a.appliedAmount.toString(),
       depositNumber: a.depositPayment.paymentNumber, invoiceNumber: a.purchaseInvoice.invoiceNumber,
+      invoiceOutstanding: a.purchaseInvoice.outstanding.toString(), invoiceStatus: a.purchaseInvoice.status,
       party: a.purchaseInvoice.supplier.name, journalNumber: a.journalEntry!.entryNumber, journalCancelledAt: a.journalEntry!.cancelledAt,
     })),
   ];
 
   if (opts.out) {
-    const header = 'side,application_id,applied_at,applied_amount,deposit_number,invoice_number,party,journal_number,journal_cancelled_at';
+    const header = 'side,application_id,applied_at,applied_amount,deposit_number,invoice_number,invoice_outstanding,invoice_status,party,journal_number,journal_cancelled_at';
     const lines = rows.map((r) =>
-      [r.side, r.applicationId, r.appliedAt, r.appliedAmount, r.depositNumber, r.invoiceNumber, r.party, r.journalNumber, r.journalCancelledAt]
+      [r.side, r.applicationId, r.appliedAt, r.appliedAmount, r.depositNumber, r.invoiceNumber, r.invoiceOutstanding, r.invoiceStatus, r.party, r.journalNumber, r.journalCancelledAt]
         .map(csvCell)
         .join(','),
     );
@@ -90,7 +97,7 @@ async function main() {
   }
   console.log(`Active deposit applications with a cancelled journal: ${rows.length} (customer ${customer.length}, supplier ${supplier.length})`);
   for (const r of rows) {
-    console.log(`  ${r.side} ${r.depositNumber} -> ${r.invoiceNumber} ${r.appliedAmount} (journal ${r.journalNumber})`);
+    console.log(`  ${r.side} ${r.depositNumber} -> ${r.invoiceNumber} ${r.appliedAmount} (journal ${r.journalNumber}; invoice outstanding ${r.invoiceOutstanding}, ${r.invoiceStatus})`);
   }
 }
 
