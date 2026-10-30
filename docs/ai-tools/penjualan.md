@@ -330,6 +330,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: aplikasi tidak ditemukan.
 - 400: aplikasi sudah dibatalkan.
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
 
 ### cdep_balance
 

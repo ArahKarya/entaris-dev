@@ -494,6 +494,8 @@ router.post('/settlements/:id/cancel', requireCap('doc.cancel'), async (req: Aut
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const settlementId = req.params.id as string;
+      // Row lock: a second concurrent cancel waits here, then sees isCancelled.
+      await tx.$queryRaw`SELECT id FROM project_guarantee_settlements WHERE id = ${settlementId} FOR UPDATE`;
       const settlement = await tx.projectGuaranteeSettlement.findUnique({
         where: { id: settlementId },
       });

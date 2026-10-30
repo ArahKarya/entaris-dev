@@ -1510,6 +1510,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Aplikasi uang muka tidak ditemukan
 - 400: Aplikasi sudah dibatalkan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
 
 **Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)
 

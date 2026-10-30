@@ -22,7 +22,7 @@ const makeTx = (journals: ReturnType<typeof makeJournal>[]) => ({
   journalEntry: {
     findMany: vi.fn().mockResolvedValue(journals),
     findUnique: vi.fn(async ({ where }: { where: { id: string } }) => journals.find((j) => j.id === where.id) ?? null),
-    update: vi.fn().mockResolvedValue({}),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   },
   accountingLedgerEntry: {
     updateMany: vi.fn().mockResolvedValue({ count: 2 }),
@@ -34,6 +34,10 @@ const makeTx = (journals: ReturnType<typeof makeJournal>[]) => ({
   fiscalYear: {
     findUnique: vi.fn(async ({ where }: { where: { id: string } }) => FISCAL_YEARS[where.id] ?? null),
   },
+  // assertPeriodOpen's FOR SHARE row read.
+  $queryRaw: vi.fn(async (_sql: TemplateStringsArray, id: string) =>
+    FISCAL_YEARS[id] ? [{ is_closed: FISCAL_YEARS[id]!.isClosed }] : [],
+  ),
 });
 
 async function caught(p: Promise<unknown>): Promise<BusinessError> {
@@ -65,8 +69,8 @@ describe('cancelJournalsByPrefix', () => {
       },
       include: { items: true },
     });
-    expect(tx.journalEntry.update).toHaveBeenCalledWith({
-      where: { id: 'j1' },
+    expect(tx.journalEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: 'j1', status: { not: 'Cancelled' } },
       data: { status: 'Cancelled', cancelledAt: expect.any(Date) },
     });
     expect(tx.accountingLedgerEntry.updateMany).toHaveBeenCalledWith({
@@ -84,7 +88,7 @@ describe('cancelJournalsByPrefix', () => {
     const e = await caught(cancelJournalsByPrefix(tx, 'JV-PR0004'));
 
     expect(e.code).toBe(PERIOD_CLOSED);
-    expect(tx.journalEntry.update).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'j2' } }));
+    expect(tx.journalEntry.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'j2', status: { not: 'Cancelled' } } }));
   });
 
   it('cancels multiple journals including revisions (JV-PR0004, JV-PR0004-R, JV-PR0004-R2)', async () => {
@@ -107,7 +111,7 @@ describe('cancelJournalsByPrefix', () => {
     const count = await cancelJournalsByPrefix(tx, 'JV-PR0004');
 
     expect(count).toBe(3);
-    expect(tx.journalEntry.update).toHaveBeenCalledTimes(3);
+    expect(tx.journalEntry.updateMany).toHaveBeenCalledTimes(3);
     expect(tx.accountingLedgerEntry.updateMany).toHaveBeenCalledTimes(3);
   });
 
@@ -132,7 +136,7 @@ describe('cancelJournalsByPrefix', () => {
     const count = await cancelJournalsByPrefix(tx, 'JV-NONEXISTENT');
 
     expect(count).toBe(0);
-    expect(tx.journalEntry.update).not.toHaveBeenCalled();
+    expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
     expect(tx.accountingLedgerEntry.updateMany).not.toHaveBeenCalled();
   });
 
@@ -186,8 +190,8 @@ describe('cancelDocumentJournals', () => {
     const cancelled = await cancelDocumentJournals(tx, ['JV-SI-1']);
 
     expect(cancelled).toEqual(['JV-SI-1', 'JV-SI-1-CORR']);
-    expect(tx.journalEntry.update).toHaveBeenCalledWith({
-      where: { id: 'j2' },
+    expect(tx.journalEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: 'j2', status: { not: 'Cancelled' } },
       data: { status: 'Cancelled', cancelledAt: expect.any(Date) },
     });
     expect(tx.accountingLedgerEntry.updateMany).toHaveBeenCalledWith({
@@ -209,14 +213,14 @@ describe('cancelDocumentJournals', () => {
 
     expect(e.code).toBe(PERIOD_CLOSED);
     expect(e.message).toMatch(/Tahun buku 2025 sudah ditutup; jurnal/);
-    expect(tx.journalEntry.update).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'j2' } }));
+    expect(tx.journalEntry.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'j2', status: { not: 'Cancelled' } } }));
   });
 
   it('returns [] and writes nothing when no journal matches', async () => {
     const tx = makeTx([]) as any;
 
     expect(await cancelDocumentJournals(tx, ['JV-SI-NONE'])).toEqual([]);
-    expect(tx.journalEntry.update).not.toHaveBeenCalled();
+    expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
     expect(tx.fiscalYear.findUnique).not.toHaveBeenCalled();
   });
 });
@@ -225,13 +229,22 @@ describe('voidJournalByIdInTx', () => {
   it('is a no-op for a missing journal', async () => {
     const tx = makeTx([]) as any;
     expect(await voidJournalByIdInTx(tx, 'nope')).toBe(false);
-    expect(tx.journalEntry.update).not.toHaveBeenCalled();
+    expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
   });
 
   it('skips an already cancelled journal in an open year', async () => {
     const tx = makeTx([makeJournal('j1', 'JV-1', [], 'fy-open', 'Cancelled')]) as any;
     expect(await voidJournalByIdInTx(tx, 'j1')).toBe(false);
-    expect(tx.journalEntry.update).not.toHaveBeenCalled();
+    expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reverses nothing when a concurrent void claimed the journal first', async () => {
+    const tx = makeTx([makeJournal('j1', 'JV-DP-1', [{ accountId: 'dp', debit: 4_000_000, credit: 0 }])]) as any;
+    tx.journalEntry.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    expect(await voidJournalByIdInTx(tx, 'j1', 'uang muka')).toBe(false);
+    expect(tx.accountingLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(tx.account.update).not.toHaveBeenCalled();
   });
 
   it('names the document in the closed-year message', async () => {

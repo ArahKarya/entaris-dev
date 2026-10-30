@@ -182,6 +182,8 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
+      await tx.$queryRaw`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`;
       const deposit = await tx.payment.findUnique({
         where: { id },
         include: {
@@ -367,8 +369,11 @@ router.post('/apply', async (req: AuthRequest, res) => {
 router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const applicationId = req.params.id as string;
+      // Row lock: a second concurrent cancel waits here, then sees isCancelled.
+      await tx.$queryRaw`SELECT id FROM customer_deposit_applications WHERE id = ${applicationId} FOR UPDATE`;
       const application = await tx.customerDepositApplication.findUnique({
-        where: { id: req.params.id as string },
+        where: { id: applicationId },
         include: {
           depositPayment: true,
           salesInvoice: { include: { customer: true } },
@@ -382,8 +387,11 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
       const applyAmountNum = applyAmount.toNumber();
 
       // Void the application journal; rejected when its fiscal year (the apply date's) is closed.
+      // Legacy applications without a journal are checked against the apply date's year.
       if (application.journalEntry) {
         await voidJournalInTx(tx, application.journalEntry, 'uang muka');
+      } else {
+        await assertPeriodOpen(tx, { date: application.appliedAt }, 'uang muka');
       }
 
       // Restore invoice outstanding

@@ -15,6 +15,9 @@ type JournalWithItems = Prisma.JournalEntryGetPayload<{ include: { items: true }
  * already cancelled, so satellites, auto-settle and action-dated journals cannot be voided in a
  * closed year through a document that sits in an open one. `label` names the document in the
  * error message. Returns false when the journal was already cancelled.
+ *
+ * The status flip is a conditional claim on the row, so of two concurrent voids only one
+ * reverses the balances; `journal.status` read earlier by the caller may be stale.
  */
 export async function voidJournalInTx(
   tx: Tx,
@@ -24,10 +27,11 @@ export async function voidJournalInTx(
   await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId }, label);
   if (journal.status === 'Cancelled') return false;
 
-  await tx.journalEntry.update({
-    where: { id: journal.id },
+  const claimed = await tx.journalEntry.updateMany({
+    where: { id: journal.id, status: { not: 'Cancelled' } },
     data: { status: 'Cancelled', cancelledAt: new Date() },
   });
+  if (claimed.count === 0) return false;
   await tx.accountingLedgerEntry.updateMany({
     where: { referenceId: journal.id, isCancelled: false },
     data: { isCancelled: true },

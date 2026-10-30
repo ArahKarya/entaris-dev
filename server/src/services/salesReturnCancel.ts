@@ -21,6 +21,8 @@ export async function cancelSalesReturnInTx(
   tx: Tx,
   returnId: string,
 ): Promise<{ id: string; status: 'Cancelled' }> {
+  // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
+  await tx.$queryRaw`SELECT id FROM sales_returns WHERE id = ${returnId} FOR UPDATE`;
   const ret = await tx.salesReturn.findUnique({
     where: { id: returnId },
     include: { salesInvoice: true },
