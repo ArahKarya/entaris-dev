@@ -6,6 +6,7 @@ import { logger } from '../lib/logger';
 import { validateBody } from '../utils/validate';
 import Decimal from 'decimal.js';
 import { parseListPaging, parseSort } from '../utils/listQuery';
+import { businessDayRange, businessMonthRange, businessToday } from '../utils/businessDate';
 import {
   DEFAULT_FIXED_ASSET_SORT,
   FIXED_ASSET_SORT_FIELDS,
@@ -364,18 +365,15 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
   const body = validateBody(BulkDepreciateSchema, req.body, res);
   if (!body) return;
   try {
-    // Resolve month range
-    const now = new Date();
-    const [yy, mm] = body.month
-      ? body.month.split('-').map(Number)
-      : [now.getFullYear(), now.getMonth() + 1];
-    const periodStart = new Date(yy, mm - 1, 1);
-    const periodEnd = new Date(yy, mm, 0, 23, 59, 59, 999);
+    // Resolve the WIB business month as a half-open range (default: current month)
+    const [yy, mm] = (body.month ?? businessToday().slice(0, 7)).split('-').map(Number);
+    if (mm < 1 || mm > 12) return res.status(400).json({ error: "Format month harus 'YYYY-MM'." });
+    const period = businessMonthRange(yy, mm);
 
     // Pull due entries (fixed asset must be Active)
     const dueEntries = await prisma.depreciationEntry.findMany({
       where: {
-        periodDate: { gte: periodStart, lte: periodEnd },
+        periodDate: { gte: period.gte, lt: period.lt },
         isPosted: false,
         fixedAsset: { status: 'Active' },
       },
@@ -420,9 +418,13 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       });
     }
 
-    // Resolve fiscal year covering periodStart
+    // Fiscal year covering the whole business month (first and last day); a month split by a
+    // fiscal-year boundary is refused. Closed years are not filtered here.
+    const firstDay = businessDayRange(period.firstDay);
+    const lastDay = businessDayRange(period.lastDay);
     const fiscalYear = await prisma.fiscalYear.findFirst({
-      where: { startDate: { lte: periodStart }, endDate: { gte: periodEnd } },
+      where: { startDate: { lt: firstDay.lt }, endDate: { gte: lastDay.gte } },
+      orderBy: { startDate: 'desc' },
     });
     if (!fiscalYear) {
       return res.status(400).json({

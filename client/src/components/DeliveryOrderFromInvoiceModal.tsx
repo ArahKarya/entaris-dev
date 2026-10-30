@@ -18,6 +18,7 @@ import {
   TableRegion,
 } from '@/components/sales-a/overlay-parts';
 import { formDialogClass, formShellClass } from '@/components/sales-a/overlay-classes';
+import { todayLocal } from '@/lib/date';
 
 interface InvoiceLine {
   id: string;
@@ -36,7 +37,7 @@ interface Props {
   onSuccess?: () => void;
 }
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => todayLocal();
 
 const DeliveryOrderFromInvoiceModal: React.FC<Props> = ({
   invoiceId, invoiceNumber, customerName, items, onClose, onSuccess,

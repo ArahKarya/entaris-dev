@@ -7,23 +7,23 @@ import { systemAccounts } from '../../services/systemAccounts';
 import { buildStockSnapshot } from '../../services/stockSnapshot';
 import { translateMessage } from '../../i18n/translateMessage';
 import { requestLanguage } from '../../middleware/responseLanguage';
+import { asOfBound, businessDayRange, businessToday, reportRange } from '../../utils/businessDate';
 
 const router = Router();
 
-function parseQueryDate(value: unknown, endOfDay = false): Date | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return undefined;
-  if (endOfDay) d.setHours(23, 59, 59, 999);
-  return d;
+/** Default report window: from the 1st of this business year (`'year'`) or month (`'month'`) through today. */
+function defaultWindow(from: 'year' | 'month'): { start: string; end: string } {
+  const today = businessToday();
+  return { start: from === 'year' ? `${today.slice(0, 4)}-01-01` : `${today.slice(0, 7)}-01`, end: today };
 }
 
 router.get('/hpp', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end = endDate ? new Date(endDate as string) : new Date();
+  const parsed = reportRange(req.query, defaultWindow('year'));
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: start, lt: endBefore } = parsed.range;
+  const period = { start: parsed.startDay, end: parsed.endDay };
 
+  try {
     // Get sales with COGS: each sale item with its inventory item cost
     const salesItems = await prisma.$queryRaw<Array<{
       item_id: string;
@@ -47,7 +47,7 @@ router.get('/hpp', async (req, res) => {
       LEFT JOIN inventory_items ii ON ii.id = si.inventory_item_id
       WHERE s.status NOT IN ('Draft', 'Cancelled')
         AND s.date >= ${start}
-        AND s.date <= ${end}
+        AND s.date < ${endBefore}
         AND si.inventory_item_id IS NOT NULL
       GROUP BY ii.id, ii.code, ii.name, ii.category
       ORDER BY SUM(si.amount) DESC
@@ -57,7 +57,7 @@ router.get('/hpp', async (req, res) => {
     const totalCogs = salesItems.reduce((s, i) => s + Number(i.total_cogs), 0);
 
     res.json({
-      period: { start, end },
+      period,
       items: salesItems.map((i) => ({
         itemId: i.item_id,
         itemCode: i.item_code,
@@ -87,12 +87,12 @@ router.get('/hpp', async (req, res) => {
 // GET /api/reports/profitability-per-sku: revenue vs material WAC (at query time) vs loaded HPP per SKU.
 // loaded_cogs = qty x COALESCE(si.unit_cost_loaded, batch.unit_cost, average_cost), so it works without a batch pick.
 router.get('/profitability-per-sku', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end = endDate ? new Date(endDate as string) : new Date();
-    end.setHours(23, 59, 59, 999);
+  const parsed = reportRange(req.query, defaultWindow('year'));
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: start, lt: endBefore } = parsed.range;
+  const period = { start: parsed.startDay, end: parsed.endDay };
 
+  try {
     const rows = await prisma.$queryRaw<Array<{
       item_id: string;
       item_code: string;
@@ -123,7 +123,7 @@ router.get('/profitability-per-sku', async (req, res) => {
       LEFT JOIN inventory_items ii ON ii.id = si.inventory_item_id
       WHERE s.status NOT IN ('Draft', 'Cancelled')
         AND s.date >= ${start}
-        AND s.date <= ${end}
+        AND s.date < ${endBefore}
         AND si.inventory_item_id IS NOT NULL
       GROUP BY ii.id, ii.code, ii.name, ii.unit, ii.category
       ORDER BY SUM(si.amount) DESC
@@ -160,7 +160,7 @@ router.get('/profitability-per-sku', async (req, res) => {
     const totalLoadedCogs = items.reduce((s, i) => s + i.loadedCogs, 0);
 
     return res.json({
-      period: { start, end },
+      period,
       items,
       summary: {
         totalRevenue,
@@ -185,9 +185,12 @@ router.get('/profitability-per-sku', async (req, res) => {
 // GET /api/reports/production-cost-summary: per main output x warehouse, raw material cost/kg (material value / output kg)
 // vs posted HPP/kg (material - by-product NRV + conversion cost). Read-only, no journal.
 router.get('/production-cost-summary', async (req, res) => {
+  const parsed = reportRange(req.query, defaultWindow('month'));
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: start, lt: endBefore } = parsed.range;
+  const period = { start: parsed.startDay, end: parsed.endDay };
+
   try {
-    const start = parseQueryDate(req.query.startDate) ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const end = parseQueryDate(req.query.endDate, true) ?? new Date();
     const warehouseId = typeof req.query.warehouseId === 'string' && req.query.warehouseId ? req.query.warehouseId : null;
 
     const rows = await prisma.$queryRaw<Array<{
@@ -197,7 +200,7 @@ router.get('/production-cost-summary', async (req, res) => {
     }>>`
       WITH runs AS (
         SELECT pr.id, pr.run_number, pr.date FROM production_runs pr
-        WHERE NOT pr.is_cancelled AND pr.date >= ${start} AND pr.date <= ${end}
+        WHERE NOT pr.is_cancelled AND pr.date >= ${start} AND pr.date < ${endBefore}
       ),
       main_items AS (
         SELECT DISTINCT i.production_run_id run_id, i.item_id FROM production_run_items i
@@ -264,7 +267,7 @@ router.get('/production-cost-summary', async (req, res) => {
     const summary = [...groups.values()].map(derive)
       .sort((a, b) => a.warehouseName.localeCompare(b.warehouseName) || a.outputName.localeCompare(b.outputName));
 
-    return res.json({ period: { start, end }, summary, total: derive(total), runs });
+    return res.json({ period, summary, total: derive(total), runs });
   } catch (error) {
     logger.error({ error }, 'GET /reports/production-cost-summary error');
     return res.status(500).json({ error: 'Gagal mengambil laporan modal produksi.' });
@@ -372,18 +375,15 @@ router.get('/receivable-schedule', async (req, res) => {
 
 // GET /api/reports/daily — consolidated daily activity report
 router.get('/daily', async (req, res) => {
-  const { date: rawDate } = req.query;
-  const dateStr = typeof rawDate === 'string' && rawDate ? rawDate : new Date().toISOString().slice(0, 10);
-  const dayStart = new Date(dateStr);
-  if (isNaN(dayStart.getTime())) {
-    return res.status(400).json({ error: 'Parameter date tidak valid.' });
-  }
-  const dayEnd = new Date(dateStr);
-  dayEnd.setHours(23, 59, 59, 999);
+  // One WIB business day (default today); dayEnd is its last instant, for aging.
+  const asOf = asOfBound(req.query.date);
+  if (!asOf.ok) return res.status(400).json({ error: asOf.error });
+  const dateStr = asOf.day;
+  const dayRange = businessDayRange(dateStr);
+  const dayEnd = new Date(dayRange.lt.getTime() - 1);
 
   try {
     const activeStatus = { notIn: ['Draft' as const, 'Cancelled' as const] };
-    const dayRange = { gte: dayStart, lte: dayEnd };
 
     const [
       salesInvoices,

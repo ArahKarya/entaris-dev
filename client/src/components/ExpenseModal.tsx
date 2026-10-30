@@ -16,6 +16,7 @@ import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
 import AttachmentUpload from './AttachmentUpload';
 import AttachmentPreview from './AttachmentPreview';
 import type { PickerOption as SelectOption } from './purchase-cash/OptionPicker';
+import { todayLocal } from '@/lib/date';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -29,7 +30,7 @@ const partyWithTypeOption = (p: PartyRecord) => ({ value: p.id, label: `${p.name
 
 const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('finance');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [debitAccountId, setDebitAccountId] = useState('');
@@ -47,7 +48,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose }) => {
   // Reset form on open
   useEffect(() => {
     if (isOpen) {
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setDebitAccountId('');
       setCreditAccountId('');
       setPartyId('');

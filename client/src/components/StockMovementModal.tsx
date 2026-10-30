@@ -21,6 +21,7 @@ import { ComboboxField } from '@/components/overlays/ComboboxField';
 import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField';
 import { useTranslation } from 'react-i18next';
 import { formatNumber } from '@/lib/format';
+import { todayLocal } from '@/lib/date';
 
 interface StockMovementModalProps {
   isOpen: boolean;
@@ -28,7 +29,7 @@ interface StockMovementModalProps {
   editMovement?: any | null;
 }
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => todayLocal();
 
 const defaultForm = {
   date: today(),

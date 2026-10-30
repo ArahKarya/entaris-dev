@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { OptionPicker, type PickerOption } from '@/components/purchase-cash/OptionPicker';
 import { DateInput, Field } from '@/components/shared';
 import { FormError, PinnedBody, PinnedFooter, PinnedHeader, pinnedDialogClass } from '@/components/overlays/dialog-parts';
+import { todayLocal } from '@/lib/date';
 
 interface Account {
   id: string;
@@ -30,7 +31,7 @@ interface JournalItem {
 
 const JournalEntryModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('finance');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocal());
   const [narration, setNarration] = useState('');
   const [items, setItems] = useState<JournalItem[]>([
     { id: crypto.randomUUID(), accountId: '', partyId: null, debit: 0, credit: 0, description: '' },
@@ -62,7 +63,7 @@ const JournalEntryModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
       queryClient.invalidateQueries({ queryKey: ['journals'] });
       queryClient.invalidateQueries({ queryKey: ['coa'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-metrics'] });
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setNarration('');
       setItems([
         { id: crypto.randomUUID(), accountId: '', partyId: null, debit: 0, credit: 0, description: '' },

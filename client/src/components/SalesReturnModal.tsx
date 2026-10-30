@@ -18,6 +18,7 @@ import {
   TableRegion,
 } from '@/components/sales-a/overlay-parts';
 import { formDialogClass, numberInputClass } from '@/components/sales-a/overlay-classes';
+import { todayLocal } from '@/lib/date';
 
 interface Props {
   open: boolean;
@@ -44,7 +45,7 @@ interface LineState {
   restock: boolean;
 }
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => todayLocal();
 
 export default function SalesReturnModal({ open, onClose, prefillInvoiceId }: Props) {
   const { t } = useTranslation('sales');

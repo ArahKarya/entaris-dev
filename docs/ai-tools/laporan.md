@@ -32,7 +32,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 
 ### Aturan periode dan tanggal
 
-- Format tanggal `YYYY-MM-DD`. `endDate` dan `date` dianggap sampai 23:59:59 hari itu (inklusif), `startDate` dari 00:00.
+- Format tanggal `YYYY-MM-DD`, dibaca sebagai hari bisnis WIB: `startDate` dari 00:00 WIB, `endDate` dan `date` inklusif sampai akhir hari itu (sebelum 00:00 WIB hari berikutnya). Jurnal bertanggal 1 Feb pukul 02:00 WIB masuk Februari.
 - Tanggal tidak valid menghasilkan HTTP 400 ("Parameter startDate tidak valid").
 - Perilaku default berbeda per laporan, jadi sebutkan periode secara eksplisit:
   - `get_trial_balance`, `rpt_profit_loss`, `rpt_ledger_book`: tanpa periode = SEMUA transaksi sejak awal (kumulatif).
@@ -188,7 +188,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -322,7 +322,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -410,7 +410,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -452,7 +452,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -495,7 +495,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 |---|---|---|---|---|
 | `accountId` | query | `string` | ya | ID akun (COA) yang dilihat mutasinya |
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -543,7 +543,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | `partyId` | query | `string` | tidak | Filter pemasok |
 | `warehouseId` | query | `string` | tidak | Filter gudang tujuan |
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 | `overdue` | query | enum: `1`, `true` | tidak | Isi 1/true untuk hanya PO lewat tanggal kirim |
 
 **Contoh pemanggilan**
@@ -590,7 +590,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 | `warehouseId` | query | `string` | tidak | Batasi ke satu gudang hasil produksi |
 
 **Contoh pemanggilan**
@@ -633,7 +633,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -679,7 +679,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -722,7 +722,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 |---|---|---|---|---|
 | `partyId` | query | `string` | tidak | Filter satu pemasok |
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 

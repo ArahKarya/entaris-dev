@@ -1,30 +1,52 @@
 import { Router, type Request } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import fixedAssetsRouter from './dashboard/fixedAssets';
 import { requestLanguage } from '../middleware/responseLanguage';
 import { translateFields } from '../i18n/translateFields';
+import { businessToday, monthKeys, reportRange, sqlBusinessTs } from '../utils/businessDate';
 
 /** Chart month labels follow the UI language the client sends. */
 const monthLocale = (req: Pick<Request, 'get'>): string => (requestLanguage(req) === 'en' ? 'en-US' : 'id-ID');
 
+/** `YYYY-MM` -> short month label ("Feb 26"); formatted in UTC so the host TZ cannot shift it. */
+const monthLabel = (key: string, locale: string): string =>
+  new Date(`${key}-15T00:00:00.000Z`).toLocaleString(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+
 const router = Router();
 
-// Helper: parse optional startDate / endDate query params.
-// Fallback defaults set by caller via fallback args.
-function parseRange(
-  req: { query: Record<string, unknown> },
-  defaults: { start: Date; end?: Date },
-): { start: Date; end: Date } {
-  const s = typeof req.query.startDate === 'string' ? req.query.startDate : '';
-  const e = typeof req.query.endDate === 'string' ? req.query.endDate : '';
-  const parsedStart = s ? new Date(s) : defaults.start;
-  const parsedEnd = e ? new Date(e + 'T23:59:59.999') : (defaults.end ?? new Date());
-  const start = isNaN(parsedStart.getTime()) ? defaults.start : parsedStart;
-  const end = isNaN(parsedEnd.getTime()) ? (defaults.end ?? new Date()) : parsedEnd;
-  return { start, end };
+type DashboardRange = { gte: Date; lt: Date; startDay: string; endDay: string };
+
+/** First day of the business month `monthsBack` months before today's month. */
+function monthStartBack(today: string, monthsBack: number): string {
+  const [y, m] = today.split('-').map(Number);
+  const idx = y * 12 + (m - 1) - monthsBack;
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}-01`;
 }
+
+/**
+ * Optional startDate / endDate (inclusive business days, WIB) as a half-open range; defaults
+ * to `monthsBack` whole months before the current month through today. Null when malformed
+ * (400 already sent).
+ */
+function dashboardRange(
+  req: { query: Record<string, unknown> },
+  res: { status: (code: number) => { json: (body: unknown) => unknown } },
+  monthsBack: number,
+): DashboardRange | null {
+  const today = businessToday();
+  const parsed = reportRange(req.query, { start: monthStartBack(today, monthsBack), end: today });
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return null;
+  }
+  // Both defaults are set, so every bound is present.
+  return { gte: parsed.range.gte!, lt: parsed.range.lt!, startDay: parsed.startDay!, endDay: parsed.endDay! };
+}
+
+const aleBusinessTs = sqlBusinessTs(Prisma.sql`ale.date`);
 
 // Sub-router untuk widget Aset Tetap (single comprehensive endpoint).
 router.use('/fixed-assets', fixedAssetsRouter);
@@ -60,17 +82,17 @@ router.get('/metrics', async (req, res) => {
 
     const arAcc = await prisma.account.findUnique({ where: { id: arMapping.id }, select: { balance: true } });
 
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const { start, end } = parseRange(req, { start: startOfMonth, end: now });
+    const range = dashboardRange(req, res, 0);
+    if (!range) return;
+    const { gte: start, lt: endBefore } = range;
 
     const [revEntries, expEntries] = await Promise.all([
       prisma.accountingLedgerEntry.aggregate({
-        where: { date: { gte: start, lte: end }, isCancelled: false, account: { rootType: 'REVENUE' as any } },
+        where: { date: { gte: start, lt: endBefore }, isCancelled: false, account: { rootType: 'REVENUE' as any } },
         _sum: { credit: true, debit: true },
       }),
       prisma.accountingLedgerEntry.aggregate({
-        where: { date: { gte: start, lte: end }, isCancelled: false, account: { rootType: 'EXPENSE' as any } },
+        where: { date: { gte: start, lt: endBefore }, isCancelled: false, account: { rootType: 'EXPENSE' as any } },
         _sum: { credit: true, debit: true },
       }),
     ]);
@@ -99,43 +121,30 @@ router.get('/metrics', async (req, res) => {
 // GET /api/dashboard/charts — revenue vs expense (month-grouped, default 6 months)
 router.get('/charts', async (req, res) => {
   try {
-    const now = new Date();
-    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    const { start, end } = parseRange(req, { start: sixMonthsAgo, end: now });
+    const range = dashboardRange(req, res, 5);
+    if (!range) return;
 
-    const rows = await prisma.$queryRaw<Array<{ month: Date; pendapatan: bigint; beban: bigint }>>`
+    // Bucket by WIB business month; the offset is a bound parameter, hence GROUP BY 1.
+    const rows = await prisma.$queryRaw<Array<{ month: string; pendapatan: bigint; beban: bigint }>>`
       SELECT
-        date_trunc('month', ale.date) AS month,
+        to_char(date_trunc('month', ${aleBusinessTs}), 'YYYY-MM') AS month,
         COALESCE(SUM(CASE WHEN a."rootType" = 'REVENUE' THEN ale.credit - ale.debit ELSE 0 END), 0) AS pendapatan,
         COALESCE(SUM(CASE WHEN a."rootType" = 'EXPENSE' THEN ale.debit - ale.credit ELSE 0 END), 0) AS beban
       FROM accounting_ledger_entries ale
       JOIN accounts a ON ale.account_id = a.id
-      WHERE ale.date >= ${start}
-        AND ale.date <= ${end}
+      WHERE ale.date >= ${range.gte}
+        AND ale.date < ${range.lt}
         AND ale.is_cancelled = false
         AND a."rootType" IN ('REVENUE', 'EXPENSE')
-      GROUP BY date_trunc('month', ale.date)
-      ORDER BY month ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
-    // Build month labels from start → end
-    const months: { key: string; name: string }[] = [];
-    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    const endCap = new Date(end.getFullYear(), end.getMonth(), 1);
-    while (cursor <= endCap) {
-      months.push({
-        key: `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`,
-        name: cursor.toLocaleString(monthLocale(req), { month: 'short', year: '2-digit' }),
-      });
-      cursor.setMonth(cursor.getMonth() + 1);
-    }
+    const locale = monthLocale(req);
+    const months = monthKeys(range.startDay, range.endDay).map((key) => ({ key, name: monthLabel(key, locale) }));
 
     const rowMap = new Map(
-      rows.map((r) => {
-        const d = new Date(r.month);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        return [key, { pendapatan: Math.max(0, Number(r.pendapatan)), beban: Math.max(0, Number(r.beban)) }];
-      })
+      rows.map((r) => [r.month, { pendapatan: Math.max(0, Number(r.pendapatan)), beban: Math.max(0, Number(r.beban)) }])
     );
 
     const chartData = months.map((m) => ({
@@ -271,14 +280,13 @@ router.get('/upcoming-due', async (_req, res) => {
 // GET /api/dashboard/expense-breakdown — expenses by category for period (default current month)
 router.get('/expense-breakdown', async (req, res) => {
   try {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const { start, end } = parseRange(req, { start: startOfMonth, end: now });
+    const range = dashboardRange(req, res, 0);
+    if (!range) return;
 
     const entries = await prisma.accountingLedgerEntry.groupBy({
       by: ['accountId'],
       where: {
-        date: { gte: start, lte: end },
+        date: { gte: range.gte, lt: range.lt },
         isCancelled: false,
         account: { rootType: 'EXPENSE' as any },
       },
@@ -435,20 +443,20 @@ router.get('/negative-stock', async (_req, res) => {
 // GET /api/dashboard/cash-flow — daily cash in/out for period (default current month)
 router.get('/cash-flow', async (req, res) => {
   try {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const { start, end } = parseRange(req, { start: startOfMonth, end: now });
+    const range = dashboardRange(req, res, 0);
+    if (!range) return;
 
-    const rows = await prisma.$queryRaw<Array<{ day: Date; cash_in: number; cash_out: number }>>`
-      SELECT date_trunc('day', p.date) AS day,
+    // Bucket by WIB business day (YYYY-MM-DD); offset is a bound parameter, hence GROUP BY 1.
+    const rows = await prisma.$queryRaw<Array<{ day: string; cash_in: number; cash_out: number }>>`
+      SELECT to_char(${sqlBusinessTs(Prisma.sql`p.date`)}, 'YYYY-MM-DD') AS day,
              COALESCE(SUM(CASE WHEN p.payment_type = 'Receive' THEN p.amount ELSE 0 END), 0) AS cash_in,
              COALESCE(SUM(CASE WHEN p.payment_type = 'Pay' THEN p.amount ELSE 0 END), 0) AS cash_out
         FROM payments p
-       WHERE p.date >= ${start}
-         AND p.date <= ${end}
+       WHERE p.date >= ${range.gte}
+         AND p.date < ${range.lt}
          AND p.status = 'Submitted'
-       GROUP BY date_trunc('day', p.date)
-       ORDER BY day
+       GROUP BY 1
+       ORDER BY 1
     `;
 
     const days = rows.map((r) => ({
@@ -516,42 +524,29 @@ router.get('/financial-ratios', async (_req, res) => {
 // GET /api/dashboard/monthly-profit — monthly profit trend (default 12 months, customizable via startDate/endDate)
 router.get('/monthly-profit', async (req, res) => {
   try {
-    const now = new Date();
-    const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-    const { start, end } = parseRange(req, { start: twelveMonthsAgo, end: now });
+    const range = dashboardRange(req, res, 11);
+    if (!range) return;
 
-    const rows = await prisma.$queryRaw<Array<{ month: Date; revenue: number; expense: number }>>`
+    const rows = await prisma.$queryRaw<Array<{ month: string; revenue: number; expense: number }>>`
       SELECT
-        date_trunc('month', ale.date) AS month,
+        to_char(date_trunc('month', ${aleBusinessTs}), 'YYYY-MM') AS month,
         COALESCE(SUM(CASE WHEN a."rootType" = 'REVENUE' THEN ale.credit - ale.debit ELSE 0 END), 0) AS revenue,
         COALESCE(SUM(CASE WHEN a."rootType" = 'EXPENSE' THEN ale.debit - ale.credit ELSE 0 END), 0) AS expense
       FROM accounting_ledger_entries ale
       JOIN accounts a ON ale.account_id = a.id
-      WHERE ale.date >= ${start}
-        AND ale.date <= ${end}
+      WHERE ale.date >= ${range.gte}
+        AND ale.date < ${range.lt}
         AND ale.is_cancelled = false
         AND a."rootType" IN ('REVENUE', 'EXPENSE')
-      GROUP BY date_trunc('month', ale.date)
-      ORDER BY month ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
-    const months: { key: string; name: string }[] = [];
-    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    const endCap = new Date(end.getFullYear(), end.getMonth(), 1);
-    while (cursor <= endCap) {
-      months.push({
-        key: `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`,
-        name: cursor.toLocaleString(monthLocale(req), { month: 'short', year: '2-digit' }),
-      });
-      cursor.setMonth(cursor.getMonth() + 1);
-    }
+    const locale = monthLocale(req);
+    const months = monthKeys(range.startDay, range.endDay).map((key) => ({ key, name: monthLabel(key, locale) }));
 
     const rowMap = new Map(
-      rows.map((r) => {
-        const d = new Date(r.month);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        return [key, { revenue: Math.max(0, Number(r.revenue)), expense: Math.max(0, Number(r.expense)) }];
-      })
+      rows.map((r) => [r.month, { revenue: Math.max(0, Number(r.revenue)), expense: Math.max(0, Number(r.expense)) }])
     );
 
     const data = months.map((m) => {

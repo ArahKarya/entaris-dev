@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DateInput, Field } from '@/components/shared';
 import { FormError, OverlayBody, OverlayFooter, OverlayHeader } from './sales/dialog-parts-b';
 import { dialogShellClass } from './sales/dialog-classes-b';
+import { todayLocal } from '@/lib/date';
 
 interface Deposit {
   id: string;
@@ -30,7 +31,7 @@ interface Props {
 
 const RefundCustomerDepositModal: React.FC<Props> = ({ isOpen, onClose, deposit }) => {
   const { t } = useTranslation('sales');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const [date, setDate] = useState(today);
   const [offsetAmount, setOffsetAmount] = useState<number>(0);
   const [cashAmount, setCashAmount] = useState<number>(0);

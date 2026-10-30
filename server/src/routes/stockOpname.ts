@@ -6,6 +6,7 @@ import { validateBody } from '../utils/validate';
 import { CreateStockOpnameSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
+import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { cancelJournalsByPrefix } from '../utils/journalCancel';
 import { journalFamilyWhere } from '../utils/journalFamily';
@@ -138,10 +139,7 @@ router.post('/', async (req: AuthRequest, res) => {
   try {
     const result = await prisma.$transaction(async (tx) => {
       const txDate = new Date(body.date);
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: { isClosed: false, startDate: { lte: txDate }, endDate: { gte: txDate } },
-      });
-      if (!fiscalYear) throw new BusinessError('Tidak ada tahun fiskal aktif untuk tanggal ini.');
+      const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
       // Check no other Draft exists
       const existingDraft = await tx.stockOpname.findFirst({ where: { status: 'Draft' as any } });

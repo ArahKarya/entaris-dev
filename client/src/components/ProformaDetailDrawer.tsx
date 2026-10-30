@@ -15,6 +15,7 @@ import { TableRegion } from '@/components/sales-a/overlay-parts';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import ProformaInvoicePDF from '../lib/pdf/ProformaInvoicePDF';
 import { useCompanyPDF } from '../lib/pdf/useCompanyPDF';
+import { todayLocal } from '@/lib/date';
 
 interface ApiErr { response?: { data?: { error?: string } } }
 interface ProformaItemRow {
@@ -70,8 +71,8 @@ const ProformaDetailDrawer: React.FC<Props> = ({ proformaId, onClose, onEdit }) 
   const convertMut = useMutation({
     mutationFn: async () => {
       const p2 = (await api.get(`/proforma-invoices/${proformaId}/convert-payload`)).data;
-      const today = new Date().toISOString().split('T')[0];
-      const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+      const today = todayLocal();
+      const dueDate = todayLocal(30);
       const note = t('proformaDetailDrawer.convertedFromNote', { number: p2.proformaNumber });
       const inv = (
         await api.post('/sales/invoices', {

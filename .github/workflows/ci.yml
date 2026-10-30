@@ -65,6 +65,8 @@ jobs:
       - run: npx tsc --noEmit
       # Unit tests only; integration tests run in the `integration` job below.
       - run: npm test
+      # Business-day helpers must not depend on the host TZ: rerun them in WIB (runner is UTC).
+      - run: TZ=Asia/Jakarta npx vitest run src/utils/__tests__/businessDate.test.ts src/utils/__tests__/fiscalYear.test.ts
       # Katalog tool AIRA/MCP: drift guard (route <-> registry, docs/ai-tools mutakhir).
       - run: npm run ai-tools:check
 

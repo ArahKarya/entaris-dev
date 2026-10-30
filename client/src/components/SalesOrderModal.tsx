@@ -22,6 +22,7 @@ import {
 } from '@/components/sales-a/overlay-parts';
 import { formDialogClass, formShellClass, numberInputClass } from '@/components/sales-a/overlay-classes';
 import { toast } from 'sonner';
+import { todayLocal } from '@/lib/date';
 
 interface SOItem {
   id: string;
@@ -56,7 +57,7 @@ interface Props {
 const SalesOrderModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
   const { t } = useTranslation('sales');
   const isEdit = Boolean(editTarget?.id);
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [expectedDelivery, setExpectedDelivery] = useState('');

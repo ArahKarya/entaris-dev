@@ -13,6 +13,7 @@ import { FormDialog } from './purchase-cash/FormDialog';
 import { OptionPicker, type PickerOption as SelectOption } from './purchase-cash/OptionPicker';
 import { usePartyPicker } from '@/hooks/usePartyPicker';
 import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
+import { todayLocal } from '@/lib/date';
 
 const UNITS = ['Kg', 'Ton', 'Sak', 'Liter', 'Pcs', 'Box', 'Unit', 'Set', 'Meter'];
 
@@ -108,7 +109,7 @@ function getCurrentUserName(): string {
 const GoodsReceiptModal: React.FC<Props> = ({ onClose, initialPurchaseOrder = null }) => {
   const { t } = useTranslation('purchasing');
   const queryClient = useQueryClient();
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [partyId, setPartyId] = useState(initialPurchaseOrder?.partyId ?? '');

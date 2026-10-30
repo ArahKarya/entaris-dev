@@ -15,6 +15,7 @@ import { usePartyPicker } from '@/hooks/usePartyPicker';
 import { RupiahField } from './purchase-cash/RupiahField';
 import { uploadAttachments, validateAttachmentFiles } from '../lib/attachments';
 import type { PickerOption as SelectOption } from './purchase-cash/OptionPicker';
+import { todayLocal } from '@/lib/date';
 
 interface Props {
   isOpen: boolean;
@@ -73,7 +74,7 @@ function RowPartyPicker({ value, ...rest }: RowPartyPickerProps) {
 
 const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
   const { t } = useTranslation('finance');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const [date, setDate] = useState(today);
   const [cashAccountId, setCashAccountId] = useState('');
   const [batchNote, setBatchNote] = useState(() => makeBatchNote(today));
@@ -85,9 +86,9 @@ const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
 
   useEffect(() => {
     if (isOpen) {
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setCashAccountId('');
-      setBatchNote(makeBatchNote(new Date().toISOString().split('T')[0]));
+      setBatchNote(makeBatchNote(todayLocal()));
       setRows([makeEmptyRow()]);
       setIsSubmitting(false);
       setHasSubmitted(false);

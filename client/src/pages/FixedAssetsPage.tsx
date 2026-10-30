@@ -32,6 +32,7 @@ import {
   type DepreciationPostTarget,
   type FixedAssetRow,
 } from '@/components/fixed-assets/types';
+import { todayLocal } from '@/lib/date';
 
 type Tab = 'list' | 'depreciation';
 
@@ -232,7 +233,7 @@ export default function FixedAssetsPage() {
         loading={disposeMut.isPending}
         onConfirm={async () => {
           if (!disposeTarget) return;
-          await disposeMut.mutateAsync({ id: disposeTarget.id, disposalDate: new Date().toISOString().substring(0, 10) });
+          await disposeMut.mutateAsync({ id: disposeTarget.id, disposalDate: todayLocal() });
         }}
       />
 

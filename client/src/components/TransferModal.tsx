@@ -13,6 +13,7 @@ import { OptionPicker } from './purchase-cash/OptionPicker';
 import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
 import AttachmentUpload from './AttachmentUpload';
 import AttachmentPreview from './AttachmentPreview';
+import { todayLocal } from '@/lib/date';
 
 interface TransferModalProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ interface TransferModalProps {
 
 const TransferModal: React.FC<TransferModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('inventory');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [sourceAccountId, setSourceAccountId] = useState('');
@@ -36,7 +37,7 @@ const TransferModal: React.FC<TransferModalProps> = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (isOpen) {
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setSourceAccountId('');
       setDestAccountId('');
       setAmount('');

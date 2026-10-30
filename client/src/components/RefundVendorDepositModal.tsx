@@ -11,6 +11,7 @@ import { Field, DateInput } from '@/components/shared';
 import { FormDialog } from './purchase-cash/FormDialog';
 import { OptionPicker } from './purchase-cash/OptionPicker';
 import { ErrorAlert } from './purchase-cash/ErrorAlert';
+import { todayLocal } from '@/lib/date';
 
 interface Deposit {
   id: string;
@@ -28,7 +29,7 @@ interface Props {
 
 const RefundVendorDepositModal: React.FC<Props> = ({ isOpen, onClose, deposit }) => {
   const { t } = useTranslation('purchasing');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const [date, setDate] = useState(today);
   const [offsetAmount, setOffsetAmount] = useState<number>(0);
   const [cashAmount, setCashAmount] = useState<number>(0);

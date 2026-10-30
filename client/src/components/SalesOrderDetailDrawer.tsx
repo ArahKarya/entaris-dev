@@ -28,6 +28,7 @@ import SalesOrderPDF from '../lib/pdf/SalesOrderPDF';
 import { useCompanyPDF } from '../lib/pdf/useCompanyPDF';
 import { mergeInvoicePdfWithAttachments } from '../lib/pdf/mergePdfWithAttachments';
 import type { AttachmentRef } from '../lib/pdf/mergePdfWithAttachments';
+import { todayLocal } from '@/lib/date';
 
 interface Props {
   soId: string | null;
@@ -43,7 +44,7 @@ const SalesOrderDetailDrawer: React.FC<Props> = ({ soId, onClose, onEdit }) => {
   const [genDOOpen, setGenDOOpen] = useState(false);
   const [genItems, setGenItems] = useState<Record<string, number>>({});
   const [genWarehouseId, setGenWarehouseId] = useState('');
-  const [genDate, setGenDate] = useState(new Date().toISOString().split('T')[0]);
+  const [genDate, setGenDate] = useState(todayLocal());
   const [genNomorMobil, setGenNomorMobil] = useState('');
   const [genDriver, setGenDriver] = useState('');
   const [genRecipient, setGenRecipient] = useState('');
@@ -54,7 +55,7 @@ const SalesOrderDetailDrawer: React.FC<Props> = ({ soId, onClose, onEdit }) => {
   const canBypassNegativeStock = cap('inventory.negative_stock');
   // Uang muka (DP)
   const [dpOpen, setDpOpen] = useState(false);
-  const [dpDate, setDpDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dpDate, setDpDate] = useState(todayLocal());
   const [dpAmount, setDpAmount] = useState(0);
   const [dpAccountId, setDpAccountId] = useState('');
   const [dpNotes, setDpNotes] = useState('');

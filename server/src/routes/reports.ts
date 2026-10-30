@@ -6,6 +6,7 @@ import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { compareAccountNumber } from '../utils/accountSort';
 import { buildTrialBalance } from '../utils/trialBalance';
+import { asOfBound, businessToday, reportRange } from '../utils/businessDate';
 import operationalRouter from './reports/operational';
 import purchasingReportRouter from './reports/purchasing';
 
@@ -16,37 +17,16 @@ const router = Router();
 router.use(operationalRouter);
 router.use(purchasingReportRouter);
 
-function parseQueryDate(value: unknown, endOfDay = false): Date | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return undefined;
-  // When used as an upper bound (endDate / date), set to end of day
-  // so entries created during the day are included
-  if (endOfDay) {
-    d.setHours(23, 59, 59, 999);
-  }
-  return d;
-}
-
 // GET /api/reports/trial-balance
 router.get('/trial-balance', async (req, res) => {
-  const { startDate: rawStart, endDate: rawEnd } = req.query;
-  const startDate = parseQueryDate(rawStart);
-  const endDate = parseQueryDate(rawEnd, true);
-  if (rawStart && typeof rawStart === 'string' && rawStart !== '' && !startDate) {
-    return res.status(400).json({ error: 'Parameter startDate tidak valid.' });
-  }
-  if (rawEnd && typeof rawEnd === 'string' && rawEnd !== '' && !endDate) {
-    return res.status(400).json({ error: 'Parameter endDate tidak valid.' });
-  }
+  // Inclusive business days -> half-open [start 00:00, end+1 00:00) WIB.
+  const parsed = reportRange(req.query, {});
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: startDate, lt: endBefore } = parsed.range;
 
   try {
     const where: Prisma.AccountingLedgerEntryWhereInput = { isCancelled: false };
-    if (startDate || endDate) {
-      where.date = {};
-      if (startDate) (where.date as any).gte = startDate;
-      if (endDate) (where.date as any).lte = endDate;
-    }
+    if (startDate || endBefore) where.date = { gte: startDate, lt: endBefore };
 
     const [entries, accounts] = await Promise.all([
       prisma.accountingLedgerEntry.groupBy({
@@ -75,26 +55,17 @@ router.get('/trial-balance', async (req, res) => {
 
 // GET /api/reports/profit-loss
 router.get('/profit-loss', async (req, res) => {
-  const { startDate: rawStart, endDate: rawEnd } = req.query;
-  const startDate = parseQueryDate(rawStart);
-  const endDate = parseQueryDate(rawEnd, true);
-  if (rawStart && typeof rawStart === 'string' && rawStart !== '' && !startDate) {
-    return res.status(400).json({ error: 'Parameter startDate tidak valid.' });
-  }
-  if (rawEnd && typeof rawEnd === 'string' && rawEnd !== '' && !endDate) {
-    return res.status(400).json({ error: 'Parameter endDate tidak valid.' });
-  }
+  // Inclusive business days -> half-open [start 00:00, end+1 00:00) WIB.
+  const parsed = reportRange(req.query, {});
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: startDate, lt: endBefore } = parsed.range;
 
   try {
     const where: Prisma.AccountingLedgerEntryWhereInput = {
       isCancelled: false,
       account: { OR: [{ rootType: 'REVENUE' as any }, { rootType: 'EXPENSE' as any }] },
     };
-    if (startDate || endDate) {
-      where.date = {};
-      if (startDate) (where.date as any).gte = startDate;
-      if (endDate) (where.date as any).lte = endDate;
-    }
+    if (startDate || endBefore) where.date = { gte: startDate, lt: endBefore };
 
     const [allAccounts, entries] = await Promise.all([
       prisma.account.findMany({
@@ -185,11 +156,10 @@ router.get('/profit-loss', async (req, res) => {
 
 // GET /api/reports/balance-sheet
 router.get('/balance-sheet', async (req, res) => {
-  const parsedDate = parseQueryDate(req.query.date, true);
-  if (req.query.date && typeof req.query.date === 'string' && req.query.date !== '' && !parsedDate) {
-    return res.status(400).json({ error: 'Parameter date tidak valid.' });
-  }
-  const targetDate = parsedDate ?? new Date();
+  // As of the end of the business day (default today): everything before the next day's 00:00 WIB.
+  const asOf = asOfBound(req.query.date);
+  if (!asOf.ok) return res.status(400).json({ error: asOf.error });
+  const before = asOf.lt;
 
   try {
     const [allAccounts, entries, revAgg, expAgg] = await Promise.all([
@@ -198,15 +168,15 @@ router.get('/balance-sheet', async (req, res) => {
       }),
       prisma.accountingLedgerEntry.groupBy({
         by: ['accountId'],
-        where: { date: { lte: targetDate }, isCancelled: false },
+        where: { date: { lt: before }, isCancelled: false },
         _sum: { debit: true, credit: true },
       }),
       prisma.accountingLedgerEntry.aggregate({
-        where: { date: { lte: targetDate }, isCancelled: false, account: { rootType: 'REVENUE' as any } },
+        where: { date: { lt: before }, isCancelled: false, account: { rootType: 'REVENUE' as any } },
         _sum: { debit: true, credit: true },
       }),
       prisma.accountingLedgerEntry.aggregate({
-        where: { date: { lte: targetDate }, isCancelled: false, account: { rootType: 'EXPENSE' as any } },
+        where: { date: { lt: before }, isCancelled: false, account: { rootType: 'EXPENSE' as any } },
         _sum: { debit: true, credit: true },
       }),
     ]);
@@ -294,24 +264,18 @@ router.get('/balance-sheet', async (req, res) => {
 
 // GET /api/reports/cash-flow
 router.get('/cash-flow', async (req, res) => {
-  const { startDate: rawStart, endDate: rawEnd } = req.query;
-  const parsedStart = parseQueryDate(rawStart);
-  const parsedEnd = parseQueryDate(rawEnd, true);
-  if (rawStart && typeof rawStart === 'string' && rawStart !== '' && !parsedStart) {
-    return res.status(400).json({ error: 'Parameter startDate tidak valid.' });
-  }
-  if (rawEnd && typeof rawEnd === 'string' && rawEnd !== '' && !parsedEnd) {
-    return res.status(400).json({ error: 'Parameter endDate tidak valid.' });
-  }
-  const start = parsedStart ?? new Date(new Date().getFullYear(), 0, 1);
-  const end = parsedEnd ?? new Date();
+  // Default: 1 Jan of the current business year through today.
+  const today = businessToday();
+  const parsed = reportRange(req.query, { start: `${today.slice(0, 4)}-01-01`, end: today });
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: start, lt: endBefore } = parsed.range;
 
   try {
     const cashAccounts = await systemAccounts.getAccounts('CASH');
     const cashAccountIds = cashAccounts.map((a) => a.id);
 
     const cashEntries = await prisma.accountingLedgerEntry.findMany({
-      where: { accountId: { in: cashAccountIds }, date: { gte: start, lte: end }, isCancelled: false },
+      where: { accountId: { in: cashAccountIds }, date: { gte: start, lt: endBefore }, isCancelled: false },
       take: 50000,
     });
 
@@ -418,20 +382,16 @@ router.get('/aging', async (req, res) => {
 
 // GET /api/reports/ledger-detail — detailed ledger entries for a specific account
 router.get('/ledger-detail', async (req, res) => {
-  const { accountId, startDate: rawStart, endDate: rawEnd } = req.query;
+  const { accountId } = req.query;
 
   if (!accountId || typeof accountId !== 'string') {
     return res.status(400).json({ error: 'Parameter accountId wajib diisi.' });
   }
 
-  const startDate = parseQueryDate(rawStart);
-  const endDate = parseQueryDate(rawEnd, true);
-  if (rawStart && typeof rawStart === 'string' && rawStart !== '' && !startDate) {
-    return res.status(400).json({ error: 'Parameter startDate tidak valid.' });
-  }
-  if (rawEnd && typeof rawEnd === 'string' && rawEnd !== '' && !endDate) {
-    return res.status(400).json({ error: 'Parameter endDate tidak valid.' });
-  }
+  // Inclusive business days -> half-open [start 00:00, end+1 00:00) WIB.
+  const parsed = reportRange(req.query, {});
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: startDate, lt: endBefore } = parsed.range;
 
   try {
     const account = await prisma.account.findUnique({
@@ -446,11 +406,7 @@ router.get('/ledger-detail', async (req, res) => {
       accountId,
       isCancelled: false,
     };
-    if (startDate || endDate) {
-      where.date = {};
-      if (startDate) (where.date as any).gte = startDate;
-      if (endDate) (where.date as any).lte = endDate;
-    }
+    if (startDate || endBefore) where.date = { gte: startDate, lt: endBefore };
 
     const entries = await prisma.accountingLedgerEntry.findMany({
       where,
@@ -496,9 +452,9 @@ router.get('/ledger-detail', async (req, res) => {
 
 // GET /api/reports/ledger-book — full ledger with mutations per account
 router.get('/ledger-book', async (req, res) => {
-  const { startDate: rawStart, endDate: rawEnd } = req.query;
-  const startDate = parseQueryDate(rawStart);
-  const endDate = parseQueryDate(rawEnd, true);
+  const parsed = reportRange(req.query, {});
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  const { gte: startDate, lt: endBefore } = parsed.range;
 
   try {
     // Get all active leaf accounts (non-group)
@@ -513,11 +469,7 @@ router.get('/ledger-book', async (req, res) => {
 
     // Build date filter
     const dateFilter: Prisma.AccountingLedgerEntryWhereInput = { isCancelled: false };
-    if (startDate || endDate) {
-      dateFilter.date = {};
-      if (startDate) (dateFilter.date as any).gte = startDate;
-      if (endDate) (dateFilter.date as any).lte = endDate;
-    }
+    if (startDate || endBefore) dateFilter.date = { gte: startDate, lt: endBefore };
 
     // Compute opening balance (before startDate) for each account if startDate is given
     const openingBalances = new Map<string, number>();

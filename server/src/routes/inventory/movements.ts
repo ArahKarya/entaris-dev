@@ -7,6 +7,7 @@ import { CreateStockMovementSchema, UpdateStockMovementSchema } from '../../util
 import { BusinessError, handleRouteError } from '../../utils/errors';
 import { documentMovementLockMessage } from '../../services/documentMovementLock';
 import { generateDocumentNumber } from '../../utils/documentNumber';
+import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { updateAccountBalance, recalculateAccountBalances } from '../../utils/accountBalance';
 import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
@@ -88,14 +89,7 @@ router.post('/', async (req: AuthRequest, res) => {
   try {
     const result = await prisma.$transaction(async (tx) => {
       const txDate = new Date(body.date);
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: {
-          isClosed: false,
-          startDate: { lte: txDate },
-          endDate: { gte: txDate },
-        },
-      });
-      if (!fiscalYear) throw new BusinessError('Tidak ada tahun fiskal aktif untuk tanggal transaksi ini.');
+      const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
       const item = await tx.inventoryItem.findUnique({ where: { id: body.itemId } });
       if (!item) throw new BusinessError('Item stok tidak ditemukan.');
@@ -441,10 +435,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
         }
 
         const movementDate = new Date(body.date);
-        const fiscalYear = await tx.fiscalYear.findFirst({
-          where: { isClosed: false, startDate: { lte: movementDate }, endDate: { gte: movementDate } },
-        });
-        if (!fiscalYear) throw new BusinessError('Tidak ada tahun fiskal aktif untuk tanggal transaksi ini.');
+        const fiscalYear = await getOpenFiscalYear(tx, movementDate);
 
         const editNarration = `${typeLabels[body.movementType]}: ${itemAfterReversal.name} ${newQty} ${itemAfterReversal.unit}${body.notes ? ' - ' + body.notes : ''} (Edit)`;
         const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);

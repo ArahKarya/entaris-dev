@@ -22,7 +22,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 
 ### Aturan periode dan tanggal
 
-- Format tanggal `YYYY-MM-DD`. `endDate` dan `date` dianggap sampai 23:59:59 hari itu (inklusif), `startDate` dari 00:00.
+- Format tanggal `YYYY-MM-DD`, dibaca sebagai hari bisnis WIB: `startDate` dari 00:00 WIB, `endDate` dan `date` inklusif sampai akhir hari itu (sebelum 00:00 WIB hari berikutnya). Jurnal bertanggal 1 Feb pukul 02:00 WIB masuk Februari.
 - Tanggal tidak valid menghasilkan HTTP 400 ("Parameter startDate tidak valid").
 - Perilaku default berbeda per laporan, jadi sebutkan periode secara eksplisit:
   - `get_trial_balance`, `rpt_profit_loss`, `rpt_ledger_book`: tanpa periode = SEMUA transaksi sejak awal (kumulatif).

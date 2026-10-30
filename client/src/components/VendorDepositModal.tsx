@@ -15,6 +15,7 @@ import { RupiahField } from './purchase-cash/RupiahField';
 import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
 import AttachmentUpload from './AttachmentUpload';
 import AttachmentPreview from './AttachmentPreview';
+import { todayLocal } from '@/lib/date';
 
 interface VendorDepositModalProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ interface VendorDepositModalProps {
 
 const VendorDepositModal: React.FC<VendorDepositModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('purchasing');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [partyId, setPartyId] = useState('');
@@ -39,7 +40,7 @@ const VendorDepositModal: React.FC<VendorDepositModalProps> = ({ isOpen, onClose
 
   useEffect(() => {
     if (isOpen) {
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setPartyId('');
       setAmount('');
       setAccountId('');

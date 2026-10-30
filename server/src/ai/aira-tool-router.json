@@ -2211,7 +2211,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         },
         {
           "name": "page",
@@ -2369,7 +2369,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -2797,7 +2797,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -2869,7 +2869,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -2911,7 +2911,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -3027,7 +3027,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -3073,7 +3073,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -10917,7 +10917,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11003,7 +11003,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11049,7 +11049,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11102,7 +11102,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11197,7 +11197,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         },
         {
           "name": "overdue",
@@ -11257,7 +11257,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         },
         {
           "name": "warehouseId",
@@ -11309,7 +11309,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11358,7 +11358,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11439,7 +11439,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {
@@ -11487,7 +11487,7 @@
           "in": "query",
           "type": "date",
           "required": false,
-          "description": "Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD)"
+          "description": "Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD)"
         }
       ],
       "output": {

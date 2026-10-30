@@ -6,6 +6,7 @@ import { cancelJournalsByPrefix } from '../utils/journalCancel';
 import { journalFamilyWhere } from '../utils/journalFamily';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
 import { generateDocumentNumber } from '../utils/documentNumber';
+import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { calcWeightedAverage } from '../utils/weightedAverage';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
@@ -95,10 +96,7 @@ export async function editProductionRunInTx(
   await tx.productionRunMachine.deleteMany({ where: { productionRunId: runId } });
 
   const txDate = new Date(body.date);
-  const fiscalYear = await tx.fiscalYear.findFirst({
-    where: { isClosed: false, startDate: { lte: txDate }, endDate: { gte: txDate } },
-  });
-  if (!fiscalYear) throw new BusinessError('Tidak ada tahun fiskal aktif untuk tanggal transaksi ini.');
+  const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
   const allItemIds = [...body.inputs.map((i) => i.itemId), ...body.outputs.map((o) => o.itemId)];
   const allItems = await tx.inventoryItem.findMany({ where: { id: { in: allItemIds } } });
