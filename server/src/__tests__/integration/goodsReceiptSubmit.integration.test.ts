@@ -5,7 +5,8 @@
  *   - Submit: stok In + averageCost recompute + JE (DR Persediaan / CR
  *     Hutang Belum Tagih @ provisional cost). Provisional = lockedUnitCost
  *     kalau diisi, kalau 0 pakai item averageCost saat itu.
- *   - Cancel: reverse stok + reverse JV. Blocked kalau invoice link Paid.
+ *   - Cancel: reverse stok + void JV asal (beserta ALE-nya), tanpa JV -CXL.
+ *     Blocked kalau invoice link Paid.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -190,7 +191,7 @@ d('submitGoodsReceiptInTx', () => {
 });
 
 d('cancelGoodsReceiptInTx', () => {
-  it('reverses stock + JV (DR Hutang Belum Tagih / CR Persediaan)', async () => {
+  it('reverses stock and voids the STT journal (no -CXL journal)', async () => {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     try {
       await prisma.$transaction(async (tx) => {
@@ -240,22 +241,24 @@ d('cancelGoodsReceiptInTx', () => {
         });
         expect(sm!.isCancelled).toBe(true);
 
-        // Original JV → Cancelled
+        // Original JV → Cancelled, with its ledger entries
         const originalJv = await tx.journalEntry.findUnique({
           where: { entryNumber: `JV-${stt.sttNumber}` },
-        });
-        expect(originalJv!.status).toBe('Cancelled');
-
-        // Reverse JV exists with balanced flip
-        const cxlJv = await tx.journalEntry.findUnique({
-          where: { entryNumber: `JV-${stt.sttNumber}-CXL` },
           include: { items: true },
         });
-        expect(cxlJv).not.toBeNull();
-        const totalDr = cxlJv!.items.reduce((s, i) => s + Number(i.debit), 0);
-        const totalCr = cxlJv!.items.reduce((s, i) => s + Number(i.credit), 0);
+        expect(originalJv!.status).toBe('Cancelled');
+        const totalDr = originalJv!.items.reduce((s, i) => s + Number(i.debit), 0);
         expect(totalDr).toBe(250_000); // 50 × 5000
-        expect(totalCr).toBe(250_000);
+        const liveAle = await tx.accountingLedgerEntry.count({
+          where: { referenceId: originalJv!.id, isCancelled: false },
+        });
+        expect(liveAle).toBe(0);
+
+        // No reversal journal is posted
+        const cxlJv = await tx.journalEntry.findUnique({
+          where: { entryNumber: `JV-${stt.sttNumber}-CXL` },
+        });
+        expect(cxlJv).toBeNull();
 
         // STT marked Cancelled
         const sttAfter = await tx.goodsReceipt.findUnique({ where: { id: stt.id } });

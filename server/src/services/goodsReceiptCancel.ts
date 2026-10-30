@@ -1,14 +1,16 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
-import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
-import { updateAccountBalance } from '../utils/accountBalance';
+import { assertPeriodsOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
+import { cancelJournalsInTx, findDocumentJournals } from './ledger/cancelJournals';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 
 /** Error code: reversal would drive stock negative; the client offers a forced cancel. */
 export const GOODS_RECEIPT_CANCEL_INSUFFICIENT_STOCK = 'GR_CANCEL_INSUFFICIENT_STOCK';
+/** Error code: a line of the STT is still billed by a purchase invoice that is not cancelled. */
+export const GR_LINE_INVOICED = 'GR_LINE_INVOICED';
 
 type Tx = Prisma.TransactionClient;
 
@@ -21,9 +23,11 @@ interface CancelOptions {
 }
 
 /**
- * Cancel an STT. Rejected for legacy backfill STTs (cancel the PI instead) and when a linked PI
- * exists (cancel it first; not auto-cancelled because of payment side effects). Reverses stock,
- * posts a flipped JV (DR Hutang Belum Tagih / CR Persediaan) and decrements PO qtyReceived.
+ * Cancel an STT. Rejected for legacy backfill STTs (cancel the PI instead) and while any of its
+ * lines is billed by a purchase invoice that is not cancelled (cancel it first; not auto-cancelled
+ * because of payment side effects). Reverses stock, voids the STT journal (it and its ledger
+ * entries are cancelled and the balances reversed per line; no `-CXL` journal) and decrements PO
+ * qtyReceived.
  */
 export async function cancelGoodsReceiptInTx(
   tx: Tx,
@@ -49,8 +53,8 @@ export async function cancelGoodsReceiptInTx(
     where: { id: stt.id },
     select: { invoice: { select: { invoiceNumber: true, status: true } } },
   });
-  // The cancel journal is booked to the STT's fiscal year (moving it to the cancel date's year is
-  // a later change), so that year, the STT's date and the original journal's year must be open.
+  // The cancel voids the STT's own journal, so the STT's date and stored fiscal year must be open
+  // (the journal's own year is checked again when it is voided).
   await assertPeriodsOpen(tx, [{ date: stt.date }, { fiscalYearId: stt.fiscalYearId }], 'penerimaan barang');
 
   if (stt.isLegacyBackfill) {
@@ -73,6 +77,19 @@ export async function cancelGoodsReceiptInTx(
           'Batalkan invoice tersebut dulu.',
       );
     }
+  }
+  // The header link above names only the first invoice and is cleared when that invoice is
+  // cancelled, so check every line: another invoice may still bill one of them (G-19).
+  const billed = await tx.purchaseInvoiceItem.findFirst({
+    where: { goodsReceiptItem: { goodsReceiptId: stt.id }, purchaseInvoice: { status: { not: 'Cancelled' } } },
+    select: { purchaseInvoice: { select: { invoiceNumber: true, status: true } } },
+  });
+  if (billed) {
+    throw new BusinessError(
+      `STT ${stt.sttNumber} masih ditagih di invoice pembelian ${billed.purchaseInvoice.invoiceNumber} (${billed.purchaseInvoice.status}). ` +
+        'Batalkan invoice tersebut dulu.',
+      GR_LINE_INVOICED,
+    );
   }
 
   // Block when an outbound movement already consumes one of these batches (sourceMovementId);
@@ -154,59 +171,11 @@ export async function cancelGoodsReceiptInTx(
     await recomputeAverageCostFromReplay(tx, itemId);
   }
 
-  const originalJv = await tx.journalEntry.findUnique({
-    where: { entryNumber: `JV-${stt.sttNumber}` },
-    include: { items: true },
-  });
-  if (originalJv && originalJv.status === 'Submitted') {
-    await assertPeriodOpen(tx, { fiscalYearId: originalJv.fiscalYearId }, 'penerimaan barang');
-    const reverseItems = originalJv.items.map((it) => ({
-      accountId: it.accountId,
-      partyId: it.partyId,
-      debit: Number(it.credit), // flip DR/CR
-      credit: Number(it.debit),
-      description: `[CANCEL] ${it.description ?? ''}`,
-    }));
-
-    const cancelJv = await tx.journalEntry.create({
-      data: {
-        entryNumber: `JV-${stt.sttNumber}-CXL`,
-        date: new Date(),
-        narration: `Pembatalan ${stt.sttNumber}`,
-        status: 'Submitted',
-        fiscalYearId: stt.fiscalYearId,
-        createdBy: userId,
-        submittedAt: new Date(),
-        items: { create: reverseItems },
-      },
-    });
-
-    await tx.accountingLedgerEntry.createMany({
-      data: reverseItems.map((it) => ({
-        date: new Date(),
-        accountId: it.accountId,
-        partyId: it.partyId,
-        debit: it.debit,
-        credit: it.credit,
-        referenceType: 'JournalEntry',
-        referenceId: cancelJv.id,
-        description: it.description,
-        fiscalYearId: stt.fiscalYearId,
-      })),
-    });
-
-    for (const it of reverseItems) {
-      await updateAccountBalance(tx, it.accountId, it.debit, it.credit);
-    }
-
-    await tx.journalEntry.update({
-      where: { id: originalJv.id },
-      data: { status: 'Cancelled', cancelledAt: new Date(), ...trail },
-    });
-  }
+  const journals = await findDocumentJournals(tx, `JV-${stt.sttNumber}`);
+  const voided = await cancelJournalsInTx(tx, journals, { label: 'penerimaan barang', trail });
 
   const updated = await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } });
 
-  logger.info({ sttId, sttNumber: stt.sttNumber }, 'Goods receipt cancelled (stock reversed + JV flipped)');
+  logger.info({ sttId, sttNumber: stt.sttNumber, voided }, 'Goods receipt cancelled (stock reversed + journal voided)');
   return updated;
 }
