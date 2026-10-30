@@ -1,6 +1,7 @@
 /**
  * Write paths that used to leave UI cells empty: manual stock movement GL
  * lines without description, and stock opname without a header warehouse.
+ * Also the closed fiscal year guard on movement edit/cancel and opname cancel.
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import express from 'express';
@@ -13,7 +14,10 @@ vi.mock('../../lib/prisma', () => ({
   prisma: { $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(current.tx)) },
 }));
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('../../middleware/auth', () => ({ requireCap: () => (_req: unknown, _res: unknown, next: () => void) => next() }));
+// Pass-through gate tagged with its capability, so tests can read which cap a route requires.
+vi.mock('../../middleware/auth', () => ({
+  requireCap: (cap: string) => Object.assign((_req: unknown, _res: unknown, next: () => void) => next(), { cap }),
+}));
 vi.mock('../../utils/documentNumber', () => ({ generateDocumentNumber: vi.fn(async (_tx, prefix: string) => `${prefix}-202610-0001`) }));
 vi.mock('../../utils/accountBalance', () => ({
   updateAccountBalance: vi.fn(async () => undefined),
@@ -31,6 +35,7 @@ vi.mock('../../services/averageCostRecompute', () => ({ recomputeAverageCostFrom
 
 import movementsRouter from '../inventory/movements';
 import stockOpnameRouter from '../stockOpname';
+import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
 
 let server: Server;
 let base = '';
@@ -60,10 +65,25 @@ const ITEM_ID = '0b8a3f0e-0000-4000-8000-0000000000a1';
 const ITEM = { id: ITEM_ID, name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '50', averageCost: '9000' };
 const WH = '0b8a3f0e-0000-4000-8000-000000000001';
 
+const FY_2026 = { id: 'fy-2026', name: '2026', isClosed: false };
+const FY_2027 = { id: 'fy-2027', name: '2027', isClosed: false };
+
+/** Fiscal years by id and by date (2026 / 2027), plus their FOR SHARE row read; `closed` ids read as closed. */
+const fiscalYearHandlers = (closed: string[] = []) => ({
+  'fiscalYear.findFirst': ({ where }: any) => (where.endDate.gte >= new Date('2026-12-31T17:00:00Z') ? FY_2027 : FY_2026),
+  'fiscalYear.findUnique': ({ where }: any) => [FY_2026, FY_2027].find((fy) => fy.id === where.id) ?? null,
+  $queryRaw: (_sql: unknown, id: string) => [{ is_closed: closed.includes(id) }],
+});
+
 const journalHandlers = {
-  'fiscalYear.findFirst': () => ({ id: 'fy-2026' }),
+  ...fiscalYearHandlers(),
   'inventoryItem.findUnique': () => ITEM,
   'journalEntry.create': ({ data }: any) => ({ id: 'je-1', ...data, items: data.items.create }),
+};
+
+const OLD_MOVEMENT = {
+  id: 'sm-1', itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: '10', isCancelled: false, date: new Date('2026-12-20'),
+  referenceType: null, journalEntryId: null, fiscalYearId: 'fy-2026', movementNumber: 'SM-1', item: ITEM,
 };
 
 describe('manual stock movement GL descriptions', () => {
@@ -92,10 +112,7 @@ describe('manual stock movement GL descriptions', () => {
   it('PUT writes the "(Edit)" narration on the re-posted journal and ledger', async () => {
     current = makeAutoTx({
       ...journalHandlers,
-      'stockMovement.findUnique': () => ({
-        id: 'sm-1', itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: '10', isCancelled: false,
-        referenceType: null, journalEntryId: null, fiscalYearId: 'fy-2026', movementNumber: 'SM-1', item: ITEM,
-      }),
+      'stockMovement.findUnique': () => OLD_MOVEMENT,
     });
     const res = await send('PUT', '/movements/sm-1', { movementType: 'Out', quantity: 4, unitCost: 1000, date: '2026-10-10' });
     expect(res.status).toBe(200);
@@ -144,5 +161,79 @@ describe('stock opname header warehouse', () => {
     expect(res.status).toBe(201);
     expect(current.fn('stockOpname.create').mock.calls[0]![0].data.warehouseId).toBe('wh-default');
     expect(current.fn('stockMovement.create').mock.calls[0]![0].data.warehouseId).toBe('wh-default');
+  });
+});
+
+describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const movementTx = (closed: string[], movement: object = OLD_MOVEMENT) =>
+    makeAutoTx({ ...journalHandlers, ...fiscalYearHandlers(closed), 'stockMovement.findUnique': () => movement });
+
+  it('PUT requires doc.cancel, like cancel', () => {
+    type Layer = { route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: { cap?: string } }> } };
+    const capOf = (path: string) =>
+      (movementsRouter.stack as Layer[]).find((l) => l.route?.path === path && l.route.methods.put)?.route?.stack[0]?.handle.cap;
+    expect(capOf('/:id')).toBe('doc.cancel');
+    expect(capOf('/:id/cancel')).toBe('doc.cancel');
+  });
+
+  it('PUT moving a movement into the next year books the movement, journal and auto-settle in that year', async () => {
+    current = movementTx([]);
+    const res = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 10, unitCost: 1000, date: '2027-01-05' });
+    expect(res.status).toBe(200);
+    expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ fiscalYearId: 'fy-2027', date: new Date('2027-01-05') });
+    expect(current.fn('journalEntry.create').mock.calls[0]![0].data.fiscalYearId).toBe('fy-2027');
+    expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).toMatchObject({ fiscalYearId: 'fy-2027', settleDate: new Date('2027-01-05') });
+  });
+
+  it('PUT out of a closed year is rejected with PERIOD_CLOSED before any stock is reversed', async () => {
+    current = movementTx(['fy-2026']);
+    const res = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 10, unitCost: 1000, date: '2027-01-05' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('PERIOD_CLOSED');
+    expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
+  });
+
+  it('PUT into a closed year is rejected even when no journal would be posted (unit cost 0)', async () => {
+    current = movementTx(['fy-2026'], { ...OLD_MOVEMENT, date: new Date('2027-01-10'), fiscalYearId: 'fy-2027' });
+    const res = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 10, unitCost: 0, date: '2026-12-20' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('PERIOD_CLOSED');
+    expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
+  });
+
+  it('PUT is rejected when the old journal sits in a closed year', async () => {
+    current = makeAutoTx({
+      ...journalHandlers,
+      ...fiscalYearHandlers(['fy-old']),
+      'fiscalYear.findUnique': ({ where }: any) => [FY_2026, FY_2027, { id: 'fy-old', name: '2025', isClosed: true }].find((fy) => fy.id === where.id) ?? null,
+      'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, journalEntryId: 'je-old' }),
+      'journalEntry.findUnique': () => ({ id: 'je-old', fiscalYearId: 'fy-old', items: [] }),
+    });
+    const res = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 10, unitCost: 1000, date: '2026-12-20' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('PERIOD_CLOSED');
+    expect(current.fn('journalEntry.update')).not.toHaveBeenCalled();
+  });
+
+  it('cancel in a closed year is rejected with PERIOD_CLOSED', async () => {
+    current = movementTx(['fy-2026']);
+    const res = await send('PUT', '/movements/sm-1/cancel', {});
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('PERIOD_CLOSED');
+    expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
+    expect(current.fn('stockMovement.update')).not.toHaveBeenCalled();
+  });
+
+  it('opname cancel in a closed year is rejected with PERIOD_CLOSED', async () => {
+    current = makeAutoTx({
+      ...fiscalYearHandlers(['fy-2026']),
+      'stockOpname.findUnique': () => ({ id: 'so-1', opnameNumber: 'SO-1', status: 'Submitted', date: new Date('2026-12-20'), fiscalYearId: 'fy-2026', items: [] }),
+    });
+    const res = await send('PUT', '/stock-opname/so-1/cancel', {});
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('PERIOD_CLOSED');
+    expect(current.fn('stockOpname.update')).not.toHaveBeenCalled();
   });
 });

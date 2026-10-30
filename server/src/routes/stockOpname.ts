@@ -7,6 +7,7 @@ import { CreateStockOpnameSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { assertPeriodsOpen } from '../utils/periodGuard';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { cancelJournalsByPrefix } from '../utils/journalCancel';
 import { journalFamilyWhere } from '../utils/journalFamily';
@@ -415,6 +416,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       if (!so) throw new BusinessError('Stok opname tidak ditemukan.');
       if (so.status === 'Cancelled') throw new BusinessError('Stok opname sudah dibatalkan.');
       if (so.status === 'Draft') throw new BusinessError('Stok opname Draft tidak perlu dibatalkan.');
+      await assertPeriodsOpen(tx, [{ date: so.date }, { fiscalYearId: so.fiscalYearId }], 'stok opname');
 
       // Reverse stock movements
       const itemsWithMovement = so.items.filter((i: any) => i.movementId);
