@@ -26,6 +26,7 @@ async function captureCreate(input: SubmitPurchaseInvoiceInput, grItems: ReturnT
     throw new Error(STOP);
   });
   const tx = {
+    $queryRaw: vi.fn(async () => []),
     party: { findUnique: vi.fn(async () => ({ id: 'sup-1', isActive: true })) },
     goodsReceiptItem: { findMany: vi.fn(async () => grItems) },
     inventoryItem: { findMany: vi.fn(async () => [{ id: 'inv-1', accountId: null }]) },

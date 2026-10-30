@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
@@ -75,6 +75,12 @@ export async function submitPurchaseInvoiceInTx(
     .filter((id): id is string => !!id);
   const sttItemMap = new Map<string, any>();
   if (sttItemIds.length > 0) {
+    // Lock the STT headers before reading them: a concurrent STT cancel holds the same row lock,
+    // so this read sees it committed (and rejects), and a later cancel waits and sees the PI link.
+    await tx.$queryRaw`
+      SELECT id FROM goods_receipts
+      WHERE id IN (SELECT goods_receipt_id FROM goods_receipt_items WHERE id IN (${Prisma.join(sttItemIds)}))
+      ORDER BY id FOR UPDATE`;
     const sttItems = await tx.goodsReceiptItem.findMany({
       where: { id: { in: sttItemIds } },
       include: { goodsReceipt: true, invoiceItem: { select: { id: true } } },

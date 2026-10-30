@@ -7,10 +7,12 @@
  *   journal stores who cancelled it and why.
  * - Two concurrent cancels of one 10 t STT: stock and PO qtyReceived drop by 10 t once; the STT
  *   stores who cancelled it.
+ * - An STT cancel racing a purchase invoice for the same STT: whichever commits first wins; the
+ *   cancel never reverses an STT that just got invoiced, and the invoice never links a cancelled STT.
  *
  * Both races need committed rows on two connections, so their fixtures are created for real in a
- * far-future year and deleted after. The first cancel is held open before commit while the second
- * one starts, so the second always reads the stale "Submitted" row and loses at the claim.
+ * far-future year and deleted after. The first transaction is held open before commit while the
+ * second one starts, so the second always reads the stale row and has to wait for the lock.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -54,6 +56,7 @@ vi.mock('../../lib/prisma', () => ({
 
 import journalsRouter from '../../routes/journals';
 import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
+import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { STALE_STATUS } from '../../utils/cancelClaim';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -207,59 +210,84 @@ d('journal menu cancel run twice at once', () => {
   });
 });
 
+/** A committed 10 t STT against a PO line in a far-future year; `cleanup` deletes all of it. */
+async function seedStt() {
+  const fy = await createFiscalYear(prisma as unknown as Tx, { year: 2088 });
+  const supplier = await prisma.party.create({ data: { name: `IT-E1R4-Supplier-${tag()}`, partyType: 'Supplier', isActive: true } });
+  const item = await prisma.inventoryItem.create({
+    data: { code: `IT-E1R4-${tag()}`, name: `Uji STT ganda ${tag()}`, unit: 'kg', currentStock: 10_000, averageCost: 9_000, isActive: true },
+  });
+  // State right after a 10 t STT against a PO line (no journal: the cancel then posts none).
+  await prisma.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: 10_000 } });
+  const po = await prisma.purchaseOrder.create({
+    data: {
+      poNumber: `PO-E1R4-${tag()}`, date: new Date('2088-04-01'), partyId: supplier.id, fiscalYearId: fy.id, createdBy: userId,
+      items: { create: [{ itemName: item.name, inventoryItemId: item.id, quantity: 10_000, unit: 'kg', qtyReceived: 10_000 }] },
+    },
+    include: { items: true },
+  });
+  const movement = await prisma.stockMovement.create({
+    data: {
+      movementNumber: `SM-E1R4-${tag()}`, date: new Date('2088-04-02'), itemId: item.id, movementType: 'In', quantity: 10_000,
+      unitCost: 9_000, warehouseId, fiscalYearId: fy.id, createdById: userId, referenceType: 'GoodsReceipt',
+    },
+  });
+  const stt = await prisma.goodsReceipt.create({
+    data: {
+      sttNumber: `STT-E1R4-${tag()}`, date: new Date('2088-04-02'), partyId: supplier.id, fiscalYearId: fy.id, createdBy: userId,
+      status: 'Submitted', submittedAt: new Date(),
+      items: {
+        create: [{
+          inventoryItemId: item.id, warehouseId, itemName: item.name, quantity: 10_000, unit: 'kg',
+          purchaseOrderItemId: po.items[0]!.id, stockMovementId: movement.id,
+        }],
+      },
+    },
+    include: { items: true },
+  });
+  await prisma.stockMovement.update({ where: { id: movement.id }, data: { referenceId: stt.id } });
+  const cleanup = async (purchaseInvoiceIds: string[] = []) => {
+    await prisma.goodsReceipt.delete({ where: { id: stt.id } });
+    await prisma.purchaseInvoice.deleteMany({ where: { id: { in: purchaseInvoiceIds } } });
+    await prisma.stockMovement.delete({ where: { id: movement.id } });
+    await prisma.purchaseOrder.delete({ where: { id: po.id } });
+    await prisma.inventoryStock.deleteMany({ where: { itemId: item.id } });
+    await prisma.inventoryItem.delete({ where: { id: item.id } });
+    await prisma.party.delete({ where: { id: supplier.id } });
+    await prisma.fiscalYear.delete({ where: { id: fy.id } });
+  };
+  return { fy, supplier, item, po, stt, cleanup };
+}
+
+/** Starts `fn` in its own transaction and holds it open before commit until `release` runs. */
+function heldTransaction(fn: (t: Tx) => Promise<unknown>) {
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  let markApplied!: () => void;
+  const applied = new Promise<void>((r) => { markApplied = r; });
+  const done = prisma.$transaction(async (t) => {
+    await fn(t as unknown as Tx);
+    markApplied();
+    await held;
+  }, { timeout: 20000 });
+  return { applied, release, done };
+}
+
+const outcome = (e: unknown) => (e instanceof BusinessError ? (e.code ?? e.message) : String(e));
+
 d('STT cancel run twice at once', () => {
   it('stock and PO qtyReceived drop by 10 t once; the loser gets STALE_STATUS', async () => {
-    const fy = await createFiscalYear(prisma as unknown as Tx, { year: 2088 });
-    const supplier = await prisma.party.create({ data: { name: `IT-E1R4-Supplier-${tag()}`, partyType: 'Supplier', isActive: true } });
-    const item = await prisma.inventoryItem.create({
-      data: { code: `IT-E1R4-${tag()}`, name: `Uji STT ganda ${tag()}`, unit: 'kg', currentStock: 10_000, averageCost: 9_000, isActive: true },
-    });
-    // State right after a 10 t STT against a PO line (no journal: the cancel then posts none).
-    await prisma.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: 10_000 } });
-    const po = await prisma.purchaseOrder.create({
-      data: {
-        poNumber: `PO-E1R4-${tag()}`, date: new Date('2088-04-01'), partyId: supplier.id, fiscalYearId: fy.id, createdBy: userId,
-        items: { create: [{ itemName: item.name, inventoryItemId: item.id, quantity: 10_000, unit: 'kg', qtyReceived: 10_000 }] },
-      },
-      include: { items: true },
-    });
-    const movement = await prisma.stockMovement.create({
-      data: {
-        movementNumber: `SM-E1R4-${tag()}`, date: new Date('2088-04-02'), itemId: item.id, movementType: 'In', quantity: 10_000,
-        unitCost: 9_000, warehouseId, fiscalYearId: fy.id, createdById: userId, referenceType: 'GoodsReceipt',
-      },
-    });
-    const stt = await prisma.goodsReceipt.create({
-      data: {
-        sttNumber: `STT-E1R4-${tag()}`, date: new Date('2088-04-02'), partyId: supplier.id, fiscalYearId: fy.id, createdBy: userId,
-        status: 'Submitted', submittedAt: new Date(),
-        items: {
-          create: [{
-            inventoryItemId: item.id, warehouseId, itemName: item.name, quantity: 10_000, unit: 'kg',
-            purchaseOrderItemId: po.items[0]!.id, stockMovementId: movement.id,
-          }],
-        },
-      },
-    });
-    await prisma.stockMovement.update({ where: { id: movement.id }, data: { referenceId: stt.id } });
+    const { item, po, stt, cleanup } = await seedStt();
     try {
-      let release!: () => void;
-      const held = new Promise<void>((r) => { release = r; });
-      let markApplied!: () => void;
-      const applied = new Promise<void>((r) => { markApplied = r; });
-      const first = prisma.$transaction(async (t) => {
-        await cancelGoodsReceiptInTx(t, stt.id, userId, { reason: 'Barang dikembalikan' });
-        markApplied();
-        await held; // keep the first cancel uncommitted while the second one starts
-      }, { timeout: 20000 });
-      await applied;
+      const first = heldTransaction((t) => cancelGoodsReceiptInTx(t, stt.id, userId, { reason: 'Barang dikembalikan' }));
+      await first.applied;
 
       const second = prisma.$transaction((t) => cancelGoodsReceiptInTx(t, stt.id, userId), { timeout: 20000 })
-        .then(() => 'NO_ERROR', (e: unknown) => (e instanceof BusinessError ? e.code : String(e)));
+        .then(() => 'NO_ERROR', outcome);
       expect(await stillPending(second)).toBe(true);
 
-      release();
-      await first;
+      first.release();
+      await first.done;
       expect(await second).toBe(STALE_STATUS);
 
       expect(Number((await prisma.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).currentStock)).toBe(0);
@@ -271,13 +299,74 @@ d('STT cancel run twice at once', () => {
       expect(after.cancelledById).toBe(userId);
       expect(after.cancelReason).toBe('Barang dikembalikan');
     } finally {
-      await prisma.goodsReceipt.delete({ where: { id: stt.id } });
-      await prisma.stockMovement.delete({ where: { id: movement.id } });
-      await prisma.purchaseOrder.delete({ where: { id: po.id } });
-      await prisma.inventoryStock.deleteMany({ where: { itemId: item.id } });
-      await prisma.inventoryItem.delete({ where: { id: item.id } });
-      await prisma.party.delete({ where: { id: supplier.id } });
-      await prisma.fiscalYear.delete({ where: { id: fy.id } });
+      await cleanup();
+    }
+  });
+});
+
+d('STT cancel racing a purchase invoice for the same STT', () => {
+  it('a cancel that waited on the invoice link sees the invoice and is rejected; stock stays', async () => {
+    const { fy, supplier, item, stt, cleanup } = await seedStt();
+    const pi = await prisma.purchaseInvoice.create({
+      data: {
+        invoiceNumber: `PI-E1R4-${tag()}`, date: new Date('2088-04-03'), partyId: supplier.id, grandTotal: 0, outstanding: 0,
+        fiscalYearId: fy.id, createdBy: userId, status: 'Submitted',
+      },
+    });
+    try {
+      // The invoice side links the STT first and is still committing when the cancel starts.
+      const link = heldTransaction((t) => t.goodsReceipt.updateMany({
+        where: { id: stt.id, invoiceId: null },
+        data: { invoiceId: pi.id, invoicedAt: new Date('2088-04-03') },
+      }));
+      await link.applied;
+
+      const cancel = prisma.$transaction((t) => cancelGoodsReceiptInTx(t, stt.id, userId), { timeout: 20000 })
+        .then(() => 'NO_ERROR', outcome);
+      expect(await stillPending(cancel)).toBe(true);
+
+      link.release();
+      await link.done;
+      expect(await cancel).toMatch(/terkait invoice .* \(Submitted, belum dibayar\)/);
+
+      const after = await prisma.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } });
+      expect(after.status).toBe('Submitted');
+      expect(after.invoiceId).toBe(pi.id);
+      expect(Number((await prisma.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).currentStock)).toBe(10_000);
+    } finally {
+      await cleanup([pi.id]);
+    }
+  });
+
+  it('an invoice submitted while the cancel commits is rejected instead of linking the cancelled STT', async () => {
+    const { supplier, item, stt, cleanup } = await seedStt();
+    try {
+      const cancel = heldTransaction((t) => cancelGoodsReceiptInTx(t, stt.id, userId));
+      await cancel.applied;
+
+      // Always rolled back: the test only needs to know how far the submit got.
+      const submit = prisma.$transaction(async (t) => {
+        await submitPurchaseInvoiceInTx(t, {
+          date: '2088-04-03',
+          partyId: supplier.id,
+          items: [{
+            itemName: item.name, inventoryItemId: item.id, warehouseId, quantity: 10_000, unit: 'kg', rate: 9_000,
+            goodsReceiptItemId: stt.items[0]!.id,
+          }],
+        }, userId);
+        throw new Error('SUBMITTED');
+      }, { timeout: 20000 }).then(() => 'NO_ERROR', outcome);
+      expect(await stillPending(submit)).toBe(true);
+
+      cancel.release();
+      await cancel.done;
+      expect(await submit).toBe(`STT ${stt.sttNumber} sudah dibatalkan.`);
+
+      const after = await prisma.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } });
+      expect(after.status).toBe('Cancelled');
+      expect(after.invoiceId).toBeNull();
+    } finally {
+      await cleanup();
     }
   });
 });
