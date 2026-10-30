@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeAutoTx } from '../../__tests__/helpers/autoTx';
 import { BusinessError } from '../errors';
-import { assertPeriodOpen, assertPeriodsOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../periodGuard';
+import { assertPeriodOpen, assertPeriodsOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_BUSY, PERIOD_CLOSED, YEAR_LOCK_WAIT_MS } from '../periodGuard';
 import { translateMessage } from '../../i18n/translateMessage';
 
 const openFy = { id: 'fy-1', name: '2026', isClosed: false };
@@ -12,6 +12,11 @@ const lockRows =
   (...rows: { id: string; isClosed: boolean }[]) =>
   (_sql: TemplateStringsArray, id: string) =>
     rows.filter((r) => r.id === id).map((r) => ({ is_closed: r.isClosed }));
+
+/** The $queryRaw calls as [sql with ? for each value, ...values]. */
+const rawCalls = (f: { mock: { calls: unknown[][] } }) =>
+  f.mock.calls.map(([sql, ...values]) => [(sql as string[]).join('?'), ...values] as [string, ...unknown[]]);
+const forShareCall = (f: { mock: { calls: unknown[][] } }) => rawCalls(f).find(([sql]) => /FOR SHARE/.test(sql))!;
 
 async function caught(p: Promise<unknown>): Promise<BusinessError> {
   try {
@@ -111,15 +116,58 @@ describe('assertPeriodOpen', () => {
     const { tx, fn } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: lockRows({ ...openFy, isClosed: true }) });
     const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'invoice'));
     expect(e.code).toBe(PERIOD_CLOSED);
-    const [sql, id] = fn('$queryRaw').mock.calls[0]!;
-    expect(sql.join('?')).toMatch(/FROM fiscal_years WHERE id = \? FOR SHARE/);
+    const [sql, id] = forShareCall(fn('$queryRaw'));
+    expect(sql).toMatch(/FROM fiscal_years WHERE id = \? FOR SHARE/);
     expect(id).toBe('fy-1');
   });
 
   it('locks the row found by date too', async () => {
     const { tx, fn } = makeAutoTx({ 'fiscalYear.findFirst': () => openFy, $queryRaw: lockRows(openFy) });
     await assertPeriodOpen(tx, { date: new Date('2026-03-01T00:00:00Z') }, 'jurnal');
-    expect(fn('$queryRaw').mock.calls[0]![1]).toBe('fy-1');
+    expect(forShareCall(fn('$queryRaw'))[1]).toBe('fy-1');
+  });
+
+  it('bounds the row-lock wait with a local lock_timeout and puts the previous one back afterwards', async () => {
+    const queryRaw = (sql: TemplateStringsArray, id: string) => {
+      const text = sql.join('?');
+      if (text.includes('current_setting')) return [{ lock_timeout: '7s' }];
+      if (text.includes('FOR SHARE')) return lockRows(openFy)(sql, id);
+      return [{}];
+    };
+    const { tx, fn } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: queryRaw });
+    await assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'jurnal');
+    const calls = rawCalls(fn('$queryRaw'));
+    const lockAt = calls.findIndex(([sql]) => sql.includes('FOR SHARE'));
+    expect(calls[lockAt - 1]).toEqual(["SELECT set_config('lock_timeout', ?, true)", `${YEAR_LOCK_WAIT_MS}ms`]);
+    expect(calls[lockAt + 1]).toEqual(["SELECT set_config('lock_timeout', ?, true)", '7s']);
+    // Shorter than Prisma's default 5 s interactive-transaction timeout.
+    expect(YEAR_LOCK_WAIT_MS).toBeLessThan(5000);
+  });
+
+  it('reports PERIOD_BUSY when a close or reopen still holds the year row after the wait', async () => {
+    const lockTimeout = Object.assign(new Error('Raw query failed. Code: `55P03`. Message: `canceling statement due to lock timeout`'), {
+      code: 'P2010',
+      meta: { driverAdapterError: { name: 'DriverAdapterError', cause: { kind: 'postgres', code: '55P03', originalCode: '55P03' } } },
+    });
+    const queryRaw = (sql: TemplateStringsArray) => {
+      if (sql.join('?').includes('FOR SHARE')) throw lockTimeout;
+      return [{}];
+    };
+    const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: queryRaw });
+    const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'invoice'));
+    expect(e.code).toBe(PERIOD_BUSY);
+    expect(e.message).toBe('Tahun buku 2026 sedang ditutup atau dibuka kembali; invoice belum bisa diproses. Coba lagi beberapa saat lagi.');
+    expect(translateMessage(e.message, 'en')).toBe('Fiscal year 2026 is being closed or reopened; this invoice cannot be processed yet. Try again in a moment.');
+  });
+
+  it('passes any other error of the row lock through unchanged', async () => {
+    const boom = Object.assign(new Error('connection reset'), { code: 'P1017' });
+    const queryRaw = (sql: TemplateStringsArray) => {
+      if (sql.join('?').includes('FOR SHARE')) throw boom;
+      return [{}];
+    };
+    const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => openFy, $queryRaw: queryRaw });
+    await expect(assertPeriodOpen(tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-01T00:00:00Z') }, 'invoice')).rejects.toBe(boom);
   });
 
   it('reports FISCAL_YEAR_MISSING when the row is gone by the time it is locked', async () => {

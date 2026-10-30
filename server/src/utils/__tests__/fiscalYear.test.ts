@@ -91,7 +91,7 @@ describe('getOpenFiscalYear', () => {
   it('share-locks the year row and trusts its committed isClosed, so a close that won the race rejects the posting', async () => {
     const tx = txWith(utcMidnight, { fy2026: true });
     await expect(getOpenFiscalYear(tx, DEC31_2330_WIB)).rejects.toMatchObject({ code: PERIOD_CLOSED });
-    const [sql, id] = (tx.$queryRaw as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [sql, id] = (tx.$queryRaw as unknown as ReturnType<typeof vi.fn>).mock.calls.find(([q]) => (q as string[]).join('?').includes('FOR SHARE'))!;
     expect((sql as string[]).join('?')).toMatch(/FROM fiscal_years WHERE id = \? FOR SHARE/);
     expect(id).toBe('fy2026');
   });

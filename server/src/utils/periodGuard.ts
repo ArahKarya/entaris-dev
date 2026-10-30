@@ -13,6 +13,16 @@ export const PERIOD_CLOSED = 'PERIOD_CLOSED';
 export const FISCAL_YEAR_MISSING = 'FISCAL_YEAR_MISSING';
 /** Reserved for the period lock date; nothing raises it until that column exists. */
 export const PERIOD_LOCKED = 'PERIOD_LOCKED';
+/** The year row stayed locked by a running close or reopen past YEAR_LOCK_WAIT_MS; retry later. */
+export const PERIOD_BUSY = 'PERIOD_BUSY';
+
+/**
+ * How long a posting waits for a running year close or reopen before giving up with PERIOD_BUSY.
+ * A close may hold the row for up to 30 s, but most posting transactions expire after Prisma's
+ * default 5 s: the wait ends first, so the client gets a coded answer instead of a timed-out
+ * transaction.
+ */
+export const YEAR_LOCK_WAIT_MS = 3000;
 
 /**
  * The document or journal being checked. `date` is always its own date; `fiscalYearId`, when
@@ -73,26 +83,50 @@ async function findFiscalYearForDate(tx: Tx, date: Date): Promise<FiscalYear | n
 }
 
 /**
+ * Postgres lock_not_available (55P03), raised when a lock wait outlasts lock_timeout. Through the
+ * pg driver adapter a raw query fails with P2010 and the SQLSTATE in meta.driverAdapterError.
+ */
+function isLockTimeout(err: unknown): boolean {
+  const e = err as { meta?: { code?: unknown; driverAdapterError?: { cause?: { code?: unknown } } } } | null;
+  return e?.meta?.driverAdapterError?.cause?.code === '55P03' || e?.meta?.code === '55P03';
+}
+
+/**
  * Share-locks the fiscal-year row until the transaction ends and returns its committed isClosed
  * (null when the row is gone). Year close and reopen take FOR UPDATE on the same row, so a
  * posting or cancel either finishes before the close sums the year, or waits and sees it closed.
+ * The wait is bounded by YEAR_LOCK_WAIT_MS (PERIOD_BUSY past it, and the transaction is then
+ * aborted); the caller's lock_timeout is put back for the rest of the transaction.
  */
-async function lockFiscalYearRow(tx: Tx, id: string): Promise<boolean | null> {
-  const rows = await tx.$queryRaw<{ is_closed: boolean }[]>`SELECT is_closed FROM fiscal_years WHERE id = ${id} FOR SHARE`;
+async function lockFiscalYearRow(tx: Tx, fy: FiscalYear, label: PeriodLabel): Promise<boolean | null> {
+  const before = await tx.$queryRaw<{ lock_timeout?: string }[]>`SELECT current_setting('lock_timeout') AS lock_timeout`;
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${`${YEAR_LOCK_WAIT_MS}ms`}, true)`;
+  let rows: { is_closed: boolean }[];
+  try {
+    rows = await tx.$queryRaw<{ is_closed: boolean }[]>`SELECT is_closed FROM fiscal_years WHERE id = ${fy.id} FOR SHARE`;
+  } catch (err) {
+    if (!isLockTimeout(err)) throw err;
+    throw new BusinessError(
+      `Tahun buku ${fy.name} sedang ditutup atau dibuka kembali; ${label} belum bisa diproses. Coba lagi beberapa saat lagi.`,
+      PERIOD_BUSY,
+    );
+  }
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${before[0]?.lock_timeout ?? '0'}, true)`;
   return rows[0]?.is_closed ?? null;
 }
 
 /**
  * Returns the fiscal year for the reference when it exists and is open, and holds a share lock
  * on its row for the rest of the transaction (see lockFiscalYearRow).
- * Throws BusinessError FISCAL_YEAR_MISSING when none covers it, PERIOD_CLOSED when it is closed.
+ * Throws BusinessError FISCAL_YEAR_MISSING when none covers it, PERIOD_CLOSED when it is closed,
+ * PERIOD_BUSY when a close or reopen of that year is still running after YEAR_LOCK_WAIT_MS.
  */
 export async function assertPeriodOpen(tx: Tx, ref: PeriodRef, label: PeriodLabel): Promise<FiscalYear> {
   const found =
     ref.fiscalYearId !== undefined
       ? await tx.fiscalYear.findUnique({ where: { id: ref.fiscalYearId } })
       : await findFiscalYearForDate(tx, ref.date);
-  const isClosed = found ? await lockFiscalYearRow(tx, found.id) : null;
+  const isClosed = found ? await lockFiscalYearRow(tx, found, label) : null;
   const fy = found && isClosed !== null ? { ...found, isClosed } : null;
   if (!fy) {
     throw new BusinessError(

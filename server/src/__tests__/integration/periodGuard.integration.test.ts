@@ -11,7 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { BusinessError } from '../../utils/errors';
-import { assertPeriodOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../../utils/periodGuard';
+import { assertPeriodOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_BUSY, PERIOD_CLOSED, YEAR_LOCK_WAIT_MS } from '../../utils/periodGuard';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { closedThenOpenYears, createFiscalYear } from '../helpers/periodFixture';
 
@@ -163,6 +163,44 @@ d('assertPeriodOpen', () => {
           await closer.query('ROLLBACK').catch(() => undefined);
           closer.release();
         }
+      });
+    });
+
+    it('gives up with PERIOD_BUSY when a close outlasts the wait, before a default 5 s transaction expires', async () => {
+      await withCommittedYear(2087, async (fyId) => {
+        const closer = await pool.connect();
+        try {
+          await closer.query('BEGIN');
+          await closer.query('SELECT id FROM fiscal_years WHERE id = $1 FOR UPDATE', [fyId]);
+
+          const started = Date.now();
+          // Prisma's default interactive timeout (5 s), as most posting routes use.
+          const posting = await codeOf(prisma.$transaction((tx) => getOpenFiscalYear(tx, new Date('2087-06-15T03:00:00Z'))));
+          const waited = Date.now() - started;
+
+          expect(posting).toBe(PERIOD_BUSY);
+          expect(waited).toBeGreaterThanOrEqual(YEAR_LOCK_WAIT_MS - 100);
+          expect(waited).toBeLessThan(5000);
+        } finally {
+          await closer.query('ROLLBACK').catch(() => undefined);
+          closer.release();
+        }
+      });
+    }, 15000);
+
+    it("puts the transaction's own lock_timeout back after the year row is locked", async () => {
+      await withCommittedYear(2088, async (fyId) => {
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '7s'");
+          await assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2088-06-15T03:00:00Z') }, 'jurnal');
+          const [{ lock_timeout }] = await tx.$queryRaw<{ lock_timeout: string }[]>`SELECT current_setting('lock_timeout') AS lock_timeout`;
+          expect(lock_timeout).toBe('7s');
+        });
+        await prisma.$transaction(async (tx) => {
+          await assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2088-06-15T03:00:00Z') }, 'jurnal');
+          const [{ lock_timeout }] = await tx.$queryRaw<{ lock_timeout: string }[]>`SELECT current_setting('lock_timeout') AS lock_timeout`;
+          expect(lock_timeout).toBe('0');
+        });
       });
     });
 

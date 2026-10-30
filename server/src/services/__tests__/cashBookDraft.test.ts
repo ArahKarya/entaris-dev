@@ -422,6 +422,22 @@ describe('postCashBookDraft', () => {
     expect(tx.drafts.get(id).status).toBe('Draft');
   });
 
+  it('partial: a year close still running (PERIOD_BUSY) aborts the whole post instead of becoming a row error', async () => {
+    const { db, tx, id } = await seeded();
+    const busy = new BusinessError(
+      'Tahun buku 2026 sedang ditutup atau dibuka kembali; dokumen belum bisa diproses. Coba lagi beberapa saat lagi.',
+      'PERIOD_BUSY',
+    );
+    openFy.mockImplementation(async (_tx: unknown, date: Date) => {
+      if (date.toISOString().startsWith('2026-10-03')) throw busy;
+      return { id: 'fy1' };
+    });
+    // The lock wait aborted the transaction, so no other row may be posted in it.
+    await expect(postCashBookDraft(db, id, 'u1', { partial: true })).rejects.toBe(busy);
+    expect(postJournal).not.toHaveBeenCalled();
+    expect(tx.drafts.get(id).status).toBe('Draft');
+  });
+
   it('partial: posts the valid rows, records per-row errors, status PartiallyPosted; a later post only posts the rest', async () => {
     const { db, tx, id } = await seeded();
     tx.rows.get(draftRows(tx)[0].id).accountId = 'acc-grp'; // becomes invalid
