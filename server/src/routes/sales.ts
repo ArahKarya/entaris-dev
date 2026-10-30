@@ -4,7 +4,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
 import { clearable } from '../utils/clearable';
-import { CreateSalesInvoiceSchema, UpdateInvoiceMetaSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreateSalesInvoiceSchema, UpdateInvoiceMetaSchema } from '../utils/schemas';
+import { cancelTrail } from '../utils/cancelClaim';
 import { handleRouteError } from '../utils/errors';
 import { cancelSalesInvoiceInTx } from '../services/invoiceCancellation';
 import { submitSalesInvoiceInTx } from '../services/salesInvoiceSubmit';
@@ -203,9 +204,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
 // POST /api/sales/invoices/:id/cancel — cancel sales invoice
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
   try {
     const result = await prisma.$transaction(
-      (tx) => cancelSalesInvoiceInTx(tx, req.params.id as string),
+      (tx) => cancelSalesInvoiceInTx(tx, req.params.id as string, cancelTrail(req.user!.userId, body.reason)),
       { timeout: 15000 },
     );
     return res.json(result);

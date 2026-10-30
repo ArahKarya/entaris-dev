@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
-import { CreateSalesReturnSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreateSalesReturnSchema } from '../utils/schemas';
+import { cancelTrail } from '../utils/cancelClaim';
 import { handleRouteError } from '../utils/errors';
 import { estimateSalesReturnAmount, submitSalesReturnInTx } from '../services/salesReturnSubmit';
 import { cancelSalesReturnInTx } from '../services/salesReturnCancel';
@@ -183,9 +184,11 @@ router.post('/', async (req: AuthRequest, res) => {
 
 // POST /api/sales-returns/:id/cancel (requires the doc.cancel capability)
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
   try {
     const result = await prisma.$transaction(
-      (tx) => cancelSalesReturnInTx(tx, req.params.id as string),
+      (tx) => cancelSalesReturnInTx(tx, req.params.id as string, cancelTrail(req.user!.userId, body.reason)),
       { timeout: 15000 },
     );
     return res.json(result);

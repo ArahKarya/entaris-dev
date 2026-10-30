@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
-import { CreateGoodsReceiptSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreateGoodsReceiptSchema } from '../utils/schemas';
 import { handleRouteError } from '../utils/errors';
 import { submitGoodsReceiptInTx } from '../services/goodsReceiptSubmit';
 import { cancelGoodsReceiptInTx } from '../services/goodsReceiptCancel';
@@ -127,13 +127,15 @@ router.post('/', async (req: AuthRequest, res) => {
 // POST /:id/cancel
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   try {
+    const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+    if (!body) return;
     const allowNegativeStock = req.body?.allowNegativeStock === true;
     const negativeStockReason = typeof req.body?.negativeStockReason === 'string' ? req.body.negativeStockReason : null;
     if (allowNegativeStock && (!negativeStockReason || negativeStockReason.trim().length < 10)) {
       return res.status(400).json({ error: 'Alasan bypass stok minus wajib diisi (minimal 10 karakter).' });
     }
     const result = await prisma.$transaction(
-      (tx) => cancelGoodsReceiptInTx(tx, req.params.id as string, req.user!.userId, { allowNegativeStock, negativeStockReason }),
+      (tx) => cancelGoodsReceiptInTx(tx, req.params.id as string, req.user!.userId, { allowNegativeStock, negativeStockReason, reason: body.reason }),
       { timeout: 30000 },
     );
     logger.info({ sttId: result.id, userId: req.user!.userId }, 'Goods receipt cancelled via API');

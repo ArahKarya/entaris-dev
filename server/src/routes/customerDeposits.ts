@@ -7,9 +7,10 @@ import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBa
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
-import { ApplyCustomerDepositSchema, RefundCustomerDepositSchema } from '../utils/schemas';
+import { ApplyCustomerDepositSchema, CancelReasonSchema, RefundCustomerDepositSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
+import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
 import {
@@ -184,6 +185,9 @@ router.get('/balance/:partyId', async (req, res) => {
 // PATCH /api/customer-deposits/:id/cancel — cancel a customer deposit payment (requires doc.cancel)
 router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
+  const trail = cancelTrail(req.user!.userId, body.reason);
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -199,6 +203,8 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       if (!deposit) throw new BusinessError('Deposit tidak ditemukan.');
       if (deposit.paymentType !== 'CustomerDeposit') throw new BusinessError('Bukan tipe uang muka customer.');
       if (deposit.status === 'Cancelled') throw new BusinessError('Deposit sudah dibatalkan.');
+      // First write, like every cancel: nothing below runs for a deposit another request cancelled.
+      await claimCancel(tx.payment, id, { status: 'Cancelled', cancelledAt: new Date(), ...trail });
 
       // Check if any applications exist
       if (deposit.customerDepositApplications.length > 0) {
@@ -216,7 +222,7 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       // Deposits posted before the payment→journal link still have their journal, found unlinked.
       const journal = deposit.journalEntry ?? (await findUnlinkedDepositJournal(tx, { ...deposit, paymentType: 'CustomerDeposit' }));
       if (journal) {
-        await voidJournalInTx(tx, journal, 'uang muka');
+        await voidJournalInTx(tx, journal, 'uang muka', trail);
       } else {
         // No journal and no ledger rows at all — reverse account balances directly.
         // Never add a [BATAL] reversal JV: there is no original to pair it with.
@@ -231,12 +237,6 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       await tx.party.update({
         where: { id: deposit.partyId },
         data: { customerDepositBalance: { decrement: depositAmount } },
-      });
-
-      // Mark deposit as cancelled
-      await tx.payment.update({
-        where: { id },
-        data: { status: 'Cancelled', cancelledAt: new Date() },
       });
     }, { timeout: 15000 });
 
@@ -367,6 +367,8 @@ router.post('/apply', async (req: AuthRequest, res) => {
 
 // POST /api/customer-deposits/apply/:id/cancel — cancel deposit application
 router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const applicationId = req.params.id as string;
@@ -382,6 +384,7 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
       });
       if (!application) throw new BusinessError('Aplikasi uang muka tidak ditemukan.');
       if (application.isCancelled) throw new BusinessError('Aplikasi sudah dibatalkan.');
+      await claimCancel(tx.customerDepositApplication, application.id, { isCancelled: true, cancelledAt: new Date() });
 
       const applyAmount = new Decimal(application.appliedAmount.toString());
       const applyAmountNum = applyAmount.toNumber();
@@ -389,7 +392,7 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
       // Void the application journal; rejected when its fiscal year (the apply date's) is closed.
       // Legacy applications without a journal are checked against the apply date's year.
       if (application.journalEntry) {
-        await voidJournalInTx(tx, application.journalEntry, 'uang muka');
+        await voidJournalInTx(tx, application.journalEntry, 'uang muka', cancelTrail(req.user!.userId, body.reason));
       } else {
         await assertPeriodOpen(tx, { date: application.appliedAt }, 'uang muka');
       }
@@ -409,12 +412,6 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
         data: { customerDepositBalance: { increment: applyAmountNum } },
       });
       await recalcPartyOutstanding(tx, invoice.partyId);
-
-      // Mark application as cancelled
-      await tx.customerDepositApplication.update({
-        where: { id: application.id },
-        data: { isCancelled: true, cancelledAt: new Date() },
-      });
 
       return { id: application.id, status: 'Cancelled' };
     }, { timeout: 15000 });

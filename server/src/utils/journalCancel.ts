@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { updateAccountBalance } from './accountBalance';
 import { journalFamilyWhere } from './journalFamily';
 import { assertPeriodOpen, type PeriodLabel } from './periodGuard';
+import { cancelTrailData, tryClaimCancel, type CancelTrail } from './cancelClaim';
 
 type Tx = Prisma.TransactionClient;
 type JournalWithItems = Prisma.JournalEntryGetPayload<{ include: { items: true } }>;
@@ -17,21 +18,24 @@ type JournalWithItems = Prisma.JournalEntryGetPayload<{ include: { items: true }
  * error message. Returns false when the journal was already cancelled.
  *
  * The status flip is a conditional claim on the row, so of two concurrent voids only one
- * reverses the balances; `journal.status` read earlier by the caller may be stale.
+ * reverses the balances; `journal.status` read earlier by the caller may be stale. `trail` (the
+ * user and reason of a user-initiated cancel) is stored on the journal; system voids omit it.
  */
 export async function voidJournalInTx(
   tx: Tx,
   journal: JournalWithItems,
   label: PeriodLabel = 'jurnal',
+  trail?: CancelTrail,
 ): Promise<boolean> {
   await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId }, label);
   if (journal.status === 'Cancelled') return false;
 
-  const claimed = await tx.journalEntry.updateMany({
-    where: { id: journal.id, status: { not: 'Cancelled' } },
-    data: { status: 'Cancelled', cancelledAt: new Date() },
+  const claimed = await tryClaimCancel(tx.journalEntry, journal.id, {
+    status: 'Cancelled',
+    cancelledAt: new Date(),
+    ...cancelTrailData(trail),
   });
-  if (claimed.count === 0) return false;
+  if (!claimed) return false;
   await tx.accountingLedgerEntry.updateMany({
     where: { referenceId: journal.id, isCancelled: false },
     data: { isCancelled: true },
@@ -50,13 +54,14 @@ export async function voidJournalByIdInTx(
   tx: Tx,
   journalEntryId: string,
   label: PeriodLabel = 'jurnal',
+  trail?: CancelTrail,
 ): Promise<boolean> {
   const journal = await tx.journalEntry.findUnique({
     where: { id: journalEntryId },
     include: { items: true },
   });
   if (!journal) return false;
-  return voidJournalInTx(tx, journal, label);
+  return voidJournalInTx(tx, journal, label, trail);
 }
 
 /**
@@ -64,13 +69,14 @@ export async function voidJournalByIdInTx(
  * plus their satellites `<base>-…` (e.g. JV-SI-202604-0038-CORR, -CORR-PPN, -WAPU). The dash
  * boundary keeps JV-SI-202604-0038 from matching JV-SI-202604-00380. Ledger entries are marked
  * cancelled and account balances reversed per journal item. Each journal's own fiscal year
- * must be open (see voidJournalInTx).
+ * must be open (see voidJournalInTx). `trail` is stored on each voided journal.
  *
  * @returns entry numbers that were cancelled, in posting order
  */
 export async function cancelDocumentJournals(
   tx: Tx,
-  baseNumbers: string[]
+  baseNumbers: string[],
+  trail?: CancelTrail,
 ): Promise<string[]> {
   const journals = await tx.journalEntry.findMany({
     where: {
@@ -85,7 +91,7 @@ export async function cancelDocumentJournals(
   });
 
   for (const journal of journals) {
-    await voidJournalInTx(tx, journal);
+    await voidJournalInTx(tx, journal, 'jurnal', trail);
   }
 
   return journals.map((j) => j.entryNumber);

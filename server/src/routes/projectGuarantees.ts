@@ -23,9 +23,10 @@ import { updateAccountBalance } from '../utils/accountBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
-import { CreateProjectGuaranteeSchema, SettleProjectGuaranteeSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreateProjectGuaranteeSchema, SettleProjectGuaranteeSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { voidJournalByIdInTx } from '../utils/journalCancel';
+import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
@@ -457,6 +458,9 @@ router.post('/:id/settle', async (req: AuthRequest, res) => {
 
 // PATCH /api/project-guarantees/:id/cancel — batalkan setoran (belum ada settlement)
 router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
+  const trail = cancelTrail(req.user!.userId, body.reason);
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const guaranteeId = req.params.id as string;
@@ -468,19 +472,15 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       });
       if (!guarantee) throw new BusinessError('Uang jaminan tidak ditemukan.');
       if (guarantee.status === 'Dibatalkan') throw new BusinessError('Uang jaminan sudah dibatalkan.');
+      await claimCancel(tx.projectGuarantee, guaranteeId, { status: 'Dibatalkan', cancelledAt: new Date(), ...trail });
       if (guarantee.settlements.length > 0) {
         throw new BusinessError('Sudah ada settlement aktif. Batalkan settlement terlebih dahulu.');
       }
       await assertPeriodOpen(tx, { fiscalYearId: guarantee.fiscalYearId }, 'uang jaminan');
 
       if (guarantee.journalEntryId) {
-        await voidJournalByIdInTx(tx, guarantee.journalEntryId, 'uang jaminan');
+        await voidJournalByIdInTx(tx, guarantee.journalEntryId, 'uang jaminan', trail);
       }
-
-      await tx.projectGuarantee.update({
-        where: { id: guaranteeId },
-        data: { status: 'Dibatalkan', cancelledAt: new Date() },
-      });
     });
 
     return res.json({ message: 'Uang jaminan dibatalkan.' });
@@ -491,6 +491,9 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
 
 // POST /api/project-guarantees/settlements/:id/cancel — batalkan satu settlement
 router.post('/settlements/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
+  const trail = cancelTrail(req.user!.userId, body.reason);
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const settlementId = req.params.id as string;
@@ -501,6 +504,7 @@ router.post('/settlements/:id/cancel', requireCap('doc.cancel'), async (req: Aut
       });
       if (!settlement) throw new BusinessError('Settlement tidak ditemukan.');
       if (settlement.isCancelled) throw new BusinessError('Settlement sudah dibatalkan.');
+      await claimCancel(tx.projectGuaranteeSettlement, settlementId, { isCancelled: true, cancelledAt: new Date(), ...trail });
 
       await tx.$queryRaw`SELECT id FROM project_guarantees WHERE id = ${settlement.guaranteeId} FOR UPDATE`;
       const guarantee = await tx.projectGuarantee.findUnique({
@@ -513,15 +517,10 @@ router.post('/settlements/:id/cancel', requireCap('doc.cancel'), async (req: Aut
       // A settlement has no fiscal year of its own: its journal's year decides (voidJournalByIdInTx),
       // or its date when it has no journal.
       if (settlement.journalEntryId) {
-        await voidJournalByIdInTx(tx, settlement.journalEntryId, 'uang jaminan');
+        await voidJournalByIdInTx(tx, settlement.journalEntryId, 'uang jaminan', trail);
       } else {
         await assertPeriodOpen(tx, { date: settlement.date }, 'uang jaminan');
       }
-
-      await tx.projectGuaranteeSettlement.update({
-        where: { id: settlementId },
-        data: { isCancelled: true, cancelledAt: new Date() },
-      });
 
       // Bila jaminan sudah Selesai dan sisa kembali > 0 → buka lagi.
       const remainingActive = guarantee.settlements.filter((s) => s.id !== settlementId);

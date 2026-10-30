@@ -20,6 +20,12 @@ export const UpdateAccountSchema = CreateAccountSchema.partial().extend({
   isActive: z.boolean().optional(),
 });
 
+// Cancel reason: optional on every cancel that keeps a trail (cancel_reason on the document or
+// on the journals it voids); the client does not ask for one yet.
+export const CancelReasonSchema = z.object({
+  reason: z.string().trim().max(500, 'Alasan pembatalan maksimal 500 karakter.').nullable().optional(),
+});
+
 // Journal Entry
 const JournalItemSchema = z.object({
   accountId: z.string().min(1, 'Akun wajib dipilih.'),

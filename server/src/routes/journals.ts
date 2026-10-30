@@ -8,7 +8,8 @@ import { applyPartyImpact } from '../utils/partyBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
-import { CreateJournalSchema } from '../utils/schemas';
+import { CancelReasonSchema, CreateJournalSchema } from '../utils/schemas';
+import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { journalMenuCancelBlockReason } from '../services/journalCancelGuard';
 import { assertPeriodOpen } from '../utils/periodGuard';
@@ -180,27 +181,30 @@ router.get('/:id', async (req: AuthRequest, res) => {
 // PATCH /api/journals/:id/cancel — cancel a journal entry and reverse balances
 router.patch('/:id/cancel', async (req: AuthRequest, res) => {
   const id = req.params.id as string;
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
 
   try {
-    const entry = await prisma.journalEntry.findUnique({
-      where: { id },
-      include: {
-        items: {
-          include: { account: { select: { accountNumber: true, rootType: true } } },
+    const found = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Read inside the transaction: the claim below decides between two concurrent cancels.
+      const entry = await tx.journalEntry.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: { account: { select: { accountNumber: true, rootType: true } } },
+          },
         },
-      },
-    });
-
-    if (!entry) return res.status(404).json({ error: 'Jurnal tidak ditemukan.' });
-    if (entry.status === 'Cancelled') return res.status(400).json({ error: 'Jurnal sudah dibatalkan.' });
-
-    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Claim the journal first so a double click or a concurrent AIRA call cannot reverse it twice.
-      const claimed = await tx.journalEntry.updateMany({
-        where: { id, status: { not: 'Cancelled' } },
-        data: { status: 'Cancelled', cancelledAt: new Date() },
       });
-      if (claimed.count === 0) throw new BusinessError('Jurnal sudah dibatalkan.');
+      if (!entry) return false;
+      if (entry.status === 'Cancelled') throw new BusinessError('Jurnal sudah dibatalkan.');
+
+      // Claim the journal first so a double click or a concurrent AIRA call cannot reverse it
+      // twice: the loser gets STALE_STATUS before any balance moves.
+      await claimCancel(tx.journalEntry, id, {
+        status: 'Cancelled',
+        cancelledAt: new Date(),
+        ...cancelTrail(req.user!.userId, body.reason),
+      });
 
       // Closed fiscal year first so the client gets the PERIOD_CLOSED code; then only hand-made
       // journals pass, module journals are undone from their module.
@@ -277,8 +281,10 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
         where: { referenceId: entry.id, isCancelled: false },
         data: { isCancelled: true },
       });
+      return true;
     }, { timeout: 15000 });
 
+    if (!found) return res.status(404).json({ error: 'Jurnal tidak ditemukan.' });
     return res.json({ message: 'Jurnal dibatalkan.' });
   } catch (error: any) {
     return handleRouteError(res, error, 'PATCH /journals/:id/cancel', 'Gagal membatalkan jurnal.');
