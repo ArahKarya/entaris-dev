@@ -48,7 +48,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 |---|---|
 | PO (buat/ubah/ajukan/tutup/batal) | Tidak ada GL, stok, WAC |
 | STT submit (`gr_create`) | DR Persediaan (1.4.0) / CR Hutang Belum Tagih (2.1.5). Stok masuk, WAC dihitung ulang. Titipan pelanggan: GL nol |
-| STT batal (`gr_cancel`) | Jurnal balik `JV-{stt}-CXL`: DR 2.1.5 / CR 1.4.0; stok dibalik; `qtyReceived` PO dikurangi |
+| STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dibalik; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`) |
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
 | PI dari STT | DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang |
 | Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> 5.11. Lawan selalu Hutang Usaha (2.1.1) |

@@ -20872,7 +20872,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "goods_receipt",
-      "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).",
+      "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual STT dibatalkan (void, tanpa jurnal balik -CXL), dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila ada baris STT yang masih ditagih di PI yang belum dibatalkan (batalkan PI dulu).",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -20925,18 +20925,19 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.",
+      "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "prerequisites": [
         "STT berstatus Submitted",
-        "PI terkait (bila ada) sudah dibatalkan",
+        "Semua PI yang menagih baris STT ini (bila ada) sudah dibatalkan",
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: STT sudah dibatalkan",
         "400: STT legacy - batalkan PI-nya",
         "400: ada PI Paid / PI belum dibatalkan",
+        "400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu",
         "400: stok tidak cukup untuk dibalikkan",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
@@ -23856,7 +23857,7 @@
       "group": "Bank & Kas",
       "toolset": "kas-bank",
       "module": "payment",
-      "desc": "Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).",
+      "desc": "Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal pembayaran dibatalkan (void) dan saldo akun dibalik persis per baris jurnalnya. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -23893,7 +23894,7 @@
       "level": 1,
       "phase": 2,
       "draftCapable": false,
-      "postingEffect": "Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.",
+      "postingEffect": "Jurnal pembayaran dibatalkan (void, tanpa jurnal balik): ledger-nya ditandai batal dan saldo akun dibalik per baris jurnal, jadi akun Piutang/Hutang yang dipulihkan adalah akun saat posting walaupun pemetaan Akun Sistem sudah berubah. Pembayaran lama tanpa jurnal dibalik dari nominal dan pemetaan Piutang/Hutang saat ini. Outstanding invoice terkait naik kembali, status invoice dipulihkan.",
       "confirm_template": "Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [

@@ -774,7 +774,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 ### pay_cancel
 
-**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).
+**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal pembayaran dibatalkan (void) dan saldo akun dibalik persis per baris jurnalnya. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -815,7 +815,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Pembayaran dengan status Cancelled.
 
-**Efek pembukuan/stok:** Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.
+**Efek pembukuan/stok:** Jurnal pembayaran dibatalkan (void, tanpa jurnal balik): ledger-nya ditandai batal dan saldo akun dibalik per baris jurnal, jadi akun Piutang/Hutang yang dipulihkan adalah akun saat posting walaupun pemetaan Akun Sistem sudah berubah. Pembayaran lama tanpa jurnal dibalik dari nominal dan pemetaan Piutang/Hutang saat ini. Outstanding invoice terkait naik kembali, status invoice dipulihkan.
 
 **Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.
 
