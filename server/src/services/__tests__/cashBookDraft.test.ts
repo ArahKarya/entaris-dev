@@ -408,11 +408,16 @@ describe('postCashBookDraft', () => {
   it('rejects a row dated in a closed fiscal year', async () => {
     const { db, tx, id } = await seeded();
     openFy.mockImplementation(async (_tx: unknown, date: Date) => {
-      if (date.toISOString().startsWith('2026-10-03')) throw new BusinessError('Tahun fiskal tidak ditemukan atau sudah ditutup untuk tanggal ini.');
+      if (date.toISOString().startsWith('2026-10-03')) {
+        throw new BusinessError(
+          'Tahun buku 2026 sudah ditutup; dokumen di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.',
+          'PERIOD_CLOSED',
+        );
+      }
       return { id: 'fy1' };
     });
     const err = await postCashBookDraft(db, id, 'u1').catch((e) => e);
-    expect(err.rowErrors[0]).toMatch(/Baris 1: Tanggal 2026-10-03: Tahun fiskal/);
+    expect(err.rowErrors[0]).toMatch(/Baris 1: Tanggal 2026-10-03: Tahun buku 2026 sudah ditutup/);
     expect(postJournal).not.toHaveBeenCalled();
     expect(tx.drafts.get(id).status).toBe('Draft');
   });

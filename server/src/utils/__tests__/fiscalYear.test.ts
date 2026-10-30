@@ -1,13 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { getOpenFiscalYear } from '../fiscalYear';
 import { BusinessError } from '../errors';
+import { FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../periodGuard';
 
-interface Fy { id: string; startDate: Date; endDate: Date; isClosed: boolean }
+interface Fy { id: string; name?: string; startDate: Date; endDate: Date; isClosed: boolean }
 interface Where { isClosed?: boolean; startDate?: { lt?: Date }; endDate?: { gte?: Date } }
 
-/** In-memory findFirst that honours the where/orderBy shape getOpenFiscalYear sends. */
-function txWith(years: Fy[]): Prisma.TransactionClient {
+/**
+ * In-memory findFirst that honours the where/orderBy shape the period guard sends, plus the
+ * FOR SHARE row read that answers with the committed isClosed (`lockedAs` overrides it by id).
+ */
+function txWith(years: Fy[], lockedAs: Record<string, boolean> = {}): Prisma.TransactionClient {
   const findFirst = async ({ where, orderBy }: { where: Where; orderBy?: { startDate: 'asc' | 'desc' } }) => {
     const hits = years.filter(
       (fy) =>
@@ -18,7 +22,10 @@ function txWith(years: Fy[]): Prisma.TransactionClient {
     if (orderBy?.startDate === 'desc') hits.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
     return hits[0] ?? null;
   };
-  return { fiscalYear: { findFirst } } as unknown as Prisma.TransactionClient;
+  const $queryRaw = vi.fn(async (_sql: TemplateStringsArray, id: string) =>
+    years.filter((fy) => fy.id === id).map((fy) => ({ is_closed: lockedAs[fy.id] ?? fy.isClosed })),
+  );
+  return { fiscalYear: { findFirst }, $queryRaw } as unknown as Prisma.TransactionClient;
 }
 
 // FYs as stored by `new Date('YYYY-MM-DD')` (UTC midnight) and at WIB midnight.
@@ -69,9 +76,23 @@ describe('getOpenFiscalYear', () => {
     await expect(getOpenFiscalYear(txWith(years), JAN1_0300_WIB)).resolves.toMatchObject({ id: 'new' });
   });
 
-  it('rejects a closed or missing year', async () => {
-    const closed = utcMidnight.map((fy) => ({ ...fy, isClosed: fy.id === 'fy2026' }));
-    await expect(getOpenFiscalYear(txWith(closed), DEC31_2330_WIB)).rejects.toBeInstanceOf(BusinessError);
-    await expect(getOpenFiscalYear(txWith([]), DEC31_2330_WIB)).rejects.toThrow(/Tahun fiskal tidak ditemukan/);
+  it('rejects a closed year with PERIOD_CLOSED and a missing one with FISCAL_YEAR_MISSING', async () => {
+    const closed = utcMidnight.map((fy) => ({ ...fy, name: fy.id, isClosed: fy.id === 'fy2026' }));
+    await expect(getOpenFiscalYear(txWith(closed), DEC31_2330_WIB)).rejects.toMatchObject({ code: PERIOD_CLOSED });
+    await expect(getOpenFiscalYear(txWith([]), DEC31_2330_WIB)).rejects.toMatchObject({ code: FISCAL_YEAR_MISSING });
+    await expect(getOpenFiscalYear(txWith([]), DEC31_2330_WIB)).rejects.toBeInstanceOf(BusinessError);
+  });
+
+  it('names the document in the message, "dokumen" by default', async () => {
+    await expect(getOpenFiscalYear(txWith([]), DEC31_2330_WIB)).rejects.toThrow(/Tahun buku untuk dokumen tidak ditemukan/);
+    await expect(getOpenFiscalYear(txWith([]), DEC31_2330_WIB, { label: 'invoice' })).rejects.toThrow(/Tahun buku untuk invoice tidak ditemukan/);
+  });
+
+  it('share-locks the year row and trusts its committed isClosed, so a close that won the race rejects the posting', async () => {
+    const tx = txWith(utcMidnight, { fy2026: true });
+    await expect(getOpenFiscalYear(tx, DEC31_2330_WIB)).rejects.toMatchObject({ code: PERIOD_CLOSED });
+    const [sql, id] = (tx.$queryRaw as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect((sql as string[]).join('?')).toMatch(/FROM fiscal_years WHERE id = \? FOR SHARE/);
+    expect(id).toBe('fy2026');
   });
 });

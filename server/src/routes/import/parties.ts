@@ -132,6 +132,8 @@ router.post(
                 vendorDepositAccount: await systemAccounts.getAccount('VENDOR_DEPOSIT'),
                 customerDepositAccount: await systemAccounts.getAccount('CUSTOMER_DEPOSIT'),
                 openingEquityAccount: await systemAccounts.getAccount('OPENING_EQUITY'),
+                // Outside a transaction the row lock ends with the lookup itself; the journals below
+                // are dated now, so a year close can only race them while closing the current year.
                 fiscalYear: await getOpenFiscalYear(prisma as any, now),
               }
             : null;

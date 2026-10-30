@@ -1,5 +1,6 @@
 /**
- * Integration test: assertPeriodOpen / resolveJournalFiscalYear against real fiscal-year rows.
+ * Integration test: assertPeriodOpen / resolveJournalFiscalYear / getOpenFiscalYear against real
+ * fiscal-year rows.
  *
  * Fiscal years are stored at UTC midnight of their first and last day (routes/fiscalYears.ts).
  * The guard must still find the year for any instant on those business days (WIB), and report
@@ -11,6 +12,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { BusinessError } from '../../utils/errors';
 import { assertPeriodOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../../utils/periodGuard';
+import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { closedThenOpenYears, createFiscalYear } from '../helpers/periodFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -83,6 +85,15 @@ d('assertPeriodOpen', () => {
     });
   });
 
+  it('getOpenFiscalYear reports a missing year and a closed one with the same codes', async () => {
+    await inRollback(async (tx) => {
+      expect(await codeOf(getOpenFiscalYear(tx, new Date('2094-06-15T03:00:00Z')))).toBe(FISCAL_YEAR_MISSING);
+      const { open } = await closedThenOpenYears(tx, 2095);
+      expect(await codeOf(getOpenFiscalYear(tx, new Date('2095-08-01T03:00:00Z')))).toBe(PERIOD_CLOSED);
+      expect((await getOpenFiscalYear(tx, new Date('2095-12-31T18:00:00Z'))).id).toBe(open.id);
+    });
+  });
+
   it('reports a closed year as PERIOD_CLOSED, by date and by id', async () => {
     await inRollback(async (tx) => {
       const { closed, open } = await closedThenOpenYears(tx, 2095);
@@ -123,6 +134,31 @@ d('assertPeriodOpen', () => {
 
           await closer.query('COMMIT');
           expect(await guard).toBe(PERIOD_CLOSED);
+        } finally {
+          await closer.query('ROLLBACK').catch(() => undefined);
+          closer.release();
+        }
+      });
+    });
+
+    it('makes a new posting through getOpenFiscalYear wait for a close in progress, then reports PERIOD_CLOSED', async () => {
+      await withCommittedYear(2086, async (fyId) => {
+        const closer = await pool.connect();
+        try {
+          await closer.query('BEGIN');
+          await closer.query('SELECT id FROM fiscal_years WHERE id = $1 FOR UPDATE', [fyId]);
+          await closer.query('UPDATE fiscal_years SET is_closed = true WHERE id = $1', [fyId]);
+
+          let settled = false;
+          // A posting dated inside the year: found by date, then locked behind the close.
+          const posting = codeOf(prisma.$transaction((tx) => getOpenFiscalYear(tx, new Date('2086-06-15T03:00:00Z')))).finally(() => {
+            settled = true;
+          });
+          await new Promise((r) => setTimeout(r, 300));
+          expect(settled).toBe(false);
+
+          await closer.query('COMMIT');
+          expect(await posting).toBe(PERIOD_CLOSED);
         } finally {
           await closer.query('ROLLBACK').catch(() => undefined);
           closer.release();

@@ -224,10 +224,15 @@ describe('postSettlementInTx', () => {
 
   it('rejects a settlement dated in a closed fiscal period — nothing is posted', async () => {
     const tx = makeTx(pending(), { fiscalYear: null });
-    await expect(postSettlementInTx(asTx(tx), 'pr-1', finance, { settlementDate: '2025-12-31', cashAccountId: 'acc-cash' })).rejects.toThrow(/Tahun fiskal|sebelum tanggal pembayaran/);
+    await expect(postSettlementInTx(asTx(tx), 'pr-1', finance, { settlementDate: '2025-12-31', cashAccountId: 'acc-cash' })).rejects.toThrow(/Tahun buku|sebelum tanggal pembayaran/);
     expect(tx.journalEntry.create).not.toHaveBeenCalled();
-    const closed = makeTx(pending(), { fiscalYear: null });
-    await expect(postSettlementInTx(asTx(closed), 'pr-1', finance, { settlementDate: '2026-10-10', cashAccountId: 'acc-cash' })).rejects.toThrow(/Tahun fiskal/);
+    const missing = makeTx(pending(), { fiscalYear: null });
+    await expect(postSettlementInTx(asTx(missing), 'pr-1', finance, { settlementDate: '2026-10-10', cashAccountId: 'acc-cash' })).rejects.toMatchObject({ code: 'FISCAL_YEAR_MISSING' });
+    expect(missing.journalEntry.create).not.toHaveBeenCalled();
+    const closedFy = { id: 'fy-2026', name: '2026', isClosed: true };
+    const closed = makeTx(pending(), { fiscalYear: closedFy });
+    closed.fiscalYear.findUnique = vi.fn(async () => closedFy);
+    await expect(postSettlementInTx(asTx(closed), 'pr-1', finance, { settlementDate: '2026-10-10', cashAccountId: 'acc-cash' })).rejects.toMatchObject({ code: 'PERIOD_CLOSED' });
     expect(closed.journalEntry.create).not.toHaveBeenCalled();
   });
 

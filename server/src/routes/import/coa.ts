@@ -144,7 +144,6 @@ router.post(
             const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
             if (account.id !== openingEquity.id) {
               const now = new Date();
-              const fiscalYear = await getOpenFiscalYear(prisma as any, now);
               const absAmount = Math.abs(row.openingBalance);
 
               // ASSET/EXPENSE normal balance = debit, LIABILITY/EQUITY/REVENUE normal balance = credit
@@ -157,6 +156,8 @@ router.post(
               const accountCredit = (isDebitNormal === isPositive) ? 0 : absAmount;
 
               await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+                // Inside the transaction so the fiscal year stays share-locked until the journal commits.
+                const fiscalYear = await getOpenFiscalYear(tx, now);
                 // Re-import never deletes posted journals (audit G-25): an account that already has
                 // an active opening-balance journal keeps it, and the row is reported instead.
                 const existingOpening = await tx.journalEntry.findFirst({

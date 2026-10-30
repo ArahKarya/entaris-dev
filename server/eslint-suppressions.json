@@ -56,7 +56,7 @@
   },
   "src/routes/import/coa.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 7
+      "count": 6
     }
   },
   "src/routes/import/inventory.ts": {
