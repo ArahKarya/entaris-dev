@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, requireCap } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { validateBody } from '../utils/validate';
 import { handleRouteError } from '../utils/errors';
+import { CancelReasonSchema } from '../utils/schemas';
+import { cancelTrail } from '../utils/cancelClaim';
 import { assertPeriodOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
 import Decimal from 'decimal.js';
 import { parseListPaging, parseSort } from '../utils/listQuery';
@@ -21,6 +23,7 @@ import {
   isGaAssetLinkConflict,
   resolveGaAssetLink,
 } from '../services/fixedAssetGaLink';
+import { cancelDepreciationEntryInTx } from '../services/fixedAssetDepreciationCancel';
 
 const router = Router();
 
@@ -350,6 +353,27 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
     res.json({ success: true, journalEntryId: result.id });
   } catch (error) {
     return handleRouteError(res, error, 'POST /fixed-assets/:id/depreciate', 'Gagal posting depresiasi.');
+  }
+});
+
+// POST /:id/depreciation/:entryId/cancel — un-post the asset's newest posted depreciation row
+// (requires doc.cancel): voids its journal and restores accumulated depreciation and book value.
+router.post('/:id/depreciation/:entryId/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
+  try {
+    const result = await prisma.$transaction(
+      (tx) => cancelDepreciationEntryInTx(
+        tx,
+        req.params.id as string,
+        req.params.entryId as string,
+        cancelTrail(req.user!.userId, body.reason),
+      ),
+      { timeout: 15000 },
+    );
+    return res.json({ message: 'Posting penyusutan dibatalkan.', ...result });
+  } catch (error) {
+    return handleRouteError(res, error, 'POST /fixed-assets/:id/depreciation/:entryId/cancel', 'Gagal membatalkan posting penyusutan.');
   }
 });
 
