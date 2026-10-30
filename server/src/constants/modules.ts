@@ -92,7 +92,7 @@ export const BUILTIN_ROLES: BuiltinRoleDef[] = [
 
 /**
  * Default permissions per built-in role ('edit' implies view). Admin is super-admin and is not listed;
- * by default no other role has capabilities (see DEFAULT_CAPS).
+ * capabilities per role are in DEFAULT_CAPS.
  */
 export const DEFAULT_MATRIX: Record<string, Record<string, PermAction>> = {
   Accountant: {
@@ -126,7 +126,7 @@ export const BACKFILL_MODULES: string[] = ['project_guarantee', 'payment_request
 
 /** Default capabilities per non-super built-in role. */
 export const DEFAULT_CAPS: Record<string, string[]> = {
-  Accountant: [],
+  Accountant: ['doc.cancel'],
   StaffProduksi: [],
   Viewer: [],
 };
@@ -145,4 +145,8 @@ export interface CapBackfill {
  * data_fix_markers): a cap an Admin later removes is never re-added. Also add the caps to DEFAULT_CAPS
  * so fresh databases match, and ship the entry with (or before) the gate that needs it.
  */
-export const BACKFILL_CAPS: readonly CapBackfill[] = [];
+export const BACKFILL_CAPS: readonly CapBackfill[] = [
+  // Stock movement edit (PUT /inventory/movements/:id) now needs doc.cancel; Accountant keeps it and
+  // the document cancels it already performed through its module rights.
+  { key: 'e1-accountant-doc-cancel', role: 'Accountant', caps: ['doc.cancel'] },
+];
