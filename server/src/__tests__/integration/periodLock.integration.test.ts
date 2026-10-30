@@ -30,6 +30,7 @@ import { submitPurchaseOrderInTx } from '../../services/purchaseOrderSubmit';
 import { PERIOD_LOCK_NOT_PAST, PERIOD_LOCK_REASON_REQUIRED, setPeriodLockInTx } from '../../services/periodLock';
 import periodLockRouter from '../../routes/periodLock';
 import quotationsRouter from '../../routes/quotations';
+import fixedAssetsRouter from '../../routes/fixedAssets';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -187,6 +188,50 @@ d('period lock: postings and cancels', () => {
         submitPurchaseOrderInTx(t, { date: `${Y}-03-15`, saveAs: 'draft', items: [{ itemName: 'Barang uji', quantity: 2, unit: 'pcs', estimatedRate: 10_000 }] }, adminId),
       );
       expect(po.fiscalYearId).toBe(year.id);
+    });
+  });
+
+  it('bulk depreciation checks a mid-month lock against the posted 1st-of-month date, like a single post', async () => {
+    await inRollback(async (tx) => {
+      const year = await createFiscalYear(tx, { year: Y });
+      const account = (rootType: 'ASSET' | 'EXPENSE') =>
+        tx.account.create({ data: { name: `IT-LOCK ${rootType}`, accountNumber: `IT-LOCK-${tag()}`, accountType: rootType, rootType } });
+      const [assetAccount, expense, accum] = [await account('ASSET'), await account('EXPENSE'), await account('ASSET')];
+      const asset = await tx.fixedAsset.create({
+        data: {
+          assetNumber: `IT-LOCK-${tag()}`,
+          name: `IT-LOCK Mesin ${tag()}`,
+          category: 'IT-LOCK',
+          acquisitionDate: new Date(`${Y}-03-01`),
+          acquisitionCost: 12_000_000,
+          usefulLifeMonths: 12,
+          bookValue: 12_000_000,
+          assetAccountId: assetAccount.id,
+          depreciationAccountId: expense.id,
+          accumulatedDepAccountId: accum.id,
+          fiscalYearId: year.id,
+          createdBy: adminId,
+        },
+      });
+      const entry = await tx.depreciationEntry.create({
+        data: { fixedAssetId: asset.id, periodDate: new Date(`${Y}-04-01`), amount: 1_000_000 },
+      });
+      clockAt(`${Y}-04-25T03:00:00Z`);
+      expect((await lockAt(tx, `${Y}-04-09`)).status).toBe(200);
+
+      const bulk = () => callRoute(fixedAssetsRouter, 'post', '/depreciate-bulk', { body: { month: `${Y}-04` }, userId: adminId, role: 'Admin' });
+      const locked = await bulk();
+      expect(locked.status, JSON.stringify(locked.body)).toBe(400);
+      expect(locked.body.code).toBe(PERIOD_LOCKED);
+      expect(await tx.depreciationEntry.findUniqueOrThrow({ where: { id: entry.id } })).toMatchObject({ isPosted: false, journalEntryId: null });
+      expect(await tx.journalEntry.count({ where: { sourceType: 'DEPRECIATION', fiscalYearId: year.id } })).toBe(0);
+      expect(Number((await tx.account.findUniqueOrThrow({ where: { id: expense.id } })).balance)).toBe(0);
+
+      expect((await lockAt(tx, `${Y}-03-31`, 'Buka April untuk penyusutan')).status).toBe(200);
+      const posted = await bulk();
+      expect(posted.status, JSON.stringify(posted.body)).toBe(200);
+      expect(posted.body.posted).toBe(1);
+      expect(await tx.depreciationEntry.findUniqueOrThrow({ where: { id: entry.id } })).toMatchObject({ isPosted: true });
     });
   });
 });
