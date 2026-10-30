@@ -5,6 +5,7 @@ import { redactSecrets } from '../utils/redact';
 /**
  * Audit "oldValues": per route prefix, a loader fetches the row before the handler runs.
  * Loaders must stay cheap (one findUnique, no line items); failures are swallowed so auditing never blocks a request.
+ * Exceptions that include lines are marked below: the request replaces those lines, so the old ones live only here.
  */
 
 export type SnapshotLoader = (id: string) => Promise<unknown>;
@@ -40,7 +41,8 @@ export const DEFAULT_SNAPSHOT_REGISTRY: SnapshotEntry[] = [
   { prefix: 'journals', load: byId(prisma.journalEntry) },
   { prefix: 'purchase-orders', load: byId(prisma.purchaseOrder) },
   { prefix: 'goods-receipts', load: byId(prisma.goodsReceipt) },
-  { prefix: 'delivery-orders', load: byId(prisma.deliveryOrder) },
+  // Exception to "no line items": PUT replaces the lines, so the audit trail must keep the old ones.
+  { prefix: 'delivery-orders', load: byId(prisma.deliveryOrder, { include: { items: true } }) },
   { prefix: 'sales-orders', load: byId(prisma.salesOrder) },
   { prefix: 'quotations', load: byId(prisma.quotation) },
   { prefix: 'parties', load: byId(prisma.party) },
