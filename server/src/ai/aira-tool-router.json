@@ -15941,10 +15941,14 @@
       "accessNote": "Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.",
       "errors": [
         "400: transfer sudah dibatalkan",
-        "404: transfer tidak ditemukan"
+        "404: transfer tidak ditemukan",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "stf_get"
+      ],
+      "prerequisites": [
+        "Tahun buku tanggal transfer masih terbuka."
       ]
     },
     {
@@ -17037,7 +17041,11 @@
       "confirm_template": "Batalkan Surat Jalan {id} (stok dikembalikan)?",
       "errors": [
         "400: batalkan invoice terkait dulu.",
-        "400: surat jalan sudah dibatalkan."
+        "400: surat jalan sudah dibatalkan.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+      ],
+      "prerequisites": [
+        "Tahun buku tanggal SJ masih terbuka."
       ]
     },
     {
@@ -20635,14 +20643,16 @@
       "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
       "prerequisites": [
         "STT berstatus Submitted",
-        "PI terkait (bila ada) sudah dibatalkan"
+        "PI terkait (bila ada) sudah dibatalkan",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: STT sudah dibatalkan",
         "400: STT legacy - batalkan PI-nya",
         "400: ada PI Paid / PI belum dibatalkan",
         "400: stok tidak cukup untuk dibalikkan",
-        "400: alasan bypass stok minus wajib (min 10 karakter)"
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pi_cancel",
@@ -27509,11 +27519,18 @@
       "errors": [
         "400: SJ sudah masuk invoice — batalkan invoice dulu.",
         "400: SJ sudah dibatalkan.",
-        "403: bypass stok minus butuh capability."
+        "403: bypass stok minus butuh capability.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan"
       ],
       "related": [
         "do_patch",
         "do_cancel"
+      ],
+      "prerequisites": [
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka.",
+        "Tanggal baru di bulan yang sama dengan tanggal lama."
       ]
     },
     {
@@ -29448,6 +29465,7 @@
       "outputSummary": "Pergerakan stok hasil edit (pergerakan baru).",
       "handler": "PUT /api/inventory/movements/:id",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
@@ -29457,12 +29475,16 @@
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
         "Bukan berasal dari STT/GoodsReceipt atau ProductionRun.",
-        "Tahun fiskal tanggal baru terbuka."
+        "User memiliki capability doc.cancel.",
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400: gerakan dari STT/produksi tidak dapat diedit per baris",
-        "400: pembalikan stok lama membuat stok negatif"
+        "400: pembalikan stok lama membuat stok negatif",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "403: tanpa capability doc.cancel"
       ],
       "related": [
         "inv_mov_get",
@@ -29506,13 +29528,15 @@
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan."
+        "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400: dari STT tidak dapat dibatalkan per baris",
         "400: stok tidak mencukupi untuk pembalikan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "inv_mov_get",
@@ -30097,12 +30121,15 @@
       "accessNote": "Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).",
       "prerequisites": [
         "Run belum dibatalkan.",
-        "Bila allowNegativeStock=true: capability inventory.negative_stock."
+        "Bila allowNegativeStock=true: capability inventory.negative_stock.",
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "409: sudah ada pengajuan edit Pending untuk run ini",
         "400: stok tidak cukup / run sudah dibatalkan",
-        "403: tidak berwenang bypass validasi stok"
+        "403: tidak berwenang bypass validasi stok",
+        "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku"
       ],
       "related": [
         "prod_run_get",
@@ -30169,13 +30196,15 @@
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Run belum dibatalkan."
+        "Run belum dibatalkan.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: proses produksi sudah dibatalkan",
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "prod_run_get"
@@ -33120,12 +33149,14 @@
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Stok item saat ini cukup untuk membalik surplus."
+        "Stok item saat ini cukup untuk membalik surplus.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: stok opname sudah dibatalkan",
         "400: stok item tidak mencukupi untuk pembalikan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "opn_get"

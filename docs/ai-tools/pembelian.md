@@ -198,6 +198,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - STT berstatus Submitted
 - PI terkait (bila ada) sudah dibatalkan
+- Tahun buku dokumen dan jurnalnya masih terbuka.
 
 **Error umum**
 
@@ -206,6 +207,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: ada PI Paid / PI belum dibatalkan
 - 400: stok tidak cukup untuk dibalikkan
 - 400: alasan bypass stok minus wajib (min 10 karakter)
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)
 

@@ -1403,10 +1403,15 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Teks konfirmasi:** Batalkan Surat Jalan {id} (stok dikembalikan)?
 
+**Prasyarat**
+
+- Tahun buku tanggal SJ masih terbuka.
+
 **Error umum**
 
 - 400: batalkan invoice terkait dulu.
 - 400: surat jalan sudah dibatalkan.
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 ### do_create
 
@@ -1814,11 +1819,19 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Teks konfirmasi:** Edit penuh Surat Jalan {id} (stok akan dibalik dan diterapkan ulang)?
 
+**Prasyarat**
+
+- Tahun buku tanggal lama dan tanggal baru masih terbuka.
+- Tanggal baru di bulan yang sama dengan tanggal lama.
+
 **Error umum**
 
 - 400: SJ sudah masuk invoice — batalkan invoice dulu.
 - 400: SJ sudah dibatalkan.
 - 403: bypass stok minus butuh capability.
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
+- 400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan
 
 **Tool terkait:** [`do_patch`](#do_patch), [`do_cancel`](#do_cancel)
 
