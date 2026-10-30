@@ -453,7 +453,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/inventory/production-cost-standards/:id` (src/routes/inventory/productionCostStandards.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1255,7 +1255,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/inventory/production-processes/:id` (src/routes/inventory/productionProcesses.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1397,7 +1397,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/inventory/production-runs/:id/cancel` (src/routes/inventory/productionRuns.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 

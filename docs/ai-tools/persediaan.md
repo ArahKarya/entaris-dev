@@ -679,7 +679,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `inventory` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `inventory` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/inventory/movements/:id/cancel` (src/routes/inventory/movements.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -722,7 +722,7 @@ Aturan wajib:
 
 - User memiliki capability doc.cancel.
 - Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.
-- Tahun buku dokumen dan jurnalnya masih terbuka.
+- Tahun buku tanggal pergerakan dan jurnalnya masih terbuka.
 
 **Error umum**
 
@@ -957,7 +957,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `inventory` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `inventory` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/inventory/movements/:id` (src/routes/inventory/movements.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1031,7 +1031,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `stock_opname` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `stock_opname` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/stock-opname/:id/cancel` (src/routes/stockOpname.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1643,7 +1643,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `warehouse` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `warehouse` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/warehouses/:id` (src/routes/warehouses.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 

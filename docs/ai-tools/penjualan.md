@@ -282,7 +282,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `customer_deposit` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)
 - **Handler:** `POST /api/customer-deposits/apply/:id/cancel` (src/routes/customerDeposits.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1364,7 +1364,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `delivery_order` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)
 - **Handler:** `POST /api/delivery-orders/:id/cancel` (src/routes/deliveryOrders.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -2424,7 +2424,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `proforma_invoice` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `proforma_invoice` / `edit`, capability `doc.cancel`)
 - **Handler:** `PATCH /api/proforma-invoices/:id/cancel` (src/routes/proformaInvoices.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -2997,11 +2997,11 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### quot_cancel
 
-**Ringkasan:** Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default hanya Admin).
+**Ringkasan:** Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default Admin dan Accountant).
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `quotation` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `quotation` / `edit`, capability `doc.cancel`)
 - **Handler:** `PATCH /api/quotations/:id/cancel` (src/routes/quotations.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -3662,7 +3662,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `sales_invoice` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `sales_invoice` / `edit`, capability `doc.cancel`)
 - **Handler:** `POST /api/sales/invoices/:id/cancel` (src/routes/sales.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -4479,7 +4479,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `sales_return` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `sales_return` / `edit`, capability `doc.cancel`)
 - **Handler:** `POST /api/sales-returns/:id/cancel` (src/routes/salesReturns.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -4744,7 +4744,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `delivery_order` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)
 - **Handler:** `POST /api/temporary-delivery-notes/:id/cancel` (src/routes/temporaryDeliveryNotes.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 

@@ -152,8 +152,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `goods_receipt` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `goods_receipt` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/goods-receipts/:id/cancel` (src/routes/goodsReceipts.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -443,8 +443,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `purchase_invoice` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `purchase_invoice` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/purchase/invoices/:id/cancel` (src/routes/purchase.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -918,8 +918,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `purchase_order` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `purchase_order` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/purchase-orders/:id/cancel` (src/routes/purchaseOrders.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -971,8 +971,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `purchase_order` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `purchase_order` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/purchase-orders/:id/close` (src/routes/purchaseOrders.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1463,8 +1463,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `vendor_deposit` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/vendor-deposits/apply/:id/cancel` (src/routes/vendorDeposits.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
