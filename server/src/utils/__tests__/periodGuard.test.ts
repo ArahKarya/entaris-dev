@@ -68,6 +68,35 @@ describe('assertPeriodOpen', () => {
     expect(fn('fiscalYear.findFirst').mock.calls[0]![0].where.endDate).toEqual({ gte: new Date('2026-06-10T16:00:00Z') });
   });
 
+  describe('with a negative APP_UTC_OFFSET', () => {
+    // Bounds at UTC midnight (seed, POST /fiscal-years) and at local midnight (-05:00).
+    const years = [
+      { id: 'fy26', name: '2026', isClosed: false, startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') },
+      { id: 'fy27', name: '2027', isClosed: false, startDate: new Date('2027-01-01T05:00:00Z'), endDate: new Date('2027-12-31T05:00:00Z') },
+    ];
+    const rowsTx = () =>
+      makeAutoTx({
+        'fiscalYear.findFirst': ({ where }: any) =>
+          years
+            .filter((y) => y.startDate < where.startDate.lt && y.endDate >= where.endDate.gte)
+            .sort((a, b) => b.startDate.getTime() - a.startDate.getTime())[0] ?? null,
+      }).tx;
+
+    it('keeps a date-only value on its own calendar day', async () => {
+      vi.stubEnv('APP_UTC_OFFSET', '-05:00');
+      expect((await resolveJournalFiscalYear(rowsTx(), new Date('2027-01-01'))).id).toBe('fy27');
+      expect((await resolveJournalFiscalYear(rowsTx(), new Date('2026-12-31'))).id).toBe('fy26');
+      expect((await resolveJournalFiscalYear(rowsTx(), new Date('2027-12-31'))).id).toBe('fy27');
+    });
+
+    it('places a timed instant by its local day', async () => {
+      vi.stubEnv('APP_UTC_OFFSET', '-05:00');
+      // 1 Jan 03:00Z = 31 Dec 22:00 local; 1 Jan 05:30Z = 1 Jan 00:30 local.
+      expect((await resolveJournalFiscalYear(rowsTx(), new Date('2027-01-01T03:00:00Z'))).id).toBe('fy26');
+      expect((await resolveJournalFiscalYear(rowsTx(), new Date('2027-01-01T05:30:00Z'))).id).toBe('fy27');
+    });
+  });
+
   it('messages translate to English with the label', async () => {
     const { tx } = makeAutoTx({ 'fiscalYear.findUnique': () => closedFy });
     const e = await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-0' }, 'jurnal'));

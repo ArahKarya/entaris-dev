@@ -23,25 +23,37 @@ export type PeriodRef = { date: Date } | { fiscalYearId: string };
 export type PeriodLabel = 'jurnal' | 'invoice' | 'pembayaran' | 'uang muka' | 'uang jaminan' | 'penyusutan' | 'dokumen';
 
 const MS_PER_MINUTE = 60_000;
+const MS_PER_DAY = 86_400_000;
 
-/** Calendar day (YYYY-MM-DD) of an instant in the business time zone. */
+/**
+ * Calendar day (YYYY-MM-DD) of an instant in the business time zone. An instant at exact UTC
+ * midnight is a date-only value (new Date('YYYY-MM-DD')) and keeps its UTC calendar day; a
+ * negative offset would otherwise move it to the day before.
+ */
 function businessDay(date: Date, offset: string): string {
+  if (date.getTime() % MS_PER_DAY === 0) return date.toISOString().slice(0, 10);
   const sign = offset.startsWith('-') ? -1 : 1;
   const [h, m] = offset.slice(1).split(':').map(Number);
   const shifted = new Date(date.getTime() + sign * (h! * 60 + m!) * MS_PER_MINUTE);
   return shifted.toISOString().slice(0, 10);
 }
 
+const earlier = (a: Date, b: Date): Date => (a.getTime() <= b.getTime() ? a : b);
+
 /**
  * Fiscal year whose [startDate, endDate] touches the business day of `date`, open or closed.
- * Fiscal-year bounds are stored at UTC or local midnight of their calendar day; both fall
- * inside that business day, so the half-open day range [00:00, next 00:00) matches either.
+ * Fiscal-year bounds are stored at UTC or local midnight of their calendar day. Each range end
+ * is the earlier of the two midnights (of this day, and of the next day), which accepts either
+ * form of this day and neither form of a neighbouring day, for positive and negative offsets.
  */
 async function findFiscalYearForDate(tx: Tx, date: Date): Promise<FiscalYear | null> {
-  const day = businessDay(date, businessUtcOffset());
-  const { gte, lt } = localDayRange(day, day);
+  const offset = businessUtcOffset();
+  const day = businessDay(date, offset);
+  const local = localDayRange(day, day, offset);
+  const utcStart = new Date(`${day}T00:00:00.000Z`);
+  const utcNext = new Date(utcStart.getTime() + MS_PER_DAY);
   return tx.fiscalYear.findFirst({
-    where: { startDate: { lt }, endDate: { gte } },
+    where: { startDate: { lt: earlier(local.lt!, utcNext) }, endDate: { gte: earlier(local.gte!, utcStart) } },
     orderBy: { startDate: 'desc' },
   });
 }
