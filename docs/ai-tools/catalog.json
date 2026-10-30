@@ -2118,7 +2118,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -2127,6 +2128,13 @@
           "type": "string",
           "required": true,
           "description": "ID CustomerDepositApplication."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi."
         }
       ],
       "output": {
@@ -2146,12 +2154,14 @@
         "400: aplikasi tidak ditemukan.",
         "400: aplikasi sudah dibatalkan.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku"
+        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### cdep_apply_cancel\n\n**Ringkasan:** Membatalkan pemakaian uang muka pada invoice: jurnal aplikasi dibalik, outstanding invoice dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/customer-deposits/apply/:id/cancel` (src/routes/customerDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID CustomerDepositApplication. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"cdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pemakaian uang muka (aplikasi <id>)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV aplikasi (DR Uang Muka / CR Piutang dibalik), outstanding & status invoice dipulihkan, aplikasi ditandai batal.\n\n**Teks konfirmasi:** Batalkan pemakaian uang muka (aplikasi {id})?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: aplikasi tidak ditemukan.\n- 400: aplikasi sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n",
+      "doc": "### cdep_apply_cancel\n\n**Ringkasan:** Membatalkan pemakaian uang muka pada invoice: jurnal aplikasi dibalik, outstanding invoice dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/customer-deposits/apply/:id/cancel` (src/routes/customerDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID CustomerDepositApplication. |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"cdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pemakaian uang muka (aplikasi <id>)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV aplikasi (DR Uang Muka / CR Piutang dibalik), outstanding & status invoice dipulihkan, aplikasi ditandai batal.\n\n**Teks konfirmasi:** Batalkan pemakaian uang muka (aplikasi {id})?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: aplikasi tidak ditemukan.\n- 400: aplikasi sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n",
       "example": {
         "tool": "cdep_apply_cancel",
         "args": {
@@ -2215,7 +2225,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -2224,6 +2235,13 @@
           "type": "string",
           "required": true,
           "description": "ID Payment uang muka."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya."
         }
       ],
       "output": {
@@ -2246,7 +2264,9 @@
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
         "400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka.",
@@ -2254,7 +2274,7 @@
         "Bukan uang muka hasil Retur Penjualan (yang itu dibatalkan lewat retur).",
         "User memiliki capability doc.cancel."
       ],
-      "doc": "### cdep_cancel\n\n**Ringkasan:** Membatalkan uang muka pelanggan: jurnal penerimaan dibalik, saldo uang muka pelanggan berkurang, status Cancelled. Ditolak bila sudah dipakai pada Invoice atau sudah pernah di-refund. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/customer-deposits/:id/cancel` (src/routes/customerDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Payment uang muka. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"cdep_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang muka pelanggan <id> (jurnal dibalik)?\"\n}\n```\n\n**Isi hasil:** { message: 'Uang muka pelanggan berhasil dibatalkan.' }.\n\n**Efek pembukuan/stok:** Membalik jurnal penerimaan uang muka (DR Kas/Bank / CR 2.1.2 Uang Muka Pelanggan dibalik), ledger dibatalkan, party.customerDepositBalance dikurangi.\n\n**Teks konfirmasi:** Batalkan uang muka pelanggan {id} (jurnal dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n- Belum ada refund (refundedAmount = 0).\n- Bukan uang muka hasil Retur Penjualan (yang itu dibatalkan lewat retur).\n- User memiliki capability doc.cancel.\n\n**Error umum**\n\n- 400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.\n- 400: bukan tipe uang muka pelanggan.\n- 400: sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund\n- 400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan\n- 403: tanpa capability doc.cancel\n",
+      "doc": "### cdep_cancel\n\n**Ringkasan:** Membatalkan uang muka pelanggan: jurnal penerimaan dibalik, saldo uang muka pelanggan berkurang, status Cancelled. Ditolak bila sudah dipakai pada Invoice atau sudah pernah di-refund. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/customer-deposits/:id/cancel` (src/routes/customerDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Payment uang muka. |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"cdep_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang muka pelanggan <id> (jurnal dibalik)?\"\n}\n```\n\n**Isi hasil:** { message: 'Uang muka pelanggan berhasil dibatalkan.' }.\n\n**Efek pembukuan/stok:** Membalik jurnal penerimaan uang muka (DR Kas/Bank / CR 2.1.2 Uang Muka Pelanggan dibalik), ledger dibatalkan, party.customerDepositBalance dikurangi.\n\n**Teks konfirmasi:** Batalkan uang muka pelanggan {id} (jurnal dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n- Belum ada refund (refundedAmount = 0).\n- Bukan uang muka hasil Retur Penjualan (yang itu dibatalkan lewat retur).\n- User memiliki capability doc.cancel.\n\n**Error umum**\n\n- 400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.\n- 400: bukan tipe uang muka pelanggan.\n- 400: sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund\n- 400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan\n- 403: tanpa capability doc.cancel\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n",
       "example": {
         "tool": "cdep_cancel",
         "args": {
@@ -4292,12 +4312,13 @@
       "errors": [
         "400: batalkan invoice terkait dulu.",
         "400: surat jalan sudah dibatalkan.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
       ],
       "prerequisites": [
         "Tahun buku tanggal SJ masih terbuka."
       ],
-      "doc": "### do_cancel\n\n**Ringkasan:** Membatalkan Surat Jalan: stok dikembalikan (per gudang), pergerakan stok ditandai batal, status Cancelled. Ditolak bila DO sudah masuk invoice.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/delivery-orders/:id/cancel` (src/routes/deliveryOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Surat Jalan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"do_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Surat Jalan <id> (stok dikembalikan)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Stok: mengembalikan stok & pergerakan keluar dibatalkan. Tidak ada jurnal GL.\n\n**Teks konfirmasi:** Batalkan Surat Jalan {id} (stok dikembalikan)?\n\n**Prasyarat**\n\n- Tahun buku tanggal SJ masih terbuka.\n\n**Error umum**\n\n- 400: batalkan invoice terkait dulu.\n- 400: surat jalan sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
+      "doc": "### do_cancel\n\n**Ringkasan:** Membatalkan Surat Jalan: stok dikembalikan (per gudang), pergerakan stok ditandai batal, status Cancelled. Ditolak bila DO sudah masuk invoice.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/delivery-orders/:id/cancel` (src/routes/deliveryOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Surat Jalan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"do_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Surat Jalan <id> (stok dikembalikan)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Stok: mengembalikan stok & pergerakan keluar dibatalkan. Tidak ada jurnal GL.\n\n**Teks konfirmasi:** Batalkan Surat Jalan {id} (stok dikembalikan)?\n\n**Prasyarat**\n\n- Tahun buku tanggal SJ masih terbuka.\n\n**Error umum**\n\n- 400: batalkan invoice terkait dulu.\n- 400: surat jalan sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n",
       "example": {
         "tool": "do_cancel",
         "args": {
@@ -17282,7 +17303,8 @@
       "input": {
         "id": "string",
         "allowNegativeStock": "boolean",
-        "negativeStockReason": "string"
+        "negativeStockReason": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -17305,6 +17327,13 @@
           "type": "string",
           "required": false,
           "description": "Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di STT dan jurnal aslinya."
         }
       ],
       "output": {
@@ -17332,13 +17361,15 @@
         "400: ada PI Paid / PI belum dibatalkan",
         "400: stok tidak cukup untuk dibalikkan",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pi_cancel",
         "gr_get"
       ],
-      "doc": "### gr_cancel\n\n**Ringkasan:** Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `goods_receipt` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/goods-receipts/:id/cancel` (src/routes/goodsReceipts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID STT (UUID). |\n| `allowNegativeStock` | body | `boolean` | tidak | true = abaikan guard stok minus saat membalikkan stok (override Admin). |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"gr_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan STT <id>? Stok akan dikembalikan dan accrual hutang dibalik.\"\n}\n```\n\n**Isi hasil:** STT dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.\n\n**Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.\n\n**Prasyarat**\n\n- STT berstatus Submitted\n- PI terkait (bila ada) sudah dibatalkan\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: STT sudah dibatalkan\n- 400: STT legacy - batalkan PI-nya\n- 400: ada PI Paid / PI belum dibatalkan\n- 400: stok tidak cukup untuk dibalikkan\n- 400: alasan bypass stok minus wajib (min 10 karakter)\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)\n",
+      "doc": "### gr_cancel\n\n**Ringkasan:** Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `goods_receipt` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/goods-receipts/:id/cancel` (src/routes/goodsReceipts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID STT (UUID). |\n| `allowNegativeStock` | body | `boolean` | tidak | true = abaikan guard stok minus saat membalikkan stok (override Admin). |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di STT dan jurnal aslinya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"gr_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan STT <id>? Stok akan dikembalikan dan accrual hutang dibalik.\"\n}\n```\n\n**Isi hasil:** STT dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.\n\n**Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.\n\n**Prasyarat**\n\n- STT berstatus Submitted\n- PI terkait (bila ada) sudah dibatalkan\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: STT sudah dibatalkan\n- 400: STT legacy - batalkan PI-nya\n- 400: ada PI Paid / PI belum dibatalkan\n- 400: stok tidak cukup untuk dibalikkan\n- 400: alasan bypass stok minus wajib (min 10 karakter)\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)\n",
       "example": {
         "tool": "gr_cancel",
         "args": {
@@ -20122,7 +20153,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -20131,6 +20163,13 @@
           "type": "string",
           "required": true,
           "description": "ID dokumen/rekaman (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal."
         }
       ],
       "output": {
@@ -20154,13 +20193,15 @@
         "400: sudah dibatalkan",
         "400: jurnal terkait pembayaran/dokumen sumber",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)"
+        "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "je_get",
         "je_create"
       ],
-      "doc": "### je_cancel\n\n**Ringkasan:** Membatalkan jurnal manual dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Ditolak: jurnal di tahun buku tertutup, jurnal tutup buku dan penyusutan, jurnal dari dokumen sumber (pembayaran, faktur, STT, produksi, HPP, revisi harga PI), jurnal modul uang muka vendor, dan jurnal yang terhubung ke stok, GA, pengajuan dana, atau uang jaminan: batalkan dari modul asalnya atau buat jurnal koreksi.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `journal` / `edit`)\n- **Handler:** `PATCH /api/journals/:id/cancel` (src/routes/journals.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"je_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan (reverse) jurnal <id>?\"\n}\n```\n\n**Isi hasil:** Konfirmasi pembatalan / jurnal berstatus Cancelled.\n\n**Efek pembukuan/stok:** Membalik saldo akun & saldo pihak; efek samping aplikasi uang muka/refund pelanggan yang ditautkan ikut dibalik. Tidak ada efek stok. Catatan kode: tidak ada capability doc.cancel pada endpoint ini.\n\n**Teks konfirmasi:** Batalkan (reverse) jurnal {id}?\n\n**Prasyarat**\n\n- Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka.\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 404: tidak ditemukan\n- 400: sudah dibatalkan\n- 400: jurnal terkait pembayaran/dokumen sumber\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)\n\n**Tool terkait:** [`je_get`](#je_get), [`je_create`](#je_create)\n",
+      "doc": "### je_cancel\n\n**Ringkasan:** Membatalkan jurnal manual dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Ditolak: jurnal di tahun buku tertutup, jurnal tutup buku dan penyusutan, jurnal dari dokumen sumber (pembayaran, faktur, STT, produksi, HPP, revisi harga PI), jurnal modul uang muka vendor, dan jurnal yang terhubung ke stok, GA, pengajuan dana, atau uang jaminan: batalkan dari modul asalnya atau buat jurnal koreksi.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `journal` / `edit`)\n- **Handler:** `PATCH /api/journals/:id/cancel` (src/routes/journals.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"je_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan (reverse) jurnal <id>?\"\n}\n```\n\n**Isi hasil:** Konfirmasi pembatalan / jurnal berstatus Cancelled.\n\n**Efek pembukuan/stok:** Membalik saldo akun & saldo pihak; efek samping aplikasi uang muka/refund pelanggan yang ditautkan ikut dibalik. Tidak ada efek stok. Catatan kode: tidak ada capability doc.cancel pada endpoint ini.\n\n**Teks konfirmasi:** Batalkan (reverse) jurnal {id}?\n\n**Prasyarat**\n\n- Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka.\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 404: tidak ditemukan\n- 400: sudah dibatalkan\n- 400: jurnal terkait pembayaran/dokumen sumber\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`je_get`](#je_get), [`je_create`](#je_create)\n",
       "example": {
         "tool": "je_cancel",
         "args": {
@@ -22823,7 +22864,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -22832,6 +22874,13 @@
           "type": "string",
           "required": true,
           "description": "ID pembayaran (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di pembayaran dan jurnalnya."
         }
       ],
       "output": {
@@ -22852,7 +22901,9 @@
         "400: Pembayaran sudah dibatalkan",
         "400: Gunakan endpoint Uang Muka untuk membatalkan deposit",
         "400: Refund belum mendukung cancel otomatis",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pay_get",
@@ -22862,7 +22913,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pay_cancel\n\n**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `payment` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/payments/:id/cancel` (src/routes/payments.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID pembayaran (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pay_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pembayaran <id>? Alokasi dan jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pembayaran dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.\n\n**Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Pembayaran sudah dibatalkan\n- 400: Gunakan endpoint Uang Muka untuk membatalkan deposit\n- 400: Refund belum mendukung cancel otomatis\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pay_get`](#pay_get), [`vdep_cancel`](pembelian.md#vdep_cancel), [`pi_cancel`](pembelian.md#pi_cancel)\n",
+      "doc": "### pay_cancel\n\n**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `payment` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/payments/:id/cancel` (src/routes/payments.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID pembayaran (UUID). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di pembayaran dan jurnalnya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pay_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pembayaran <id>? Alokasi dan jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pembayaran dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.\n\n**Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Pembayaran sudah dibatalkan\n- 400: Gunakan endpoint Uang Muka untuk membatalkan deposit\n- 400: Refund belum mendukung cancel otomatis\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`pay_get`](#pay_get), [`vdep_cancel`](pembelian.md#vdep_cancel), [`pi_cancel`](pembelian.md#pi_cancel)\n",
       "example": {
         "tool": "pay_cancel",
         "args": {
@@ -25938,7 +25989,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -25947,6 +25999,13 @@
           "type": "string",
           "required": true,
           "description": "ID uang jaminan (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang jaminan dan jurnalnya."
         }
       ],
       "output": {
@@ -25966,7 +26025,9 @@
       "errors": [
         "400: Uang jaminan sudah dibatalkan",
         "400: Sudah ada settlement aktif - batalkan settlement dulu",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pg_settlement_cancel",
@@ -25975,7 +26036,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pg_cancel\n\n**Ringkasan:** Membatalkan setoran uang jaminan (hanya bila belum ada settlement aktif): jurnal setoran dibatalkan dan saldo akun dibalik.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `PATCH /api/project-guarantees/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID uang jaminan (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang jaminan <id>? Jurnal setoran akan dibalik.\"\n}\n```\n\n**Isi hasil:** Uang jaminan berstatus Dibatalkan.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal setoran (DR Uang Jaminan 1.8 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. Tidak membuat jurnal balikan baru.\n\n**Teks konfirmasi:** Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Uang jaminan sudah dibatalkan\n- 400: Sudah ada settlement aktif - batalkan settlement dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)\n",
+      "doc": "### pg_cancel\n\n**Ringkasan:** Membatalkan setoran uang jaminan (hanya bila belum ada settlement aktif): jurnal setoran dibatalkan dan saldo akun dibalik.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `PATCH /api/project-guarantees/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID uang jaminan (UUID). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang jaminan dan jurnalnya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang jaminan <id>? Jurnal setoran akan dibalik.\"\n}\n```\n\n**Isi hasil:** Uang jaminan berstatus Dibatalkan.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal setoran (DR Uang Jaminan 1.8 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. Tidak membuat jurnal balikan baru.\n\n**Teks konfirmasi:** Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Uang jaminan sudah dibatalkan\n- 400: Sudah ada settlement aktif - batalkan settlement dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)\n",
       "example": {
         "tool": "pg_cancel",
         "args": {
@@ -26404,7 +26465,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -26413,6 +26475,13 @@
           "type": "string",
           "required": true,
           "description": "ID settlement (bukan ID jaminan)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di settlement dan jurnalnya."
         }
       ],
       "output": {
@@ -26432,7 +26501,9 @@
       "errors": [
         "400: Settlement sudah dibatalkan",
         "400: Uang jaminan induk sudah dibatalkan",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pg_get",
@@ -26441,7 +26512,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pg_settlement_cancel\n\n**Ringkasan:** Membatalkan satu settlement uang jaminan (pengembalian/hangus): jurnal settlement dibatalkan dan sisa jaminan dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/project-guarantees/settlements/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID settlement (bukan ID jaminan). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_settlement_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan settlement uang jaminan <id>? Jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** { message: 'Settlement dibatalkan.' }.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal settlement (DR Kas-Bank/Beban / CR Uang Jaminan 1.8): saldo akun dibalik, sisa jaminan naik, status jaminan kembali Disetor bila sebelumnya Selesai.\n\n**Teks konfirmasi:** Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Settlement sudah dibatalkan\n- 400: Uang jaminan induk sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)\n",
+      "doc": "### pg_settlement_cancel\n\n**Ringkasan:** Membatalkan satu settlement uang jaminan (pengembalian/hangus): jurnal settlement dibatalkan dan sisa jaminan dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/project-guarantees/settlements/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID settlement (bukan ID jaminan). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di settlement dan jurnalnya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_settlement_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan settlement uang jaminan <id>? Jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** { message: 'Settlement dibatalkan.' }.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal settlement (DR Kas-Bank/Beban / CR Uang Jaminan 1.8): saldo akun dibalik, sisa jaminan naik, status jaminan kembali Disetor bila sebelumnya Selesai.\n\n**Teks konfirmasi:** Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Settlement sudah dibatalkan\n- 400: Uang jaminan induk sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)\n",
       "example": {
         "tool": "pg_settlement_cancel",
         "args": {
@@ -26563,7 +26634,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -26572,6 +26644,13 @@
           "type": "string",
           "required": true,
           "description": "ID invoice pembelian (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice."
         }
       ],
       "output": {
@@ -26593,7 +26672,9 @@
         "400: Invoice sudah lunas",
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "pay_cancel",
@@ -26603,7 +26684,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pi_cancel\n\n**Ringkasan:** Membatalkan Invoice Pembelian: jurnal faktur dibalik, stok yang dibuat PI dikembalikan, STT terkait dilepas (invoiceId dikosongkan, stok milik STT tidak terganggu). Ditolak bila faktur sudah lunas, punya pembayaran teralokasi, atau punya alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `purchase_invoice` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/purchase/invoices/:id/cancel` (src/routes/purchase.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice pembelian (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pi_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Pembelian <id>? Jurnal dan stok terkait akan dibalik.\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.\n\n**Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Invoice sudah dibatalkan\n- 400: Invoice sudah lunas\n- 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu\n- 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)\n",
+      "doc": "### pi_cancel\n\n**Ringkasan:** Membatalkan Invoice Pembelian: jurnal faktur dibalik, stok yang dibuat PI dikembalikan, STT terkait dilepas (invoiceId dikosongkan, stok milik STT tidak terganggu). Ditolak bila faktur sudah lunas, punya pembayaran teralokasi, atau punya alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `purchase_invoice` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/purchase/invoices/:id/cancel` (src/routes/purchase.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice pembelian (UUID). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pi_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Pembelian <id>? Jurnal dan stok terkait akan dibalik.\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.\n\n**Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Invoice sudah dibatalkan\n- 400: Invoice sudah lunas\n- 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu\n- 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)\n",
       "example": {
         "tool": "pi_cancel",
         "args": {
@@ -35441,7 +35522,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -35450,6 +35532,13 @@
           "type": "string",
           "required": true,
           "description": "ID invoice."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice."
         }
       ],
       "output": {
@@ -35469,12 +35558,14 @@
         "400: invoice sudah lunas.",
         "400: ada pembayaran teralokasi — batalkan pembayaran dulu.",
         "400: ada alokasi uang muka aktif — batalkan alokasi dulu.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### si_cancel\n\n**Ringkasan:** Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales/invoices/:id/cancel` (src/routes/sales.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"si_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.\n\n**Teks konfirmasi:** Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: invoice sudah lunas.\n- 400: ada pembayaran teralokasi — batalkan pembayaran dulu.\n- 400: ada alokasi uang muka aktif — batalkan alokasi dulu.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
+      "doc": "### si_cancel\n\n**Ringkasan:** Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales/invoices/:id/cancel` (src/routes/sales.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice. |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"si_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.\n\n**Teks konfirmasi:** Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: invoice sudah lunas.\n- 400: ada pembayaran teralokasi — batalkan pembayaran dulu.\n- 400: ada alokasi uang muka aktif — batalkan alokasi dulu.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n",
       "example": {
         "tool": "si_cancel",
         "args": {
@@ -36940,7 +37031,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -36949,6 +37041,13 @@
           "type": "string",
           "required": true,
           "description": "ID retur."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal retur dan uang muka kreditnya."
         }
       ],
       "output": {
@@ -36967,12 +37066,14 @@
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### sret_cancel\n\n**Ringkasan:** Membatalkan Retur Penjualan: jurnal retur & jurnal HPP dibalik, stok masuk dibatalkan, kredit pelanggan hasil retur dibalik. Ditolak bila kredit sudah dipakai di faktur lain.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_return` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales-returns/:id/cancel` (src/routes/salesReturns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID retur. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sret_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Retur Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.\n\n**Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.\n- 400: retur sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
+      "doc": "### sret_cancel\n\n**Ringkasan:** Membatalkan Retur Penjualan: jurnal retur & jurnal HPP dibalik, stok masuk dibatalkan, kredit pelanggan hasil retur dibalik. Ditolak bila kredit sudah dipakai di faktur lain.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_return` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales-returns/:id/cancel` (src/routes/salesReturns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID retur. |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal retur dan uang muka kreditnya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sret_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Retur Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.\n\n**Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.\n- 400: retur sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n",
       "example": {
         "tool": "sret_cancel",
         "args": {
@@ -37370,7 +37471,8 @@
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock"
+        "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
       ],
       "related": [
         "stf_get"
@@ -37380,7 +37482,7 @@
         "User memiliki capability doc.cancel.",
         "Barang yang diterima gudang tujuan belum dipakai."
       ],
-      "doc": "### stf_cancel\n\n**Ringkasan:** Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Ditolak bila batch TransferIn sudah dipakai pergerakan lain (sourceMovementId) atau stok gudang tujuan kurang dari qty transfer. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `stock_transfer` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/stock-transfers/:id/cancel` (src/routes/stockTransfers.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID transfer. |\n| `allowNegativeStock` | body | `boolean` | tidak | Paksa batal walau stok gudang tujuan jadi minus. Butuh capability inventory.negative_stock dan negativeStockReason minimal 10 karakter. Tidak melewati penolakan batch terpakai. |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus (wajib bila allowNegativeStock). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"stf_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan transfer stok <id>? Stok akan dikembalikan ke gudang asal.\"\n}\n```\n\n**Isi hasil:** Transfer dengan status Cancelled.\n\n**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).\n\n**Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.\n\n**Prasyarat**\n\n- Tahun buku tanggal transfer masih terbuka.\n- User memiliki capability doc.cancel.\n- Barang yang diterima gudang tujuan belum dipakai.\n\n**Error umum**\n\n- 400: transfer sudah dibatalkan\n- 404: transfer tidak ditemukan\n- 400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu\n- 400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock\n\n**Tool terkait:** [`stf_get`](#stf_get)\n",
+      "doc": "### stf_cancel\n\n**Ringkasan:** Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Ditolak bila batch TransferIn sudah dipakai pergerakan lain (sourceMovementId) atau stok gudang tujuan kurang dari qty transfer. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `stock_transfer` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/stock-transfers/:id/cancel` (src/routes/stockTransfers.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID transfer. |\n| `allowNegativeStock` | body | `boolean` | tidak | Paksa batal walau stok gudang tujuan jadi minus. Butuh capability inventory.negative_stock dan negativeStockReason minimal 10 karakter. Tidak melewati penolakan batch terpakai. |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus (wajib bila allowNegativeStock). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"stf_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan transfer stok <id>? Stok akan dikembalikan ke gudang asal.\"\n}\n```\n\n**Isi hasil:** Transfer dengan status Cancelled.\n\n**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).\n\n**Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.\n\n**Prasyarat**\n\n- Tahun buku tanggal transfer masih terbuka.\n- User memiliki capability doc.cancel.\n- Barang yang diterima gudang tujuan belum dipakai.\n\n**Error umum**\n\n- 400: transfer sudah dibatalkan\n- 404: transfer tidak ditemukan\n- 400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu\n- 400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n\n**Tool terkait:** [`stf_get`](#stf_get)\n",
       "example": {
         "tool": "stf_cancel",
         "args": {
@@ -39284,7 +39386,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -39293,6 +39396,13 @@
           "type": "string",
           "required": true,
           "description": "ID VendorDepositApplication (bukan ID uang muka)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi."
         }
       ],
       "output": {
@@ -39313,7 +39423,9 @@
         "400: Aplikasi uang muka tidak ditemukan",
         "400: Aplikasi sudah dibatalkan",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku"
+        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "vdep_apply",
@@ -39322,7 +39434,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### vdep_apply_cancel\n\n**Ringkasan:** Membatalkan satu aplikasi uang muka vendor ke invoice: jurnal aplikasi dibalik, outstanding faktur dan saldo uang muka dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/vendor-deposits/apply/:id/cancel` (src/routes/vendorDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID VendorDepositApplication (bukan ID uang muka). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"vdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan aplikasi uang muka <id>? Hutang faktur akan dipulihkan.\"\n}\n```\n\n**Isi hasil:** Aplikasi uang muka yang dibatalkan.\n\n**Efek pembukuan/stok:** Reverse jurnal aplikasi (DR Hutang Usaha 2.1.1 / CR Uang Muka Vendor 1.3 dibalik): outstanding PI naik kembali, depositBalance pemasok naik, aplikasi ditandai isCancelled.\n\n**Teks konfirmasi:** Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Aplikasi uang muka tidak ditemukan\n- 400: Aplikasi sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n\n**Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)\n",
+      "doc": "### vdep_apply_cancel\n\n**Ringkasan:** Membatalkan satu aplikasi uang muka vendor ke invoice: jurnal aplikasi dibalik, outstanding faktur dan saldo uang muka dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/vendor-deposits/apply/:id/cancel` (src/routes/vendorDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID VendorDepositApplication (bukan ID uang muka). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"vdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan aplikasi uang muka <id>? Hutang faktur akan dipulihkan.\"\n}\n```\n\n**Isi hasil:** Aplikasi uang muka yang dibatalkan.\n\n**Efek pembukuan/stok:** Reverse jurnal aplikasi (DR Hutang Usaha 2.1.1 / CR Uang Muka Vendor 1.3 dibalik): outstanding PI naik kembali, depositBalance pemasok naik, aplikasi ditandai isCancelled.\n\n**Teks konfirmasi:** Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Aplikasi uang muka tidak ditemukan\n- 400: Aplikasi sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)\n",
       "example": {
         "tool": "vdep_apply_cancel",
         "args": {
@@ -39387,7 +39499,8 @@
         "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -39396,6 +39509,13 @@
           "type": "string",
           "required": true,
           "description": "ID pembayaran uang muka vendor (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya."
         }
       ],
       "output": {
@@ -39417,7 +39537,9 @@
         "400: Bukan tipe uang muka vendor",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
         "vdep_apply_cancel",
@@ -39428,7 +39550,7 @@
         "Belum ada refund (refundedAmount = 0).",
         "User memiliki capability doc.cancel."
       ],
-      "doc": "### vdep_cancel\n\n**Ringkasan:** Membatalkan uang muka vendor: jurnal pembukuan dibalik. Ditolak bila uang muka sudah diaplikasikan ke Invoice (batalkan aplikasinya dulu) atau sudah pernah di-refund. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/vendor-deposits/:id/cancel` (src/routes/vendorDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID pembayaran uang muka vendor (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"vdep_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang muka vendor <id>? Jurnal kas/bank terkait akan dibalik.\"\n}\n```\n\n**Isi hasil:** Uang muka dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse jurnal uang muka (asal: DR Uang Muka Vendor 1.3 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dan depositBalance pemasok dibalik.\n\n**Teks konfirmasi:** Batalkan uang muka vendor {id}? Jurnal kas/bank terkait akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n- Belum ada refund (refundedAmount = 0).\n- User memiliki capability doc.cancel.\n\n**Error umum**\n\n- 400: Deposit sudah dibatalkan\n- 400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu\n- 400: Bukan tipe uang muka vendor\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund\n- 403: tanpa capability doc.cancel\n\n**Tool terkait:** [`vdep_apply_cancel`](#vdep_apply_cancel), [`pay_record`](kas-bank.md#pay_record)\n",
+      "doc": "### vdep_cancel\n\n**Ringkasan:** Membatalkan uang muka vendor: jurnal pembukuan dibalik. Ditolak bila uang muka sudah diaplikasikan ke Invoice (batalkan aplikasinya dulu) atau sudah pernah di-refund. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/vendor-deposits/:id/cancel` (src/routes/vendorDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID pembayaran uang muka vendor (UUID). |\n| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"vdep_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang muka vendor <id>? Jurnal kas/bank terkait akan dibalik.\"\n}\n```\n\n**Isi hasil:** Uang muka dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse jurnal uang muka (asal: DR Uang Muka Vendor 1.3 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dan depositBalance pemasok dibalik.\n\n**Teks konfirmasi:** Batalkan uang muka vendor {id}? Jurnal kas/bank terkait akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n- Belum ada refund (refundedAmount = 0).\n- User memiliki capability doc.cancel.\n\n**Error umum**\n\n- 400: Deposit sudah dibatalkan\n- 400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu\n- 400: Bukan tipe uang muka vendor\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund\n- 403: tanpa capability doc.cancel\n- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.\n- 400: alasan pembatalan maksimal 500 karakter\n\n**Tool terkait:** [`vdep_apply_cancel`](#vdep_apply_cancel), [`pay_record`](kas-bank.md#pay_record)\n",
       "example": {
         "tool": "vdep_cancel",
         "args": {

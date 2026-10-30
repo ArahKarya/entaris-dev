@@ -164,6 +164,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | `id` | path | `string` | ya | ID STT (UUID). |
 | `allowNegativeStock` | body | `boolean` | tidak | true = abaikan guard stok minus saat membalikkan stok (override Admin). |
 | `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di STT dan jurnal aslinya. |
 
 **Contoh pemanggilan**
 
@@ -208,6 +209,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: stok tidak cukup untuk dibalikkan
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)
 
@@ -453,6 +456,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID invoice pembelian (UUID). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice. |
 
 **Contoh pemanggilan**
 
@@ -494,6 +498,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)
 
@@ -1473,6 +1479,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID VendorDepositApplication (bukan ID uang muka). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal aplikasi. |
 
 **Contoh pemanggilan**
 
@@ -1513,6 +1520,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Aplikasi sudah dibatalkan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)
 
@@ -1571,6 +1580,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID pembayaran uang muka vendor (UUID). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang muka dan jurnalnya. |
 
 **Contoh pemanggilan**
 
@@ -1615,6 +1625,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
 - 403: tanpa capability doc.cancel
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`vdep_apply_cancel`](#vdep_apply_cancel), [`pay_record`](kas-bank.md#pay_record)
 

@@ -788,6 +788,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID pembayaran (UUID). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di pembayaran dan jurnalnya. |
 
 **Contoh pemanggilan**
 
@@ -828,6 +829,8 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Gunakan endpoint Uang Muka untuk membatalkan deposit
 - 400: Refund belum mendukung cancel otomatis
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pay_get`](#pay_get), [`vdep_cancel`](pembelian.md#vdep_cancel), [`pi_cancel`](pembelian.md#pi_cancel)
 
@@ -1151,6 +1154,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID uang jaminan (UUID). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di uang jaminan dan jurnalnya. |
 
 **Contoh pemanggilan**
 
@@ -1190,6 +1194,8 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Uang jaminan sudah dibatalkan
 - 400: Sudah ada settlement aktif - batalkan settlement dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)
 
@@ -1435,6 +1441,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID settlement (bukan ID jaminan). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di settlement dan jurnalnya. |
 
 **Contoh pemanggilan**
 
@@ -1474,6 +1481,8 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Settlement sudah dibatalkan
 - 400: Uang jaminan induk sudah dibatalkan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)
 

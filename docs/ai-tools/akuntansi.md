@@ -1249,6 +1249,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal. |
 
 **Contoh pemanggilan**
 
@@ -1291,6 +1292,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400: jurnal terkait pembayaran/dokumen sumber
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`je_get`](#je_get), [`je_create`](#je_create)
 
