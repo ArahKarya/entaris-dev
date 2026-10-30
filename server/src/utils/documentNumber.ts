@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { businessYearMonth } from './businessDate';
 
 /**
  * Generates a sequential document number using advisory locks to prevent
@@ -15,9 +16,9 @@ export async function generateDocumentNumber(
   date: Date,
   fiscalYearId: string
 ): Promise<string> {
-  const year = date.getFullYear();
-  const month = date.getMonth(); // 0-indexed
-  const monthStr = String(month + 1).padStart(2, '0');
+  // Series month = business-day month (WIB), independent of the host TZ.
+  const { year, month } = businessYearMonth(date);
+  const monthStr = String(month).padStart(2, '0');
   const yearMonth = `${year}${monthStr}`;
 
   // Use a deterministic advisory lock key per (prefix, yearMonth)

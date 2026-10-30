@@ -303,6 +303,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "ID baris wajib diisi.": "Line ID is required.",
   "Minimal satu baris.": "At least one line.",
   "Tahun fiskal tidak ditemukan atau sudah ditutup untuk tanggal ini.": "Fiscal year not found or already closed for this date.",
+  "Tanggal mulai harus berformat YYYY-MM-DD.": "Start date must use the YYYY-MM-DD format.",
+  "Tanggal selesai harus berformat YYYY-MM-DD.": "End date must use the YYYY-MM-DD format.",
   "Ada {0} kesalahan pada baris: {1}{2}": "There are {0} row errors: {1}{2}",
   "Posting dibatalkan: {0} baris bermasalah.": "Posting cancelled: {0} rows have problems.",
   "File \"{0}\" kosong.": "File \"{0}\" is empty.",

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
+import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { adjustWarehouseStock, resolveWarehouseId, getWarehouseStockMap } from '../utils/warehouseStock';
 import { recomputeDeliveredQtyInTx, relinkDoItemsToSOInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
@@ -136,10 +137,7 @@ export async function editDeliveryOrderInTx(
     },
   });
 
-  const fiscalYear = await tx.fiscalYear.findFirst({
-    where: { isClosed: false, startDate: { lte: txDate }, endDate: { gte: txDate } },
-  });
-  if (!fiscalYear) throw new BusinessError('Tidak ada tahun fiskal aktif untuk tanggal transaksi ini.');
+  const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
   // Counter account the invoice will post COGS against; stored on each Out movement.
   const cogsAccountId = await resolveCogsAccountId(tx);

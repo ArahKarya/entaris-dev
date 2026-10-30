@@ -441,8 +441,9 @@ export const UpdateCompanySettingsSchema = z.object({
 // Fiscal Year
 export const CreateFiscalYearSchema = z.object({
   name: z.string().min(1, 'Nama tahun fiskal wajib diisi.'),
-  startDate: z.string().min(1, 'Tanggal mulai wajib diisi.'),
-  endDate: z.string().min(1, 'Tanggal selesai wajib diisi.'),
+  // Date-only, so the year is stored at UTC midnight of its first/last day (see getOpenFiscalYear).
+  startDate: z.string().min(1, 'Tanggal mulai wajib diisi.').regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal mulai harus berformat YYYY-MM-DD.'),
+  endDate: z.string().min(1, 'Tanggal selesai wajib diisi.').regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal selesai harus berformat YYYY-MM-DD.'),
 });
 
 // Inventory Item

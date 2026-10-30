@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
+import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { calcWeightedAverage } from '../utils/weightedAverage';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
 import { systemAccounts } from './systemAccounts';
@@ -75,10 +76,7 @@ export async function submitProductionRunInTx(
   userId: string,
 ) {
   const txDate = new Date(body.date);
-  const fiscalYear = await tx.fiscalYear.findFirst({
-    where: { isClosed: false, startDate: { lte: txDate }, endDate: { gte: txDate } },
-  });
-  if (!fiscalYear) throw new BusinessError('Tidak ada tahun fiskal aktif untuk tanggal transaksi ini.');
+  const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
   // Pre-fetch all referenced items in one round-trip.
   const allItemIds = [...body.inputs.map((i) => i.itemId), ...body.outputs.map((o) => o.itemId)];
