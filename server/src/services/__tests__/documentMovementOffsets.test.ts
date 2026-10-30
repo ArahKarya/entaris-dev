@@ -33,7 +33,7 @@ vi.mock('../salesOrderDelivery', () => ({
 
 import { submitGoodsReceiptInTx } from '../goodsReceiptSubmit';
 import { submitDeliveryOrderInTx } from '../deliveryOrderSubmit';
-import { editDeliveryOrderInTx } from '../deliveryOrderEdit';
+import { editDeliveryOrderInTx, DELIVERY_ORDER_MONTH_CHANGE } from '../deliveryOrderEdit';
 import { submitSalesReturnInTx } from '../salesReturnSubmit';
 import { makeAutoTx } from '../../__tests__/helpers/autoTx';
 
@@ -82,8 +82,13 @@ describe('delivery order movements', () => {
     'inventoryStock.findUnique': () => ({ currentStock: '100' }),
     'account.findFirst': () => (hppBeras ? { id: 'acc-5.1' } : null),
     'deliveryOrder.findUniqueOrThrow': () => ({ id: 'do-1', items: [] }),
-    'deliveryOrder.findUnique': () => ({ id: 'do-1', doNumber: 'DO-1', status: 'Submitted', invoiceId: null, items: [] }),
-    'fiscalYear.findFirst': () => ({ id: 'fy-2026' }),
+    'deliveryOrder.findUnique': () => ({
+      id: 'do-1', doNumber: 'DO-1', status: 'Submitted', invoiceId: null, items: [],
+      date: new Date('2026-10-03'), fiscalYearId: 'fy-2026',
+    }),
+    'fiscalYear.findFirst': () => ({ id: 'fy-2026', name: '2026', isClosed: false }),
+    // assertPeriodOpen's FOR SHARE read of the fiscal-year row.
+    $queryRaw: () => [{ is_closed: false }],
   });
   const body = {
     date: '2026-10-10',
@@ -107,6 +112,27 @@ describe('delivery order movements', () => {
     const { tx, fn } = makeAutoTx(doHandlers(true));
     await editDeliveryOrderInTx(tx, 'do-1', body, 'u1');
     expect(movementData(fn)[0]).toMatchObject({ referenceType: 'DeliveryOrder', offsetAccountId: 'acc-5.1' });
+  });
+
+  it('edit moves the header fiscal year with the date', async () => {
+    const { tx, fn } = makeAutoTx(doHandlers(true));
+    await editDeliveryOrderInTx(tx, 'do-1', body, 'u1');
+    expect(fn('deliveryOrder.update').mock.calls[0]![0].data).toMatchObject({ date: new Date('2026-10-10'), fiscalYearId: 'fy-2026' });
+  });
+
+  it('edit rejects moving the note to another month, before touching stock', async () => {
+    const { tx, fn } = makeAutoTx(doHandlers(true));
+    await expect(editDeliveryOrderInTx(tx, 'do-1', { ...body, date: '2026-11-02' }, 'u1')).rejects.toMatchObject({
+      code: DELIVERY_ORDER_MONTH_CHANGE,
+    });
+    expect(fn('stockMovement.update')).not.toHaveBeenCalled();
+    expect(fn('deliveryOrder.update')).not.toHaveBeenCalled();
+  });
+
+  it('edit rejects a note whose date is in a closed fiscal year', async () => {
+    const { tx, fn } = makeAutoTx({ ...doHandlers(true), $queryRaw: () => [{ is_closed: true }] });
+    await expect(editDeliveryOrderInTx(tx, 'do-1', body, 'u1')).rejects.toMatchObject({ code: 'PERIOD_CLOSED' });
+    expect(fn('deliveryOrderItem.deleteMany')).not.toHaveBeenCalled();
   });
 
   it('no counter account for a zero-value line', async () => {

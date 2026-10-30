@@ -2,6 +2,7 @@ import { unlinkTemporaryNotesFromDoInTx } from './temporaryDeliveryNote';
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { recomputeDeliveredQtyInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
 
@@ -30,6 +31,8 @@ export async function cancelDeliveryOrderInTx(
   if (deliveryOrder.invoiceId) {
     throw new BusinessError('Batalkan invoice terkait dulu sebelum batalkan surat jalan.');
   }
+  // By date: the stored fiscal year can be stale after an older edit moved the note.
+  await assertPeriodOpen(tx, { date: deliveryOrder.date }, 'surat jalan');
 
   for (const line of deliveryOrder.items) {
     if (!line.stockMovementId) continue;
