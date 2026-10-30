@@ -815,6 +815,9 @@ model Payment {
   fiscalYear                  FiscalYear                   @relation(fields: [fiscalYearId], references: [id])
   submittedAt                 DateTime?                    @map("submitted_at")
   cancelledAt                 DateTime?                    @map("cancelled_at")
+  /// Plain user id, no relation (same as JournalEntry.cancelledById).
+  cancelledById               String?                      @map("cancelled_by_id")
+  cancelReason                String?                      @map("cancel_reason")
   createdAt                   DateTime                     @default(now()) @map("created_at")
   updatedAt                   DateTime                     @updatedAt @map("updated_at")
 
@@ -2143,6 +2146,9 @@ model GoodsReceipt {
   user             User               @relation("GoodsReceiptCreator", fields: [createdBy], references: [id])
   submittedAt      DateTime?          @map("submitted_at")
   cancelledAt      DateTime?          @map("cancelled_at")
+  /// Plain user id, no relation (same as JournalEntry.cancelledById).
+  cancelledById    String?            @map("cancelled_by_id")
+  cancelReason     String?            @map("cancel_reason")
   createdAt        DateTime           @default(now()) @map("created_at")
   updatedAt        DateTime           @updatedAt @map("updated_at")
 
@@ -2285,6 +2291,9 @@ model ProjectGuarantee {
   settlements        ProjectGuaranteeSettlement[]
   submittedAt        DateTime?                    @map("submitted_at")
   cancelledAt        DateTime?                    @map("cancelled_at")
+  /// Plain user id, no relation (same as JournalEntry.cancelledById).
+  cancelledById      String?                      @map("cancelled_by_id")
+  cancelReason       String?                      @map("cancel_reason")
   createdAt          DateTime                     @default(now()) @map("created_at")
   updatedAt          DateTime                     @updatedAt @map("updated_at")
 
@@ -2311,6 +2320,9 @@ model ProjectGuaranteeSettlement {
   notes            String?
   isCancelled      Boolean          @default(false) @map("is_cancelled")
   cancelledAt      DateTime?        @map("cancelled_at")
+  /// Plain user id, no relation (same as JournalEntry.cancelledById).
+  cancelledById    String?          @map("cancelled_by_id")
+  cancelReason     String?          @map("cancel_reason")
   createdBy        String           @map("created_by")
   createdAt        DateTime         @default(now()) @map("created_at")
 
