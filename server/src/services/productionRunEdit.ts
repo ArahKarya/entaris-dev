@@ -6,7 +6,7 @@ import { cancelJournalsByPrefix } from '../utils/journalCancel';
 import { journalFamilyWhere } from '../utils/journalFamily';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
 import { generateDocumentNumber } from '../utils/documentNumber';
-import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { calcWeightedAverage } from '../utils/weightedAverage';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
@@ -36,6 +36,13 @@ export async function editProductionRunInTx(
   });
   if (!oldRun) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (oldRun.isCancelled) throw new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.');
+
+  // Old journals and auto-settle are voided and new ones posted on body.date: both periods must be
+  // open. Checked before anything is reversed, and again here when an approved edit is executed.
+  const txDate = new Date(body.date);
+  if (isNaN(txDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
+  await assertPeriodsOpen(tx, [{ date: oldRun.date }, { fiscalYearId: oldRun.fiscalYearId }], 'produksi');
+  const fiscalYear = await assertPeriodOpen(tx, { date: txDate }, 'produksi');
 
   const oldMovements = await tx.stockMovement.findMany({
     where: { referenceType: 'ProductionRun', referenceId: runId, isCancelled: false },
@@ -94,9 +101,6 @@ export async function editProductionRunInTx(
   // OEE: clear old downtime + per-machine rows; recreated from the new payload below.
   await tx.productionDowntime.deleteMany({ where: { productionRunId: runId } });
   await tx.productionRunMachine.deleteMany({ where: { productionRunId: runId } });
-
-  const txDate = new Date(body.date);
-  const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
   const allItemIds = [...body.inputs.map((i) => i.itemId), ...body.outputs.map((o) => o.itemId)];
   const allItems = await tx.inventoryItem.findMany({ where: { id: { in: allItemIds } } });

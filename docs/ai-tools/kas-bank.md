@@ -778,8 +778,8 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `payment` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `payment` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/payments/:id/cancel` (src/routes/payments.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1141,8 +1141,8 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `project_guarantee` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `PATCH /api/project-guarantees/:id/cancel` (src/routes/projectGuarantees.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1425,8 +1425,8 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `project_guarantee` / `edit`, capability `doc.cancel`)
-- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).
+- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)
+- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).
 - **Handler:** `POST /api/project-guarantees/settlements/:id/cancel` (src/routes/projectGuarantees.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 

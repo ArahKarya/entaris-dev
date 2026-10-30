@@ -679,7 +679,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `inventory` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `inventory` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/inventory/movements/:id/cancel` (src/routes/inventory/movements.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -722,6 +722,7 @@ Aturan wajib:
 
 - User memiliki capability doc.cancel.
 - Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.
+- Tahun buku tanggal pergerakan dan jurnalnya masih terbuka.
 
 **Error umum**
 
@@ -729,6 +730,7 @@ Aturan wajib:
 - 400: dari STT tidak dapat dibatalkan per baris
 - 400: stok tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_create`](#inv_mov_create)
 
@@ -955,7 +957,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `inventory` / `edit`)
+- **Roles & izin:** Admin, Accountant (modul `inventory` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/inventory/movements/:id` (src/routes/inventory/movements.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1009,13 +1011,17 @@ Aturan wajib:
 
 - Pergerakan belum dibatalkan.
 - Bukan berasal dari STT/GoodsReceipt atau ProductionRun.
-- Tahun fiskal tanggal baru terbuka.
+- User memiliki capability doc.cancel.
+- Tahun buku tanggal lama dan tanggal baru masih terbuka.
 
 **Error umum**
 
 - 400: gerakan sudah dibatalkan
 - 400: gerakan dari STT/produksi tidak dapat diedit per baris
 - 400: pembalikan stok lama membuat stok negatif
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
+- 403: tanpa capability doc.cancel
 
 **Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_cancel`](#inv_mov_cancel)
 
@@ -1025,7 +1031,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `stock_opname` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `stock_opname` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/stock-opname/:id/cancel` (src/routes/stockOpname.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1068,12 +1074,14 @@ Aturan wajib:
 
 - User memiliki capability doc.cancel.
 - Stok item saat ini cukup untuk membalik surplus.
+- Tahun buku dokumen dan jurnalnya masih terbuka.
 
 **Error umum**
 
 - 400: stok opname sudah dibatalkan
 - 400: stok item tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`opn_get`](#opn_get)
 
@@ -1287,10 +1295,15 @@ Aturan wajib:
 
 **Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.
 
+**Prasyarat**
+
+- Tahun buku tanggal transfer masih terbuka.
+
 **Error umum**
 
 - 400: transfer sudah dibatalkan
 - 404: transfer tidak ditemukan
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`stf_get`](#stf_get)
 
@@ -1630,7 +1643,7 @@ Aturan wajib:
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `warehouse` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `warehouse` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/warehouses/:id` (src/routes/warehouses.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 

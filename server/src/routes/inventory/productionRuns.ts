@@ -223,7 +223,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
     // Approval gate: edit mengubah stok/GL/WAC → non-bypass hanya mengantrekan.
     if (await needsApproval(req.user!.role)) {
       const q = await queueEditApproval(prisma, { documentType: 'ProductionRunEdit', targetId: id, body, rawBody: req.body, userId: req.user!.userId });
-      return q.ok ? res.status(q.status).json(q.body) : res.status(q.status).json({ error: q.error });
+      return q.ok ? res.status(q.status).json(q.body) : res.status(q.status).json({ error: q.error, ...(q.code ? { code: q.code } : {}) });
     }
     const result = await prisma.$transaction(
       (tx) => editProductionRunInTx(tx, id, body, req.user!.userId),

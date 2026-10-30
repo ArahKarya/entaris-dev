@@ -51,7 +51,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`audit_list`](sistem.md#audit_list) | sistem | read | - | Admin | `GET /api/audit-logs` |
 | [`audit_summary`](sistem.md#audit_summary) | sistem | read | - | Admin | `GET /api/audit-logs/summary` |
 | [`cdep_apply`](penjualan.md#cdep_apply) | penjualan | critical | tidak | Admin, Accountant | `POST /api/customer-deposits/apply` |
-| [`cdep_apply_cancel`](penjualan.md#cdep_apply_cancel) | penjualan | critical | tidak | Admin | `POST /api/customer-deposits/apply/:id/cancel` |
+| [`cdep_apply_cancel`](penjualan.md#cdep_apply_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/customer-deposits/apply/:id/cancel` |
 | [`cdep_balance`](penjualan.md#cdep_balance) | penjualan | read | - | Admin, Accountant | `GET /api/customer-deposits/balance/:partyId` |
 | [`cdep_cancel`](penjualan.md#cdep_cancel) | penjualan | critical | tidak | Admin, Accountant | `PATCH /api/customer-deposits/:id/cancel` |
 | [`cdep_list`](penjualan.md#cdep_list) | penjualan | read | - | Admin, Accountant | `GET /api/customer-deposits` |
@@ -84,7 +84,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`crm_sales_users`](penjualan.md#crm_sales_users) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/sales-users` |
 | [`crm_settings_get`](penjualan.md#crm_settings_get) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/crm/settings` |
 | [`crm_settings_update`](penjualan.md#crm_settings_update) | penjualan | critical | tidak | Admin | `PUT /api/crm/settings` |
-| [`do_cancel`](penjualan.md#do_cancel) | penjualan | critical | tidak | Admin | `POST /api/delivery-orders/:id/cancel` |
+| [`do_cancel`](penjualan.md#do_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/delivery-orders/:id/cancel` |
 | [`do_create`](penjualan.md#do_create) | penjualan | critical | tidak | Admin, Accountant, StaffProduksi | `POST /api/delivery-orders` |
 | [`do_from_invoice`](penjualan.md#do_from_invoice) | penjualan | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/delivery-orders/from-invoice/:invoiceId` |
 | [`do_get`](penjualan.md#do_get) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/delivery-orders/:id` |
@@ -256,7 +256,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`gmr_submit`](aset-umum.md#gmr_submit) | aset-umum | write | ya | Admin | `PATCH /api/ga/material-requests/:id/submit` |
 | [`gmr_summary`](aset-umum.md#gmr_summary) | aset-umum | read | - | Admin | `GET /api/ga/material-requests/summary` |
 | [`gmr_update`](aset-umum.md#gmr_update) | aset-umum | write | ya | Admin | `PUT /api/ga/material-requests/:id` |
-| [`gr_cancel`](pembelian.md#gr_cancel) | pembelian | critical | tidak | Admin | `POST /api/goods-receipts/:id/cancel` |
+| [`gr_cancel`](pembelian.md#gr_cancel) | pembelian | critical | tidak | Admin, Accountant | `POST /api/goods-receipts/:id/cancel` |
 | [`gr_create`](pembelian.md#gr_create) | pembelian | critical | tidak | Admin, Accountant, StaffProduksi | `POST /api/goods-receipts` |
 | [`gr_get`](pembelian.md#gr_get) | pembelian | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/goods-receipts/:id` |
 | [`gr_list`](pembelian.md#gr_list) | pembelian | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/goods-receipts` |
@@ -285,12 +285,12 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`inv_item_update`](persediaan.md#inv_item_update) | persediaan | write | tidak | Admin, Accountant, StaffProduksi | `PUT /api/inventory/items/:id` |
 | [`inv_items_list`](persediaan.md#inv_items_list) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/items` |
 | [`inv_items_summary`](persediaan.md#inv_items_summary) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/items/summary` |
-| [`inv_mov_cancel`](persediaan.md#inv_mov_cancel) | persediaan | critical | tidak | Admin | `PUT /api/inventory/movements/:id/cancel` |
+| [`inv_mov_cancel`](persediaan.md#inv_mov_cancel) | persediaan | critical | tidak | Admin, Accountant | `PUT /api/inventory/movements/:id/cancel` |
 | [`inv_mov_create`](persediaan.md#inv_mov_create) | persediaan | critical | tidak | Admin, Accountant, StaffProduksi | `POST /api/inventory/movements` |
 | [`inv_mov_get`](persediaan.md#inv_mov_get) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/movements/:id` |
 | [`inv_mov_list`](persediaan.md#inv_mov_list) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/movements` |
 | [`inv_mov_summary`](persediaan.md#inv_mov_summary) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/movements/summary` |
-| [`inv_mov_update`](persediaan.md#inv_mov_update) | persediaan | critical | tidak | Admin, Accountant, StaffProduksi | `PUT /api/inventory/movements/:id` |
+| [`inv_mov_update`](persediaan.md#inv_mov_update) | persediaan | critical | tidak | Admin, Accountant | `PUT /api/inventory/movements/:id` |
 | [`je_cancel`](akuntansi.md#je_cancel) | akuntansi | critical | tidak | Admin, Accountant | `PATCH /api/journals/:id/cancel` |
 | [`je_create`](akuntansi.md#je_create) | akuntansi | critical | tidak | Admin, Accountant | `POST /api/journals` |
 | [`je_get`](akuntansi.md#je_get) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/journals/:id` |
@@ -315,19 +315,19 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`notif_read_all`](sistem.md#notif_read_all) | sistem | write | tidak | Admin, Accountant, StaffProduksi, Viewer | `PATCH /api/notifications/read-all` |
 | [`notif_types`](sistem.md#notif_types) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/notifications/types` |
 | [`notif_unread_count`](sistem.md#notif_unread_count) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/notifications/unread-count` |
-| [`opn_cancel`](persediaan.md#opn_cancel) | persediaan | critical | tidak | Admin | `PUT /api/stock-opname/:id/cancel` |
+| [`opn_cancel`](persediaan.md#opn_cancel) | persediaan | critical | tidak | Admin, Accountant | `PUT /api/stock-opname/:id/cancel` |
 | [`opn_create`](persediaan.md#opn_create) | persediaan | critical | tidak | Admin, Accountant | `POST /api/stock-opname` |
 | [`opn_get`](persediaan.md#opn_get) | persediaan | read | - | Admin, Accountant | `GET /api/stock-opname/:id` |
 | [`opn_list`](persediaan.md#opn_list) | persediaan | read | - | Admin, Accountant | `GET /api/stock-opname` |
 | [`party_create`](master-data.md#party_create) | master-data | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/parties` |
 | [`party_dashboard`](master-data.md#party_dashboard) | master-data | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/parties/dashboard` |
-| [`party_delete`](master-data.md#party_delete) | master-data | critical | tidak | Admin | `DELETE /api/parties/:id` |
+| [`party_delete`](master-data.md#party_delete) | master-data | critical | tidak | Admin, Accountant | `DELETE /api/parties/:id` |
 | [`party_get`](master-data.md#party_get) | master-data | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/parties/:id` |
 | [`party_search`](master-data.md#party_search) | master-data | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/parties` |
 | [`party_similar`](master-data.md#party_similar) | master-data | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/parties/similar` |
 | [`party_summary`](master-data.md#party_summary) | master-data | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/parties/summary` |
 | [`party_update`](master-data.md#party_update) | master-data | write | tidak | Admin, Accountant, StaffProduksi | `PUT /api/parties/:id` |
-| [`pay_cancel`](kas-bank.md#pay_cancel) | kas-bank | critical | tidak | Admin | `POST /api/payments/:id/cancel` |
+| [`pay_cancel`](kas-bank.md#pay_cancel) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/payments/:id/cancel` |
 | [`pay_cash_journals`](kas-bank.md#pay_cash_journals) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/payments/cash-journals` |
 | [`pay_get`](kas-bank.md#pay_get) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/payments/:id` |
 | [`pay_ledger`](kas-bank.md#pay_ledger) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/payments/ledger` |
@@ -362,14 +362,14 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`payreqtype_delete`](pengajuan-pembayaran.md#payreqtype_delete) | pengajuan-pembayaran | write | tidak | Admin | `DELETE /api/payment-request-types/:id` |
 | [`payreqtype_list`](pengajuan-pembayaran.md#payreqtype_list) | pengajuan-pembayaran | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/payment-request-types` |
 | [`payreqtype_update`](pengajuan-pembayaran.md#payreqtype_update) | pengajuan-pembayaran | write | tidak | Admin | `PUT /api/payment-request-types/:id` |
-| [`pg_cancel`](kas-bank.md#pg_cancel) | kas-bank | critical | tidak | Admin | `PATCH /api/project-guarantees/:id/cancel` |
+| [`pg_cancel`](kas-bank.md#pg_cancel) | kas-bank | critical | tidak | Admin, Accountant | `PATCH /api/project-guarantees/:id/cancel` |
 | [`pg_create`](kas-bank.md#pg_create) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/project-guarantees` |
 | [`pg_get`](kas-bank.md#pg_get) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/project-guarantees/:id` |
 | [`pg_list`](kas-bank.md#pg_list) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/project-guarantees` |
 | [`pg_settle`](kas-bank.md#pg_settle) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/project-guarantees/:id/settle` |
-| [`pg_settlement_cancel`](kas-bank.md#pg_settlement_cancel) | kas-bank | critical | tidak | Admin | `POST /api/project-guarantees/settlements/:id/cancel` |
+| [`pg_settlement_cancel`](kas-bank.md#pg_settlement_cancel) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/project-guarantees/settlements/:id/cancel` |
 | [`pg_summary`](kas-bank.md#pg_summary) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/project-guarantees/summary` |
-| [`pi_cancel`](pembelian.md#pi_cancel) | pembelian | critical | tidak | Admin | `POST /api/purchase/invoices/:id/cancel` |
+| [`pi_cancel`](pembelian.md#pi_cancel) | pembelian | critical | tidak | Admin, Accountant | `POST /api/purchase/invoices/:id/cancel` |
 | [`pi_create`](pembelian.md#pi_create) | pembelian | critical | ya | Admin, Accountant, StaffProduksi | `POST /api/purchase/invoices` |
 | [`pi_get`](pembelian.md#pi_get) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/purchase/invoices/:id` |
 | [`pi_list`](pembelian.md#pi_list) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/purchase/invoices` |
@@ -377,8 +377,8 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`pi_revise_price`](pembelian.md#pi_revise_price) | pembelian | critical | ya | Admin, Accountant, StaffProduksi | `POST /api/purchase/invoices/:id/revise-price` |
 | [`pi_summary`](pembelian.md#pi_summary) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/purchase/invoices/summary` |
 | [`pi_update`](pembelian.md#pi_update) | pembelian | write | tidak | Admin, Accountant, StaffProduksi | `PUT /api/purchase/invoices/:id` |
-| [`po_cancel`](pembelian.md#po_cancel) | pembelian | critical | tidak | Admin | `POST /api/purchase-orders/:id/cancel` |
-| [`po_close`](pembelian.md#po_close) | pembelian | critical | tidak | Admin | `POST /api/purchase-orders/:id/close` |
+| [`po_cancel`](pembelian.md#po_cancel) | pembelian | critical | tidak | Admin, Accountant | `POST /api/purchase-orders/:id/cancel` |
+| [`po_close`](pembelian.md#po_close) | pembelian | critical | tidak | Admin, Accountant | `POST /api/purchase-orders/:id/close` |
 | [`po_create`](pembelian.md#po_create) | pembelian | write | ya | Admin, Accountant, StaffProduksi | `POST /api/purchase-orders` |
 | [`po_delete`](pembelian.md#po_delete) | pembelian | write | ya | Admin, Accountant, StaffProduksi | `DELETE /api/purchase-orders/:id` |
 | [`po_get`](pembelian.md#po_get) | pembelian | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/purchase-orders/:id` |
@@ -386,7 +386,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`po_submit`](pembelian.md#po_submit) | pembelian | write | ya | Admin, Accountant, StaffProduksi | `POST /api/purchase-orders/:id/submit` |
 | [`po_update`](pembelian.md#po_update) | pembelian | write | ya | Admin, Accountant, StaffProduksi | `PUT /api/purchase-orders/:id` |
 | [`prod_cost_create`](produksi.md#prod_cost_create) | produksi | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/inventory/production-cost-standards` |
-| [`prod_cost_delete`](produksi.md#prod_cost_delete) | produksi | critical | tidak | Admin | `DELETE /api/inventory/production-cost-standards/:id` |
+| [`prod_cost_delete`](produksi.md#prod_cost_delete) | produksi | critical | tidak | Admin, Accountant | `DELETE /api/inventory/production-cost-standards/:id` |
 | [`prod_cost_list`](produksi.md#prod_cost_list) | produksi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/production-cost-standards` |
 | [`prod_cost_update`](produksi.md#prod_cost_update) | produksi | write | tidak | Admin, Accountant, StaffProduksi | `PUT /api/inventory/production-cost-standards/:id` |
 | [`prod_dash_oee`](produksi.md#prod_dash_oee) | produksi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/dashboard/oee` |
@@ -400,15 +400,15 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`prod_draft_post`](produksi.md#prod_draft_post) | produksi | critical | ya | Admin, Accountant, StaffProduksi | `POST /api/inventory/production-runs/drafts/:id/post` |
 | [`prod_draft_update`](produksi.md#prod_draft_update) | produksi | write | ya | Admin, Accountant, StaffProduksi | `PUT /api/inventory/production-runs/drafts/:id` |
 | [`prod_proc_create`](produksi.md#prod_proc_create) | produksi | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/inventory/production-processes` |
-| [`prod_proc_delete`](produksi.md#prod_proc_delete) | produksi | critical | tidak | Admin | `DELETE /api/inventory/production-processes/:id` |
+| [`prod_proc_delete`](produksi.md#prod_proc_delete) | produksi | critical | tidak | Admin, Accountant | `DELETE /api/inventory/production-processes/:id` |
 | [`prod_proc_list`](produksi.md#prod_proc_list) | produksi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/inventory/production-processes` |
 | [`prod_proc_update`](produksi.md#prod_proc_update) | produksi | write | tidak | Admin, Accountant, StaffProduksi | `PUT /api/inventory/production-processes/:id` |
-| [`prod_run_cancel`](produksi.md#prod_run_cancel) | produksi | critical | tidak | Admin | `PUT /api/inventory/production-runs/:id/cancel` |
+| [`prod_run_cancel`](produksi.md#prod_run_cancel) | produksi | critical | tidak | Admin, Accountant | `PUT /api/inventory/production-runs/:id/cancel` |
 | [`prod_run_get`](produksi.md#prod_run_get) | produksi | read | - | Admin, Accountant, StaffProduksi | `GET /api/inventory/production-runs/:id` |
 | [`prod_run_list`](produksi.md#prod_run_list) | produksi | read | - | Admin, Accountant, StaffProduksi | `GET /api/inventory/production-runs` |
 | [`prod_run_summary`](produksi.md#prod_run_summary) | produksi | read | - | Admin, Accountant, StaffProduksi | `GET /api/inventory/production-runs/summary` |
 | [`prod_run_update`](produksi.md#prod_run_update) | produksi | critical | ya | Admin, Accountant, StaffProduksi | `PUT /api/inventory/production-runs/:id` |
-| [`proforma_cancel`](penjualan.md#proforma_cancel) | penjualan | critical | tidak | Admin | `PATCH /api/proforma-invoices/:id/cancel` |
+| [`proforma_cancel`](penjualan.md#proforma_cancel) | penjualan | critical | tidak | Admin, Accountant | `PATCH /api/proforma-invoices/:id/cancel` |
 | [`proforma_convert_payload`](penjualan.md#proforma_convert_payload) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/proforma-invoices/:id/convert-payload` |
 | [`proforma_create`](penjualan.md#proforma_create) | penjualan | write | ya | Admin, Accountant | `POST /api/proforma-invoices` |
 | [`proforma_delete`](penjualan.md#proforma_delete) | penjualan | write | tidak | Admin, Accountant | `DELETE /api/proforma-invoices/:id` |
@@ -418,7 +418,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`proforma_send`](penjualan.md#proforma_send) | penjualan | write | tidak | Admin, Accountant | `PATCH /api/proforma-invoices/:id/send` |
 | [`proforma_update`](penjualan.md#proforma_update) | penjualan | write | ya | Admin, Accountant | `PUT /api/proforma-invoices/:id` |
 | [`quot_accept`](penjualan.md#quot_accept) | penjualan | write | tidak | Admin, Accountant | `PATCH /api/quotations/:id/accept` |
-| [`quot_cancel`](penjualan.md#quot_cancel) | penjualan | critical | tidak | Admin | `PATCH /api/quotations/:id/cancel` |
+| [`quot_cancel`](penjualan.md#quot_cancel) | penjualan | critical | tidak | Admin, Accountant | `PATCH /api/quotations/:id/cancel` |
 | [`quot_convert_payload`](penjualan.md#quot_convert_payload) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/quotations/:id/convert-payload` |
 | [`quot_create`](penjualan.md#quot_create) | penjualan | write | ya | Admin, Accountant | `POST /api/quotations` |
 | [`quot_delete`](penjualan.md#quot_delete) | penjualan | write | tidak | Admin, Accountant | `DELETE /api/quotations/:id` |
@@ -474,7 +474,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`search_global`](sistem.md#search_global) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/search` |
 | [`set_company_get`](sistem.md#set_company_get) | sistem | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/settings/company` |
 | [`set_company_update`](sistem.md#set_company_update) | sistem | critical | tidak | Admin | `PUT /api/settings/company` |
-| [`si_cancel`](penjualan.md#si_cancel) | penjualan | critical | tidak | Admin | `POST /api/sales/invoices/:id/cancel` |
+| [`si_cancel`](penjualan.md#si_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/sales/invoices/:id/cancel` |
 | [`si_create`](penjualan.md#si_create) | penjualan | critical | tidak | Admin, Accountant | `POST /api/sales/invoices` |
 | [`si_get`](penjualan.md#si_get) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/sales/invoices/:id` |
 | [`si_list`](penjualan.md#si_list) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/sales/invoices` |
@@ -488,7 +488,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`so_submit`](penjualan.md#so_submit) | penjualan | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/sales-orders/:id/submit` |
 | [`so_summary`](penjualan.md#so_summary) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/sales-orders/summary` |
 | [`so_update`](penjualan.md#so_update) | penjualan | write | ya | Admin, Accountant, StaffProduksi | `PUT /api/sales-orders/:id` |
-| [`sret_cancel`](penjualan.md#sret_cancel) | penjualan | critical | tidak | Admin | `POST /api/sales-returns/:id/cancel` |
+| [`sret_cancel`](penjualan.md#sret_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/sales-returns/:id/cancel` |
 | [`sret_create`](penjualan.md#sret_create) | penjualan | critical | ya | Admin, Accountant, StaffProduksi | `POST /api/sales-returns` |
 | [`sret_eligible`](penjualan.md#sret_eligible) | penjualan | read | - | Admin, Accountant, StaffProduksi | `GET /api/sales-returns/eligible/:invoiceId` |
 | [`sret_get`](penjualan.md#sret_get) | penjualan | read | - | Admin, Accountant, StaffProduksi | `GET /api/sales-returns/:id` |
@@ -500,7 +500,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`stf_mark_printed`](persediaan.md#stf_mark_printed) | persediaan | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/stock-transfers/:id/mark-printed` |
 | [`stf_update`](persediaan.md#stf_update) | persediaan | write | tidak | Admin, Accountant, StaffProduksi | `PATCH /api/stock-transfers/:id` |
 | [`svc_create`](master-data.md#svc_create) | master-data | write | tidak | Admin, Accountant | `POST /api/service-items` |
-| [`svc_delete`](master-data.md#svc_delete) | master-data | write | tidak | Admin | `DELETE /api/service-items/:id` |
+| [`svc_delete`](master-data.md#svc_delete) | master-data | write | tidak | Admin, Accountant | `DELETE /api/service-items/:id` |
 | [`svc_list`](master-data.md#svc_list) | master-data | read | - | Admin, Accountant, Viewer | `GET /api/service-items` |
 | [`svc_update`](master-data.md#svc_update) | master-data | write | tidak | Admin, Accountant | `PATCH /api/service-items/:id` |
 | [`sysacct_get`](akuntansi.md#sysacct_get) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/system-accounts` |
@@ -510,7 +510,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`tax_get_config`](akuntansi.md#tax_get_config) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/tax/config` |
 | [`tax_report`](akuntansi.md#tax_report) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/tax/report` |
 | [`tax_update_config`](akuntansi.md#tax_update_config) | akuntansi | write | tidak | Admin | `PUT /api/tax/config/:id` |
-| [`tdn_cancel`](penjualan.md#tdn_cancel) | penjualan | critical | tidak | Admin | `POST /api/temporary-delivery-notes/:id/cancel` |
+| [`tdn_cancel`](penjualan.md#tdn_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/temporary-delivery-notes/:id/cancel` |
 | [`tdn_create`](penjualan.md#tdn_create) | penjualan | write | ya | Admin, Accountant, StaffProduksi | `POST /api/temporary-delivery-notes` |
 | [`tdn_get`](penjualan.md#tdn_get) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/temporary-delivery-notes/:id` |
 | [`tdn_link`](penjualan.md#tdn_link) | penjualan | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/temporary-delivery-notes/:id/link` |
@@ -519,14 +519,14 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`tdn_summary`](penjualan.md#tdn_summary) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/temporary-delivery-notes/summary` |
 | [`tdn_update`](penjualan.md#tdn_update) | penjualan | write | ya | Admin, Accountant, StaffProduksi | `PUT /api/temporary-delivery-notes/:id` |
 | [`vdep_apply`](pembelian.md#vdep_apply) | pembelian | critical | tidak | Admin, Accountant | `POST /api/vendor-deposits/apply` |
-| [`vdep_apply_cancel`](pembelian.md#vdep_apply_cancel) | pembelian | critical | tidak | Admin | `POST /api/vendor-deposits/apply/:id/cancel` |
+| [`vdep_apply_cancel`](pembelian.md#vdep_apply_cancel) | pembelian | critical | tidak | Admin, Accountant | `POST /api/vendor-deposits/apply/:id/cancel` |
 | [`vdep_balance`](pembelian.md#vdep_balance) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/vendor-deposits/balance/:partyId` |
 | [`vdep_cancel`](pembelian.md#vdep_cancel) | pembelian | critical | tidak | Admin, Accountant | `PATCH /api/vendor-deposits/:id/cancel` |
 | [`vdep_list`](pembelian.md#vdep_list) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/vendor-deposits` |
 | [`vdep_refund`](pembelian.md#vdep_refund) | pembelian | critical | tidak | Admin, Accountant | `POST /api/vendor-deposits/:id/refund` |
 | [`vdep_summary`](pembelian.md#vdep_summary) | pembelian | read | - | Admin, Accountant, StaffProduksi | `GET /api/vendor-deposits/summary` |
 | [`wh_create`](persediaan.md#wh_create) | persediaan | write | tidak | Admin, Accountant | `POST /api/warehouses` |
-| [`wh_delete`](persediaan.md#wh_delete) | persediaan | critical | tidak | Admin | `DELETE /api/warehouses/:id` |
+| [`wh_delete`](persediaan.md#wh_delete) | persediaan | critical | tidak | Admin, Accountant | `DELETE /api/warehouses/:id` |
 | [`wh_get`](persediaan.md#wh_get) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/warehouses/:id` |
 | [`wh_list`](persediaan.md#wh_list) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/warehouses` |
 | [`wh_stock_snapshot`](persediaan.md#wh_stock_snapshot) | persediaan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/warehouses/stock-snapshot` |

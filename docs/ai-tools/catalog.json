@@ -2114,7 +2114,8 @@
       "desc": "Membatalkan pemakaian uang muka pada invoice: jurnal aplikasi dibalik, outstanding invoice dipulihkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -2150,7 +2151,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### cdep_apply_cancel\n\n**Ringkasan:** Membatalkan pemakaian uang muka pada invoice: jurnal aplikasi dibalik, outstanding invoice dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `customer_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/customer-deposits/apply/:id/cancel` (src/routes/customerDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID CustomerDepositApplication. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"cdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pemakaian uang muka (aplikasi <id>)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV aplikasi (DR Uang Muka / CR Piutang dibalik), outstanding & status invoice dipulihkan, aplikasi ditandai batal.\n\n**Teks konfirmasi:** Batalkan pemakaian uang muka (aplikasi {id})?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: aplikasi tidak ditemukan.\n- 400: aplikasi sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n",
+      "doc": "### cdep_apply_cancel\n\n**Ringkasan:** Membatalkan pemakaian uang muka pada invoice: jurnal aplikasi dibalik, outstanding invoice dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/customer-deposits/apply/:id/cancel` (src/routes/customerDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID CustomerDepositApplication. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"cdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pemakaian uang muka (aplikasi <id>)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV aplikasi (DR Uang Muka / CR Piutang dibalik), outstanding & status invoice dipulihkan, aplikasi ditandai batal.\n\n**Teks konfirmasi:** Batalkan pemakaian uang muka (aplikasi {id})?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: aplikasi tidak ditemukan.\n- 400: aplikasi sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n",
       "example": {
         "tool": "cdep_apply_cancel",
         "args": {
@@ -4253,7 +4254,8 @@
       "desc": "Membatalkan Surat Jalan: stok dikembalikan (per gudang), pergerakan stok ditandai batal, status Cancelled. Ditolak bila DO sudah masuk invoice.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -4282,9 +4284,13 @@
       "confirm_template": "Batalkan Surat Jalan {id} (stok dikembalikan)?",
       "errors": [
         "400: batalkan invoice terkait dulu.",
-        "400: surat jalan sudah dibatalkan."
+        "400: surat jalan sudah dibatalkan.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
-      "doc": "### do_cancel\n\n**Ringkasan:** Membatalkan Surat Jalan: stok dikembalikan (per gudang), pergerakan stok ditandai batal, status Cancelled. Ditolak bila DO sudah masuk invoice.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `delivery_order` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/delivery-orders/:id/cancel` (src/routes/deliveryOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Surat Jalan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"do_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Surat Jalan <id> (stok dikembalikan)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Stok: mengembalikan stok & pergerakan keluar dibatalkan. Tidak ada jurnal GL.\n\n**Teks konfirmasi:** Batalkan Surat Jalan {id} (stok dikembalikan)?\n\n**Error umum**\n\n- 400: batalkan invoice terkait dulu.\n- 400: surat jalan sudah dibatalkan.\n",
+      "prerequisites": [
+        "Tahun buku tanggal SJ masih terbuka."
+      ],
+      "doc": "### do_cancel\n\n**Ringkasan:** Membatalkan Surat Jalan: stok dikembalikan (per gudang), pergerakan stok ditandai batal, status Cancelled. Ditolak bila DO sudah masuk invoice.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/delivery-orders/:id/cancel` (src/routes/deliveryOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Surat Jalan. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"do_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Surat Jalan <id> (stok dikembalikan)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Stok: mengembalikan stok & pergerakan keluar dibatalkan. Tidak ada jurnal GL.\n\n**Teks konfirmasi:** Batalkan Surat Jalan {id} (stok dikembalikan)?\n\n**Prasyarat**\n\n- Tahun buku tanggal SJ masih terbuka.\n\n**Error umum**\n\n- 400: batalkan invoice terkait dulu.\n- 400: surat jalan sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
       "example": {
         "tool": "do_cancel",
         "args": {
@@ -4999,13 +5005,20 @@
       "errors": [
         "400: SJ sudah masuk invoice — batalkan invoice dulu.",
         "400: SJ sudah dibatalkan.",
-        "403: bypass stok minus butuh capability."
+        "403: bypass stok minus butuh capability.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan"
       ],
       "related": [
         "do_patch",
         "do_cancel"
       ],
-      "doc": "### do_update\n\n**Ringkasan:** Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `delivery_order` / `edit`)\n- **Catatan akses:** Risiko direklasifikasi dari write (membalik dan menerapkan ulang pergerakan stok).\n- **Handler:** `PUT /api/delivery-orders/:id` (src/routes/deliveryOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Surat Jalan. |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `partyId` | body | `uuid` | ya | ID pelanggan/vendor (Party). |\n| `nomorMobil` | body | `string` | tidak |  |\n| `driverName` | body | `string` | tidak |  |\n| `recipientName` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `items` | body | `array<object>` | ya | Seluruh baris baru (menggantikan baris lama). |\n| `items[].inventoryItemId` | body | `uuid` | tidak |  |\n| `items[].warehouseId` | body | `uuid` | tidak |  |\n| `items[].itemName` | body | `string` | ya |  |\n| `items[].quantity` | body | `number` | ya |  |\n| `items[].unit` | body | `string` | ya |  |\n| `items[].description` | body | `string` | tidak |  |\n| `allowNegativeStock` | body | `boolean` | tidak | ADMIN ONLY bypass — wajib isi negativeStockReason. Enforced di route handler. |\n| `negativeStockReason` | body | `string` | tidak |  |\n| `temporaryNoteIds` | body | `array<string>` | tidak | Surat Jalan Sementara yang ditautkan ke DO resmi ini (opsional) |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"do_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"date\": \"2026-01-31\",\n    \"partyId\": \"00000000-0000-0000-0000-000000000000\",\n    \"items\": [\n      {\n        \"itemName\": \"<itemName>\",\n        \"quantity\": 1,\n        \"unit\": \"<unit>\"\n      }\n    ]\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Edit penuh Surat Jalan <id> (stok akan dibalik dan diterapkan ulang)?\"\n}\n```\n\n**Isi hasil:** DeliveryOrder setelah diedit.\n\n**Efek pembukuan/stok:** Stok: membalik pergerakan keluar lama dan membuat pergerakan keluar baru (stok & WAC per item berubah). TIDAK ada jurnal GL. Bypass stok minus butuh capability inventory.negative_stock (tanpa itu 403, tidak diantrikan).\n\n**Teks konfirmasi:** Edit penuh Surat Jalan {id} (stok akan dibalik dan diterapkan ulang)?\n\n**Error umum**\n\n- 400: SJ sudah masuk invoice — batalkan invoice dulu.\n- 400: SJ sudah dibatalkan.\n- 403: bypass stok minus butuh capability.\n\n**Tool terkait:** [`do_patch`](#do_patch), [`do_cancel`](#do_cancel)\n",
+      "prerequisites": [
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka.",
+        "Tanggal baru di bulan yang sama dengan tanggal lama."
+      ],
+      "doc": "### do_update\n\n**Ringkasan:** Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `delivery_order` / `edit`)\n- **Catatan akses:** Risiko direklasifikasi dari write (membalik dan menerapkan ulang pergerakan stok).\n- **Handler:** `PUT /api/delivery-orders/:id` (src/routes/deliveryOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID Surat Jalan. |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `partyId` | body | `uuid` | ya | ID pelanggan/vendor (Party). |\n| `nomorMobil` | body | `string` | tidak |  |\n| `driverName` | body | `string` | tidak |  |\n| `recipientName` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `items` | body | `array<object>` | ya | Seluruh baris baru (menggantikan baris lama). |\n| `items[].inventoryItemId` | body | `uuid` | tidak |  |\n| `items[].warehouseId` | body | `uuid` | tidak |  |\n| `items[].itemName` | body | `string` | ya |  |\n| `items[].quantity` | body | `number` | ya |  |\n| `items[].unit` | body | `string` | ya |  |\n| `items[].description` | body | `string` | tidak |  |\n| `allowNegativeStock` | body | `boolean` | tidak | ADMIN ONLY bypass — wajib isi negativeStockReason. Enforced di route handler. |\n| `negativeStockReason` | body | `string` | tidak |  |\n| `temporaryNoteIds` | body | `array<string>` | tidak | Surat Jalan Sementara yang ditautkan ke DO resmi ini (opsional) |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"do_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"date\": \"2026-01-31\",\n    \"partyId\": \"00000000-0000-0000-0000-000000000000\",\n    \"items\": [\n      {\n        \"itemName\": \"<itemName>\",\n        \"quantity\": 1,\n        \"unit\": \"<unit>\"\n      }\n    ]\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Edit penuh Surat Jalan <id> (stok akan dibalik dan diterapkan ulang)?\"\n}\n```\n\n**Isi hasil:** DeliveryOrder setelah diedit.\n\n**Efek pembukuan/stok:** Stok: membalik pergerakan keluar lama dan membuat pergerakan keluar baru (stok & WAC per item berubah). TIDAK ada jurnal GL. Bypass stok minus butuh capability inventory.negative_stock (tanpa itu 403, tidak diantrikan).\n\n**Teks konfirmasi:** Edit penuh Surat Jalan {id} (stok akan dibalik dan diterapkan ulang)?\n\n**Prasyarat**\n\n- Tahun buku tanggal lama dan tanggal baru masih terbuka.\n- Tanggal baru di bulan yang sama dengan tanggal lama.\n\n**Error umum**\n\n- 400: SJ sudah masuk invoice — batalkan invoice dulu.\n- 400: SJ sudah dibatalkan.\n- 403: bypass stok minus butuh capability.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku\n- 400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan\n\n**Tool terkait:** [`do_patch`](#do_patch), [`do_cancel`](#do_cancel)\n",
       "example": {
         "tool": "do_update",
         "args": {
@@ -17254,7 +17267,8 @@
       "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -17297,23 +17311,25 @@
       "draftCapable": false,
       "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "prerequisites": [
         "STT berstatus Submitted",
-        "PI terkait (bila ada) sudah dibatalkan"
+        "PI terkait (bila ada) sudah dibatalkan",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: STT sudah dibatalkan",
         "400: STT legacy - batalkan PI-nya",
         "400: ada PI Paid / PI belum dibatalkan",
         "400: stok tidak cukup untuk dibalikkan",
-        "400: alasan bypass stok minus wajib (min 10 karakter)"
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pi_cancel",
         "gr_get"
       ],
-      "doc": "### gr_cancel\n\n**Ringkasan:** Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `goods_receipt` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/goods-receipts/:id/cancel` (src/routes/goodsReceipts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID STT (UUID). |\n| `allowNegativeStock` | body | `boolean` | tidak | true = abaikan guard stok minus saat membalikkan stok (override Admin). |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"gr_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan STT <id>? Stok akan dikembalikan dan accrual hutang dibalik.\"\n}\n```\n\n**Isi hasil:** STT dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.\n\n**Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.\n\n**Prasyarat**\n\n- STT berstatus Submitted\n- PI terkait (bila ada) sudah dibatalkan\n\n**Error umum**\n\n- 400: STT sudah dibatalkan\n- 400: STT legacy - batalkan PI-nya\n- 400: ada PI Paid / PI belum dibatalkan\n- 400: stok tidak cukup untuk dibalikkan\n- 400: alasan bypass stok minus wajib (min 10 karakter)\n\n**Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)\n",
+      "doc": "### gr_cancel\n\n**Ringkasan:** Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `goods_receipt` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/goods-receipts/:id/cancel` (src/routes/goodsReceipts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID STT (UUID). |\n| `allowNegativeStock` | body | `boolean` | tidak | true = abaikan guard stok minus saat membalikkan stok (override Admin). |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"gr_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan STT <id>? Stok akan dikembalikan dan accrual hutang dibalik.\"\n}\n```\n\n**Isi hasil:** STT dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.\n\n**Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.\n\n**Prasyarat**\n\n- STT berstatus Submitted\n- PI terkait (bila ada) sudah dibatalkan\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: STT sudah dibatalkan\n- 400: STT legacy - batalkan PI-nya\n- 400: ada PI Paid / PI belum dibatalkan\n- 400: stok tidak cukup untuk dibalikkan\n- 400: alasan bypass stok minus wajib (min 10 karakter)\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)\n",
       "example": {
         "tool": "gr_cancel",
         "args": {
@@ -19477,7 +19493,8 @@
       "desc": "Membatalkan pergerakan stok: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Pergerakan dari STT harus dibatalkan lewat STT.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -19506,19 +19523,21 @@
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan."
+        "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.",
+        "Tahun buku tanggal pergerakan dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400: dari STT tidak dapat dibatalkan per baris",
         "400: stok tidak mencukupi untuk pembalikan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "inv_mov_get",
         "inv_mov_create"
       ],
-      "doc": "### inv_mov_cancel\n\n**Ringkasan:** Membatalkan pergerakan stok: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Pergerakan dari STT harus dibatalkan lewat STT.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `inventory` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/inventory/movements/:id/cancel` (src/routes/inventory/movements.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID pergerakan stok. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inv_mov_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pergerakan stok <id>? Stok dan jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pesan sukses pembatalan.\n\n**Efek pembukuan/stok:** Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dihitung ulang; WAC dan COGS backfill disesuaikan.\n\n**Teks konfirmasi:** Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.\n\n**Error umum**\n\n- 400: gerakan sudah dibatalkan\n- 400: dari STT tidak dapat dibatalkan per baris\n- 400: stok tidak mencukupi untuk pembalikan\n- 403: tanpa capability doc.cancel\n\n**Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_create`](#inv_mov_create)\n",
+      "doc": "### inv_mov_cancel\n\n**Ringkasan:** Membatalkan pergerakan stok: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Pergerakan dari STT harus dibatalkan lewat STT.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `inventory` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/inventory/movements/:id/cancel` (src/routes/inventory/movements.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID pergerakan stok. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inv_mov_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pergerakan stok <id>? Stok dan jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pesan sukses pembatalan.\n\n**Efek pembukuan/stok:** Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dihitung ulang; WAC dan COGS backfill disesuaikan.\n\n**Teks konfirmasi:** Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.\n- Tahun buku tanggal pergerakan dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: gerakan sudah dibatalkan\n- 400: dari STT tidak dapat dibatalkan per baris\n- 400: stok tidak mencukupi untuk pembalikan\n- 403: tanpa capability doc.cancel\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_create`](#inv_mov_create)\n",
       "example": {
         "tool": "inv_mov_cancel",
         "args": {
@@ -19960,8 +19979,7 @@
       "risk": "critical",
       "roles": [
         "Admin",
-        "Accountant",
-        "StaffProduksi"
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -20047,6 +20065,7 @@
       "outputSummary": "Pergerakan stok hasil edit (pergerakan baru).",
       "handler": "PUT /api/inventory/movements/:id",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
@@ -20056,18 +20075,22 @@
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
         "Bukan berasal dari STT/GoodsReceipt atau ProductionRun.",
-        "Tahun fiskal tanggal baru terbuka."
+        "User memiliki capability doc.cancel.",
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400: gerakan dari STT/produksi tidak dapat diedit per baris",
-        "400: pembalikan stok lama membuat stok negatif"
+        "400: pembalikan stok lama membuat stok negatif",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "403: tanpa capability doc.cancel"
       ],
       "related": [
         "inv_mov_get",
         "inv_mov_cancel"
       ],
-      "doc": "### inv_mov_update\n\n**Ringkasan:** Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Pergerakan dari STT/GoodsReceipt atau produksi tidak dapat diedit per baris.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `inventory` / `edit`)\n- **Handler:** `PUT /api/inventory/movements/:id` (src/routes/inventory/movements.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID pergerakan stok yang diedit. |\n| `movementType` | body | enum: `In`, `Out`, `AdjustmentIn`, `AdjustmentOut` | ya | Jenis mutasi stok. |\n| `quantity` | body | `number` | ya | Jumlah (qty). |\n| `unitCost` | body | `number` | tidak |  |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `offsetAccountId` | body | `string` | tidak |  |\n| `referenceType` | body | `string` | tidak |  |\n| `referenceNumber` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inv_mov_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"movementType\": \"In\",\n    \"quantity\": 1,\n    \"date\": \"2026-01-31\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah pergerakan stok <id> menjadi In 1 biaya satuan {unitCost} tanggal 2026-01-31? Stok dan jurnal lama dibalik lalu dibuat ulang.\"\n}\n```\n\n**Isi hasil:** Pergerakan stok hasil edit (pergerakan baru).\n\n**Efek pembukuan/stok:** Membalik stok & jurnal lama (jurnal lama berstatus Cancelled), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create), reverse+settle ulang COGS backfill, recompute WAC item dari replay.\n\n**Teks konfirmasi:** Ubah pergerakan stok {id} menjadi {movementType} {quantity} biaya satuan {unitCost} tanggal {date}? Stok dan jurnal lama dibalik lalu dibuat ulang.\n\n**Prasyarat**\n\n- Pergerakan belum dibatalkan.\n- Bukan berasal dari STT/GoodsReceipt atau ProductionRun.\n- Tahun fiskal tanggal baru terbuka.\n\n**Error umum**\n\n- 400: gerakan sudah dibatalkan\n- 400: gerakan dari STT/produksi tidak dapat diedit per baris\n- 400: pembalikan stok lama membuat stok negatif\n\n**Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_cancel`](#inv_mov_cancel)\n",
+      "doc": "### inv_mov_update\n\n**Ringkasan:** Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Pergerakan dari STT/GoodsReceipt atau produksi tidak dapat diedit per baris.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `inventory` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/inventory/movements/:id` (src/routes/inventory/movements.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID pergerakan stok yang diedit. |\n| `movementType` | body | enum: `In`, `Out`, `AdjustmentIn`, `AdjustmentOut` | ya | Jenis mutasi stok. |\n| `quantity` | body | `number` | ya | Jumlah (qty). |\n| `unitCost` | body | `number` | tidak |  |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `offsetAccountId` | body | `string` | tidak |  |\n| `referenceType` | body | `string` | tidak |  |\n| `referenceNumber` | body | `string` | tidak |  |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"inv_mov_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"movementType\": \"In\",\n    \"quantity\": 1,\n    \"date\": \"2026-01-31\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah pergerakan stok <id> menjadi In 1 biaya satuan {unitCost} tanggal 2026-01-31? Stok dan jurnal lama dibalik lalu dibuat ulang.\"\n}\n```\n\n**Isi hasil:** Pergerakan stok hasil edit (pergerakan baru).\n\n**Efek pembukuan/stok:** Membalik stok & jurnal lama (jurnal lama berstatus Cancelled), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create), reverse+settle ulang COGS backfill, recompute WAC item dari replay.\n\n**Teks konfirmasi:** Ubah pergerakan stok {id} menjadi {movementType} {quantity} biaya satuan {unitCost} tanggal {date}? Stok dan jurnal lama dibalik lalu dibuat ulang.\n\n**Prasyarat**\n\n- Pergerakan belum dibatalkan.\n- Bukan berasal dari STT/GoodsReceipt atau ProductionRun.\n- User memiliki capability doc.cancel.\n- Tahun buku tanggal lama dan tanggal baru masih terbuka.\n\n**Error umum**\n\n- 400: gerakan sudah dibatalkan\n- 400: gerakan dari STT/produksi tidak dapat diedit per baris\n- 400: pembalikan stok lama membuat stok negatif\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku\n- 403: tanpa capability doc.cancel\n\n**Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_cancel`](#inv_mov_cancel)\n",
       "example": {
         "tool": "inv_mov_update",
         "args": {
@@ -21862,7 +21885,8 @@
       "desc": "Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -21891,17 +21915,19 @@
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Stok item saat ini cukup untuk membalik surplus."
+        "Stok item saat ini cukup untuk membalik surplus.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: stok opname sudah dibatalkan",
         "400: stok item tidak mencukupi untuk pembalikan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "opn_get"
       ],
-      "doc": "### opn_cancel\n\n**Ringkasan:** Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `stock_opname` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/stock-opname/:id/cancel` (src/routes/stockOpname.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID stok opname. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"opn_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan stok opname <id>? Penyesuaian stok dan jurnal selisih akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pesan sukses pembatalan.\n\n**Efek pembukuan/stok:** Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled + saldo akun dihitung ulang. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.\n\n**Teks konfirmasi:** Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Stok item saat ini cukup untuk membalik surplus.\n\n**Error umum**\n\n- 400: stok opname sudah dibatalkan\n- 400: stok item tidak mencukupi untuk pembalikan\n- 403: tanpa capability doc.cancel\n\n**Tool terkait:** [`opn_get`](#opn_get)\n",
+      "doc": "### opn_cancel\n\n**Ringkasan:** Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `stock_opname` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/stock-opname/:id/cancel` (src/routes/stockOpname.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID stok opname. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"opn_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan stok opname <id>? Penyesuaian stok dan jurnal selisih akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pesan sukses pembatalan.\n\n**Efek pembukuan/stok:** Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled + saldo akun dihitung ulang. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.\n\n**Teks konfirmasi:** Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Stok item saat ini cukup untuk membalik surplus.\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: stok opname sudah dibatalkan\n- 400: stok item tidak mencukupi untuk pembalikan\n- 403: tanpa capability doc.cancel\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`opn_get`](#opn_get)\n",
       "example": {
         "tool": "opn_cancel",
         "args": {
@@ -22319,7 +22345,8 @@
       "desc": "Hapus mitra. Bila sudah punya faktur penjualan/pembelian/pembayaran, mitra TIDAK dihapus melainkan dinonaktifkan; hanya mitra tanpa transaksi yang benar-benar dihapus. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -22349,7 +22376,7 @@
       "errors": [
         "404: data mitra tidak ditemukan"
       ],
-      "doc": "### party_delete\n\n**Ringkasan:** Hapus mitra. Bila sudah punya faktur penjualan/pembelian/pembayaran, mitra TIDAK dihapus melainkan dinonaktifkan; hanya mitra tanpa transaksi yang benar-benar dihapus. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `parties` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/parties/:id` (src/routes/parties.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID mitra (UUID) |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"party_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus/nonaktifkan mitra <id>? Mitra dengan transaksi hanya dinonaktifkan. Setujui?\"\n}\n```\n\n**Isi hasil:** {message, deleted:true} atau {message, deactivated:true}.\n\n**Efek pembukuan/stok:** Tidak ada jurnal. Menghapus master permanen (tanpa transaksi) atau menonaktifkan (ada transaksi).\n\n**Teks konfirmasi:** Hapus/nonaktifkan mitra {id}? Mitra dengan transaksi hanya dinonaktifkan. Setujui?\n\n**Error umum**\n\n- 404: data mitra tidak ditemukan\n",
+      "doc": "### party_delete\n\n**Ringkasan:** Hapus mitra. Bila sudah punya faktur penjualan/pembelian/pembayaran, mitra TIDAK dihapus melainkan dinonaktifkan; hanya mitra tanpa transaksi yang benar-benar dihapus. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `parties` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/parties/:id` (src/routes/parties.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID mitra (UUID) |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"party_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus/nonaktifkan mitra <id>? Mitra dengan transaksi hanya dinonaktifkan. Setujui?\"\n}\n```\n\n**Isi hasil:** {message, deleted:true} atau {message, deactivated:true}.\n\n**Efek pembukuan/stok:** Tidak ada jurnal. Menghapus master permanen (tanpa transaksi) atau menonaktifkan (ada transaksi).\n\n**Teks konfirmasi:** Hapus/nonaktifkan mitra {id}? Mitra dengan transaksi hanya dinonaktifkan. Setujui?\n\n**Error umum**\n\n- 404: data mitra tidak ditemukan\n",
       "example": {
         "tool": "party_delete",
         "args": {
@@ -22783,7 +22810,8 @@
       "desc": "Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -22810,7 +22838,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.",
       "confirm_template": "Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Pembayaran sudah dibatalkan",
         "400: Gunakan endpoint Uang Muka untuk membatalkan deposit",
@@ -22825,7 +22853,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pay_cancel\n\n**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `payment` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/payments/:id/cancel` (src/routes/payments.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID pembayaran (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pay_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pembayaran <id>? Alokasi dan jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pembayaran dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.\n\n**Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Pembayaran sudah dibatalkan\n- 400: Gunakan endpoint Uang Muka untuk membatalkan deposit\n- 400: Refund belum mendukung cancel otomatis\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pay_get`](#pay_get), [`vdep_cancel`](pembelian.md#vdep_cancel), [`pi_cancel`](pembelian.md#pi_cancel)\n",
+      "doc": "### pay_cancel\n\n**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `payment` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/payments/:id/cancel` (src/routes/payments.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID pembayaran (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pay_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan pembayaran <id>? Alokasi dan jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** Pembayaran dengan status Cancelled.\n\n**Efek pembukuan/stok:** Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.\n\n**Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Pembayaran sudah dibatalkan\n- 400: Gunakan endpoint Uang Muka untuk membatalkan deposit\n- 400: Refund belum mendukung cancel otomatis\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pay_get`](#pay_get), [`vdep_cancel`](pembelian.md#vdep_cancel), [`pi_cancel`](pembelian.md#pi_cancel)\n",
       "example": {
         "tool": "pay_cancel",
         "args": {
@@ -25897,7 +25925,8 @@
       "desc": "Membatalkan setoran uang jaminan (hanya bila belum ada settlement aktif): jurnal setoran dibatalkan dan saldo akun dibalik.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -25924,7 +25953,7 @@
       "draftCapable": false,
       "postingEffect": "Soft-cancel jurnal setoran (DR Uang Jaminan 1.8 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. Tidak membuat jurnal balikan baru.",
       "confirm_template": "Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Uang jaminan sudah dibatalkan",
         "400: Sudah ada settlement aktif - batalkan settlement dulu",
@@ -25937,7 +25966,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pg_cancel\n\n**Ringkasan:** Membatalkan setoran uang jaminan (hanya bila belum ada settlement aktif): jurnal setoran dibatalkan dan saldo akun dibalik.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `PATCH /api/project-guarantees/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID uang jaminan (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang jaminan <id>? Jurnal setoran akan dibalik.\"\n}\n```\n\n**Isi hasil:** Uang jaminan berstatus Dibatalkan.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal setoran (DR Uang Jaminan 1.8 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. Tidak membuat jurnal balikan baru.\n\n**Teks konfirmasi:** Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Uang jaminan sudah dibatalkan\n- 400: Sudah ada settlement aktif - batalkan settlement dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)\n",
+      "doc": "### pg_cancel\n\n**Ringkasan:** Membatalkan setoran uang jaminan (hanya bila belum ada settlement aktif): jurnal setoran dibatalkan dan saldo akun dibalik.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `PATCH /api/project-guarantees/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID uang jaminan (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan uang jaminan <id>? Jurnal setoran akan dibalik.\"\n}\n```\n\n**Isi hasil:** Uang jaminan berstatus Dibatalkan.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal setoran (DR Uang Jaminan 1.8 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. Tidak membuat jurnal balikan baru.\n\n**Teks konfirmasi:** Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Uang jaminan sudah dibatalkan\n- 400: Sudah ada settlement aktif - batalkan settlement dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)\n",
       "example": {
         "tool": "pg_cancel",
         "args": {
@@ -26362,7 +26391,8 @@
       "desc": "Membatalkan satu settlement uang jaminan (pengembalian/hangus): jurnal settlement dibatalkan dan sisa jaminan dipulihkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -26389,7 +26419,7 @@
       "draftCapable": false,
       "postingEffect": "Soft-cancel jurnal settlement (DR Kas-Bank/Beban / CR Uang Jaminan 1.8): saldo akun dibalik, sisa jaminan naik, status jaminan kembali Disetor bila sebelumnya Selesai.",
       "confirm_template": "Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Settlement sudah dibatalkan",
         "400: Uang jaminan induk sudah dibatalkan",
@@ -26402,7 +26432,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pg_settlement_cancel\n\n**Ringkasan:** Membatalkan satu settlement uang jaminan (pengembalian/hangus): jurnal settlement dibatalkan dan sisa jaminan dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/project-guarantees/settlements/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID settlement (bukan ID jaminan). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_settlement_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan settlement uang jaminan <id>? Jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** { message: 'Settlement dibatalkan.' }.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal settlement (DR Kas-Bank/Beban / CR Uang Jaminan 1.8): saldo akun dibalik, sisa jaminan naik, status jaminan kembali Disetor bila sebelumnya Selesai.\n\n**Teks konfirmasi:** Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Settlement sudah dibatalkan\n- 400: Uang jaminan induk sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)\n",
+      "doc": "### pg_settlement_cancel\n\n**Ringkasan:** Membatalkan satu settlement uang jaminan (pengembalian/hangus): jurnal settlement dibatalkan dan sisa jaminan dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `project_guarantee` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/project-guarantees/settlements/:id/cancel` (src/routes/projectGuarantees.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID settlement (bukan ID jaminan). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pg_settlement_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan settlement uang jaminan <id>? Jurnal akan dibalik.\"\n}\n```\n\n**Isi hasil:** { message: 'Settlement dibatalkan.' }.\n\n**Efek pembukuan/stok:** Soft-cancel jurnal settlement (DR Kas-Bank/Beban / CR Uang Jaminan 1.8): saldo akun dibalik, sisa jaminan naik, status jaminan kembali Disetor bila sebelumnya Selesai.\n\n**Teks konfirmasi:** Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Settlement sudah dibatalkan\n- 400: Uang jaminan induk sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)\n",
       "example": {
         "tool": "pg_settlement_cancel",
         "args": {
@@ -26520,7 +26550,8 @@
       "desc": "Membatalkan Invoice Pembelian: jurnal faktur dibalik, stok yang dibuat PI dikembalikan, STT terkait dilepas (invoiceId dikosongkan, stok milik STT tidak terganggu). Ditolak bila faktur sudah lunas, punya pembayaran teralokasi, atau punya alokasi uang muka aktif.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -26547,7 +26578,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.",
       "confirm_template": "Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Invoice sudah dibatalkan",
         "400: Invoice sudah lunas",
@@ -26563,7 +26594,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### pi_cancel\n\n**Ringkasan:** Membatalkan Invoice Pembelian: jurnal faktur dibalik, stok yang dibuat PI dikembalikan, STT terkait dilepas (invoiceId dikosongkan, stok milik STT tidak terganggu). Ditolak bila faktur sudah lunas, punya pembayaran teralokasi, atau punya alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `purchase_invoice` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/purchase/invoices/:id/cancel` (src/routes/purchase.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice pembelian (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pi_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Pembelian <id>? Jurnal dan stok terkait akan dibalik.\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.\n\n**Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Invoice sudah dibatalkan\n- 400: Invoice sudah lunas\n- 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu\n- 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)\n",
+      "doc": "### pi_cancel\n\n**Ringkasan:** Membatalkan Invoice Pembelian: jurnal faktur dibalik, stok yang dibuat PI dikembalikan, STT terkait dilepas (invoiceId dikosongkan, stok milik STT tidak terganggu). Ditolak bila faktur sudah lunas, punya pembayaran teralokasi, atau punya alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `purchase_invoice` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/purchase/invoices/:id/cancel` (src/routes/purchase.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice pembelian (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"pi_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Pembelian <id>? Jurnal dan stok terkait akan dibalik.\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.\n\n**Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Invoice sudah dibatalkan\n- 400: Invoice sudah lunas\n- 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu\n- 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)\n",
       "example": {
         "tool": "pi_cancel",
         "args": {
@@ -27372,7 +27403,8 @@
       "desc": "Membatalkan PO yang sudah dipesan (status menjadi Cancelled). STT yang sudah terbit tetap valid. PO Draft tidak dibatalkan (gunakan po_delete).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -27399,7 +27431,7 @@
       "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok/WAC. STT terkait tetap valid; PO tidak bisa dipakai STT baru.",
       "confirm_template": "Batalkan PO {id}? PO tidak bisa dipakai lagi untuk penerimaan barang.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: PO sudah dibatalkan",
         "400: PO Draf tidak dibatalkan - hapus draf"
@@ -27408,7 +27440,7 @@
         "po_delete",
         "po_close"
       ],
-      "doc": "### po_cancel\n\n**Ringkasan:** Membatalkan PO yang sudah dipesan (status menjadi Cancelled). STT yang sudah terbit tetap valid. PO Draft tidak dibatalkan (gunakan po_delete).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `purchase_order` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/purchase-orders/:id/cancel` (src/routes/purchaseOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID PO (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"po_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan PO <id>? PO tidak bisa dipakai lagi untuk penerimaan barang.\"\n}\n```\n\n**Isi hasil:** PO dengan status Cancelled.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. STT terkait tetap valid; PO tidak bisa dipakai STT baru.\n\n**Teks konfirmasi:** Batalkan PO {id}? PO tidak bisa dipakai lagi untuk penerimaan barang.\n\n**Error umum**\n\n- 400: PO sudah dibatalkan\n- 400: PO Draf tidak dibatalkan - hapus draf\n\n**Tool terkait:** [`po_delete`](#po_delete), [`po_close`](#po_close)\n",
+      "doc": "### po_cancel\n\n**Ringkasan:** Membatalkan PO yang sudah dipesan (status menjadi Cancelled). STT yang sudah terbit tetap valid. PO Draft tidak dibatalkan (gunakan po_delete).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `purchase_order` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/purchase-orders/:id/cancel` (src/routes/purchaseOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID PO (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"po_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan PO <id>? PO tidak bisa dipakai lagi untuk penerimaan barang.\"\n}\n```\n\n**Isi hasil:** PO dengan status Cancelled.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. STT terkait tetap valid; PO tidak bisa dipakai STT baru.\n\n**Teks konfirmasi:** Batalkan PO {id}? PO tidak bisa dipakai lagi untuk penerimaan barang.\n\n**Error umum**\n\n- 400: PO sudah dibatalkan\n- 400: PO Draf tidak dibatalkan - hapus draf\n\n**Tool terkait:** [`po_delete`](#po_delete), [`po_close`](#po_close)\n",
       "example": {
         "tool": "po_cancel",
         "args": {
@@ -27424,7 +27456,8 @@
       "desc": "Menutup PO (short-close): sisa kuantitas yang belum diterima dianggap tidak akan datang. Status tetap Submitted, tetapi closedAt terisi sehingga PO tidak bisa dipakai STT baru. Alasan wajib (minimal 5 karakter).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -27459,7 +27492,7 @@
       "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya menandai PO ditutup (closedAt) dan menyimpan alasan.",
       "confirm_template": "Tutup PO {id} (sisa barang tidak akan diterima). Alasan: {reason}. Setujui?",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "prerequisites": [
         "PO berstatus Submitted dan belum ditutup"
       ],
@@ -27471,7 +27504,7 @@
         "po_get",
         "gr_create"
       ],
-      "doc": "### po_close\n\n**Ringkasan:** Menutup PO (short-close): sisa kuantitas yang belum diterima dianggap tidak akan datang. Status tetap Submitted, tetapi closedAt terisi sehingga PO tidak bisa dipakai STT baru. Alasan wajib (minimal 5 karakter).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `purchase_order` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/purchase-orders/:id/close` (src/routes/purchaseOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID PO (UUID). |\n| `reason` | body | `string` | ya | Alasan penutupan, 5-500 karakter. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"po_close\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"reason\": \"<reason>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Tutup PO <id> (sisa barang tidak akan diterima). Alasan: <reason>. Setujui?\"\n}\n```\n\n**Isi hasil:** PO dengan closedAt dan alasan penutupan.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya menandai PO ditutup (closedAt) dan menyimpan alasan.\n\n**Teks konfirmasi:** Tutup PO {id} (sisa barang tidak akan diterima). Alasan: {reason}. Setujui?\n\n**Prasyarat**\n\n- PO berstatus Submitted dan belum ditutup\n\n**Error umum**\n\n- 400: hanya PO yang sudah dipesan yang bisa ditutup\n- 400: PO sudah ditutup\n\n**Tool terkait:** [`po_get`](#po_get), [`gr_create`](#gr_create)\n",
+      "doc": "### po_close\n\n**Ringkasan:** Menutup PO (short-close): sisa kuantitas yang belum diterima dianggap tidak akan datang. Status tetap Submitted, tetapi closedAt terisi sehingga PO tidak bisa dipakai STT baru. Alasan wajib (minimal 5 karakter).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `purchase_order` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/purchase-orders/:id/close` (src/routes/purchaseOrders.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID PO (UUID). |\n| `reason` | body | `string` | ya | Alasan penutupan, 5-500 karakter. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"po_close\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"reason\": \"<reason>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Tutup PO <id> (sisa barang tidak akan diterima). Alasan: <reason>. Setujui?\"\n}\n```\n\n**Isi hasil:** PO dengan closedAt dan alasan penutupan.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok/WAC. Hanya menandai PO ditutup (closedAt) dan menyimpan alasan.\n\n**Teks konfirmasi:** Tutup PO {id} (sisa barang tidak akan diterima). Alasan: {reason}. Setujui?\n\n**Prasyarat**\n\n- PO berstatus Submitted dan belum ditutup\n\n**Error umum**\n\n- 400: hanya PO yang sudah dipesan yang bisa ditutup\n- 400: PO sudah ditutup\n\n**Tool terkait:** [`po_get`](#po_get), [`gr_create`](#gr_create)\n",
       "example": {
         "tool": "po_close",
         "args": {
@@ -28318,7 +28351,8 @@
       "desc": "Menghapus standar biaya produksi: bila sudah dipakai di run, hanya DINONAKTIFKAN (soft); bila belum pernah dipakai, dihapus permanen. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -28352,7 +28386,7 @@
         "404: standar tidak ditemukan",
         "403: tanpa capability doc.cancel"
       ],
-      "doc": "### prod_cost_delete\n\n**Ringkasan:** Menghapus standar biaya produksi: bila sudah dipakai di run, hanya DINONAKTIFKAN (soft); bila belum pernah dipakai, dihapus permanen. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/inventory/production-cost-standards/:id` (src/routes/inventory/productionCostStandards.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID standar biaya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_cost_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus/nonaktifkan standar biaya produksi <id>?\"\n}\n```\n\n**Isi hasil:** {message, deleted:true} atau {message, deactivated:true}.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok; deactivate atau hard delete master.\n\n**Teks konfirmasi:** Hapus/nonaktifkan standar biaya produksi {id}?\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n\n**Error umum**\n\n- 404: standar tidak ditemukan\n- 403: tanpa capability doc.cancel\n",
+      "doc": "### prod_cost_delete\n\n**Ringkasan:** Menghapus standar biaya produksi: bila sudah dipakai di run, hanya DINONAKTIFKAN (soft); bila belum pernah dipakai, dihapus permanen. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/inventory/production-cost-standards/:id` (src/routes/inventory/productionCostStandards.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID standar biaya. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_cost_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus/nonaktifkan standar biaya produksi <id>?\"\n}\n```\n\n**Isi hasil:** {message, deleted:true} atau {message, deactivated:true}.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok; deactivate atau hard delete master.\n\n**Teks konfirmasi:** Hapus/nonaktifkan standar biaya produksi {id}?\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n\n**Error umum**\n\n- 404: standar tidak ditemukan\n- 403: tanpa capability doc.cancel\n",
       "example": {
         "tool": "prod_cost_delete",
         "args": {
@@ -29901,7 +29935,8 @@
       "desc": "Menghapus master proses produksi: bila sudah dipakai di run produksi, hanya dinonaktifkan; bila belum, dihapus permanen. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -29932,7 +29967,7 @@
         "404: proses tidak ditemukan",
         "403: tanpa capability doc.cancel"
       ],
-      "doc": "### prod_proc_delete\n\n**Ringkasan:** Menghapus master proses produksi: bila sudah dipakai di run produksi, hanya dinonaktifkan; bila belum, dihapus permanen. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/inventory/production-processes/:id` (src/routes/inventory/productionProcesses.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID proses. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_proc_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus/nonaktifkan proses produksi <id>?\"\n}\n```\n\n**Isi hasil:** {message, deleted:true} atau {message, deactivated:true}.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok; deactivate atau hard delete master.\n\n**Teks konfirmasi:** Hapus/nonaktifkan proses produksi {id}?\n\n**Error umum**\n\n- 404: proses tidak ditemukan\n- 403: tanpa capability doc.cancel\n",
+      "doc": "### prod_proc_delete\n\n**Ringkasan:** Menghapus master proses produksi: bila sudah dipakai di run produksi, hanya dinonaktifkan; bila belum, dihapus permanen. Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/inventory/production-processes/:id` (src/routes/inventory/productionProcesses.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID proses. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_proc_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Hapus/nonaktifkan proses produksi <id>?\"\n}\n```\n\n**Isi hasil:** {message, deleted:true} atau {message, deactivated:true}.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok; deactivate atau hard delete master.\n\n**Teks konfirmasi:** Hapus/nonaktifkan proses produksi {id}?\n\n**Error umum**\n\n- 404: proses tidak ditemukan\n- 403: tanpa capability doc.cancel\n",
       "example": {
         "tool": "prod_proc_delete",
         "args": {
@@ -30069,7 +30104,8 @@
       "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, semua jurnal berawalan JV-<runNo> (termasuk revisi) dibatalkan, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -30121,18 +30157,20 @@
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Run belum dibatalkan."
+        "Run belum dibatalkan.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: proses produksi sudah dibatalkan",
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "prod_run_get"
       ],
-      "doc": "### prod_run_cancel\n\n**Ringkasan:** Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, semua jurnal berawalan JV-<runNo> (termasuk revisi) dibatalkan, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/inventory/production-runs/:id/cancel` (src/routes/inventory/productionRuns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID production run. |\n| `allowNegativeStock` | query | `string` | tidak | true = lewati cek stok output cukup (admin); wajib negativeStockReason. |\n| `allowNegativeStock` | body | `boolean` | tidak | true = lewati cek stok output cukup (admin); wajib negativeStockReason. |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus (min 10 karakter). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_run_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Data Produksi <id>? Stok dan jurnal produksi akan dibalik.\"\n}\n```\n\n**Isi hasil:** {message: 'Proses produksi berhasil dibatalkan.'}\n\n**Efek pembukuan/stok:** Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled + saldo akun dihitung ulang.\n\n**Teks konfirmasi:** Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Run belum dibatalkan.\n\n**Error umum**\n\n- 400: proses produksi sudah dibatalkan\n- 400: stok output tidak cukup untuk dibalik\n- 400: alasan bypass < 10 karakter\n- 403: tanpa capability doc.cancel\n\n**Tool terkait:** [`prod_run_get`](#prod_run_get)\n",
+      "doc": "### prod_run_cancel\n\n**Ringkasan:** Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, semua jurnal berawalan JV-<runNo> (termasuk revisi) dibatalkan, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)\n- **Handler:** `PUT /api/inventory/production-runs/:id/cancel` (src/routes/inventory/productionRuns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID production run. |\n| `allowNegativeStock` | query | `string` | tidak | true = lewati cek stok output cukup (admin); wajib negativeStockReason. |\n| `allowNegativeStock` | body | `boolean` | tidak | true = lewati cek stok output cukup (admin); wajib negativeStockReason. |\n| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus (min 10 karakter). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_run_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Data Produksi <id>? Stok dan jurnal produksi akan dibalik.\"\n}\n```\n\n**Isi hasil:** {message: 'Proses produksi berhasil dibatalkan.'}\n\n**Efek pembukuan/stok:** Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled + saldo akun dihitung ulang.\n\n**Teks konfirmasi:** Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Run belum dibatalkan.\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: proses produksi sudah dibatalkan\n- 400: stok output tidak cukup untuk dibalik\n- 400: alasan bypass < 10 karakter\n- 403: tanpa capability doc.cancel\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`prod_run_get`](#prod_run_get)\n",
       "example": {
         "tool": "prod_run_cancel",
         "args": {
@@ -30767,18 +30805,21 @@
       "accessNote": "Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).",
       "prerequisites": [
         "Run belum dibatalkan.",
-        "Bila allowNegativeStock=true: capability inventory.negative_stock."
+        "Bila allowNegativeStock=true: capability inventory.negative_stock.",
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "409: sudah ada pengajuan edit Pending untuk run ini",
         "400: stok tidak cukup / run sudah dibatalkan",
-        "403: tidak berwenang bypass validasi stok"
+        "403: tidak berwenang bypass validasi stok",
+        "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku"
       ],
       "related": [
         "prod_run_get",
         "prod_run_cancel"
       ],
-      "doc": "### prod_run_update\n\n**Ringkasan:** Mengedit Data Produksi yang SUDAH diposting (bukan draft): membatalkan efek lama lalu menerapkan ulang dengan nomor run yang sama dan jurnal revisi JV-<runNo>-R<n>. Untuk role tanpa approval.bypass, tidak langsung dieksekusi melainkan diantrekan sebagai ApprovalRequest 'ProductionRunEdit' (202).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `production` / `edit`)\n- **Catatan akses:** Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).\n- **Handler:** `PUT /api/inventory/production-runs/:id` (src/routes/inventory/productionRuns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID production run yang diedit. |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `warehouseId` | body | `uuid` | tidak | the legacy default-warehouse fallback so user is explicit per run. |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `referenceType` | body | `string` | tidak |  |\n| `referenceId` | body | `string` | tidak |  |\n| `referenceNumber` | body | `string` | tidak |  |\n| `inputs` | body | `array<object>` | ya | Baris input baru (menggantikan semua baris lama). |\n| `inputs[].itemId` | body | `string` | ya |  |\n| `inputs[].quantity` | body | `number` | ya |  |\n| `inputs[].sourceMovementId` | body | `uuid` | tidak | fall back to WAC-based costing (legacy behavior). |\n| `inputs[].batchUnitCost` | body | `number` | tidak |  |\n| `outputs` | body | `array<object>` | ya | Baris output baru (menggantikan semua baris lama). |\n| `outputs[].itemId` | body | `string` | ya |  |\n| `outputs[].quantity` | body | `number` | ya |  |\n| `outputs[].unitPrice` | body | `number` | tidak |  |\n| `outputs[].isByProduct` | body | `boolean` | tidak |  |\n| `costs` | body | `array<object>` | tidak | GL is NOT posted from these — real expenses still flow via JV/invoice. |\n| `costs[].standardId` | body | `uuid` | tidak |  |\n| `costs[].description` | body | `string` | ya |  |\n| `costs[].costSide` | body | enum: `InputSide`, `OutputSide` | ya |  |\n| `costs[].basis` | body | enum: `InputQty`, `OutputQty`, `Fixed` | ya |  |\n| `costs[].rate` | body | `number` | ya |  |\n| `costs[].costAccountId` | body | `uuid` | tidak |  |\n| `hppOverride` | body | `number` | tidak | material + costs - byproduct value. |\n| `processIds` | body | `array<uuid>` | tidak | Optional + order-insensitive (multiselect). Empty array = unspecified. |\n| `plannedStart` | body | `date` | tidak | B2 multi-mesin: jendela shift standar (planned production time) & istirahat. |\n| `plannedEnd` | body | `date` | tidak |  |\n| `breakStart` | body | `date` | tidak |  |\n| `breakEnd` | body | `date` | tidak |  |\n| `runMachines` | body | `array<object>` | tidak | Mesin paralel dalam run; OEE dihitung per mesin + agregat line. |\n| `runMachines[].machineId` | body | `uuid` | ya |  |\n| `runMachines[].startAt` | body | `date` | tidak |  |\n| `runMachines[].endAt` | body | `date` | tidak |  |\n| `shift` | body | `string` | tidak | \"1\" \\| \"2\" \\| \"3\" |\n| `shiftLead` | body | `string` | tidak | kepala shift (teks bebas) |\n| `manpowerCount` | body | `number` | tidak |  |\n| `goodQty` | body | `number` | tidak | LEGACY — diabaikan |\n| `rejectQty` | body | `number` | tidak | LEGACY — diabaikan |\n| `downtimes` | body | `array<object>` | tidak |  |\n| `downtimes[].machineId` | body | `uuid` | tidak |  |\n| `downtimes[].category` | body | `string` | ya |  |\n| `downtimes[].reason` | body | `string` | tidak |  |\n| `downtimes[].durationMin` | body | `number` | ya |  |\n| `machineId` | body | `uuid` | tidak | tidak lagi dipakai untuk compute OEE. |\n| `startAt` | body | `date` | tidak |  |\n| `endAt` | body | `date` | tidak |  |\n| `allowNegativeStock` | body | `boolean` | tidak | Use case: backdated production input where sales already reduced stock. |\n| `negativeStockReason` | body | `string` | tidak | Disimpan ke audit log + ditampilkan di Dashboard \"Stok Minus Aktif\". |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_run_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"date\": \"2026-01-31\",\n    \"inputs\": [\n      {\n        \"itemId\": \"<id>\",\n        \"quantity\": 1\n      }\n    ],\n    \"outputs\": [\n      {\n        \"itemId\": \"<id>\",\n        \"quantity\": 1\n      }\n    ]\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Edit Data Produksi <id>? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).\"\n}\n```\n\n**Isi hasil:** Bypass: run hasil edit (200). Non-bypass: 202 {pendingApproval, request}.\n\n**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR 5.12 Biaya Konversi Dibebankan atau CR/DR 5.1 HPP). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.\n\n**Teks konfirmasi:** Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).\n\n**Prasyarat**\n\n- Run belum dibatalkan.\n- Bila allowNegativeStock=true: capability inventory.negative_stock.\n\n**Error umum**\n\n- 409: sudah ada pengajuan edit Pending untuk run ini\n- 400: stok tidak cukup / run sudah dibatalkan\n- 403: tidak berwenang bypass validasi stok\n\n**Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)\n",
+      "doc": "### prod_run_update\n\n**Ringkasan:** Mengedit Data Produksi yang SUDAH diposting (bukan draft): membatalkan efek lama lalu menerapkan ulang dengan nomor run yang sama dan jurnal revisi JV-<runNo>-R<n>. Untuk role tanpa approval.bypass, tidak langsung dieksekusi melainkan diantrekan sebagai ApprovalRequest 'ProductionRunEdit' (202).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `production` / `edit`)\n- **Catatan akses:** Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).\n- **Handler:** `PUT /api/inventory/production-runs/:id` (src/routes/inventory/productionRuns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID production run yang diedit. |\n| `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |\n| `warehouseId` | body | `uuid` | tidak | the legacy default-warehouse fallback so user is explicit per run. |\n| `notes` | body | `string` | tidak | Catatan bebas. |\n| `referenceType` | body | `string` | tidak |  |\n| `referenceId` | body | `string` | tidak |  |\n| `referenceNumber` | body | `string` | tidak |  |\n| `inputs` | body | `array<object>` | ya | Baris input baru (menggantikan semua baris lama). |\n| `inputs[].itemId` | body | `string` | ya |  |\n| `inputs[].quantity` | body | `number` | ya |  |\n| `inputs[].sourceMovementId` | body | `uuid` | tidak | fall back to WAC-based costing (legacy behavior). |\n| `inputs[].batchUnitCost` | body | `number` | tidak |  |\n| `outputs` | body | `array<object>` | ya | Baris output baru (menggantikan semua baris lama). |\n| `outputs[].itemId` | body | `string` | ya |  |\n| `outputs[].quantity` | body | `number` | ya |  |\n| `outputs[].unitPrice` | body | `number` | tidak |  |\n| `outputs[].isByProduct` | body | `boolean` | tidak |  |\n| `costs` | body | `array<object>` | tidak | GL is NOT posted from these — real expenses still flow via JV/invoice. |\n| `costs[].standardId` | body | `uuid` | tidak |  |\n| `costs[].description` | body | `string` | ya |  |\n| `costs[].costSide` | body | enum: `InputSide`, `OutputSide` | ya |  |\n| `costs[].basis` | body | enum: `InputQty`, `OutputQty`, `Fixed` | ya |  |\n| `costs[].rate` | body | `number` | ya |  |\n| `costs[].costAccountId` | body | `uuid` | tidak |  |\n| `hppOverride` | body | `number` | tidak | material + costs - byproduct value. |\n| `processIds` | body | `array<uuid>` | tidak | Optional + order-insensitive (multiselect). Empty array = unspecified. |\n| `plannedStart` | body | `date` | tidak | B2 multi-mesin: jendela shift standar (planned production time) & istirahat. |\n| `plannedEnd` | body | `date` | tidak |  |\n| `breakStart` | body | `date` | tidak |  |\n| `breakEnd` | body | `date` | tidak |  |\n| `runMachines` | body | `array<object>` | tidak | Mesin paralel dalam run; OEE dihitung per mesin + agregat line. |\n| `runMachines[].machineId` | body | `uuid` | ya |  |\n| `runMachines[].startAt` | body | `date` | tidak |  |\n| `runMachines[].endAt` | body | `date` | tidak |  |\n| `shift` | body | `string` | tidak | \"1\" \\| \"2\" \\| \"3\" |\n| `shiftLead` | body | `string` | tidak | kepala shift (teks bebas) |\n| `manpowerCount` | body | `number` | tidak |  |\n| `goodQty` | body | `number` | tidak | LEGACY — diabaikan |\n| `rejectQty` | body | `number` | tidak | LEGACY — diabaikan |\n| `downtimes` | body | `array<object>` | tidak |  |\n| `downtimes[].machineId` | body | `uuid` | tidak |  |\n| `downtimes[].category` | body | `string` | ya |  |\n| `downtimes[].reason` | body | `string` | tidak |  |\n| `downtimes[].durationMin` | body | `number` | ya |  |\n| `machineId` | body | `uuid` | tidak | tidak lagi dipakai untuk compute OEE. |\n| `startAt` | body | `date` | tidak |  |\n| `endAt` | body | `date` | tidak |  |\n| `allowNegativeStock` | body | `boolean` | tidak | Use case: backdated production input where sales already reduced stock. |\n| `negativeStockReason` | body | `string` | tidak | Disimpan ke audit log + ditampilkan di Dashboard \"Stok Minus Aktif\". |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"prod_run_update\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"date\": \"2026-01-31\",\n    \"inputs\": [\n      {\n        \"itemId\": \"<id>\",\n        \"quantity\": 1\n      }\n    ],\n    \"outputs\": [\n      {\n        \"itemId\": \"<id>\",\n        \"quantity\": 1\n      }\n    ]\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Edit Data Produksi <id>? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).\"\n}\n```\n\n**Isi hasil:** Bypass: run hasil edit (200). Non-bypass: 202 {pendingApproval, request}.\n\n**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR 5.12 Biaya Konversi Dibebankan atau CR/DR 5.1 HPP). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.\n\n**Teks konfirmasi:** Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).\n\n**Prasyarat**\n\n- Run belum dibatalkan.\n- Bila allowNegativeStock=true: capability inventory.negative_stock.\n- Tahun buku tanggal lama dan tanggal baru masih terbuka.\n\n**Error umum**\n\n- 409: sudah ada pengajuan edit Pending untuk run ini\n- 400: stok tidak cukup / run sudah dibatalkan\n- 403: tidak berwenang bypass validasi stok\n- 400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)\n- 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku\n\n**Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)\n",
       "example": {
         "tool": "prod_run_update",
         "args": {
@@ -30807,7 +30848,8 @@
       "desc": "Membatalkan proforma invoice. Ditolak bila sudah dikonversi ke Sales Invoice atau masih ada uang muka aktif tertaut (batalkan uang muka lewat menu Uang Muka Pelanggan dulu).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -30838,7 +30880,7 @@
         "400: sudah dikonversi ke Sales Invoice.",
         "400: masih ada uang muka aktif tertaut."
       ],
-      "doc": "### proforma_cancel\n\n**Ringkasan:** Membatalkan proforma invoice. Ditolak bila sudah dikonversi ke Sales Invoice atau masih ada uang muka aktif tertaut (batalkan uang muka lewat menu Uang Muka Pelanggan dulu).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `proforma_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/proforma-invoices/:id/cancel` (src/routes/proformaInvoices.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID penawaran. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"proforma_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan proforma <id>?\"\n}\n```\n\n**Isi hasil:** Quotation berstatus Cancelled.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Status menjadi Cancelled (tidak bisa diaktifkan lagi).\n\n**Teks konfirmasi:** Batalkan proforma {id}?\n\n**Error umum**\n\n- 400: sudah dikonversi ke Sales Invoice.\n- 400: masih ada uang muka aktif tertaut.\n",
+      "doc": "### proforma_cancel\n\n**Ringkasan:** Membatalkan proforma invoice. Ditolak bila sudah dikonversi ke Sales Invoice atau masih ada uang muka aktif tertaut (batalkan uang muka lewat menu Uang Muka Pelanggan dulu).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `proforma_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/proforma-invoices/:id/cancel` (src/routes/proformaInvoices.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID penawaran. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"proforma_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan proforma <id>?\"\n}\n```\n\n**Isi hasil:** Quotation berstatus Cancelled.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Status menjadi Cancelled (tidak bisa diaktifkan lagi).\n\n**Teks konfirmasi:** Batalkan proforma {id}?\n\n**Error umum**\n\n- 400: sudah dikonversi ke Sales Invoice.\n- 400: masih ada uang muka aktif tertaut.\n",
       "example": {
         "tool": "proforma_cancel",
         "args": {
@@ -31760,10 +31802,11 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "quotation",
-      "desc": "Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default hanya Admin).",
+      "desc": "Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default Admin dan Accountant).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -31794,7 +31837,7 @@
         "400: sudah dikonversi ke Sales Invoice — batalkan invoice dulu.",
         "400: sudah dibatalkan."
       ],
-      "doc": "### quot_cancel\n\n**Ringkasan:** Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default hanya Admin).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `quotation` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/quotations/:id/cancel` (src/routes/quotations.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID penawaran. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"quot_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan penawaran <id>?\"\n}\n```\n\n**Isi hasil:** Quotation berstatus Cancelled.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Status menjadi Cancelled (tidak bisa diaktifkan lagi).\n\n**Teks konfirmasi:** Batalkan penawaran {id}?\n\n**Error umum**\n\n- 400: sudah dikonversi ke Sales Invoice — batalkan invoice dulu.\n- 400: sudah dibatalkan.\n",
+      "doc": "### quot_cancel\n\n**Ringkasan:** Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default Admin dan Accountant).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `quotation` / `edit`, capability `doc.cancel`)\n- **Handler:** `PATCH /api/quotations/:id/cancel` (src/routes/quotations.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID penawaran. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"quot_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan penawaran <id>?\"\n}\n```\n\n**Isi hasil:** Quotation berstatus Cancelled.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Status menjadi Cancelled (tidak bisa diaktifkan lagi).\n\n**Teks konfirmasi:** Batalkan penawaran {id}?\n\n**Error umum**\n\n- 400: sudah dikonversi ke Sales Invoice — batalkan invoice dulu.\n- 400: sudah dibatalkan.\n",
       "example": {
         "tool": "quot_cancel",
         "args": {
@@ -35385,7 +35428,8 @@
       "desc": "Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -35421,7 +35465,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### si_cancel\n\n**Ringkasan:** Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `sales_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales/invoices/:id/cancel` (src/routes/sales.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"si_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.\n\n**Teks konfirmasi:** Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: invoice sudah lunas.\n- 400: ada pembayaran teralokasi — batalkan pembayaran dulu.\n- 400: ada alokasi uang muka aktif — batalkan alokasi dulu.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
+      "doc": "### si_cancel\n\n**Ringkasan:** Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales/invoices/:id/cancel` (src/routes/sales.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID invoice. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"si_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Invoice Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.\n\n**Teks konfirmasi:** Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: invoice sudah lunas.\n- 400: ada pembayaran teralokasi — batalkan pembayaran dulu.\n- 400: ada alokasi uang muka aktif — batalkan alokasi dulu.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
       "example": {
         "tool": "si_cancel",
         "args": {
@@ -36883,7 +36927,8 @@
       "desc": "Membatalkan Retur Penjualan: jurnal retur & jurnal HPP dibalik, stok masuk dibatalkan, kredit pelanggan hasil retur dibalik. Ditolak bila kredit sudah dipakai di faktur lain.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -36918,7 +36963,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### sret_cancel\n\n**Ringkasan:** Membatalkan Retur Penjualan: jurnal retur & jurnal HPP dibalik, stok masuk dibatalkan, kredit pelanggan hasil retur dibalik. Ditolak bila kredit sudah dipakai di faktur lain.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `sales_return` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales-returns/:id/cancel` (src/routes/salesReturns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID retur. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sret_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Retur Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.\n\n**Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.\n- 400: retur sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
+      "doc": "### sret_cancel\n\n**Ringkasan:** Membatalkan Retur Penjualan: jurnal retur & jurnal HPP dibalik, stok masuk dibatalkan, kredit pelanggan hasil retur dibalik. Ditolak bila kredit sudah dipakai di faktur lain.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_return` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/sales-returns/:id/cancel` (src/routes/salesReturns.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID retur. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sret_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Retur Penjualan <id> (jurnal & stok dibalik)?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.\n\n**Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.\n- 400: retur sudah dibatalkan.\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n",
       "example": {
         "tool": "sret_cancel",
         "args": {
@@ -37297,12 +37342,16 @@
       "accessNote": "Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.",
       "errors": [
         "400: transfer sudah dibatalkan",
-        "404: transfer tidak ditemukan"
+        "404: transfer tidak ditemukan",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "stf_get"
       ],
-      "doc": "### stf_cancel\n\n**Ringkasan:** Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Catatan: tidak ada pengecekan stok tujuan cukup, sehingga bisa membuat saldo gudang tujuan negatif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `stock_transfer` / `edit`)\n- **Catatan akses:** Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.\n- **Handler:** `PATCH /api/stock-transfers/:id/cancel` (src/routes/stockTransfers.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID transfer. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"stf_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan transfer stok <id>? Stok akan dikembalikan ke gudang asal.\"\n}\n```\n\n**Isi hasil:** Transfer dengan status Cancelled.\n\n**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL.\n\n**Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.\n\n**Error umum**\n\n- 400: transfer sudah dibatalkan\n- 404: transfer tidak ditemukan\n\n**Tool terkait:** [`stf_get`](#stf_get)\n",
+      "prerequisites": [
+        "Tahun buku tanggal transfer masih terbuka."
+      ],
+      "doc": "### stf_cancel\n\n**Ringkasan:** Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Catatan: tidak ada pengecekan stok tujuan cukup, sehingga bisa membuat saldo gudang tujuan negatif.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `stock_transfer` / `edit`)\n- **Catatan akses:** Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.\n- **Handler:** `PATCH /api/stock-transfers/:id/cancel` (src/routes/stockTransfers.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID transfer. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"stf_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan transfer stok <id>? Stok akan dikembalikan ke gudang asal.\"\n}\n```\n\n**Isi hasil:** Transfer dengan status Cancelled.\n\n**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL.\n\n**Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.\n\n**Prasyarat**\n\n- Tahun buku tanggal transfer masih terbuka.\n\n**Error umum**\n\n- 400: transfer sudah dibatalkan\n- 404: transfer tidak ditemukan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n\n**Tool terkait:** [`stf_get`](#stf_get)\n",
       "example": {
         "tool": "stf_cancel",
         "args": {
@@ -37837,7 +37886,8 @@
       "desc": "Menonaktifkan item jasa (soft delete: isActive=false; data tidak dihapus dan dapat diaktifkan lagi lewat svc_update). Butuh capability doc.cancel.",
       "risk": "write",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -37867,7 +37917,7 @@
       "related": [
         "svc_update"
       ],
-      "doc": "### svc_delete\n\n**Ringkasan:** Menonaktifkan item jasa (soft delete: isActive=false; data tidak dihapus dan dapat diaktifkan lagi lewat svc_update). Butuh capability doc.cancel.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `sales_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/service-items/:id` (src/routes/serviceItems.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID item jasa. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"svc_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Nonaktifkan item jasa <id>?\"\n}\n```\n\n**Isi hasil:** { success: true }.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Item jasa dinonaktifkan; dokumen lama tidak terpengaruh.\n\n**Teks konfirmasi:** Nonaktifkan item jasa {id}?\n\n**Tool terkait:** [`svc_update`](#svc_update)\n",
+      "doc": "### svc_delete\n\n**Ringkasan:** Menonaktifkan item jasa (soft delete: isActive=false; data tidak dihapus dan dapat diaktifkan lagi lewat svc_update). Butuh capability doc.cancel.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `sales_invoice` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/service-items/:id` (src/routes/serviceItems.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID item jasa. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"svc_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Nonaktifkan item jasa <id>?\"\n}\n```\n\n**Isi hasil:** { success: true }.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Item jasa dinonaktifkan; dokumen lama tidak terpengaruh.\n\n**Teks konfirmasi:** Nonaktifkan item jasa {id}?\n\n**Tool terkait:** [`svc_update`](#svc_update)\n",
       "example": {
         "tool": "svc_delete",
         "args": {
@@ -38485,7 +38535,8 @@
       "desc": "Membatalkan Surat Jalan Sementara. Tidak bisa bila sudah Linked ke DO resmi (batalkan DO dulu). Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -38516,7 +38567,7 @@
         "400: sudah dibatalkan.",
         "400: sudah ditautkan ke surat jalan resmi."
       ],
-      "doc": "### tdn_cancel\n\n**Ringkasan:** Membatalkan Surat Jalan Sementara. Tidak bisa bila sudah Linked ke DO resmi (batalkan DO dulu). Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `delivery_order` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/temporary-delivery-notes/:id/cancel` (src/routes/temporaryDeliveryNotes.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID SJS. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"tdn_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Surat Jalan Sementara <id>?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Status SJS menjadi Cancelled.\n\n**Teks konfirmasi:** Batalkan Surat Jalan Sementara {id}?\n\n**Error umum**\n\n- 400: sudah dibatalkan.\n- 400: sudah ditautkan ke surat jalan resmi.\n",
+      "doc": "### tdn_cancel\n\n**Ringkasan:** Membatalkan Surat Jalan Sementara. Tidak bisa bila sudah Linked ke DO resmi (batalkan DO dulu). Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/temporary-delivery-notes/:id/cancel` (src/routes/temporaryDeliveryNotes.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID SJS. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"tdn_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan Surat Jalan Sementara <id>?\"\n}\n```\n\n**Isi hasil:** { id, status: 'Cancelled' }.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok. Status SJS menjadi Cancelled.\n\n**Teks konfirmasi:** Batalkan Surat Jalan Sementara {id}?\n\n**Error umum**\n\n- 400: sudah dibatalkan.\n- 400: sudah ditautkan ke surat jalan resmi.\n",
       "example": {
         "tool": "tdn_cancel",
         "args": {
@@ -39200,7 +39251,8 @@
       "desc": "Membatalkan satu aplikasi uang muka vendor ke invoice: jurnal aplikasi dibalik, outstanding faktur dan saldo uang muka dipulihkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -39227,7 +39279,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse jurnal aplikasi (DR Hutang Usaha 2.1.1 / CR Uang Muka Vendor 1.3 dibalik): outstanding PI naik kembali, depositBalance pemasok naik, aplikasi ditandai isCancelled.",
       "confirm_template": "Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Aplikasi uang muka tidak ditemukan",
         "400: Aplikasi sudah dibatalkan",
@@ -39241,7 +39293,7 @@
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
-      "doc": "### vdep_apply_cancel\n\n**Ringkasan:** Membatalkan satu aplikasi uang muka vendor ke invoice: jurnal aplikasi dibalik, outstanding faktur dan saldo uang muka dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `vendor_deposit` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default hanya Admin).\n- **Handler:** `POST /api/vendor-deposits/apply/:id/cancel` (src/routes/vendorDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID VendorDepositApplication (bukan ID uang muka). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"vdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan aplikasi uang muka <id>? Hutang faktur akan dipulihkan.\"\n}\n```\n\n**Isi hasil:** Aplikasi uang muka yang dibatalkan.\n\n**Efek pembukuan/stok:** Reverse jurnal aplikasi (DR Hutang Usaha 2.1.1 / CR Uang Muka Vendor 1.3 dibalik): outstanding PI naik kembali, depositBalance pemasok naik, aplikasi ditandai isCancelled.\n\n**Teks konfirmasi:** Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Aplikasi uang muka tidak ditemukan\n- 400: Aplikasi sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n\n**Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)\n",
+      "doc": "### vdep_apply_cancel\n\n**Ringkasan:** Membatalkan satu aplikasi uang muka vendor ke invoice: jurnal aplikasi dibalik, outstanding faktur dan saldo uang muka dipulihkan.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)\n- **Catatan akses:** Butuh capability doc.cancel (default Admin dan Accountant).\n- **Handler:** `POST /api/vendor-deposits/apply/:id/cancel` (src/routes/vendorDeposits.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID VendorDepositApplication (bukan ID uang muka). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"vdep_apply_cancel\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Batalkan aplikasi uang muka <id>? Hutang faktur akan dipulihkan.\"\n}\n```\n\n**Isi hasil:** Aplikasi uang muka yang dibatalkan.\n\n**Efek pembukuan/stok:** Reverse jurnal aplikasi (DR Hutang Usaha 2.1.1 / CR Uang Muka Vendor 1.3 dibalik): outstanding PI naik kembali, depositBalance pemasok naik, aplikasi ditandai isCancelled.\n\n**Teks konfirmasi:** Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.\n\n**Prasyarat**\n\n- Tahun buku dokumen dan jurnalnya masih terbuka.\n\n**Error umum**\n\n- 400: Aplikasi uang muka tidak ditemukan\n- 400: Aplikasi sudah dibatalkan\n- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan\n- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku\n\n**Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)\n",
       "example": {
         "tool": "vdep_apply_cancel",
         "args": {
@@ -39738,7 +39790,8 @@
       "desc": "Menghapus permanen gudang. Ditolak bila gudang default, masih punya saldo stok, atau punya riwayat pergerakan/transfer (nonaktifkan saja). Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -39775,7 +39828,7 @@
         "404: gudang tidak ditemukan",
         "403: tanpa capability doc.cancel"
       ],
-      "doc": "### wh_delete\n\n**Ringkasan:** Menghapus permanen gudang. Ditolak bila gudang default, masih punya saldo stok, atau punya riwayat pergerakan/transfer (nonaktifkan saja). Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `warehouse` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/warehouses/:id` (src/routes/warehouses.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID gudang. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"wh_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"HAPUS permanen gudang <id>?\"\n}\n```\n\n**Isi hasil:** {success:true}.\n\n**Efek pembukuan/stok:** Tidak ada jurnal; hard delete gudang + baris saldo stok nol.\n\n**Teks konfirmasi:** HAPUS permanen gudang {id}?\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Gudang bukan default, tanpa saldo, tanpa riwayat.\n\n**Error umum**\n\n- 400: gudang default tidak bisa dihapus\n- 400: masih punya saldo / riwayat transaksi\n- 404: gudang tidak ditemukan\n- 403: tanpa capability doc.cancel\n",
+      "doc": "### wh_delete\n\n**Ringkasan:** Menghapus permanen gudang. Ditolak bila gudang default, masih punya saldo stok, atau punya riwayat pergerakan/transfer (nonaktifkan saja). Butuh capability doc.cancel.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `warehouse` / `edit`, capability `doc.cancel`)\n- **Handler:** `DELETE /api/warehouses/:id` (src/routes/warehouses.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | UUID gudang. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"wh_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"HAPUS permanen gudang <id>?\"\n}\n```\n\n**Isi hasil:** {success:true}.\n\n**Efek pembukuan/stok:** Tidak ada jurnal; hard delete gudang + baris saldo stok nol.\n\n**Teks konfirmasi:** HAPUS permanen gudang {id}?\n\n**Prasyarat**\n\n- User memiliki capability doc.cancel.\n- Gudang bukan default, tanpa saldo, tanpa riwayat.\n\n**Error umum**\n\n- 400: gudang default tidak bisa dihapus\n- 400: masih punya saldo / riwayat transaksi\n- 404: gudang tidak ditemukan\n- 403: tanpa capability doc.cancel\n",
       "example": {
         "tool": "wh_delete",
         "args": {

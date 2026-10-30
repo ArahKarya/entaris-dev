@@ -45,12 +45,15 @@ export interface RouteResult {
   body: any; // JSON of any route
 }
 
-/** Invoke the handlers of `METHOD path` on an Express router with a minimal req/res. */
+/**
+ * Invoke the handlers of `METHOD path` on an Express router with a minimal req/res. `role` is the
+ * role key in req.user (default 'Admin'); requireCap gates resolve it against the roles table.
+ */
 export async function callRoute(
   router: Router,
   method: 'get' | 'post' | 'put' | 'patch' | 'delete',
   path: string,
-  opts: { query?: Record<string, string>; body?: unknown; userId?: string; params?: Record<string, string> } = {},
+  opts: { query?: Record<string, string>; body?: unknown; userId?: string; role?: string; params?: Record<string, string> } = {},
 ): Promise<RouteResult> {
   type Layer = { route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: (...args: unknown[]) => unknown }> } };
   const layer = (router.stack as Layer[]).find((l) => l.route?.path === path && l.route.methods[method]);
@@ -67,7 +70,7 @@ export async function callRoute(
     body: opts.body ?? {},
     params: opts.params ?? {},
     headers: {},
-    user: opts.userId ? { userId: opts.userId, role: 'Admin' } : undefined,
+    user: opts.userId ? { userId: opts.userId, role: opts.role ?? 'Admin' } : undefined,
     get: () => undefined,
   };
   for (const { handle } of layer.route.stack) await handle(req, res, () => undefined);

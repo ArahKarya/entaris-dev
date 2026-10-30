@@ -110,6 +110,26 @@ export async function assertPeriodOpen(tx: Tx, ref: PeriodRef, label: PeriodLabe
 }
 
 /**
+ * assertPeriodOpen for every reference given, once per distinct date or fiscal year. Edit and
+ * cancel paths pass the document's date and its stored fiscal year: an older edit that moved the
+ * date can leave the stored id stale, and journals booked to that id must stay untouched too.
+ */
+export async function assertPeriodsOpen(
+  tx: Tx,
+  refs: ReadonlyArray<PeriodRef | null | undefined>,
+  label: PeriodLabel,
+): Promise<void> {
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (!ref) continue;
+    const key = 'fiscalYearId' in ref ? `fy:${ref.fiscalYearId}` : `date:${ref.date.getTime()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await assertPeriodOpen(tx, ref, label);
+  }
+}
+
+/**
  * Fiscal year for a NEW journal dated `journalDate` (revision, cancel or settlement journals):
  * always taken from the journal's own date, never from the source document's fiscal year.
  */

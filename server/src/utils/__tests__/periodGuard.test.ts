@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeAutoTx } from '../../__tests__/helpers/autoTx';
 import { BusinessError } from '../errors';
-import { assertPeriodOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../periodGuard';
+import { assertPeriodOpen, assertPeriodsOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../periodGuard';
 import { translateMessage } from '../../i18n/translateMessage';
 
 const openFy = { id: 'fy-1', name: '2026', isClosed: false };
@@ -131,5 +131,30 @@ describe('assertPeriodOpen', () => {
     expect(translateMessage(e.message, 'en')).toBe(
       'Fiscal year 2025 is closed; this journal cannot be posted, changed or cancelled in that period. Make the correction in the current period.',
     );
+  });
+});
+
+describe('assertPeriodsOpen', () => {
+  it('checks each distinct date and fiscal year once, skipping empty refs', async () => {
+    const { tx, fn } = makeAutoTx({
+      'fiscalYear.findUnique': () => openFy,
+      'fiscalYear.findFirst': () => openFy,
+      $queryRaw: lockRows(openFy),
+    });
+    const day = new Date('2026-03-01T00:00:00Z');
+    await assertPeriodsOpen(tx, [{ date: day }, { fiscalYearId: 'fy-1' }, null, { date: new Date(day) }, { fiscalYearId: 'fy-1' }, undefined], 'mutasi stok');
+    expect(fn('fiscalYear.findFirst')).toHaveBeenCalledTimes(1);
+    expect(fn('fiscalYear.findUnique')).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws PERIOD_CLOSED when any of the references is in a closed year', async () => {
+    const { tx } = makeAutoTx({
+      'fiscalYear.findFirst': () => openFy,
+      'fiscalYear.findUnique': () => closedFy,
+      $queryRaw: lockRows(openFy, closedFy),
+    });
+    const e = await caught(assertPeriodsOpen(tx, [{ date: new Date('2026-03-01T00:00:00Z') }, { fiscalYearId: 'fy-0' }], 'surat jalan'));
+    expect(e.code).toBe(PERIOD_CLOSED);
+    expect(e.message).toMatch(/surat jalan di periode ini/);
   });
 });

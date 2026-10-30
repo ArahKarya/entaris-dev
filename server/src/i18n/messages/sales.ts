@@ -138,6 +138,7 @@ export const SALES_MESSAGES: MessageDictionary = {
   "Surat jalan sudah dibatalkan.": "Delivery order is already cancelled.",
   "Batalkan invoice terkait dulu sebelum batalkan surat jalan.": "Cancel the related invoice before cancelling the delivery order.",
   "Surat jalan sudah dibatalkan dan tidak bisa diedit.": "Delivery order is cancelled and cannot be edited.",
+  "Tanggal surat jalan tidak bisa dipindah ke bulan lain. Batalkan surat jalan ini lalu buat yang baru di bulan tujuan.": "A delivery order's date cannot be moved to another month. Cancel this delivery order and create a new one in the target month.",
   "Surat jalan sudah masuk invoice. Batalkan dulu invoice terkait sebelum edit.": "Delivery order is already invoiced. Cancel the related invoice before editing.",
   "Data customer tidak ditemukan.": "Customer data not found.",
   "Customer sudah tidak aktif.": "Customer is no longer active.",

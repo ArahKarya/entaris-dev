@@ -453,7 +453,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/inventory/production-cost-standards/:id` (src/routes/inventory/productionCostStandards.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1255,7 +1255,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/inventory/production-processes/:id` (src/routes/inventory/productionProcesses.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1397,7 +1397,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `production` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `production` / `edit`, capability `doc.cancel`)
 - **Handler:** `PUT /api/inventory/production-runs/:id/cancel` (src/routes/inventory/productionRuns.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1443,6 +1443,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - User memiliki capability doc.cancel.
 - Run belum dibatalkan.
+- Tahun buku dokumen dan jurnalnya masih terbuka.
 
 **Error umum**
 
@@ -1450,6 +1451,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400: stok output tidak cukup untuk dibalik
 - 400: alasan bypass < 10 karakter
 - 403: tanpa capability doc.cancel
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get)
 
@@ -1701,12 +1703,15 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 - Run belum dibatalkan.
 - Bila allowNegativeStock=true: capability inventory.negative_stock.
+- Tahun buku tanggal lama dan tanggal baru masih terbuka.
 
 **Error umum**
 
 - 409: sudah ada pengajuan edit Pending untuk run ini
 - 400: stok tidak cukup / run sudah dibatalkan
 - 403: tidak berwenang bypass validasi stok
+- 400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)
+- 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)
 

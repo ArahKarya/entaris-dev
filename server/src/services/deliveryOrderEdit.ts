@@ -2,7 +2,8 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
-import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { businessYearMonth } from '../utils/businessDate';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { adjustWarehouseStock, resolveWarehouseId, getWarehouseStockMap } from '../utils/warehouseStock';
 import { recomputeDeliveredQtyInTx, relinkDoItemsToSOInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
@@ -10,6 +11,9 @@ import { resolveCogsAccountId } from './cogsAccount';
 import type { SubmitDeliveryOrderInput } from './deliveryOrderSubmit';
 
 type Tx = Prisma.TransactionClient;
+
+/** Error code: an edit may not move a delivery note to another business month. */
+export const DELIVERY_ORDER_MONTH_CHANGE = 'DO_MONTH_CHANGE';
 
 /**
  * Edit a Submitted, not-yet-invoiced DO: reverse its movements, then re-apply the new lines with
@@ -32,6 +36,22 @@ export async function editDeliveryOrderInTx(
   if (oldDo.invoiceId) {
     throw new BusinessError(
       'Surat jalan sudah masuk invoice. Batalkan dulu invoice terkait sebelum edit.',
+    );
+  }
+
+  // The note has no journal; its date decides the period. The old date (not the stored fiscal year,
+  // which older edits left stale) and the new one must both be open, and the note stays in its
+  // month so the DO-YYYYMM number and the month's stock reports still match.
+  const txDate = new Date(body.date);
+  if (isNaN(txDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
+  await assertPeriodOpen(tx, { date: oldDo.date }, 'surat jalan');
+  const fiscalYear = await assertPeriodOpen(tx, { date: txDate }, 'surat jalan');
+  const oldMonth = businessYearMonth(oldDo.date);
+  const newMonth = businessYearMonth(txDate);
+  if (oldMonth.year !== newMonth.year || oldMonth.month !== newMonth.month) {
+    throw new BusinessError(
+      'Tanggal surat jalan tidak bisa dipindah ke bulan lain. Batalkan surat jalan ini lalu buat yang baru di bulan tujuan.',
+      DELIVERY_ORDER_MONTH_CHANGE,
     );
   }
 
@@ -61,9 +81,6 @@ export async function editDeliveryOrderInTx(
   if (party.partyType !== 'Customer' && party.partyType !== 'Both') {
     throw new BusinessError('Surat jalan hanya bisa untuk Customer.');
   }
-
-  const txDate = new Date(body.date);
-  if (isNaN(txDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
 
   // Check post-reversal stock per (item, warehouse) from inventory_stocks; currentStock is a
   // cross-warehouse total and must not gate a per-warehouse shipment.
@@ -129,6 +146,7 @@ export async function editDeliveryOrderInTx(
     where: { id: doId },
     data: {
       date: txDate,
+      fiscalYearId: fiscalYear.id,
       partyId: body.partyId,
       nomorMobil: body.nomorMobil ?? null,
       driverName: body.driverName ?? null,
@@ -136,8 +154,6 @@ export async function editDeliveryOrderInTx(
       notes: body.notes ?? null,
     },
   });
-
-  const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
   // Counter account the invoice will post COGS against; stored on each Out movement.
   const cogsAccountId = await resolveCogsAccountId(tx);

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
+import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { logger } from '../lib/logger';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
@@ -36,6 +37,9 @@ export async function cancelGoodsReceiptInTx(
   });
   if (!stt) throw new BusinessError('STT tidak ditemukan.');
   if (stt.status === 'Cancelled') throw new BusinessError('STT sudah dibatalkan.');
+  // The cancel journal is booked to the STT's fiscal year (moving it to the cancel date's year is
+  // a later change), so that year, the STT's date and the original journal's year must be open.
+  await assertPeriodsOpen(tx, [{ date: stt.date }, { fiscalYearId: stt.fiscalYearId }], 'penerimaan barang');
 
   if (stt.isLegacyBackfill) {
     throw new BusinessError(
@@ -143,6 +147,7 @@ export async function cancelGoodsReceiptInTx(
     include: { items: true },
   });
   if (originalJv && originalJv.status === 'Submitted') {
+    await assertPeriodOpen(tx, { fiscalYearId: originalJv.fiscalYearId }, 'penerimaan barang');
     const reverseItems = originalJv.items.map((it) => ({
       accountId: it.accountId,
       partyId: it.partyId,

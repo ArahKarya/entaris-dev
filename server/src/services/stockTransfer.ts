@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { assertPeriodsOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
@@ -179,6 +180,7 @@ export async function cancelStockTransferInTx(
   });
   if (!transfer) throw new BusinessError('Transfer tidak ditemukan.');
   if (transfer.status === 'Cancelled') throw new BusinessError('Transfer sudah dibatalkan.');
+  await assertPeriodsOpen(tx, [{ date: transfer.date }, { fiscalYearId: transfer.fiscalYearId }], 'transfer stok');
 
   for (const ti of transfer.items) {
     const qty = Number(ti.quantity);

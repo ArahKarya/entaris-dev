@@ -112,6 +112,23 @@ describe('runCapBackfill', () => {
 describe('BACKFILL_CAPS', () => {
   const nonSuperRoles = BUILTIN_ROLES.filter((r) => !r.isSuperAdmin).map((r) => r.key);
 
+  it('grants doc.cancel to Accountant once, before the movement edit gate needs it', async () => {
+    const entry = BACKFILL_CAPS.find((e) => e.key === 'e1-accountant-doc-cancel');
+    expect(entry).toEqual({ key: 'e1-accountant-doc-cancel', role: 'Accountant', caps: ['doc.cancel'] });
+    expect(DEFAULT_CAPS.Accountant).toContain('doc.cancel');
+
+    // First boot inserts the marker and grants; the next boot finds the marker and skips.
+    const { client, tx } = makeClient({ marked: [1, 0] });
+    expect(await runCapBackfill(client, [entry!])).toBe(1);
+    expect(await runCapBackfill(client, [entry!])).toBe(0);
+    expect(tx.role.findUnique).toHaveBeenCalledWith({ where: { key: 'Accountant' } });
+    expect(tx.roleCapability.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.roleCapability.createMany).toHaveBeenCalledWith({
+      data: [{ roleId: 'r-acc', capability: 'doc.cancel' }],
+      skipDuplicates: true,
+    });
+  });
+
   it('has unique marker keys', () => {
     const keys = BACKFILL_CAPS.map((e) => e.key);
     expect(new Set(keys).size).toBe(keys.length);

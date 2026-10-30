@@ -3,6 +3,7 @@ import { BusinessError } from '../utils/errors';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { cancelJournalsByPrefix } from '../utils/journalCancel';
 import { journalFamilyWhere } from '../utils/journalFamily';
+import { assertPeriodsOpen } from '../utils/periodGuard';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
@@ -32,6 +33,8 @@ export async function cancelProductionRunInTx(
   });
   if (!run) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (run.isCancelled) throw new BusinessError('Proses produksi sudah dibatalkan.');
+  // Its journals and auto-settle journals check their own years when voided; this covers the run.
+  await assertPeriodsOpen(tx, [{ date: run.date }, { fiscalYearId: run.fiscalYearId }], 'produksi');
 
   const movements = await tx.stockMovement.findMany({
     where: { referenceType: 'ProductionRun', referenceId: runId, isCancelled: false },

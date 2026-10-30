@@ -3,6 +3,7 @@
 
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
+import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { approvalsLink, GATED_LABELS, type GatedDocumentType } from './approvalGate';
 import { notifyAdmins } from './notificationService';
 
@@ -268,7 +269,7 @@ export async function findPendingForTarget(db: Db, documentType: EditDocumentTyp
 
 export type QueueEditResult =
   | { ok: true; status: 202; body: { pendingApproval: true; request: unknown; message: string } }
-  | { ok: false; status: 400 | 404 | 409; error: string };
+  | { ok: false; status: 400 | 404 | 409; error: string; code?: string };
 
 /**
  * Validasi target di waktu request + tolak duplikat Pending + simpan antrian
@@ -286,7 +287,9 @@ export async function queueEditApproval(
       : await prepareInvoiceRevise(db, targetId, body);
   } catch (e) {
     if (e instanceof BusinessError) {
-      return { ok: false, status: /tidak ditemukan/i.test(e.message) ? 404 : 400, error: e.message };
+      // A missing fiscal year is a 400 with its code, not a missing target.
+      const notFound = !e.code && /tidak ditemukan/i.test(e.message);
+      return { ok: false, status: notFound ? 404 : 400, error: e.message, ...(e.code ? { code: e.code } : {}) };
     }
     throw e;
   }
@@ -334,12 +337,17 @@ async function prepareProductionEdit(db: Db, runId: string, rawBody: Body) {
   const run = await db.productionRun.findUnique({
     where: { id: runId },
     select: {
-      runNumber: true, date: true, isCancelled: true, computedHpp: true,
+      runNumber: true, date: true, fiscalYearId: true, isCancelled: true, computedHpp: true,
       items: { select: { itemId: true, lineType: true, quantity: true, item: { select: { name: true } } } },
     },
   });
   if (!run) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (run.isCancelled) throw new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.');
+  // Same period check as editProductionRunInTx, so an edit of a closed period never enters the
+  // queue; the edit checks again when the request is approved.
+  await assertPeriodsOpen(db, [{ date: run.date }, { fiscalYearId: run.fiscalYearId }], 'produksi');
+  const newDate = new Date(String(body.date ?? ''));
+  if (!isNaN(newDate.getTime())) await assertPeriodOpen(db, { date: newDate }, 'produksi');
 
   const ids = Array.from(new Set([...(body.inputs ?? []), ...(body.outputs ?? [])].map((l) => String(l.itemId))));
   const inv = ids.length ? await db.inventoryItem.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];

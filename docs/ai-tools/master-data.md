@@ -190,7 +190,7 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `parties` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `parties` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/parties/:id` (src/routes/parties.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -540,7 +540,7 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin (modul `sales_invoice` / `edit`, capability `doc.cancel`)
+- **Roles & izin:** Admin, Accountant (modul `sales_invoice` / `edit`, capability `doc.cancel`)
 - **Handler:** `DELETE /api/service-items/:id` (src/routes/serviceItems.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 

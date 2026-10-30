@@ -1175,7 +1175,8 @@
       "desc": "Menghapus standar biaya produksi: bila sudah dipakai di run, hanya DINONAKTIFKAN (soft); bila belum pernah dipakai, dihapus permanen. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -1218,7 +1219,8 @@
       "desc": "Menghapus master proses produksi: bila sudah dipakai di run produksi, hanya dinonaktifkan; bila belum, dihapus permanen. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -1304,7 +1306,8 @@
       "desc": "Hapus mitra. Bila sudah punya faktur penjualan/pembelian/pembayaran, mitra TIDAK dihapus melainkan dinonaktifkan; hanya mitra tanpa transaksi yang benar-benar dihapus. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -1696,7 +1699,8 @@
       "desc": "Menonaktifkan item jasa (soft delete: isActive=false; data tidak dihapus dan dapat diaktifkan lagi lewat svc_update). Butuh capability doc.cancel.",
       "risk": "write",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -1774,7 +1778,8 @@
       "desc": "Menghapus permanen gudang. Ditolak bila gudang default, masih punya saldo stok, atau punya riwayat pergerakan/transfer (nonaktifkan saja). Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -15410,7 +15415,8 @@
       "desc": "Membatalkan setoran uang jaminan (hanya bila belum ada settlement aktif): jurnal setoran dibatalkan dan saldo akun dibalik.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -15437,7 +15443,7 @@
       "draftCapable": false,
       "postingEffect": "Soft-cancel jurnal setoran (DR Uang Jaminan 1.8 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. Tidak membuat jurnal balikan baru.",
       "confirm_template": "Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Uang jaminan sudah dibatalkan",
         "400: Sudah ada settlement aktif - batalkan settlement dulu",
@@ -15500,10 +15506,11 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "quotation",
-      "desc": "Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default hanya Admin).",
+      "desc": "Membatalkan penawaran dari status apa pun (kecuali sudah dikonversi ke invoice). Butuh capability doc.cancel (default Admin dan Accountant).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -15941,10 +15948,14 @@
       "accessNote": "Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.",
       "errors": [
         "400: transfer sudah dibatalkan",
-        "404: transfer tidak ditemukan"
+        "404: transfer tidak ditemukan",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "stf_get"
+      ],
+      "prerequisites": [
+        "Tahun buku tanggal transfer masih terbuka."
       ]
     },
     {
@@ -16802,7 +16813,8 @@
       "desc": "Membatalkan pemakaian uang muka pada invoice: jurnal aplikasi dibalik, outstanding invoice dipulihkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -17008,7 +17020,8 @@
       "desc": "Membatalkan Surat Jalan: stok dikembalikan (per gudang), pergerakan stok ditandai batal, status Cancelled. Ditolak bila DO sudah masuk invoice.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -17037,7 +17050,11 @@
       "confirm_template": "Batalkan Surat Jalan {id} (stok dikembalikan)?",
       "errors": [
         "400: batalkan invoice terkait dulu.",
-        "400: surat jalan sudah dibatalkan."
+        "400: surat jalan sudah dibatalkan.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+      ],
+      "prerequisites": [
+        "Tahun buku tanggal SJ masih terbuka."
       ]
     },
     {
@@ -20589,7 +20606,8 @@
       "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -20632,17 +20650,19 @@
       "draftCapable": false,
       "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "prerequisites": [
         "STT berstatus Submitted",
-        "PI terkait (bila ada) sudah dibatalkan"
+        "PI terkait (bila ada) sudah dibatalkan",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: STT sudah dibatalkan",
         "400: STT legacy - batalkan PI-nya",
         "400: ada PI Paid / PI belum dibatalkan",
         "400: stok tidak cukup untuk dibalikkan",
-        "400: alasan bypass stok minus wajib (min 10 karakter)"
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pi_cancel",
@@ -23560,7 +23580,8 @@
       "desc": "Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal dibatalkan. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -23587,7 +23608,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse jurnal pembayaran (Receive: DR Piutang / CR Kas; Pay: DR Kas / CR Hutang): saldo akun dibalik, outstanding invoice terkait naik kembali, status invoice dipulihkan.",
       "confirm_template": "Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Pembayaran sudah dibatalkan",
         "400: Gunakan endpoint Uang Muka untuk membatalkan deposit",
@@ -23818,7 +23839,8 @@
       "desc": "Membatalkan satu settlement uang jaminan (pengembalian/hangus): jurnal settlement dibatalkan dan sisa jaminan dipulihkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -23845,7 +23867,7 @@
       "draftCapable": false,
       "postingEffect": "Soft-cancel jurnal settlement (DR Kas-Bank/Beban / CR Uang Jaminan 1.8): saldo akun dibalik, sisa jaminan naik, status jaminan kembali Disetor bila sebelumnya Selesai.",
       "confirm_template": "Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Settlement sudah dibatalkan",
         "400: Uang jaminan induk sudah dibatalkan",
@@ -24057,7 +24079,8 @@
       "desc": "Membatalkan PO yang sudah dipesan (status menjadi Cancelled). STT yang sudah terbit tetap valid. PO Draft tidak dibatalkan (gunakan po_delete).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -24084,7 +24107,7 @@
       "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok/WAC. STT terkait tetap valid; PO tidak bisa dipakai STT baru.",
       "confirm_template": "Batalkan PO {id}? PO tidak bisa dipakai lagi untuk penerimaan barang.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: PO sudah dibatalkan",
         "400: PO Draf tidak dibatalkan - hapus draf"
@@ -24102,7 +24125,8 @@
       "desc": "Menutup PO (short-close): sisa kuantitas yang belum diterima dianggap tidak akan datang. Status tetap Submitted, tetapi closedAt terisi sehingga PO tidak bisa dipakai STT baru. Alasan wajib (minimal 5 karakter).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -24137,7 +24161,7 @@
       "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok/WAC. Hanya menandai PO ditutup (closedAt) dan menyimpan alasan.",
       "confirm_template": "Tutup PO {id} (sisa barang tidak akan diterima). Alasan: {reason}. Setujui?",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "prerequisites": [
         "PO berstatus Submitted dan belum ditutup"
       ],
@@ -24469,7 +24493,8 @@
       "desc": "Membatalkan Invoice Pembelian: jurnal faktur dibalik, stok yang dibuat PI dikembalikan, STT terkait dilepas (invoiceId dikosongkan, stok milik STT tidak terganggu). Ditolak bila faktur sudah lunas, punya pembayaran teralokasi, atau punya alokasi uang muka aktif.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -24496,7 +24521,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.",
       "confirm_template": "Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Invoice sudah dibatalkan",
         "400: Invoice sudah lunas",
@@ -25847,7 +25872,8 @@
       "desc": "Membatalkan Retur Penjualan: jurnal retur & jurnal HPP dibalik, stok masuk dibatalkan, kredit pelanggan hasil retur dibalik. Ditolak bila kredit sudah dipakai di faktur lain.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -26140,7 +26166,8 @@
       "desc": "Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -26736,7 +26763,8 @@
       "desc": "Membatalkan Surat Jalan Sementara. Tidak bisa bila sudah Linked ke DO resmi (batalkan DO dulu). Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -26978,7 +27006,8 @@
       "desc": "Membatalkan satu aplikasi uang muka vendor ke invoice: jurnal aplikasi dibalik, outstanding faktur dan saldo uang muka dipulihkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -27005,7 +27034,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse jurnal aplikasi (DR Hutang Usaha 2.1.1 / CR Uang Muka Vendor 1.3 dibalik): outstanding PI naik kembali, depositBalance pemasok naik, aplikasi ditandai isCancelled.",
       "confirm_template": "Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.",
-      "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
         "400: Aplikasi uang muka tidak ditemukan",
         "400: Aplikasi sudah dibatalkan",
@@ -27509,11 +27538,18 @@
       "errors": [
         "400: SJ sudah masuk invoice — batalkan invoice dulu.",
         "400: SJ sudah dibatalkan.",
-        "403: bypass stok minus butuh capability."
+        "403: bypass stok minus butuh capability.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan"
       ],
       "related": [
         "do_patch",
         "do_cancel"
+      ],
+      "prerequisites": [
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka.",
+        "Tanggal baru di bulan yang sama dengan tanggal lama."
       ]
     },
     {
@@ -29361,8 +29397,7 @@
       "risk": "critical",
       "roles": [
         "Admin",
-        "Accountant",
-        "StaffProduksi"
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -29448,6 +29483,7 @@
       "outputSummary": "Pergerakan stok hasil edit (pergerakan baru).",
       "handler": "PUT /api/inventory/movements/:id",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
@@ -29457,12 +29493,16 @@
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
         "Bukan berasal dari STT/GoodsReceipt atau ProductionRun.",
-        "Tahun fiskal tanggal baru terbuka."
+        "User memiliki capability doc.cancel.",
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400: gerakan dari STT/produksi tidak dapat diedit per baris",
-        "400: pembalikan stok lama membuat stok negatif"
+        "400: pembalikan stok lama membuat stok negatif",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "403: tanpa capability doc.cancel"
       ],
       "related": [
         "inv_mov_get",
@@ -29477,7 +29517,8 @@
       "desc": "Membatalkan pergerakan stok: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Pergerakan dari STT harus dibatalkan lewat STT.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -29506,13 +29547,15 @@
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan."
+        "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.",
+        "Tahun buku tanggal pergerakan dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400: dari STT tidak dapat dibatalkan per baris",
         "400: stok tidak mencukupi untuk pembalikan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "inv_mov_get",
@@ -30097,12 +30140,15 @@
       "accessNote": "Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).",
       "prerequisites": [
         "Run belum dibatalkan.",
-        "Bila allowNegativeStock=true: capability inventory.negative_stock."
+        "Bila allowNegativeStock=true: capability inventory.negative_stock.",
+        "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "409: sudah ada pengajuan edit Pending untuk run ini",
         "400: stok tidak cukup / run sudah dibatalkan",
-        "403: tidak berwenang bypass validasi stok"
+        "403: tidak berwenang bypass validasi stok",
+        "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku"
       ],
       "related": [
         "prod_run_get",
@@ -30117,7 +30163,8 @@
       "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, semua jurnal berawalan JV-<runNo> (termasuk revisi) dibatalkan, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -30169,13 +30216,15 @@
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Run belum dibatalkan."
+        "Run belum dibatalkan.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: proses produksi sudah dibatalkan",
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "prod_run_get"
@@ -32284,7 +32333,8 @@
       "desc": "Membatalkan proforma invoice. Ditolak bila sudah dikonversi ke Sales Invoice atau masih ada uang muka aktif tertaut (batalkan uang muka lewat menu Uang Muka Pelanggan dulu).",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -33091,7 +33141,8 @@
       "desc": "Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.",
       "risk": "critical",
       "roles": [
-        "Admin"
+        "Admin",
+        "Accountant"
       ],
       "input": {
         "id": "string"
@@ -33120,12 +33171,14 @@
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
-        "Stok item saat ini cukup untuk membalik surplus."
+        "Stok item saat ini cukup untuk membalik surplus.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: stok opname sudah dibatalkan",
         "400: stok item tidak mencukupi untuk pembalikan",
-        "403: tanpa capability doc.cancel"
+        "403: tanpa capability doc.cancel",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "opn_get"

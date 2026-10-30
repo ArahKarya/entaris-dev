@@ -95,7 +95,8 @@ export function StockMovementsTab({ canEdit, canCancel, onCreate, onEdit, onCanc
   const summary = summaryQuery.data;
   const kpiLoading = !summary && !summaryQuery.isError;
 
-  const editFor = canEdit ? onEdit : undefined;
+  // An edit voids and re-posts the movement, so the server requires doc.cancel for it too.
+  const editFor = canEdit && canCancel ? onEdit : undefined;
   const cancelFor = canEdit && canCancel ? onCancel : undefined;
 
   const columns = useMemo<ColumnDef<StockMovementRow>[]>(

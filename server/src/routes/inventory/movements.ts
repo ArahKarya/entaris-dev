@@ -8,6 +8,7 @@ import { BusinessError, handleRouteError } from '../../utils/errors';
 import { documentMovementLockMessage } from '../../services/documentMovementLock';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
+import { assertPeriodOpen } from '../../utils/periodGuard';
 import { updateAccountBalance, recalculateAccountBalances } from '../../utils/accountBalance';
 import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
@@ -313,7 +314,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/inventory/movements/:id — edit movement (cancel old + create new)
-router.put('/:id', async (req: AuthRequest, res) => {
+router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const body = validateBody(UpdateStockMovementSchema, req.body, res);
   if (!body) return;
@@ -335,6 +336,14 @@ router.put('/:id', async (req: AuthRequest, res) => {
       if (oldMov.referenceType === 'ProductionRun') {
         throw new BusinessError('Gerakan stok dari proses produksi tidak dapat diedit secara langsung.');
       }
+
+      // The edit voids the old journal and auto-settle and re-posts on body.date, so the old and
+      // the new period must both be open, also when no journal is posted (unit cost 0). The stored
+      // fiscalYearId is not checked: older edits never updated it, and the journals check their own year.
+      const movementDate = new Date(body.date);
+      if (isNaN(movementDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
+      await assertPeriodOpen(tx, { date: oldMov.date }, 'mutasi stok');
+      const fiscalYear = await assertPeriodOpen(tx, { date: movementDate }, 'mutasi stok');
 
       const oldIsIn = oldMov.movementType === 'In' || oldMov.movementType === 'AdjustmentIn';
       const oldQty = Number(oldMov.quantity);
@@ -359,6 +368,7 @@ router.put('/:id', async (req: AuthRequest, res) => {
           include: { items: true },
         });
         if (oldJe) {
+          await assertPeriodOpen(tx, { fiscalYearId: oldJe.fiscalYearId }, 'mutasi stok');
           oldAffectedAccountIds.push(...oldJe.items.map(ji => ji.accountId));
           await tx.accountingLedgerEntry.updateMany({
             where: { referenceId: oldMov.journalEntryId },
@@ -434,9 +444,6 @@ router.put('/:id', async (req: AuthRequest, res) => {
           creditAccountId = inventoryAccountId;
         }
 
-        const movementDate = new Date(body.date);
-        const fiscalYear = await getOpenFiscalYear(tx, movementDate);
-
         const editNarration = `${typeLabels[body.movementType]}: ${itemAfterReversal.name} ${newQty} ${itemAfterReversal.unit}${body.notes ? ' - ' + body.notes : ''} (Edit)`;
         const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
 
@@ -479,7 +486,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
       const updated = await tx.stockMovement.update({
         where: { id },
         data: {
-          date: new Date(body.date),
+          date: movementDate,
+          fiscalYearId: fiscalYear.id,
           movementType: body.movementType as any,
           quantity: newQty,
           unitCost: newUnitCost,
@@ -502,9 +510,9 @@ router.put('/:id', async (req: AuthRequest, res) => {
           itemId: oldMov.itemId,
           qtyAvailable: newQty,
           unitCostNow: newUnitCost,
-          fiscalYearId: oldMov.fiscalYearId,
+          fiscalYearId: fiscalYear.id,
           userId: req.user!.userId,
-          settleDate: new Date(body.date),
+          settleDate: movementDate,
           source: { type: "StockMovement", refId: oldMov.id, refNo: oldMov.movementNumber },
         });
       }
@@ -535,6 +543,8 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
       const cancelLock = documentMovementLockMessage(movement.referenceType, 'cancel');
       if (cancelLock) throw new BusinessError(cancelLock);
+      // By date only, as on edit: the journal and auto-settle journals check their own year below.
+      await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
 
       const isIn = movement.movementType === 'In' || movement.movementType === 'AdjustmentIn';
       const isOut = movement.movementType === 'Out' || movement.movementType === 'AdjustmentOut';
@@ -559,6 +569,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
           where: { id: movement.journalEntryId },
           include: { items: true },
         });
+        if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'mutasi stok');
         await tx.journalEntry.update({
           where: { id: movement.journalEntryId },
           data: { status: 'Cancelled', cancelledAt: new Date() },
