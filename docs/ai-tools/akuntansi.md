@@ -1145,7 +1145,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Isi hasil:** Tahun buku yang ditutup (isClosed, closedAt, closedBy).
 
-**Efek pembukuan/stok:** Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun: laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy). Laba 0 → tanpa jurnal penutup tetapi saldo tetap direset.
+**Efek pembukuan/stok:** Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup tetapi saldo tetap direset.
 
 **Teks konfirmasi:** TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.
 
@@ -1156,8 +1156,10 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Error umum**
 
+- 400 ACCOUNT_MAPPING_MISSING: akun sistem Laba Tahun Berjalan (CURRENT_PROFIT) atau Laba Ditahan (RETAINED_EARNINGS) belum dipetakan
 - 400: tahun buku sudah ditutup
 - 400: tahun buku tidak ditemukan
+- 403: tanpa capability doc.cancel atau tanpa izin edit modul settings
 
 **Tool terkait:** [`fy_reopen`](#fy_reopen), [`fy_list`](#fy_list)
 
@@ -1255,7 +1257,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### fy_reopen
 
-**Ringkasan:** Membuka kembali tahun buku yang sudah ditutup: jurnal penutup CLOSE-<nama> dibalik dan status ditutup dicabut sehingga periode bisa diposting lagi.
+**Ringkasan:** Membuka kembali tahun buku yang sudah ditutup, dengan alasan wajib: jurnal penutup CLOSE-<nama> yang aktif dibatalkan (status Cancelled, tetap tersimpan beserta alasannya; tidak dihapus) dan status ditutup dicabut sehingga periode bisa diposting lagi. Ditolak bila tahun buku sesudahnya masih ditutup atau kunci periode mencakup tanggal akhir tahun ini.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1268,6 +1270,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |
+| `reason` | body | `string` | ya | Alasan membuka kembali (5-500 karakter); disimpan di jurnal penutup yang dibatalkan dan riwayat tahun buku. |
 
 **Contoh pemanggilan**
 
@@ -1275,7 +1278,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 {
   "tool": "fy_reopen",
   "args": {
-    "id": "<id>"
+    "id": "<id>",
+    "reason": "<reason>"
   }
 }
 ```
@@ -1288,24 +1292,31 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "BUKA KEMBALI tahun buku <id>? Jurnal penutup akan dibalik."
+  "confirm": "BUKA KEMBALI tahun buku <id> dengan alasan \"<reason>\"? Jurnal penutup akan dibatalkan."
 }
 ```
 
 **Isi hasil:** Tahun buku yang dibuka kembali.
 
-**Efek pembukuan/stok:** Membalik jurnal penutup CLOSE-<nama> (DR 3.2 / CR 3.4 sebesar laba tahun itu), mengembalikan saldo berjalan akun pendapatan & beban, dan membuka periode.
+**Efek pembukuan/stok:** Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), mengembalikan saldo berjalan akun pendapatan & beban, membuka periode, dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...
 
-**Teks konfirmasi:** BUKA KEMBALI tahun buku {id}? Jurnal penutup akan dibalik.
+**Teks konfirmasi:** BUKA KEMBALI tahun buku {id} dengan alasan "{reason}"? Jurnal penutup akan dibatalkan.
 
 **Prasyarat**
 
 - Capability doc.cancel.
 - Tahun buku berstatus ditutup.
+- Tidak ada tahun buku sesudahnya yang masih ditutup.
+- Kunci periode sebelum tanggal akhir tahun buku ini.
 
 **Error umum**
 
+- 400 FY_LATER_CLOSED: tahun buku sesudahnya masih ditutup; buka kembali tahun itu dulu
+- 400 PERIOD_LOCKED: kunci periode mencakup tanggal akhir tahun buku; mundurkan kunci periode dulu
+- 400: alasan kosong, kurang dari 5 karakter, atau lebih dari 500 karakter
 - 400: tahun buku belum ditutup
+- 400: tahun buku tidak ditemukan
+- 403: tanpa capability doc.cancel atau tanpa izin edit modul settings
 
 **Tool terkait:** [`fy_close`](#fy_close)
 

@@ -6512,21 +6512,23 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun: laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy). Laba 0 → tanpa jurnal penutup tetapi saldo tetap direset.",
+      "postingEffect": "Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup tetapi saldo tetap direset.",
       "confirm_template": "TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.",
       "prerequisites": [
         "Capability doc.cancel.",
         "Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan."
       ],
       "errors": [
+        "400 ACCOUNT_MAPPING_MISSING: akun sistem Laba Tahun Berjalan (CURRENT_PROFIT) atau Laba Ditahan (RETAINED_EARNINGS) belum dipetakan",
         "400: tahun buku sudah ditutup",
-        "400: tahun buku tidak ditemukan"
+        "400: tahun buku tidak ditemukan",
+        "403: tanpa capability doc.cancel atau tanpa izin edit modul settings"
       ],
       "related": [
         "fy_reopen",
         "fy_list"
       ],
-      "doc": "### fy_close\n\n**Ringkasan:** Tutup buku: menghitung laba/rugi tahun itu dari ledger pendapatan dan beban, memposting jurnal penutup, lalu menandai tahun buku isClosed sehingga tidak ada posting baru pada periode tersebut.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/fiscal-years/:id/close` (src/routes/fiscalYears.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"fy_close\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"TUTUP BUKU tahun <id>? Posting baru pada periode ini akan ditolak.\"\n}\n```\n\n**Isi hasil:** Tahun buku yang ditutup (isClosed, closedAt, closedBy).\n\n**Efek pembukuan/stok:** Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun: laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy). Laba 0 → tanpa jurnal penutup tetapi saldo tetap direset.\n\n**Teks konfirmasi:** TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.\n\n**Prasyarat**\n\n- Capability doc.cancel.\n- Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan.\n\n**Error umum**\n\n- 400: tahun buku sudah ditutup\n- 400: tahun buku tidak ditemukan\n\n**Tool terkait:** [`fy_reopen`](#fy_reopen), [`fy_list`](#fy_list)\n",
+      "doc": "### fy_close\n\n**Ringkasan:** Tutup buku: menghitung laba/rugi tahun itu dari ledger pendapatan dan beban, memposting jurnal penutup, lalu menandai tahun buku isClosed sehingga tidak ada posting baru pada periode tersebut.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/fiscal-years/:id/close` (src/routes/fiscalYears.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"fy_close\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"TUTUP BUKU tahun <id>? Posting baru pada periode ini akan ditolak.\"\n}\n```\n\n**Isi hasil:** Tahun buku yang ditutup (isClosed, closedAt, closedBy).\n\n**Efek pembukuan/stok:** Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup tetapi saldo tetap direset.\n\n**Teks konfirmasi:** TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.\n\n**Prasyarat**\n\n- Capability doc.cancel.\n- Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan.\n\n**Error umum**\n\n- 400 ACCOUNT_MAPPING_MISSING: akun sistem Laba Tahun Berjalan (CURRENT_PROFIT) atau Laba Ditahan (RETAINED_EARNINGS) belum dipetakan\n- 400: tahun buku sudah ditutup\n- 400: tahun buku tidak ditemukan\n- 403: tanpa capability doc.cancel atau tanpa izin edit modul settings\n\n**Tool terkait:** [`fy_reopen`](#fy_reopen), [`fy_list`](#fy_list)\n",
       "example": {
         "tool": "fy_close",
         "args": {
@@ -6641,13 +6643,14 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "settings",
-      "desc": "Membuka kembali tahun buku yang sudah ditutup: jurnal penutup CLOSE-<nama> dibalik dan status ditutup dicabut sehingga periode bisa diposting lagi.",
+      "desc": "Membuka kembali tahun buku yang sudah ditutup, dengan alasan wajib: jurnal penutup CLOSE-<nama> yang aktif dibatalkan (status Cancelled, tetap tersimpan beserta alasannya; tidak dihapus) dan status ditutup dicabut sehingga periode bisa diposting lagi. Ditolak bila tahun buku sesudahnya masih ditutup atau kunci periode mencakup tanggal akhir tahun ini.",
       "risk": "critical",
       "roles": [
         "Admin"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "reason": "string"
       },
       "params": [
         {
@@ -6656,6 +6659,13 @@
           "type": "string",
           "required": true,
           "description": "ID dokumen/rekaman (UUID)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Alasan membuka kembali (5-500 karakter); disimpan di jurnal penutup yang dibatalkan dan riwayat tahun buku."
         }
       ],
       "output": {
@@ -6669,23 +6679,31 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik jurnal penutup CLOSE-<nama> (DR 3.2 / CR 3.4 sebesar laba tahun itu), mengembalikan saldo berjalan akun pendapatan & beban, dan membuka periode.",
-      "confirm_template": "BUKA KEMBALI tahun buku {id}? Jurnal penutup akan dibalik.",
+      "postingEffect": "Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), mengembalikan saldo berjalan akun pendapatan & beban, membuka periode, dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...",
+      "confirm_template": "BUKA KEMBALI tahun buku {id} dengan alasan \"{reason}\"? Jurnal penutup akan dibatalkan.",
       "prerequisites": [
         "Capability doc.cancel.",
-        "Tahun buku berstatus ditutup."
+        "Tahun buku berstatus ditutup.",
+        "Tidak ada tahun buku sesudahnya yang masih ditutup.",
+        "Kunci periode sebelum tanggal akhir tahun buku ini."
       ],
       "errors": [
-        "400: tahun buku belum ditutup"
+        "400 FY_LATER_CLOSED: tahun buku sesudahnya masih ditutup; buka kembali tahun itu dulu",
+        "400 PERIOD_LOCKED: kunci periode mencakup tanggal akhir tahun buku; mundurkan kunci periode dulu",
+        "400: alasan kosong, kurang dari 5 karakter, atau lebih dari 500 karakter",
+        "400: tahun buku belum ditutup",
+        "400: tahun buku tidak ditemukan",
+        "403: tanpa capability doc.cancel atau tanpa izin edit modul settings"
       ],
       "related": [
         "fy_close"
       ],
-      "doc": "### fy_reopen\n\n**Ringkasan:** Membuka kembali tahun buku yang sudah ditutup: jurnal penutup CLOSE-<nama> dibalik dan status ditutup dicabut sehingga periode bisa diposting lagi.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/fiscal-years/:id/reopen` (src/routes/fiscalYears.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"fy_reopen\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"BUKA KEMBALI tahun buku <id>? Jurnal penutup akan dibalik.\"\n}\n```\n\n**Isi hasil:** Tahun buku yang dibuka kembali.\n\n**Efek pembukuan/stok:** Membalik jurnal penutup CLOSE-<nama> (DR 3.2 / CR 3.4 sebesar laba tahun itu), mengembalikan saldo berjalan akun pendapatan & beban, dan membuka periode.\n\n**Teks konfirmasi:** BUKA KEMBALI tahun buku {id}? Jurnal penutup akan dibalik.\n\n**Prasyarat**\n\n- Capability doc.cancel.\n- Tahun buku berstatus ditutup.\n\n**Error umum**\n\n- 400: tahun buku belum ditutup\n\n**Tool terkait:** [`fy_close`](#fy_close)\n",
+      "doc": "### fy_reopen\n\n**Ringkasan:** Membuka kembali tahun buku yang sudah ditutup, dengan alasan wajib: jurnal penutup CLOSE-<nama> yang aktif dibatalkan (status Cancelled, tetap tersimpan beserta alasannya; tidak dihapus) dan status ditutup dicabut sehingga periode bisa diposting lagi. Ditolak bila tahun buku sesudahnya masih ditutup atau kunci periode mencakup tanggal akhir tahun ini.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`, capability `doc.cancel`)\n- **Handler:** `POST /api/fiscal-years/:id/reopen` (src/routes/fiscalYears.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |\n| `reason` | body | `string` | ya | Alasan membuka kembali (5-500 karakter); disimpan di jurnal penutup yang dibatalkan dan riwayat tahun buku. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"fy_reopen\",\n  \"args\": {\n    \"id\": \"<id>\",\n    \"reason\": \"<reason>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"BUKA KEMBALI tahun buku <id> dengan alasan \\\"<reason>\\\"? Jurnal penutup akan dibatalkan.\"\n}\n```\n\n**Isi hasil:** Tahun buku yang dibuka kembali.\n\n**Efek pembukuan/stok:** Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), mengembalikan saldo berjalan akun pendapatan & beban, membuka periode, dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...\n\n**Teks konfirmasi:** BUKA KEMBALI tahun buku {id} dengan alasan \"{reason}\"? Jurnal penutup akan dibatalkan.\n\n**Prasyarat**\n\n- Capability doc.cancel.\n- Tahun buku berstatus ditutup.\n- Tidak ada tahun buku sesudahnya yang masih ditutup.\n- Kunci periode sebelum tanggal akhir tahun buku ini.\n\n**Error umum**\n\n- 400 FY_LATER_CLOSED: tahun buku sesudahnya masih ditutup; buka kembali tahun itu dulu\n- 400 PERIOD_LOCKED: kunci periode mencakup tanggal akhir tahun buku; mundurkan kunci periode dulu\n- 400: alasan kosong, kurang dari 5 karakter, atau lebih dari 500 karakter\n- 400: tahun buku belum ditutup\n- 400: tahun buku tidak ditemukan\n- 403: tanpa capability doc.cancel atau tanpa izin edit modul settings\n\n**Tool terkait:** [`fy_close`](#fy_close)\n",
       "example": {
         "tool": "fy_reopen",
         "args": {
-          "id": "<id>"
+          "id": "<id>",
+          "reason": "<reason>"
         }
       }
     },
