@@ -697,7 +697,9 @@
       "posted": "Posted",
       "pending": "Pending",
       "postLabel": "Post depreciation for {{date}}",
-      "post": "Post"
+      "post": "Post",
+      "cancelPosting": "Cancel posting",
+      "cancelPostingLabel": "Cancel the depreciation posting for {{date}}"
     },
     "dispose": "Dispose asset",
     "edit": "Edit details"
@@ -865,7 +867,9 @@
       "exportTruncated_one": "Export limited to the first {{count, number}} asset. Narrow the filter.",
       "exportTruncated_other": "Export limited to the first {{count, number}} assets. Narrow the filter.",
       "exported_one": "{{count, number}} asset exported.",
-      "exported_other": "{{count, number}} assets exported."
+      "exported_other": "{{count, number}} assets exported.",
+      "postingCancelled": "Depreciation posting cancelled.",
+      "cancelPostingFailed": "Could not cancel the depreciation posting."
     },
     "title": "Fixed Assets",
     "description": "Fixed asset register, depreciation schedules, and monthly depreciation posting to the journal.",
@@ -891,6 +895,13 @@
       "period": "Period",
       "amount": "Expense amount",
       "note": "To post every asset at once, use the Depreciation posting tab."
+    },
+    "cancelPosting": {
+      "title": "Cancel the depreciation posting?",
+      "description": "This period's depreciation journal is voided; accumulated depreciation goes down and the asset's book value goes back up by the amount. The period can be posted again later.",
+      "confirm": "Cancel posting",
+      "reason": "Reason (optional)",
+      "reasonPlaceholder": "E.g. wrong period or wrong account"
     }
   },
   "generalLedger": {

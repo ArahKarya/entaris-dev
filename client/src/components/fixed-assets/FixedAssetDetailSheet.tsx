@@ -1,13 +1,14 @@
 /**
  * Detail sheet for one fixed asset: master data, GL accounts, value figures
- * and the depreciation schedule. Each unposted period can be posted on its own
- * (the page owns the confirmation dialog and the mutation). Write actions are
- * passed in only when the user has the `fixed_assets` edit permission.
+ * and the depreciation schedule. Each unposted period can be posted on its own,
+ * and the latest posted period can be un-posted (the page owns the confirmation
+ * dialogs and the mutations). Write actions are passed in only when the user has
+ * the `fixed_assets` edit permission; un-posting also needs `doc.cancel`.
  */
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Pencil, Play, Trash2 } from 'lucide-react';
+import { Pencil, Play, Trash2, Undo2 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDate, formatNumber, formatRupiah, toNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,9 @@ interface FixedAssetDetailSheetProps {
   onDispose?: (asset: FixedAssetRow) => void;
   onPostEntry?: (target: DepreciationPostTarget) => void;
   postingEntryId?: string | null;
+  /** Present only with edit permission and doc.cancel; offered on the latest posted period. */
+  onCancelEntry?: (target: DepreciationPostTarget) => void;
+  cancellingEntryId?: string | null;
 }
 
 const num = (v: unknown) => toNumber(v as string | number | null) ?? 0;
@@ -61,6 +65,8 @@ export function FixedAssetDetailSheet({
   onDispose,
   onPostEntry,
   postingEntryId,
+  onCancelEntry,
+  cancellingEntryId,
 }: FixedAssetDetailSheetProps) {
   const { t } = useTranslation('finance');
   const detailQuery = useQuery({
@@ -73,6 +79,9 @@ export function FixedAssetDetailSheet({
   const entries = detailQuery.data?.depreciationEntries ?? [];
   const postedCount = entries.filter((e) => e.isPosted).length;
   const isActive = asset?.status === ACTIVE_STATUS;
+  // Entries come in period order; the server un-posts only the latest posted period.
+  const lastPostedId = entries.findLast((e) => e.isPosted)?.id ?? null;
+  const busy = !!postingEntryId || !!cancellingEntryId;
 
   const toTarget = (a: FixedAssetRow, e: DepreciationEntryRow): DepreciationPostTarget => ({
     assetId: a.id,
@@ -214,12 +223,26 @@ export function FixedAssetDetailSheet({
                                   variant="ghost"
                                   size="sm"
                                   loading={postingEntryId === e.id}
-                                  disabled={!!postingEntryId}
+                                  disabled={busy}
                                   onClick={() => onPostEntry(toTarget(asset, e))}
                                   aria-label={t('fixedAssetDetailSheet.schedule.postLabel', { date: formatDate(e.periodDate) })}
                                 >
                                   <Play aria-hidden />
                                   <span className="hidden sm:inline">{t('fixedAssetDetailSheet.schedule.post')}</span>
+                                </Button>
+                              )}
+                              {e.id === lastPostedId && isActive && onCancelEntry && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-danger-text"
+                                  loading={cancellingEntryId === e.id}
+                                  disabled={busy}
+                                  onClick={() => onCancelEntry(toTarget(asset, e))}
+                                  aria-label={t('fixedAssetDetailSheet.schedule.cancelPostingLabel', { date: formatDate(e.periodDate) })}
+                                >
+                                  <Undo2 aria-hidden />
+                                  <span className="hidden sm:inline">{t('fixedAssetDetailSheet.schedule.cancelPosting')}</span>
                                 </Button>
                               )}
                             </td>

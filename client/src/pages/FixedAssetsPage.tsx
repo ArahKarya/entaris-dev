@@ -1,7 +1,8 @@
 /**
  * Fixed assets (/fixed-assets): register (no ?tab) and monthly depreciation posting
  * (?tab=depreciation&month=YYYY-MM, always confirmed); ?asset=<id> opens the detail sheet.
- * Write actions need `fixed_assets` edit permission (the server enforces the same rule).
+ * Write actions need `fixed_assets` edit permission (the server enforces the same rule);
+ * un-posting the latest depreciation period also needs the `doc.cancel` capability.
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -11,11 +12,12 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { formatDate, formatRupiah } from '@/lib/format';
-import { can } from '@/lib/permissions';
+import { can, cap } from '@/lib/permissions';
 import { LIST_PARAM, useListState } from '@/hooks/useListState';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ConfirmDialog, PageHeader, fetchAllPages } from '@/components/shared';
+import { Textarea } from '@/components/ui/textarea';
+import { ConfirmDialog, Field, PageHeader, fetchAllPages } from '@/components/shared';
 import { FixedAssetRegister } from '@/components/fixed-assets/FixedAssetRegister';
 import { FixedAssetDetailSheet } from '@/components/fixed-assets/FixedAssetDetailSheet';
 import { FixedAssetFormDialog } from '@/components/fixed-assets/FixedAssetFormDialog';
@@ -39,6 +41,8 @@ type Tab = 'list' | 'depreciation';
 const TAB_PARAM = 'tab';
 const MONTH_PARAM = 'month';
 const ASSET_PARAM = 'asset';
+/** Same limit as the server's CancelReasonSchema. */
+const REASON_MAX = 500;
 /** Params owned by the register tab (cleared on tab switch). */
 const LIST_KEYS = [LIST_PARAM.page, LIST_PARAM.search, LIST_PARAM.sort, ...FIXED_ASSET_FILTER_KEYS];
 
@@ -47,6 +51,7 @@ export default function FixedAssetsPage() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const canEdit = can('fixed_assets', 'edit');
+  const canCancelPosting = canEdit && cap('doc.cancel');
   const tab: Tab = canEdit && searchParams.get(TAB_PARAM) === 'depreciation' ? 'depreciation' : 'list';
   const monthParam = searchParams.get(MONTH_PARAM);
   const month = monthParam && MONTH_PATTERN.test(monthParam) ? monthParam : previousMonth();
@@ -59,6 +64,8 @@ export default function FixedAssetsPage() {
   const [editTarget, setEditTarget] = useState<FixedAssetRow | null>(null);
   const [disposeTarget, setDisposeTarget] = useState<FixedAssetRow | null>(null);
   const [postTarget, setPostTarget] = useState<DepreciationPostTarget | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<DepreciationPostTarget | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
   const [lastOpened, setLastOpened] = useState<FixedAssetRow | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -117,6 +124,24 @@ export default function FixedAssetsPage() {
     },
     onError: (err) => toast.error(apiError(err, t('fixedAssetsPage.toast.depreciationFailed'))),
   });
+
+  const cancelPostingMut = useMutation({
+    mutationFn: async ({ assetId: id, entryId, reason }: { assetId: string; entryId: string; reason: string }) =>
+      (await api.post(`${FIXED_ASSET_ENDPOINT}/${id}/depreciation/${entryId}/cancel`, reason ? { reason } : {})).data,
+    onSuccess: () => {
+      toast.success(t('fixedAssetsPage.toast.postingCancelled'));
+      setCancelTarget(null);
+      qc.invalidateQueries({ queryKey: ['fixed-assets'] });
+      qc.invalidateQueries({ queryKey: ['fixed-asset'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-fixed-assets'] });
+    },
+    onError: (err) => toast.error(apiError(err, t('fixedAssetsPage.toast.cancelPostingFailed'))),
+  });
+
+  const openCancelPosting = (target: DepreciationPostTarget) => {
+    setCancelReason('');
+    setCancelTarget(target);
+  };
 
   const disposeMut = useMutation({
     mutationFn: async ({ id, disposalDate }: { id: string; disposalDate: string }) =>
@@ -213,6 +238,8 @@ export default function FixedAssetsPage() {
         onDispose={canEdit ? setDisposeTarget : undefined}
         onPostEntry={canEdit ? setPostTarget : undefined}
         postingEntryId={depreciateMut.isPending ? (depreciateMut.variables?.entryId ?? null) : null}
+        onCancelEntry={canCancelPosting ? openCancelPosting : undefined}
+        cancellingEntryId={cancelPostingMut.isPending ? (cancelPostingMut.variables?.entryId ?? null) : null}
       />
 
       {canEdit && (
@@ -276,6 +303,49 @@ export default function FixedAssetsPage() {
               ]}
               note={t('fixedAssetsPage.post.note')}
             />
+          </div>
+        )}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onOpenChange={(open) => !open && setCancelTarget(null)}
+        tone="danger"
+        title={t('fixedAssetsPage.cancelPosting.title')}
+        description={t('fixedAssetsPage.cancelPosting.description')}
+        confirmLabel={t('fixedAssetsPage.cancelPosting.confirm')}
+        loading={cancelPostingMut.isPending}
+        onConfirm={() =>
+          cancelTarget
+            ? cancelPostingMut.mutateAsync({ assetId: cancelTarget.assetId, entryId: cancelTarget.entryId, reason: cancelReason.trim() })
+            : undefined
+        }
+      >
+        {cancelTarget && (
+          <div className="space-y-3">
+            <dl className="space-y-1.5 rounded-md border border-border px-3 py-2.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">{t('fixedAssetsPage.post.asset')}</dt>
+                <dd className="num font-mono text-foreground">{cancelTarget.assetNumber}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">{t('fixedAssetsPage.post.period')}</dt>
+                <dd className="num text-foreground">{formatDate(cancelTarget.periodDate)}</dd>
+              </div>
+              <div className="flex justify-between gap-3 border-t border-border pt-1.5">
+                <dt className="text-muted-foreground">{t('fixedAssetsPage.post.amount')}</dt>
+                <dd className="num font-semibold text-foreground">{formatRupiah(cancelTarget.amount)}</dd>
+              </div>
+            </dl>
+            <Field label={t('fixedAssetsPage.cancelPosting.reason')}>
+              <Textarea
+                value={cancelReason}
+                maxLength={REASON_MAX}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder={t('fixedAssetsPage.cancelPosting.reasonPlaceholder')}
+                disabled={cancelPostingMut.isPending}
+              />
+            </Field>
           </div>
         )}
       </ConfirmDialog>

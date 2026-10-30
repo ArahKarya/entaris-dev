@@ -697,7 +697,9 @@
       "posted": "Diposting",
       "pending": "Belum",
       "postLabel": "Posting penyusutan {{date}}",
-      "post": "Posting"
+      "post": "Posting",
+      "cancelPosting": "Batalkan posting",
+      "cancelPostingLabel": "Batalkan posting penyusutan {{date}}"
     },
     "dispose": "Lepas aset",
     "edit": "Edit data"
@@ -865,7 +867,9 @@
       "exportTruncated_one": "Ekspor dibatasi {{count, number}} aset pertama. Persempit filter.",
       "exportTruncated_other": "Ekspor dibatasi {{count, number}} aset pertama. Persempit filter.",
       "exported_one": "{{count, number}} aset diekspor.",
-      "exported_other": "{{count, number}} aset diekspor."
+      "exported_other": "{{count, number}} aset diekspor.",
+      "postingCancelled": "Posting penyusutan dibatalkan.",
+      "cancelPostingFailed": "Gagal membatalkan posting penyusutan."
     },
     "title": "Aset Tetap",
     "description": "Daftar aset tetap, jadwal penyusutan, dan posting penyusutan bulanan ke jurnal.",
@@ -891,6 +895,13 @@
       "period": "Periode",
       "amount": "Jumlah beban",
       "note": "Untuk memposting semua aset sekaligus, gunakan tab Posting Penyusutan."
+    },
+    "cancelPosting": {
+      "title": "Batalkan posting penyusutan?",
+      "description": "Jurnal penyusutan periode ini di-void, akumulasi penyusutan turun dan nilai buku aset naik lagi sebesar jumlahnya. Periode ini bisa diposting ulang nanti.",
+      "confirm": "Batalkan posting",
+      "reason": "Alasan (opsional)",
+      "reasonPlaceholder": "Mis. salah periode atau salah akun"
     }
   },
   "generalLedger": {
