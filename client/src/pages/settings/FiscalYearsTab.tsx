@@ -80,7 +80,8 @@ export const FiscalYearsTab: React.FC = () => {
   });
 
   const reopenMutation = useMutation({
-    mutationFn: async (yearId: string) => api.post(`/fiscal-years/${yearId}/reopen`),
+    mutationFn: async ({ yearId, reason }: { yearId: string; reason: string }) =>
+      api.post(`/fiscal-years/${yearId}/reopen`, { reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
       toast.success(t('fiscal.toast.reopened'));
@@ -184,7 +185,14 @@ export const FiscalYearsTab: React.FC = () => {
         description={t('fiscal.reopenConfirm.description')}
         confirmLabel={t('fiscal.reopen')}
         loading={reopenMutation.isPending}
-        onConfirm={() => (confirmReopen ? reopenMutation.mutateAsync(confirmReopen.id) : undefined)}
+        requireReason={{
+          label: t('fiscal.reopenConfirm.reasonLabel'),
+          placeholder: t('fiscal.reopenConfirm.reasonPlaceholder'),
+          minLength: 5,
+        }}
+        onConfirm={(reason) =>
+          confirmReopen ? reopenMutation.mutateAsync({ yearId: confirmReopen.id, reason: reason ?? '' }) : undefined
+        }
       />
 
       <Dialog open={isModalOpen} onOpenChange={(o) => !createMutation.isPending && setIsModalOpen(o)}>
