@@ -12,6 +12,7 @@ const db = vi.hoisted(() => {
     accountingLedgerEntry: { createMany: vi.fn(), deleteMany: vi.fn() },
     account: { findUnique: vi.fn(), update: vi.fn() },
     payment: { create: vi.fn(), findMany: vi.fn(), delete: vi.fn() },
+    party: { create: vi.fn() },
   };
   return {
     ...tx,
@@ -129,14 +130,62 @@ describe('POST /api/import/parties re-import', () => {
 
   it('new party: opening balance journal is posted and nothing is deleted', async () => {
     db.party.findFirst.mockResolvedValue(null);
-    db.party.create.mockResolvedValue({ id: 'p-new' });
+    db._tx.party.create.mockResolvedValue({ id: 'p-new' });
 
     const res = await post('/api/import/parties');
 
     expect(res.body.success).toBe(1);
-    expect(db.party.create.mock.calls[0][0].data.outstandingAmount).toBe(5000000);
+    expect(db._tx.party.create.mock.calls[0][0].data.outstandingAmount).toBe(5000000);
     expect(db._tx.journalEntry.create).toHaveBeenCalledTimes(1);
     noDeletes();
+  });
+
+  it('new party: the period guard runs in the transaction that writes the party and its journals', async () => {
+    db.rows = [{ name: 'Sari', partyType: 'Both', openingBalance: '5000000', depositBalance: '100000', customerDepositBalance: '200000' }];
+    db.party.findFirst.mockResolvedValue(null);
+    db._tx.party.create.mockResolvedValue({ id: 'p-sari' });
+    const { getOpenFiscalYear } = await import('../../utils/fiscalYear');
+
+    const res = await post('/api/import/parties');
+
+    expect(res.body.success).toBe(1);
+    // One transaction per row: the year lookup is share-locked until the three journals commit.
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getOpenFiscalYear)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getOpenFiscalYear).mock.calls[0][0]).toBe(db._tx);
+    expect(db._tx.journalEntry.create).toHaveBeenCalledTimes(3);
+    expect(db._tx.payment.create).toHaveBeenCalledTimes(2);
+    expect(db.party.create).not.toHaveBeenCalled();
+  });
+
+  it('new party: a year closed before the row is posted fails the row, and party and journals roll back together', async () => {
+    db.party.findFirst.mockResolvedValue(null);
+    const { getOpenFiscalYear } = await import('../../utils/fiscalYear');
+    const { BusinessError } = await import('../../utils/errors');
+    vi.mocked(getOpenFiscalYear).mockRejectedValueOnce(
+      new BusinessError('Tahun buku 2026 sudah ditutup; dokumen di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.', 'PERIOD_CLOSED'),
+    );
+
+    const res = await post('/api/import/parties');
+
+    expect(res.body.success).toBe(0);
+    expect(res.body.errors[0].message).toMatch(/Gagal insert "Budi": Tahun buku 2026 sudah ditutup/);
+    expect(vi.mocked(getOpenFiscalYear).mock.calls[0][0]).toBe(db._tx);
+    expect(db._tx.party.create).not.toHaveBeenCalled();
+    expect(db.party.create).not.toHaveBeenCalled();
+    expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('new party without opening balances is created outside any transaction', async () => {
+    db.rows = [{ name: 'Tono', partyType: 'Supplier' }];
+    db.party.findFirst.mockResolvedValue(null);
+    db.party.create.mockResolvedValue({ id: 'p-tono' });
+
+    const res = await post('/api/import/parties');
+
+    expect(res.body.success).toBe(1);
+    expect(db.party.create).toHaveBeenCalledTimes(1);
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it('new party: a missing system account fails the row before the party is created', async () => {
@@ -148,6 +197,7 @@ describe('POST /api/import/parties re-import', () => {
 
     expect(res.body.success).toBe(0);
     expect(db.party.create).not.toHaveBeenCalled();
+    expect(db._tx.party.create).not.toHaveBeenCalled();
     expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
   });
 });

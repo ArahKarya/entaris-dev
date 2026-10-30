@@ -71,7 +71,7 @@
   },
   "src/routes/import/parties.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 3
+      "count": 2
     }
   },
   "src/routes/import/template.ts": {
