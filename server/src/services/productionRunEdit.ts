@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { cancelJournalsByPrefix } from '../utils/journalCancel';
+import { journalFamilyWhere } from '../utils/journalFamily';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { calcWeightedAverage } from '../utils/weightedAverage';
@@ -451,7 +452,7 @@ export async function editProductionRunInTx(
     // Revision suffix derived from how many cancelled JEs already share the
     // prefix. -R1, -R2, ... predictable.
     const cancelledCount = await tx.journalEntry.count({
-      where: { entryNumber: { startsWith: oldJvNumber }, status: 'Cancelled' },
+      where: { ...journalFamilyWhere(oldJvNumber), status: 'Cancelled' },
     });
     const revSuffix = `-R${cancelledCount > 0 ? cancelledCount : 1}`;
     const journalEntry = await tx.journalEntry.create({
@@ -483,7 +484,7 @@ export async function editProductionRunInTx(
 
   // Recompute balances from authoritative JE sums.
   const allRelatedJEItems = await tx.journalItem.findMany({
-    where: { journalEntry: { entryNumber: { startsWith: oldJvNumber } } },
+    where: { journalEntry: journalFamilyWhere(oldJvNumber) },
     select: { accountId: true },
   });
   const affectedAccountIds = [...new Set(allRelatedJEItems.map((ji) => ji.accountId))];

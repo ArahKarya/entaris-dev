@@ -34,7 +34,7 @@ describe('cancelJournalsByPrefix', () => {
     expect(count).toBe(1);
     expect(tx.journalEntry.findMany).toHaveBeenCalledWith({
       where: {
-        entryNumber: { startsWith: 'JV-PR0004' },
+        OR: [{ entryNumber: 'JV-PR0004' }, { entryNumber: { startsWith: 'JV-PR0004-' } }],
         status: { not: 'Cancelled' },
       },
       include: { items: true },
@@ -98,15 +98,15 @@ describe('cancelJournalsByPrefix', () => {
     expect(tx.accountingLedgerEntry.updateMany).not.toHaveBeenCalled();
   });
 
-  it('uses startsWith to match prefix (not exact match)', async () => {
+  it('matches the exact number or a dash satellite, so JV-PR-202601-1000 never matches -10000', async () => {
     const tx = makeTx([]) as any;
 
-    await cancelJournalsByPrefix(tx, 'JV-PR0004');
+    await cancelJournalsByPrefix(tx, 'JV-PR-202601-1000');
 
     expect(tx.journalEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          entryNumber: { startsWith: 'JV-PR0004' },
+          OR: [{ entryNumber: 'JV-PR-202601-1000' }, { entryNumber: { startsWith: 'JV-PR-202601-1000-' } }],
         }),
       })
     );

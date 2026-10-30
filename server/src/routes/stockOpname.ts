@@ -8,6 +8,7 @@ import { BusinessError, handleRouteError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { recalculateAccountBalances } from '../utils/accountBalance';
 import { cancelJournalsByPrefix } from '../utils/journalCancel';
+import { journalFamilyWhere } from '../utils/journalFamily';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
@@ -454,7 +455,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       // Collect affected account IDs BEFORE cancelling
       const relatedJEItems = await tx.journalItem.findMany({
         where: {
-          journalEntry: { entryNumber: { startsWith: jvNumber }, status: { not: 'Cancelled' } },
+          journalEntry: { ...journalFamilyWhere(jvNumber), status: { not: 'Cancelled' } },
         },
         select: { accountId: true },
       });
