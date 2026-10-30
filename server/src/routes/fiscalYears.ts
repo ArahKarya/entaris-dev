@@ -1,15 +1,109 @@
 import { Router } from 'express';
-import { Prisma } from '@prisma/client';
+import { JournalSourceType, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { validateBody } from '../utils/validate';
-import { CreateFiscalYearSchema } from '../utils/schemas';
+import { CreateFiscalYearSchema, ReopenFiscalYearSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
+import { assertYearEndNotLocked } from '../utils/periodGuard';
+import { voidJournalInTx } from '../utils/journalCancel';
+import { cancelTrail } from '../utils/cancelClaim';
 import { systemAccounts } from '../services/systemAccounts';
+import { SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
 import { logger } from '../lib/logger';
 
+type Tx = Prisma.TransactionClient;
+
+/** Error code: CURRENT_PROFIT or RETAINED_EARNINGS, which the year close posts to, is not mapped. */
+export const ACCOUNT_MAPPING_MISSING = 'ACCOUNT_MAPPING_MISSING';
+/** Error code: a reopen while a later fiscal year is still closed. */
+export const FY_LATER_CLOSED = 'FY_LATER_CLOSED';
+
 const router = Router();
+
+/** First account mapped to `role`; a missing mapping is a 400 with its code, not a 500. */
+async function mappedAccountId(role: SystemAccountRole): Promise<string> {
+  const [account] = await systemAccounts.getAccounts(role);
+  if (!account) {
+    throw new BusinessError(
+      `Akun sistem untuk "${SYSTEM_ACCOUNT_ROLES[role].label}" belum dikonfigurasi. Silakan atur di Pengaturan > Akun Sistem.`,
+      ACCOUNT_MAPPING_MISSING,
+    );
+  }
+  return account.id;
+}
+
+/**
+ * CLOSE journals of a year in any status: tagged FY_CLOSE, or numbered CLOSE-<name> / CLOSE-<name>-R<n>
+ * for rows the source backfill has not tagged.
+ */
+function closeJournalsWhere(year: { id: string; name: string }): Prisma.JournalEntryWhereInput {
+  const base = `CLOSE-${year.name}`;
+  return {
+    fiscalYearId: year.id,
+    OR: [{ sourceType: JournalSourceType.FY_CLOSE }, { entryNumber: base }, { entryNumber: { startsWith: `${base}-R` } }],
+  };
+}
+
+interface CloseJournalInput {
+  year: { id: string; name: string; endDate: Date };
+  /** Revenue minus expense of the year; not zero. */
+  profit: Prisma.Decimal;
+  currentProfitAccountId: string;
+  retainedEarningsAccountId: string;
+  userId: string;
+}
+
+/**
+ * Posts the CLOSE journal on the year's last day: a profit is DR current profit / CR retained
+ * earnings, a loss the other way round, with its ledger rows and running balances. The first close
+ * is CLOSE-<name>; after n earlier CLOSE journals of the year (each cancelled by a reopen) it is
+ * CLOSE-<name>-R<n+1>. The caller holds the year row FOR UPDATE, so the count cannot race.
+ * The single writer of this journal, so the shared posting service can take it over in one place.
+ */
+async function postCloseJournalInTx(tx: Tx, input: CloseJournalInput): Promise<{ id: string; entryNumber: string }> {
+  const { year, profit, userId } = input;
+  const earlier = await tx.journalEntry.count({ where: closeJournalsWhere(year) });
+  const entryNumber = earlier === 0 ? `CLOSE-${year.name}` : `CLOSE-${year.name}-R${earlier + 1}`;
+  const zero = new Prisma.Decimal(0);
+  const amount = profit.abs();
+  // Current profit is debited by a profit and credited by a loss; retained earnings the opposite.
+  const currentProfit = { debit: profit.isPositive() ? amount : zero, credit: profit.isNegative() ? amount : zero };
+  const retained = { debit: currentProfit.credit, credit: currentProfit.debit };
+
+  const closeEntry = await tx.journalEntry.create({
+    data: {
+      entryNumber,
+      date: year.endDate,
+      narration: `Tutup Buku Tahun ${year.name}`,
+      status: 'Submitted',
+      fiscalYearId: year.id,
+      createdBy: userId,
+      submittedAt: new Date(),
+      sourceType: 'FY_CLOSE',
+      sourceKey: `FY_CLOSE:${year.id}`,
+      items: {
+        create: [
+          { accountId: input.currentProfitAccountId, ...currentProfit, description: `Tutup akun laba tahun berjalan ${year.name}` },
+          { accountId: input.retainedEarningsAccountId, ...retained, description: `Transfer ke laba ditahan ${year.name}` },
+        ],
+      },
+    },
+  });
+
+  const ledgerRow = { date: year.endDate, referenceType: 'JournalEntry', referenceId: closeEntry.id, fiscalYearId: year.id };
+  await tx.accountingLedgerEntry.createMany({
+    data: [
+      { ...ledgerRow, accountId: input.currentProfitAccountId, ...currentProfit, description: `Tutup buku ${year.name}` },
+      { ...ledgerRow, accountId: input.retainedEarningsAccountId, ...retained, description: `Laba ditahan ${year.name}` },
+    ],
+  });
+
+  await updateAccountBalance(tx, input.currentProfitAccountId, currentProfit.debit, currentProfit.credit);
+  await updateAccountBalance(tx, input.retainedEarningsAccountId, retained.debit, retained.credit);
+  return { id: closeEntry.id, entryNumber };
+}
 
 // GET /api/fiscal-years
 router.get('/', async (req, res) => {
@@ -59,6 +153,7 @@ router.post('/', async (req, res) => {
 // POST /api/fiscal-years/:id/close: requires settings edit permission and the doc.cancel capability
 router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
+  const userId = req.user!.userId;
 
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -69,6 +164,9 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
       const year = await tx.fiscalYear.findUnique({ where: { id } });
       if (!year) throw new BusinessError('Tahun buku tidak ditemukan.');
       if (year.isClosed) throw new BusinessError('Tahun buku sudah ditutup.');
+
+      const retainedEarningsAccountId = await mappedAccountId('RETAINED_EARNINGS');
+      const currentProfitAccountId = await mappedAccountId('CURRENT_PROFIT');
 
       const [revAgg, expAgg] = await Promise.all([
         tx.accountingLedgerEntry.aggregate({
@@ -81,73 +179,15 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
         }),
       ]);
 
-      const netRevenue = Number(revAgg._sum?.credit || 0) - Number(revAgg._sum?.debit || 0);
-      const netExpense = Number(expAgg._sum?.debit || 0) - Number(expAgg._sum?.credit || 0);
-      const profit = netRevenue - netExpense;
+      // Decimal sums, so 0.3 - 0.1 - 0.2 is exactly zero and posts no CLOSE.
+      const sum = (v: Prisma.Decimal | null | undefined) => v ?? new Prisma.Decimal(0);
+      const netRevenue = sum(revAgg._sum?.credit).minus(sum(revAgg._sum?.debit));
+      const netExpense = sum(expAgg._sum?.debit).minus(sum(expAgg._sum?.credit));
+      const profit = netRevenue.minus(netExpense);
 
-      const retainedEarningsAcc = await systemAccounts.getAccount('RETAINED_EARNINGS');
-      const currentProfitAcc = await systemAccounts.getAccount('CURRENT_PROFIT');
-
-      if (profit !== 0) {
-        // Transfer profit/loss to Retained Earnings.
-        const closeEntry = await tx.journalEntry.create({
-          data: {
-            entryNumber: `CLOSE-${year.name}`,
-            date: year.endDate,
-            narration: `Tutup Buku Tahun ${year.name}`,
-            status: 'Submitted',
-            fiscalYearId: id,
-            createdBy: req.user!.userId,
-            submittedAt: new Date(),
-            sourceType: 'FY_CLOSE',
-            sourceKey: `FY_CLOSE:${id}`,
-            items: {
-              create: [
-                {
-                  accountId: currentProfitAcc.id,
-                  debit: profit > 0 ? profit : 0,
-                  credit: profit < 0 ? Math.abs(profit) : 0,
-                  description: `Tutup akun laba tahun berjalan ${year.name}`,
-                },
-                {
-                  accountId: retainedEarningsAcc.id,
-                  debit: profit < 0 ? Math.abs(profit) : 0,
-                  credit: profit > 0 ? profit : 0,
-                  description: `Transfer ke laba ditahan ${year.name}`,
-                },
-              ],
-            },
-          },
-        });
-
-        await tx.accountingLedgerEntry.createMany({
-          data: [
-            {
-              date: year.endDate,
-              accountId: currentProfitAcc.id,
-              debit: profit > 0 ? profit : 0,
-              credit: profit < 0 ? Math.abs(profit) : 0,
-              referenceType: 'JournalEntry',
-              referenceId: closeEntry.id,
-              description: `Tutup buku ${year.name}`,
-              fiscalYearId: id,
-            },
-            {
-              date: year.endDate,
-              accountId: retainedEarningsAcc.id,
-              debit: profit < 0 ? Math.abs(profit) : 0,
-              credit: profit > 0 ? profit : 0,
-              referenceType: 'JournalEntry',
-              referenceId: closeEntry.id,
-              description: `Laba ditahan ${year.name}`,
-              fiscalYearId: id,
-            },
-          ],
-        });
-
-        await updateAccountBalance(tx, currentProfitAcc.id, profit > 0 ? profit : 0, profit < 0 ? Math.abs(profit) : 0);
-        await updateAccountBalance(tx, retainedEarningsAcc.id, profit < 0 ? Math.abs(profit) : 0, profit > 0 ? profit : 0);
-      }
+      const closeJournal = profit.isZero()
+        ? null
+        : await postCloseJournalInTx(tx, { year, profit, currentProfitAccountId, retainedEarningsAccountId, userId });
 
       // Decrement Revenue/Expense balances by this FY's contribution only.
       const fyAccountSums = await tx.accountingLedgerEntry.groupBy({
@@ -183,9 +223,13 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
         }
       }
 
+      await tx.fiscalYearEvent.create({
+        data: { fiscalYearId: id, action: 'close', userId, closeJournalId: closeJournal?.id ?? null, profit },
+      });
+
       return tx.fiscalYear.update({
         where: { id },
-        data: { isClosed: true, closedAt: new Date(), closedBy: req.user!.userId },
+        data: { isClosed: true, closedAt: new Date(), closedBy: userId },
       });
     }, { timeout: 30000 }); // heavy transaction: 30s timeout
 
@@ -195,9 +239,14 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
   }
 });
 
-// POST /api/fiscal-years/:id/reopen: requires settings edit permission and the doc.cancel capability
+// POST /api/fiscal-years/:id/reopen: requires settings edit permission and the doc.cancel capability.
+// Body { reason } (5..500). Cancels the active CLOSE journal (kept, status Cancelled, with the reason)
+// instead of deleting it, and refuses while a later year is closed or the lock date covers the year end.
 router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const fyId = req.params.id as string;
+  const body = validateBody(ReopenFiscalYearSchema, req.body ?? {}, res);
+  if (!body) return;
+  const userId = req.user!.userId;
 
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -207,29 +256,34 @@ router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, re
       if (!year) throw new BusinessError('Tahun buku tidak ditemukan.');
       if (!year.isClosed) throw new BusinessError('Tahun buku belum ditutup.');
 
-      // Reverse the closing journal entry (CLOSE-{name}).
-      const closeEntryNumber = `CLOSE-${year.name}`;
-      const closeEntry = await tx.journalEntry.findFirst({
-        where: { entryNumber: closeEntryNumber, fiscalYearId: fyId },
-        include: { items: true },
+      // Share-locks every later year, so a close of one of them waits for this reopen (or this
+      // reopen waits for it and then sees it closed): an open year never sits before a closed one.
+      const later = await tx.$queryRaw<{ name: string; is_closed: boolean }[]>`
+        SELECT name, is_closed FROM fiscal_years WHERE start_date > ${year.endDate} ORDER BY start_date FOR SHARE`;
+      const laterClosed = later.find((y) => y.is_closed);
+      if (laterClosed) {
+        throw new BusinessError(
+          `Tahun buku ${laterClosed.name} sesudahnya sudah ditutup. Buka kembali ${laterClosed.name} dulu, lalu buka tahun buku ${year.name}.`,
+          FY_LATER_CLOSED,
+        );
+      }
+      await assertYearEndNotLocked(tx, year);
+
+      // Open the year first: voidJournalInTx checks the journal's own year (PERIOD_CLOSED otherwise).
+      const reopened = await tx.fiscalYear.update({
+        where: { id: fyId },
+        data: { isClosed: false, closedAt: null, closedBy: null },
       });
 
-      if (closeEntry) {
-        // Reverse GL ledger entries created by the closing
-        const closeLedgerEntries = await tx.accountingLedgerEntry.findMany({
-          where: { referenceType: 'JournalEntry', referenceId: closeEntry.id, fiscalYearId: fyId },
-        });
-
-        for (const entry of closeLedgerEntries) {
-          await updateAccountBalance(tx, entry.accountId, Number(entry.credit), Number(entry.debit));
-        }
-
-        await tx.accountingLedgerEntry.deleteMany({
-          where: { referenceType: 'JournalEntry', referenceId: closeEntry.id, fiscalYearId: fyId },
-        });
-
-        // Delete the closing journal entry (items cascade via onDelete: Cascade)
-        await tx.journalEntry.delete({ where: { id: closeEntry.id } });
+      // The active CLOSE journal(s); ones cancelled by earlier reopens stay as they are.
+      const closeJournals = await tx.journalEntry.findMany({
+        where: { ...closeJournalsWhere(year), status: 'Submitted' },
+        include: { items: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const trail = cancelTrail(userId, body.reason);
+      for (const journal of closeJournals) {
+        await voidJournalInTx(tx, journal, 'jurnal', trail);
       }
 
       const fyAccountSums = await tx.accountingLedgerEntry.groupBy({
@@ -265,10 +319,11 @@ router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, re
         }
       }
 
-      return tx.fiscalYear.update({
-        where: { id: fyId },
-        data: { isClosed: false, closedAt: null, closedBy: null },
+      await tx.fiscalYearEvent.create({
+        data: { fiscalYearId: fyId, action: 'reopen', userId, reason: trail.cancelReason, closeJournalId: closeJournals[0]?.id ?? null },
       });
+
+      return reopened;
     }, { timeout: 30000 });
 
     return res.json(result);

@@ -884,9 +884,30 @@ model FiscalYear {
   goodsReceipts    GoodsReceipt[]          @relation("GoodsReceiptFY")
   fixedAssets      FixedAsset[]
   cogsBackfills    CogsBackfillQueue[]     @relation("CogsBackfillFY")
+  events           FiscalYearEvent[]
   createdAt        DateTime                @default(now()) @map("created_at")
 
   @@map("fiscal_years")
+}
+
+/// One row per year close or reopen (routes/fiscalYears.ts). closeJournalId is the CLOSE journal
+/// the close posted or the reopen cancelled (null when there was none); profit is the amount the
+/// close moved to retained earnings (null on reopen). userId / closeJournalId have no FK, like
+/// JournalEntry.cancelledById.
+model FiscalYearEvent {
+  id             String     @id @default(uuid())
+  fiscalYearId   String     @map("fiscal_year_id")
+  fiscalYear     FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  /// 'close' | 'reopen' (CHECK constraint in the migration)
+  action         String
+  userId         String     @map("user_id")
+  reason         String?
+  closeJournalId String?    @map("close_journal_id")
+  profit         Decimal?   @db.Decimal(20, 2)
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  @@index([fiscalYearId, createdAt])
+  @@map("fiscal_year_events")
 }
 
 model User {
