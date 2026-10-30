@@ -73,6 +73,7 @@ export async function postOpeningStockInTx(tx: Tx, input: OpeningStockInput) {
         fiscalYearId: fiscalYear.id,
         createdBy: userId,
         submittedAt: now,
+        sourceType: 'OPENING',
         items: {
           create: [
             { accountId: invAccount.id, debit: totalValue, credit: 0, description },

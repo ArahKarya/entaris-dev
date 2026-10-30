@@ -196,6 +196,7 @@ router.patch('/:id/balance', async (req: AuthRequest, res) => {
           fiscalYearId: fiscalYear.id,
           createdBy: req.user!.userId,
           submittedAt: now,
+          sourceType: 'OPENING',
           items: {
             create: [
               { accountId: id, debit: accountDebit, credit: accountCredit, description: `Saldo Awal: ${account.name}` },

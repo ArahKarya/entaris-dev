@@ -167,6 +167,7 @@ router.post(
                         fiscalYearId: fiscalYear.id,
                         createdBy: req.user!.userId,
                         submittedAt: now,
+                        sourceType: 'OPENING',
                         items: {
                           create: isCustomer
                             ? [
@@ -220,6 +221,7 @@ router.post(
                       fiscalYearId: fiscalYear.id,
                       createdBy: req.user!.userId,
                       submittedAt: now,
+                      sourceType: 'OPENING',
                       items: {
                         create: [
                           { accountId: vendorDepositAccount.id, partyId: party.id, debit: depositBalance, credit: 0, description: `Saldo awal uang muka vendor: ${row.name}` },
@@ -285,6 +287,7 @@ router.post(
                       fiscalYearId: fiscalYear.id,
                       createdBy: req.user!.userId,
                       submittedAt: now,
+                      sourceType: 'OPENING',
                       items: {
                         create: [
                           { accountId: openingEquityAccount.id, debit: customerDepositBalance, credit: 0, description: `Saldo awal uang muka pelanggan: ${row.name}` },

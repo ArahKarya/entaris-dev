@@ -95,6 +95,8 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
             fiscalYearId: id,
             createdBy: req.user!.userId,
             submittedAt: new Date(),
+            sourceType: 'FY_CLOSE',
+            sourceKey: `FY_CLOSE:${id}`,
             items: {
               create: [
                 {

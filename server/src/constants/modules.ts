@@ -130,3 +130,19 @@ export const DEFAULT_CAPS: Record<string, string[]> = {
   StaffProduksi: [],
   Viewer: [],
 };
+
+/** One-time grant of capabilities to an existing built-in role (see BACKFILL_CAPS). */
+export interface CapBackfill {
+  /** Marker key in data_fix_markers. Never edit or reuse a key; add a new entry instead. */
+  key: string;
+  role: string;
+  caps: readonly string[];
+}
+
+/**
+ * Capabilities ensureRbacSeed grants once per database to existing system roles, so a new requireCap
+ * gate does not take a right away from roles that had it before. Each key runs once (marker in
+ * data_fix_markers): a cap an Admin later removes is never re-added. Also add the caps to DEFAULT_CAPS
+ * so fresh databases match, and ship the entry with (or before) the gate that needs it.
+ */
+export const BACKFILL_CAPS: readonly CapBackfill[] = [];

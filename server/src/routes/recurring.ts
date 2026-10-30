@@ -78,6 +78,7 @@ async function executeTemplate(
             fiscalYearId: fiscalYear.id,
             createdBy: userId,
             submittedAt: new Date(),
+            sourceType: 'RECURRING',
             items: { create: items },
           },
           include: { items: true },

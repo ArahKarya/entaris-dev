@@ -186,6 +186,7 @@ router.post(
                     fiscalYearId: fiscalYear.id,
                     createdBy: req.user!.userId,
                     submittedAt: now,
+                    sourceType: 'OPENING',
                     items: {
                       create: [
                         { accountId: account.id, debit: accountDebit, credit: accountCredit, description: `Saldo awal: ${row.accountNumber} - ${row.name}` },

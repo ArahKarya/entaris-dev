@@ -26,6 +26,12 @@ echo ""
 echo "🗃️  3/7 Running database migrations..."
 npx prisma generate
 npx prisma migrate deploy
+# Loose SQL migrations (prisma/migrations/*.sql) are not run by `migrate deploy`. The new
+# code reads the columns they add, so stop the deploy here instead of starting it without them.
+if ! node -r dotenv/config prisma/apply-loose-sql.mjs; then
+  echo "❌ Migrasi SQL lepas gagal. Deploy dihentikan; perbaiki lalu jalankan ulang: cd server && npm run db:loose"
+  exit 1
+fi
 
 # 4. Seed database — only when the users table is empty (same check as
 #    docker-app-entrypoint.sh), so a redeploy never touches live data.

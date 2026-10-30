@@ -4,7 +4,7 @@
  * STALE_STATUS_ERROR), writes a history row and returns notification events dispatched after commit.
  * Payment posts one balanced journal under the open-fiscal-year guard; cancelling voids it like gaFinance.
  */
-import type { Prisma } from '@prisma/client';
+import type { JournalSourceType, Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
 import { generateDocumentNumber } from '../utils/documentNumber';
@@ -382,6 +382,8 @@ export async function postJournalInTx(
     now: Date;
     lines: readonly JournalLine[];
     partyId?: string | null;
+    /** Journal origin; document-backed postings (payment request, settlement) by default. */
+    sourceType?: JournalSourceType;
   },
 ) {
   const { date, narration, fiscalYearId } = input;
@@ -395,6 +397,7 @@ export async function postJournalInTx(
       fiscalYearId,
       createdBy: input.actorId,
       submittedAt: input.now,
+      sourceType: input.sourceType ?? 'SYSTEM_DOC',
       items: {
         create: input.lines.map((l) => ({
           accountId: l.accountId,

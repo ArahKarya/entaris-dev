@@ -294,6 +294,7 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
           fiscalYearId: fiscalYear.id,
           createdBy: req.user!.userId,
           submittedAt: new Date(),
+          sourceType: 'DEPRECIATION',
           items: {
             create: [
               { accountId: asset.depreciationAccountId, debit: Number(entry.amount), credit: 0, description: `Beban depresiasi ${asset.name}` },
@@ -455,6 +456,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
             fiscalYearId: fiscalYear.id,
             createdBy: userId,
             submittedAt: new Date(),
+            sourceType: 'DEPRECIATION',
             items: {
               create: [
                 { accountId: asset.depreciationAccountId, debit: amount, credit: 0, description: `Beban depresiasi ${asset.name}` },

@@ -116,6 +116,7 @@ router.post(
                 fiscalYearId: fiscalYear.id,
                 createdBy: userId,
                 submittedAt: new Date(),
+                sourceType: 'IMPORT',
                 items: { create: itemsWithIds },
               },
               include: { items: true },
