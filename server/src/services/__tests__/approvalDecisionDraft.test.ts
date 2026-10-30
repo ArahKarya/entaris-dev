@@ -23,6 +23,8 @@ vi.mock('../purchaseOrderSubmit', () => ({ applyPurchaseOrderApprovalDecisionInT
 vi.mock('../../lib/prisma', () => ({ prisma: db }));
 
 import { decideApproval } from '../approvalDecision';
+import { revisePurchaseInvoiceInTx } from '../purchaseInvoiceRevise';
+import { BusinessError } from '../../utils/errors';
 
 const PAYLOAD = {
   date: '2026-10-01',
@@ -78,5 +80,28 @@ describe('decideApproval x production draft', () => {
     const r = await decideApproval({ requestId: 'req-1', action: 'approve', actorUserId: 'admin' });
     expect(r.ok).toBe(false);
     expect(db.approvalRequest.update).not.toHaveBeenCalled();
+  });
+
+  it('passes the error code of a failed execution through and keeps the request Pending', async () => {
+    db.approvalRequest.findUnique.mockResolvedValue({
+      id: 'req-2',
+      status: 'Pending',
+      documentType: 'PurchaseInvoiceRevisePrice',
+      documentId: 'pi-1',
+      requestedBy: 'u1',
+      payload: { lines: [{ itemId: '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b', newRate: 5000 }], reason: 'Harga final supplier' },
+    });
+    vi.mocked(revisePurchaseInvoiceInTx).mockRejectedValue(
+      new BusinessError('Tahun buku 2026 sudah ditutup; jurnal di periode ini tidak bisa diposting.', 'PERIOD_CLOSED'),
+    );
+    const r = await decideApproval({ requestId: 'req-2', action: 'approve', actorUserId: 'admin' });
+    expect(r).toMatchObject({ ok: false, code: 'PERIOD_CLOSED', error: expect.stringMatching(/sudah ditutup/) });
+    expect(db.approvalRequest.update).not.toHaveBeenCalled();
+  });
+
+  it('omits the code for a plain error', async () => {
+    submitRun.mockRejectedValue(new Error('Stok tidak cukup'));
+    const r = await decideApproval({ requestId: 'req-1', action: 'approve', actorUserId: 'admin' });
+    expect(r).not.toHaveProperty('code');
   });
 });

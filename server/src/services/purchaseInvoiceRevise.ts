@@ -9,6 +9,7 @@ import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
 import { systemAccounts } from '../services/systemAccounts';
 import { generateDocumentNumber } from '../utils/documentNumber';
+import { resolveJournalFiscalYear } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
@@ -65,6 +66,12 @@ export async function revisePurchaseInvoiceInTx(
   if (!invoice) throw new BusinessError('Invoice pembelian tidak ditemukan.');
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan, tidak bisa direvisi.');
   if (invoice.status === 'Draft') throw new BusinessError('Invoice masih Draft. Edit langsung, bukan revisi harga.');
+
+  // The revision journal is dated now and belongs to the fiscal year of that date, not the
+  // invoice's: a PI from a closed year can still be revised, its correction lands in the open
+  // year. Rejected only when the revision date's own year is closed or missing.
+  const now = new Date();
+  const journalFy = await resolveJournalFiscalYear(tx, now);
 
   const lineMap = new Map(invoice.items.map((it) => [it.id, it]));
 
@@ -205,8 +212,7 @@ export async function revisePurchaseInvoiceInTx(
     throw new BusinessError(`Jurnal revisi tidak balance (DR ${sumDr} vs CR ${sumCr}). Revisi dibatalkan.`);
   }
 
-  const now = new Date();
-  const entryNumber = await generateDocumentNumber(tx, 'JV', now, invoice.fiscalYearId);
+  const entryNumber = await generateDocumentNumber(tx, 'JV', now, journalFy.id);
   const je = await tx.journalEntry.create({
     data: {
       entryNumber,
@@ -214,7 +220,7 @@ export async function revisePurchaseInvoiceInTx(
       narration: `Revisi harga ${invoice.invoiceNumber} (${invoice.supplier.name}): ${input.reason.trim()}`,
       status: 'Submitted',
       submittedAt: now,
-      fiscalYearId: invoice.fiscalYearId,
+      fiscalYearId: journalFy.id,
       createdBy: userId,
       items: { create: jeItems.map((i) => ({ accountId: i.accountId, debit: i.debit, credit: i.credit, partyId: i.partyId ?? null, description: i.description })) },
     },
@@ -230,7 +236,7 @@ export async function revisePurchaseInvoiceInTx(
       referenceType: 'JournalEntry',
       referenceId: je.id,
       description: i.description,
-      fiscalYearId: invoice.fiscalYearId,
+      fiscalYearId: journalFy.id,
     })),
   });
   for (const i of jeItems) {
