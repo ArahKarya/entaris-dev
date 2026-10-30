@@ -103,6 +103,18 @@ describe('approveQueuedToolCall (execution as the original actor)', () => {
     expect(upd.status).toBe('Pending');
     expect(upd.payload.lastError).toContain('Stok tidak mencukupi.');
     expect(m.notifyUsers).not.toHaveBeenCalled();
+    expect(r).not.toHaveProperty('code');
+  });
+
+  it('handler rejection keeps its error code (PERIOD_CLOSED) for the approvals route', async () => {
+    m.callHandler.mockResolvedValue({
+      status: 400, ok: false,
+      body: { kind: 'json', data: { error: 'Tahun buku 2025 sudah ditutup; uang muka di periode ini tidak bisa diposting, diubah, atau dibatalkan.', code: 'PERIOD_CLOSED' } },
+    });
+    const r = await approveQueuedToolCall(REQ, 'admin-1', '');
+    expect(r).toMatchObject({ ok: false, code: 'PERIOD_CLOSED' });
+    expect(r.error).toContain('sudah ditutup');
+    expect(m.db.approvalRequest.update.mock.calls[0][0].data.status).toBe('Pending');
   });
 
   it('handler says partner not found -> lastError carries the corrective hint (party_search)', async () => {

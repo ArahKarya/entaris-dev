@@ -100,6 +100,8 @@ export interface ApprovedExecution {
   status?: number;
   docNumber?: string;
   error?: string;
+  /** The handler's error `code` (e.g. PERIOD_CLOSED), when it sent one. */
+  code?: string;
 }
 
 function pickRef(data: unknown): { id?: string; number?: string } {
@@ -143,7 +145,9 @@ export async function executeApprovedToolCall(request: ApprovalRequest, deps: { 
   }
   const formatted = formatHandlerResult(res, 4000);
   if (!res.ok) {
-    return { ok: false, status: res.status, error: String(formatted.structured.error ?? `Handler menolak (HTTP ${res.status}).`) };
+    const data = res.body.kind === 'json' ? (res.body.data as { code?: unknown } | null) : null;
+    const code = typeof data?.code === 'string' ? data.code : undefined;
+    return { ok: false, status: res.status, error: String(formatted.structured.error ?? `Handler menolak (HTTP ${res.status}).`), ...(code ? { code } : {}) };
   }
   const ref = pickRef(res.body.kind === 'json' ? res.body.data : null);
   const next: QueuedToolPayload = {
