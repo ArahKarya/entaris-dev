@@ -56,7 +56,8 @@ services:
       COOKIE_DOMAIN: "${COOKIE_DOMAIN:-}"
       # Zona waktu bisnis untuk filter tanggal (default WIB).
       APP_UTC_OFFSET: "${APP_UTC_OFFSET:-+07:00}"
-      # Zona waktu proses server (batas periode laporan). Default WIB.
+      # Zona waktu proses server (log, jadwal cron). Batas hari laporan,
+      # tahun buku dan nomor dokumen memakai APP_UTC_OFFSET, bukan TZ.
       TZ: "${TZ:-Asia/Jakarta}"
       NODE_ENV: "production"
       UPLOADS_DIR: "/app/uploads"

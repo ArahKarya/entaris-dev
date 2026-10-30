@@ -33,7 +33,7 @@ Toolset **dashboard** adalah ringkasan angka cepat yang sama dengan kartu dan gr
 
 ### Aturan data
 
-- **Parameter periode**: hanya `rpt_dashboard`, `rpt_dash_charts`, `rpt_dash_expense_breakdown`, `rpt_dash_cash_flow`, `rpt_dash_monthly_profit` menerima `startDate`/`endDate` (`YYYY-MM-DD`; `endDate` sampai 23:59:59). Nilai tidak valid diam-diam diganti default (tidak error, berbeda dari toolset laporan).
+- **Parameter periode**: hanya `rpt_dashboard`, `rpt_dash_charts`, `rpt_dash_expense_breakdown`, `rpt_dash_cash_flow`, `rpt_dash_monthly_profit` menerima `startDate`/`endDate` (`YYYY-MM-DD`, hari bisnis WIB; `endDate` inklusif sampai akhir hari itu). Nilai tidak valid menghasilkan HTTP 400, sama seperti toolset laporan. Grafik bulanan dan harian dikelompokkan per bulan/hari WIB.
 - **Saldo** (`rpt_dashboard`, `get_cash_position`, `rpt_dash_financial_ratios`) diambil dari kolom `balance` akun saat ini (saldo tersimpan), bukan dihitung ulang dari jurnal per tanggal. Karena itu tidak bisa dipakai untuk posisi historis.
 - `rpt_dashboard`: kas = jumlah saldo akun kas/bank sistem; piutang = saldo akun Piutang Usaha (1.2.1) dengan batas bawah 0; hutang = jumlah saldo seluruh akun LIABILITY non-grup (bukan hanya Hutang Usaha), batas bawah 0; uang muka vendor dari jumlah `depositBalance` per mitra; nilai persediaan = jumlah akun 1.4.* (boleh negatif; negatif = anomali stok). Laba = pendapatan (kredit-debit) dikurangi beban (debit-kredit) pada periode.
 - `rpt_dash_cash_flow` hanya menghitung Pembayaran berstatus Submitted: Receive = masuk, Pay = keluar. Tidak termasuk jurnal manual atau pengajuan pembayaran yang tidak lewat modul Pembayaran.
@@ -174,7 +174,7 @@ Toolset **dashboard** adalah ringkasan angka cepat yang sama dengan kartu dan gr
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -216,7 +216,7 @@ Toolset **dashboard** adalah ringkasan angka cepat yang sama dengan kartu dan gr
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -256,7 +256,7 @@ Toolset **dashboard** adalah ringkasan angka cepat yang sama dengan kartu dan gr
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -365,7 +365,7 @@ Toolset **dashboard** adalah ringkasan angka cepat yang sama dengan kartu dan gr
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
@@ -639,7 +639,7 @@ Toolset **dashboard** adalah ringkasan angka cepat yang sama dengan kartu dan gr
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 

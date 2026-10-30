@@ -151,7 +151,7 @@
   },
   "src/routes/reports.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 34
+      "count": 26
     }
   },
   "src/routes/roles.ts": {

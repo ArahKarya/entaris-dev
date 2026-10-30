@@ -445,7 +445,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 | `entityType` | query | `string` | tidak | Filter jenis entitas (segmen pertama URL, mis. sales, purchase, payments) |
 | `search` | query | `string` | tidak | Cari berdasarkan ID entitas |
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 | `page` | query | `number` | tidak | Halaman |
 | `limit` | query | `number` | tidak | Ukuran halaman (maks. 200) |
 
@@ -497,7 +497,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 | `entityType` | query | `string` | tidak | Filter jenis entitas (segmen pertama URL, mis. sales, purchase, payments) |
 | `search` | query | `string` | tidak | Cari berdasarkan ID entitas |
 | `startDate` | query | `date` | tidak | Tanggal awal periode (inklusif) (format YYYY-MM-DD) |
-| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, sampai 23:59:59) (format YYYY-MM-DD) |
+| `endDate` | query | `date` | tidak | Tanggal akhir periode (inklusif, hari bisnis WIB) (format YYYY-MM-DD) |
 
 **Contoh pemanggilan**
 
