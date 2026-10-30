@@ -538,6 +538,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: baris bermasalah (rowErrors) - tidak ada yang diposting
 - 400: draft sudah diposting
 - 400: tahun buku ditutup untuk tanggal baris
+- 400 PERIOD_LOCKED: tanggal baris pada atau sebelum tanggal kunci periode bulanan (mode partial: baris itu gagal, baris lain tetap diposting)
 - 403: tidak punya izin Jurnal (edit)
 
 **Tool terkait:** [`kas_draft_get`](#kas_draft_get), [`kas_draft_ubah_baris`](#kas_draft_ubah_baris), [`je_cancel`](akuntansi.md#je_cancel)
@@ -829,6 +830,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Gunakan endpoint Uang Muka untuk membatalkan deposit
 - 400: Refund belum mendukung cancel otomatis
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -1135,6 +1137,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Akun yang dipilih bukan akun kas/bank
 - 400: Uang muka hanya dapat dibuat untuk Supplier
 - 400: Nilai refund melebihi alokasi pembayaran asal
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`pi_list`](pembelian.md#pi_list), [`vdep_apply`](pembelian.md#vdep_apply), [`pay_cancel`](#pay_cancel), [`pay_ledger`](#pay_ledger)
 
@@ -1194,6 +1197,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Uang jaminan sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400: Sudah ada settlement aktif - batalkan settlement dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)
@@ -1266,6 +1270,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - 400: Akun yang dipilih bukan akun kas/bank
 - 400: Pihak sudah tidak aktif
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`pg_settle`](#pg_settle), [`pg_cancel`](#pg_cancel)
 
@@ -1421,6 +1426,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Akun hangus harus akun beban (EXPENSE)
 - 400: Akun tujuan pengembalian bukan akun kas/bank
 - 400: total melebihi sisa jaminan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`pg_get`](#pg_get), [`pg_settlement_cancel`](#pg_settlement_cancel)
 
@@ -1480,6 +1486,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Settlement sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400: Uang jaminan induk sudah dibatalkan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400: alasan pembatalan maksimal 500 karakter
 
 **Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)

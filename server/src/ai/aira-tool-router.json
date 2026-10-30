@@ -66,7 +66,8 @@
     "approval.bypass",
     "approval.view_all",
     "inventory.negative_stock",
-    "rbac.manage"
+    "rbac.manage",
+    "period.lock"
   ],
   "tools": [
     {
@@ -946,7 +947,8 @@
         "ga_veh_post_service_journal"
       ],
       "errors": [
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -13329,6 +13331,7 @@
         "400: bukan tipe uang muka pelanggan.",
         "400: sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat cdep_refund_cancel)",
         "400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan",
         "403: tanpa capability doc.cancel",
@@ -15357,6 +15360,7 @@
         "404: tidak ditemukan",
         "400: sudah dibatalkan",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 JOURNAL_USE_DEPOSIT_REFUND_CANCEL: jurnal refund uang muka; batalkan lewat cdep_refund_cancel/vdep_refund_cancel (tombol \"Batalkan refund\" di menu Uang Muka)",
         "400 JOURNAL_NOT_MANUAL: jurnal bukan buatan manusia (sumber modul/sistem, atau jurnal lama yang sumbernya tidak tercatat), atau terhubung ke dokumen modul (pembayaran, stok, aplikasi/offset uang muka, tutup buku, penyusutan, revisi harga, GA, pengajuan dana, uang jaminan); batalkan dari dokumen sumbernya atau buat jurnal balik manual",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
@@ -15485,6 +15489,7 @@
         "400: Uang jaminan sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Sudah ada settlement aktif - batalkan settlement dulu",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
@@ -16005,6 +16010,7 @@
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock"
       ],
       "related": [
@@ -16065,6 +16071,7 @@
         "400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu",
         "400: Bukan tipe uang muka vendor",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat vdep_refund_cancel)",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
@@ -16197,7 +16204,8 @@
       "errors": [
         "400: Pengajuan sudah diproses",
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
-        "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending"
+        "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
+        "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending"
       ],
       "related": [
         "appr_request_get",
@@ -16802,7 +16810,8 @@
       "errors": [
         "400: total melebihi sisa uang muka.",
         "400: piutang pelanggan tidak cukup untuk offset.",
-        "400: akun yang dipilih bukan kas/bank."
+        "400: akun yang dipilih bukan kas/bank.",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "cdep_balance",
@@ -16906,6 +16915,7 @@
         "400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi \"Refund UM ...\"), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)",
         "400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual",
         "400: uang muka tidak ditemukan atau bukan tipe uang muka pelanggan (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)",
         "403: tanpa capability doc.cancel",
@@ -16980,7 +16990,8 @@
         "400: sisa deposit tidak cukup.",
         "400: melebihi outstanding invoice.",
         "400: deposit dan invoice harus dari pelanggan yang sama.",
-        "400: invoice sudah lunas/dibatalkan."
+        "400: invoice sudah lunas/dibatalkan.",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "cdep_balance",
@@ -17038,6 +17049,7 @@
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di luar modul Uang Muka (menu Jurnal lama): jurnal dan saldo uang muka mitra sudah dibalik, tetapi outstanding invoice dan aplikasinya tidak; aplikasi tidak dibatalkan lagi, akuntan mengoreksi outstanding invoice",
         "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -17198,7 +17210,8 @@
       "errors": [
         "400: stok tidak cukup.",
         "400: item perlu gudang sumber.",
-        "400: pelanggan tidak aktif."
+        "400: pelanggan tidak aktif.",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "do_pending",
@@ -17246,6 +17259,7 @@
         "400: batalkan invoice terkait dulu.",
         "400: surat jalan sudah dibatalkan.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
       ],
       "prerequisites": [
@@ -17330,7 +17344,8 @@
       ],
       "errors": [
         "400: invoice sudah dibatalkan.",
-        "400: invoice sudah punya Surat Jalan."
+        "400: invoice sudah punya Surat Jalan.",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "si_create"
@@ -17486,6 +17501,92 @@
         "400: tahun buku belum ditutup"
       ],
       "related": [
+        "fy_close"
+      ]
+    },
+    {
+      "name": "period_lock_get",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "journal",
+      "desc": "Tanggal kunci periode bulanan saat ini (lockDate, YYYY-MM-DD atau null = tanpa kunci), siapa yang terakhir mengubahnya, dan 50 perubahan terakhir beserta alasannya. Posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "Viewer"
+      ],
+      "input": {},
+      "params": [],
+      "output": {
+        "status": "string"
+      },
+      "outputSummary": "{ lockDate, updatedAt, updatedBy: { id, fullName } | null, logs: [{ id, oldDate, newDate, reason, createdAt, user }] }.",
+      "handler": "GET /api/period-lock",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "related": [
+        "period_lock_set",
+        "fy_list"
+      ]
+    },
+    {
+      "name": "period_lock_set",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "journal",
+      "desc": "Mengatur, memajukan, memundurkan, atau membuka (lockDate null) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).",
+      "risk": "critical",
+      "roles": [
+        "Admin"
+      ],
+      "input": {
+        "lockDate": "string",
+        "reason": "string"
+      },
+      "params": [
+        {
+          "name": "lockDate",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB), atau null untuk membuka kunci."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan perubahan (maks. 500 karakter); wajib minimal 5 karakter saat kunci dimundurkan atau dibuka."
+        }
+      ],
+      "output": {
+        "status": "string"
+      },
+      "outputSummary": "{ message, lockDate, previousLockDate, changed, logId } (changed=false bila tanggalnya sama; tidak ada riwayat baru).",
+      "handler": "PUT /api/period-lock",
+      "permAction": "edit",
+      "requiresCapability": "period.lock",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Tidak membuat jurnal. Mengubah tanggal kunci periode global (period_lock) dan menulis satu baris riwayat (period_lock_logs: tanggal lama, tanggal baru, alasan, user). Menunggu posting yang sedang berjalan selesai.",
+      "confirm_template": "Ubah kunci periode menjadi {lockDate}? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan.",
+      "prerequisites": [
+        "Capability period.lock.",
+        "Alasan diisi bila tanggal dimundurkan atau kunci dibuka."
+      ],
+      "errors": [
+        "400 PERIOD_LOCK_NOT_PAST: tanggal kunci hari ini atau sesudahnya; hanya hari yang sudah lewat yang bisa dikunci",
+        "400 PERIOD_LOCK_REASON_REQUIRED: memundurkan atau membuka kunci tanpa alasan minimal 5 karakter",
+        "400: format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter",
+        "403: tanpa capability period.lock atau tanpa izin edit modul journal"
+      ],
+      "related": [
+        "period_lock_get",
         "fy_close"
       ]
     },
@@ -17669,7 +17770,8 @@
         "404: jadwal tidak ditemukan",
         "400 STALE_STATUS: depresiasi sudah diposting (juga klik ganda/retry atau posting lain yang lebih dulu; tidak diposting dua kali)",
         "400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup",
-        "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat"
+        "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "fa_get",
@@ -17736,6 +17838,7 @@
         "400 DEPRECIATION_NOT_LAST: masih ada baris periode lebih akhir yang terposting; batalkan dari periode terakhir dulu",
         "400 STALE_STATUS: baris belum diposting atau postingnya sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku jurnal penyusutan tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 FIXED_ASSET_NOT_ACTIVE: aset sudah dilepas (Disposed); pelepasan tidak bisa dibatalkan, jadi posting penyusutannya dikoreksi lewat jurnal manual",
         "400 DEPRECIATION_ENTRY_NOT_FOUND: baris jadwal tidak ditemukan atau bukan milik aset ini",
         "400 DEPRECIATION_JOURNAL_MISSING: jurnal penyusutan baris ini tidak ada atau sudah dibatalkan di luar modul Aset Tetap; koreksi lewat jurnal manual",
@@ -17861,7 +17964,8 @@
       ],
       "errors": [
         "400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup",
-        "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat"
+        "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "prerequisites": [
         "Tahun buku untuk periode penyusutan ada dan masih terbuka."
@@ -20399,7 +20503,8 @@
       "errors": [
         "400: Service log sudah memiliki jurnal",
         "400: Service log bersumber IMPORT/WORK_ORDER tidak dapat diposting",
-        "400: Biaya harus > 0"
+        "400: Biaya harus > 0",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "ga_veh_cancel_service_journal"
@@ -20858,7 +20963,8 @@
       "errors": [
         "400: pemasok tidak aktif/bukan supplier",
         "400: PO sudah dibatalkan/belum dipesan/sudah ditutup",
-        "400: item atau gudang tidak ditemukan/tidak aktif"
+        "400: item atau gudang tidak ditemukan/tidak aktif",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "gr_pending",
@@ -20941,6 +21047,7 @@
         "400: stok tidak cukup untuk dibalikkan",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -21491,7 +21598,8 @@
       "errors": [
         "400: tidak ada tahun fiskal aktif untuk tanggal ini",
         "400: stok di gudang tidak cukup",
-        "400: item tidak aktif / tidak ditemukan"
+        "400: item tidak aktif / tidak ditemukan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "inv_mov_cancel",
@@ -22099,7 +22207,8 @@
       "errors": [
         "403: hanya pembuat draft yang boleh memostingnya",
         "400: stok input tidak cukup (draft tetap Draft, lastError terisi)",
-        "404: draft tidak ditemukan"
+        "404: draft tidak ditemukan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "prod_draft_get",
@@ -22198,7 +22307,8 @@
       "errors": [
         "400: Jurnal tidak seimbang",
         "400: debit dan kredit sekaligus dalam satu baris",
-        "400: tahun buku ditutup/tidak ada"
+        "400: tahun buku ditutup/tidak ada",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "coa_flat",
@@ -22827,7 +22937,8 @@
       "errors": [
         "400: belum dibayar",
         "400: pertanggungjawaban uang muka sudah berjalan",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "payreq_pay"
@@ -22906,7 +23017,8 @@
         "400: sudah dibayar",
         "400: akun biaya baris N belum diisi",
         "400: akun kas sama dengan akun biaya",
-        "400: tahun buku ditutup"
+        "400: tahun buku ditutup",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "payreq_set_accounts",
@@ -23146,7 +23258,8 @@
       "confirm_template": "BATALKAN posting pertanggungjawaban {id}? Alasan: {reason}",
       "accessNote": "Keuangan.",
       "errors": [
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "payreq_settlement_post"
@@ -23252,7 +23365,8 @@
       "errors": [
         "400: pertanggungjawaban belum disetujui atasan",
         "400: tanggal sebelum tanggal bayar",
-        "400: tahun buku ditutup"
+        "400: tahun buku ditutup",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "payreq_settlement_preview",
@@ -23520,7 +23634,8 @@
       "errors": [
         "400: tagihan belum diposting",
         "400: faktur sudah dibayar",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "eambill_pay"
@@ -23650,7 +23765,8 @@
         "400: Jenis tagihan tidak dikenal",
         "400: akun debit = akun kredit",
         "400: vendor wajib untuk PURCHASE_INVOICE",
-        "400: sudah diposting"
+        "400: sudah diposting",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "eambill_list",
@@ -23843,7 +23959,8 @@
         "400: Total split tidak sama dengan jumlah pembayaran",
         "400: Akun yang dipilih bukan akun kas/bank",
         "400: Uang muka hanya dapat dibuat untuk Supplier",
-        "400: Nilai refund melebihi alokasi pembayaran asal"
+        "400: Nilai refund melebihi alokasi pembayaran asal",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "pi_list",
@@ -23902,6 +24019,7 @@
         "400: Gunakan endpoint Uang Muka untuk membatalkan deposit",
         "400: Refund belum mendukung cancel otomatis",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -24020,7 +24138,8 @@
       ],
       "errors": [
         "400: Akun yang dipilih bukan akun kas/bank",
-        "400: Pihak sudah tidak aktif"
+        "400: Pihak sudah tidak aktif",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "pg_settle",
@@ -24114,7 +24233,8 @@
         "400: Uang jaminan berstatus {status}, tidak bisa di-settle",
         "400: Akun hangus harus akun beban (EXPENSE)",
         "400: Akun tujuan pengembalian bukan akun kas/bank",
-        "400: total melebihi sisa jaminan"
+        "400: total melebihi sisa jaminan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "pg_get",
@@ -24170,6 +24290,7 @@
         "400: Settlement sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400: Uang jaminan induk sudah dibatalkan",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
@@ -24775,7 +24896,8 @@
       ],
       "errors": [
         "400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda",
-        "202: menunggu persetujuan (bukan error)"
+        "202: menunggu persetujuan (bukan error)",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "gr_pending",
@@ -24835,6 +24957,7 @@
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -24922,7 +25045,8 @@
         "409: sudah ada pengajuan Pending untuk dokumen ini",
         "400: alasan minimal 10 karakter",
         "400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup",
-        "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat"
+        "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "pi_get",
@@ -26166,7 +26290,8 @@
       "errors": [
         "400: qty retur melebihi sisa yang bisa diretur.",
         "400: invoice sudah dibatalkan.",
-        "400: akun 4.3 tidak ditemukan."
+        "400: akun 4.3 tidak ditemukan.",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "sret_eligible",
@@ -26221,6 +26346,7 @@
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
@@ -26468,7 +26594,8 @@
       "errors": [
         "400: pelanggan tidak ditemukan/tidak aktif.",
         "400: stok tidak cukup.",
-        "400: baris SJ sudah dibatalkan atau sudah masuk invoice lain."
+        "400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "do_pending",
@@ -26525,6 +26652,7 @@
         "400: ada pembayaran teralokasi — batalkan pembayaran dulu.",
         "400: ada alokasi uang muka aktif — batalkan alokasi dulu.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -26707,7 +26835,8 @@
         "400: tidak ada tahun fiskal aktif",
         "400: masih ada stok opname Draft",
         "400: stok aktual tidak boleh negatif",
-        "400: item tidak ditemukan"
+        "400: item tidak ditemukan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "opn_get",
@@ -26841,7 +26970,8 @@
       "errors": [
         "400: gudang asal dan tujuan tidak boleh sama",
         "400: stok item di gudang asal tidak cukup",
-        "400: gudang tidak aktif"
+        "400: gudang tidak aktif",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "stf_get",
@@ -27256,7 +27386,8 @@
         "400: Total melebihi sisa uang muka",
         "400: Hutang vendor tidak cukup untuk offset",
         "400: Akun yang dipilih bukan kas/bank",
-        "400: Uang muka sudah dibatalkan"
+        "400: Uang muka sudah dibatalkan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "vdep_balance",
@@ -27361,6 +27492,7 @@
         "400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi \"Refund UM ...\"), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)",
         "400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual",
         "400: uang muka tidak ditemukan atau bukan tipe uang muka supplier (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)",
         "403: tanpa capability doc.cancel",
@@ -27430,7 +27562,8 @@
         "400: Deposit dan invoice harus dari supplier yang sama",
         "400: Sisa deposit tidak cukup",
         "400: Sisa outstanding invoice kurang",
-        "400: Invoice sudah lunas/dibatalkan"
+        "400: Invoice sudah lunas/dibatalkan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "vdep_balance",
@@ -27489,6 +27622,7 @@
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di luar modul Uang Muka (menu Jurnal lama): jurnal dan saldo uang muka mitra sudah dibalik, tetapi outstanding invoice dan aplikasinya tidak; aplikasi tidak dibatalkan lagi, akuntan mengoreksi outstanding invoice",
         "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -27992,6 +28126,7 @@
         "403: bypass stok minus butuh capability.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan",
         "403: tanpa capability doc.cancel"
       ],
@@ -29955,6 +30090,7 @@
         "400: pembalikan stok lama membuat stok negatif",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "403: tanpa capability doc.cancel"
       ],
       "related": [
@@ -30008,7 +30144,8 @@
         "400: dari STT tidak dapat dibatalkan per baris",
         "400: stok tidak mencukupi untuk pembalikan",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "inv_mov_get",
@@ -30601,7 +30738,8 @@
         "400: stok tidak cukup / run sudah dibatalkan",
         "403: tidak berwenang bypass validasi stok",
         "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
-        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku"
+        "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "prod_run_get",
@@ -30677,7 +30815,8 @@
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "prod_run_get"
@@ -33631,7 +33770,8 @@
         "400: stok opname sudah dibatalkan",
         "400: stok item tidak mencukupi untuk pembalikan",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "opn_get"
@@ -34896,6 +35036,7 @@
         "400: baris bermasalah (rowErrors) - tidak ada yang diposting",
         "400: draft sudah diposting",
         "400: tahun buku ditutup untuk tanggal baris",
+        "400 PERIOD_LOCKED: tanggal baris pada atau sebelum tanggal kunci periode bulanan (mode partial: baris itu gagal, baris lain tetap diposting)",
         "403: tidak punya izin Jurnal (edit)"
       ],
       "related": [

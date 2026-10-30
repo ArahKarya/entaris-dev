@@ -213,6 +213,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: stok tidak cukup untuk dibalikkan
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -300,6 +301,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: pemasok tidak aktif/bukan supplier
 - 400: PO sudah dibatalkan/belum dipesan/sudah ditutup
 - 400: item atau gudang tidak ditemukan/tidak aktif
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`gr_pending`](#gr_pending), [`pi_create`](#pi_create), [`gr_cancel`](#gr_cancel), [`po_get`](#po_get)
 
@@ -502,6 +504,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -600,6 +603,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - 400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda
 - 202: menunggu persetujuan (bukan error)
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`gr_pending`](#gr_pending), [`pi_match_preview`](#pi_match_preview), [`pay_record`](kas-bank.md#pay_record), [`pi_cancel`](#pi_cancel)
 
@@ -819,6 +823,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: alasan minimal 10 karakter
 - 400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`pi_get`](#pi_get), [`pi_cancel`](#pi_cancel)
 
@@ -1464,6 +1469,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Sisa deposit tidak cukup
 - 400: Sisa outstanding invoice kurang
 - 400: Invoice sudah lunas/dibatalkan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`vdep_balance`](#vdep_balance), [`vdep_apply_cancel`](#vdep_apply_cancel), [`pi_get`](#pi_get)
 
@@ -1525,6 +1531,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di luar modul Uang Muka (menu Jurnal lama): jurnal dan saldo uang muka mitra sudah dibalik, tetapi outstanding invoice dan aplikasinya tidak; aplikasi tidak dibatalkan lagi, akuntan mengoreksi outstanding invoice
 - 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -1628,6 +1635,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu
 - 400: Bukan tipe uang muka vendor
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat vdep_refund_cancel)
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
@@ -1739,6 +1747,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Hutang vendor tidak cukup untuk offset
 - 400: Akun yang dipilih bukan kas/bank
 - 400: Uang muka sudah dibatalkan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`vdep_balance`](#vdep_balance), [`vdep_apply`](#vdep_apply), [`vdep_refund_list`](#vdep_refund_list), [`vdep_refund_cancel`](#vdep_refund_cancel)
 
@@ -1800,6 +1809,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi "Refund UM ..."), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)
 - 400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual
 - 400: uang muka tidak ditemukan atau bukan tipe uang muka supplier (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)
 - 403: tanpa capability doc.cancel

@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/akuntansi` · 34 tool (read 14, write 8, critical 12)
+Endpoint MCP target: `/mcp/akuntansi` · 36 tool (read 15, write 8, critical 13)
 
 ## Tujuan
 
@@ -17,7 +17,7 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 1. **Bagan akun (COA)**: pohon akun bernomor bertitik (`1.1.1`, `2.1.1`, ...). Digit pertama menentukan golongan: 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 Pendapatan, 5-8 Beban. Akun grup (`isGroup`) hanya pengelompok dan tidak boleh dijurnal; transaksi selalu ke akun detail aktif. Cari `accountId` lewat `coa_flat` sebelum membuat jurnal atau pengajuan.
 2. **Jurnal manual**: `je_create` memposting jurnal `JV-…` langsung berstatus Submitted (tidak ada draf). Dipakai untuk koreksi, transfer antar bank, dan penyesuaian. `je_cancel` hanya membatalkan jurnal buatan manusia: sumber MANUAL (`je_create`), IMPORT, RECURRING, atau CASH_BOOK (Draft Buku Kas), dan butuh capability `doc.cancel`. Jurnal dari modul lain (pembayaran, faktur, STT, HPP, uang muka, tutup buku, penyusutan, saldo awal) dan jurnal lama yang sumbernya tidak tercatat ditolak dengan `JOURNAL_NOT_MANUAL`; batalkan dari dokumen asalnya, atau buat jurnal balik manual dengan `je_create`.
 3. **Saldo awal**: `coa_set_balance` menyetel saldo akun detail ke nilai tertentu. Selisihnya diposting sebagai jurnal `OB-…` melawan Ekuitas Saldo Awal (3.1).
-4. **Tahun buku**: setiap posting wajib jatuh pada tahun buku yang terbuka (`getOpenFiscalYear`). `fy_create` membuat periode; `fy_close` menutup buku (jurnal `CLOSE-<nama>`); `fy_reopen` membukanya lagi. Periode yang ditutup menolak posting baru dengan kode `PERIOD_CLOSED`; tanggal yang tidak tercakup tahun buku mana pun ditolak dengan `FISCAL_YEAR_MISSING`. Selama tutup atau buka buku tahun itu masih berjalan, posting ke tahun tersebut menunggu paling lama 3 detik lalu ditolak dengan `PERIOD_BUSY`; tidak ada yang tersimpan, jadi ulangi setelah proses itu selesai.
+4. **Tahun buku**: setiap posting wajib jatuh pada tahun buku yang terbuka (`getOpenFiscalYear`). `fy_create` membuat periode; `fy_close` menutup buku (jurnal `CLOSE-<nama>`); `fy_reopen` membukanya lagi. Periode yang ditutup menolak posting baru dengan kode `PERIOD_CLOSED`; tanggal yang tidak tercakup tahun buku mana pun ditolak dengan `FISCAL_YEAR_MISSING`. Di dalam tahun buku yang terbuka berlaku **kunci periode bulanan**: `period_lock_get` menampilkan tanggal kuncinya, dan posting, edit, atau pembatalan bertanggal pada atau sebelum tanggal itu ditolak dengan `PERIOD_LOCKED` (quotation, SO, PO, proforma, inquiry, dan surat jalan sementara dikecualikan karena tanpa efek GL/stok). `period_lock_set` memajukan, memundurkan, atau membuka kunci; butuh capability `period.lock` (default hanya Admin), dan memundurkan atau membuka kunci wajib alasan. Koreksi untuk bulan yang terkunci dibuat di periode terbuka, atau minta pemegang `period.lock` memundurkan kunci. Selama tutup atau buka buku tahun itu masih berjalan, posting ke tahun tersebut menunggu paling lama 3 detik lalu ditolak dengan `PERIOD_BUSY`; tidak ada yang tersimpan, jadi ulangi setelah proses itu selesai.
 5. **Akun sistem**: `sysacct_get`/`sysacct_update` memetakan peran akun (Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, dst.) ke akun COA konkret. Semua auto-posting membaca pemetaan ini.
 6. **Pajak**: `tax_get_config` dan tiga tool tulisnya mengelola tarif (PPN penjualan/pembelian, PPh potong). `tax_report` meringkas PPN keluaran, PPN masukan, dan PPh per bulan dari faktur berstatus Submitted/Paid/PartiallyPaid/Overdue.
 7. **Aset tetap**: aset dicatat (`fa_create`, nomor `FA-NNNN`) beserta jadwal penyusutan garis lurus bulanan. Penyusutan diposting per baris (`fa_depreciate`) atau massal per bulan (`fa_depreciate_bulk`, selalu coba `dryRun=true` dulu). Pelepasan (`fa_dispose`) hanya mengubah status.
@@ -44,6 +44,7 @@ Yang TIDAK menghasilkan jurnal (sering disangka sebaliknya): `fa_create`, `fa_im
 Toolset ini tidak memakai antrian `ApprovalRequest`. Pengamanannya berlapis:
 - Izin modul: `coa`, `journal`, `fixed_assets`, `settings` (edit). Default hanya Admin untuk `coa` dan `settings`; Accountant bisa `journal` dan `fixed_assets`.
 - Capability `doc.cancel` (default hanya Admin) untuk `coa_delete`, `fy_close`, `fy_reopen`, `tax_delete_config`.
+- Capability `period.lock` (default hanya Admin) untuk `period_lock_set`.
 - `sysacct_update` memeriksa role Admin secara eksplisit.
 Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manusia (antrian approval) bila dipanggil agen.
 
@@ -109,6 +110,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | [`je_create`](#je_create) | critical | tidak | `POST /api/journals` |
 | [`je_get`](#je_get) | read | - | `GET /api/journals/:id` |
 | [`je_list`](#je_list) | read | - | `GET /api/journals` |
+| [`period_lock_get`](#period_lock_get) | read | - | `GET /api/period-lock` |
+| [`period_lock_set`](#period_lock_set) | critical | tidak | `PUT /api/period-lock` |
 | [`sysacct_get`](#sysacct_get) | read | - | `GET /api/system-accounts` |
 | [`sysacct_update`](#sysacct_update) | critical | tidak | `PUT /api/system-accounts` |
 | [`tax_create_config`](#tax_create_config) | write | tidak | `POST /api/tax/config` |
@@ -673,6 +676,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400 STALE_STATUS: depresiasi sudah diposting (juga klik ganda/retry atau posting lain yang lebih dulu; tidak diposting dua kali)
 - 400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`fa_get`](#fa_get), [`fa_depreciate_bulk`](#fa_depreciate_bulk), [`fa_depreciation_cancel`](#fa_depreciation_cancel)
 
@@ -731,6 +735,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - 400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`fa_depreciate`](#fa_depreciate), [`fa_list`](#fa_list)
 
@@ -793,6 +798,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400 DEPRECIATION_NOT_LAST: masih ada baris periode lebih akhir yang terposting; batalkan dari periode terakhir dulu
 - 400 STALE_STATUS: baris belum diposting atau postingnya sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku jurnal penyusutan tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 FIXED_ASSET_NOT_ACTIVE: aset sudah dilepas (Disposed); pelepasan tidak bisa dibatalkan, jadi posting penyusutannya dikoreksi lewat jurnal manual
 - 400 DEPRECIATION_ENTRY_NOT_FOUND: baris jadwal tidak ditemukan atau bukan milik aset ini
 - 400 DEPRECIATION_JOURNAL_MISSING: jurnal penyusutan baris ini tidak ada atau sudah dibatalkan di luar modul Aset Tetap; koreksi lewat jurnal manual
@@ -1360,6 +1366,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 404: tidak ditemukan
 - 400: sudah dibatalkan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 JOURNAL_USE_DEPOSIT_REFUND_CANCEL: jurnal refund uang muka; batalkan lewat cdep_refund_cancel/vdep_refund_cancel (tombol "Batalkan refund" di menu Uang Muka)
 - 400 JOURNAL_NOT_MANUAL: jurnal bukan buatan manusia (sumber modul/sistem, atau jurnal lama yang sumbernya tidak tercatat), atau terhubung ke dokumen modul (pembayaran, stok, aplikasi/offset uang muka, tutup buku, penyusutan, revisi harga, GA, pengajuan dana, uang jaminan); batalkan dari dokumen sumbernya atau buat jurnal balik manual
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
@@ -1438,6 +1445,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400: Jurnal tidak seimbang
 - 400: debit dan kredit sekaligus dalam satu baris
 - 400: tahun buku ditutup/tidak ada
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`coa_flat`](#coa_flat), [`je_cancel`](#je_cancel)
 
@@ -1514,6 +1522,100 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Isi hasil:** { data: jurnal[] (header + baris item per akun), total, page, limit }.
 
 **Tool terkait:** [`je_get`](#je_get), [`je_create`](#je_create)
+
+### period_lock_get
+
+**Ringkasan:** Tanggal kunci periode bulanan saat ini (lockDate, YYYY-MM-DD atau null = tanpa kunci), siapa yang terakhir mengubahnya, dan 50 perubahan terakhir beserta alasannya. Posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED.
+
+- **Risk / tier:** `read` / Auto
+- **Roles & izin:** Admin, Accountant, Viewer (modul `journal` / `view`)
+- **Handler:** `GET /api/period-lock` (src/routes/periodLock.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter:** tidak ada.
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "period_lock_get",
+  "args": {}
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<{ lockDate, updatedAt, updatedBy: { id, fullName } | null, logs: [{ id, oldDate, newDate, >"
+}
+```
+
+**Isi hasil:** { lockDate, updatedAt, updatedBy: { id, fullName } | null, logs: [{ id, oldDate, newDate, reason, createdAt, user }] }.
+
+**Tool terkait:** [`period_lock_set`](#period_lock_set), [`fy_list`](#fy_list)
+
+### period_lock_set
+
+**Ringkasan:** Mengatur, memajukan, memundurkan, atau membuka (lockDate null) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).
+
+- **Risk / tier:** `critical` / Wajib-Approve
+- **Draft-capable:** tidak (efek langsung)
+- **Roles & izin:** Admin (modul `journal` / `edit`, capability `period.lock`)
+- **Handler:** `PUT /api/period-lock` (src/routes/periodLock.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `lockDate` | body | `string` | ya | Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB), atau null untuk membuka kunci. |
+| `reason` | body | `string` | tidak | Alasan perubahan (maks. 500 karakter); wajib minimal 5 karakter saat kunci dimundurkan atau dibuka. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "period_lock_set",
+  "args": {
+    "lockDate": "<lockDate>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "action",
+  "status": "pending_approval",
+  "approvalId": "<id>",
+  "confirm": "Ubah kunci periode menjadi <lockDate>? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan."
+}
+```
+
+**Isi hasil:** { message, lockDate, previousLockDate, changed, logId } (changed=false bila tanggalnya sama; tidak ada riwayat baru).
+
+**Efek pembukuan/stok:** Tidak membuat jurnal. Mengubah tanggal kunci periode global (period_lock) dan menulis satu baris riwayat (period_lock_logs: tanggal lama, tanggal baru, alasan, user). Menunggu posting yang sedang berjalan selesai.
+
+**Teks konfirmasi:** Ubah kunci periode menjadi {lockDate}? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan.
+
+**Prasyarat**
+
+- Capability period.lock.
+- Alasan diisi bila tanggal dimundurkan atau kunci dibuka.
+
+**Error umum**
+
+- 400 PERIOD_LOCK_NOT_PAST: tanggal kunci hari ini atau sesudahnya; hanya hari yang sudah lewat yang bisa dikunci
+- 400 PERIOD_LOCK_REASON_REQUIRED: memundurkan atau membuka kunci tanpa alasan minimal 5 karakter
+- 400: format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter
+- 403: tanpa capability period.lock atau tanpa izin edit modul journal
+
+**Tool terkait:** [`period_lock_get`](#period_lock_get), [`fy_close`](#fy_close)
 
 ### sysacct_get
 

@@ -2120,6 +2120,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 **Error umum**
 
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`ga_veh_post_service_journal`](#ga_veh_post_service_journal)
 
@@ -3258,6 +3259,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 - 400: Service log sudah memiliki jurnal
 - 400: Service log bersumber IMPORT/WORK_ORDER tidak dapat diposting
 - 400: Biaya harus > 0
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`ga_veh_cancel_service_journal`](#ga_veh_cancel_service_journal)
 
