@@ -5,7 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { validateBody } from '../utils/validate';
 import { handleRouteError } from '../utils/errors';
-import { assertPeriodOpen } from '../utils/periodGuard';
+import { assertPeriodOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
 import Decimal from 'decimal.js';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import { businessDayRange, businessMonthRange, businessToday } from '../utils/businessDate';
@@ -429,6 +429,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
     if (!fiscalYear) {
       return res.status(400).json({
         error: `Tahun buku untuk ${yy}-${String(mm).padStart(2, '0')} tidak ditemukan.`,
+        code: FISCAL_YEAR_MISSING,
       });
     }
 
