@@ -1559,7 +1559,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### period_lock_set
 
-**Ringkasan:** Mengatur, memajukan, memundurkan, atau membuka (lockDate null) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).
+**Ringkasan:** Mengatur, memajukan, memundurkan, atau membuka (clear=true, tanpa lockDate) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1571,7 +1571,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| `lockDate` | body | `string` | ya | Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB), atau null untuk membuka kunci. |
+| `lockDate` | body | `string` | tidak | Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB). Wajib kecuali clear=true. |
+| `clear` | body | `boolean` | tidak | true untuk membuka kunci (tanpa lockDate); butuh alasan. |
 | `reason` | body | `string` | tidak | Alasan perubahan (maks. 500 karakter); wajib minimal 5 karakter saat kunci dimundurkan atau dibuka. |
 
 **Contoh pemanggilan**
@@ -1580,7 +1581,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 {
   "tool": "period_lock_set",
   "args": {
-    "lockDate": "<lockDate>"
+    "lockDate": "<lockDate>",
+    "clear": true
   }
 }
 ```
@@ -1593,7 +1595,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Ubah kunci periode menjadi <lockDate>? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan."
+  "confirm": "Ubah kunci periode bulanan sesuai rincian (lockDate baru, atau clear=true untuk membuka kunci)? Dokumen bertanggal sampai tanggal kunci tidak bisa diposting, diubah, atau dibatalkan."
 }
 ```
 
@@ -1601,7 +1603,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Efek pembukuan/stok:** Tidak membuat jurnal. Mengubah tanggal kunci periode global (period_lock) dan menulis satu baris riwayat (period_lock_logs: tanggal lama, tanggal baru, alasan, user). Menunggu posting yang sedang berjalan selesai.
 
-**Teks konfirmasi:** Ubah kunci periode menjadi {lockDate}? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan.
+**Teks konfirmasi:** Ubah kunci periode bulanan sesuai rincian (lockDate baru, atau clear=true untuk membuka kunci)? Dokumen bertanggal sampai tanggal kunci tidak bisa diposting, diubah, atau dibatalkan.
 
 **Prasyarat**
 
@@ -1612,7 +1614,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - 400 PERIOD_LOCK_NOT_PAST: tanggal kunci hari ini atau sesudahnya; hanya hari yang sudah lewat yang bisa dikunci
 - 400 PERIOD_LOCK_REASON_REQUIRED: memundurkan atau membuka kunci tanpa alasan minimal 5 karakter
-- 400: format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter
+- 400: lockDate dan clear sama-sama kosong atau diisi bersamaan, format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter
 - 403: tanpa capability period.lock atau tanpa izin edit modul journal
 
 **Tool terkait:** [`period_lock_get`](#period_lock_get), [`fy_close`](#fy_close)

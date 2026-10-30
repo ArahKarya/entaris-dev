@@ -21,7 +21,7 @@ router.get('/', async (_req, res) => {
   }
 });
 
-// PUT /api/period-lock — set, move or clear (lockDate null) the lock date. Requires period.lock;
+// PUT /api/period-lock — set, move or clear (lockDate null or clear: true) the lock date. Requires period.lock;
 // a reason is required when the date moves back or is cleared.
 router.put('/', requireCap('period.lock'), async (req: AuthRequest, res) => {
   const body = validateBody(SetPeriodLockSchema, req.body ?? {}, res);

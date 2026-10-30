@@ -334,6 +334,27 @@ d('period lock: PUT /period-lock', () => {
     });
   });
 
+  it('clear: true (the AIRA form, which cannot send null) clears the lock with a reason; with a date it is 400', async () => {
+    await inRollback(async (tx) => {
+      clockAt(`${Y}-04-25T03:00:00Z`);
+      expect((await lockAt(tx, `${Y}-03-31`)).status).toBe(200);
+      const user = await createCapUser(tx, ['period.lock']);
+      const put = (body: unknown) => callRoute(periodLockRouter, 'put', '/', { ...user, body });
+
+      const both = await put({ lockDate: `${Y}-02-28`, clear: true, reason: 'Buka semua periode' });
+      expect(both.status).toBe(400);
+      const noReason = await put({ clear: true });
+      expect(noReason.status).toBe(400);
+      expect(noReason.body.code).toBe(PERIOD_LOCK_REASON_REQUIRED);
+      expect(await lockRow(tx)).toBe(`${Y}-03-31`);
+
+      const cleared = await put({ clear: true, reason: 'Buka semua periode' });
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      expect(cleared.body).toMatchObject({ lockDate: null, previousLockDate: `${Y}-03-31`, changed: true });
+      expect(await lockRow(tx)).toBeNull();
+    });
+  });
+
   it('GET returns the lock date, who set it, and the history newest first', async () => {
     await inRollback(async (tx) => {
       clockAt(`${Y}-04-25T03:00:00Z`);

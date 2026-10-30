@@ -26268,13 +26268,14 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "journal",
-      "desc": "Mengatur, memajukan, memundurkan, atau membuka (lockDate null) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).",
+      "desc": "Mengatur, memajukan, memundurkan, atau membuka (clear=true, tanpa lockDate) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).",
       "risk": "critical",
       "roles": [
         "Admin"
       ],
       "input": {
         "lockDate": "string",
+        "clear": "boolean",
         "reason": "string"
       },
       "params": [
@@ -26282,8 +26283,15 @@
           "name": "lockDate",
           "in": "body",
           "type": "string",
-          "required": true,
-          "description": "Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB), atau null untuk membuka kunci."
+          "required": false,
+          "description": "Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB). Wajib kecuali clear=true."
+        },
+        {
+          "name": "clear",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true untuk membuka kunci (tanpa lockDate); butuh alasan."
         },
         {
           "name": "reason",
@@ -26305,7 +26313,7 @@
       "phase": 1,
       "draftCapable": false,
       "postingEffect": "Tidak membuat jurnal. Mengubah tanggal kunci periode global (period_lock) dan menulis satu baris riwayat (period_lock_logs: tanggal lama, tanggal baru, alasan, user). Menunggu posting yang sedang berjalan selesai.",
-      "confirm_template": "Ubah kunci periode menjadi {lockDate}? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan.",
+      "confirm_template": "Ubah kunci periode bulanan sesuai rincian (lockDate baru, atau clear=true untuk membuka kunci)? Dokumen bertanggal sampai tanggal kunci tidak bisa diposting, diubah, atau dibatalkan.",
       "prerequisites": [
         "Capability period.lock.",
         "Alasan diisi bila tanggal dimundurkan atau kunci dibuka."
@@ -26313,18 +26321,19 @@
       "errors": [
         "400 PERIOD_LOCK_NOT_PAST: tanggal kunci hari ini atau sesudahnya; hanya hari yang sudah lewat yang bisa dikunci",
         "400 PERIOD_LOCK_REASON_REQUIRED: memundurkan atau membuka kunci tanpa alasan minimal 5 karakter",
-        "400: format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter",
+        "400: lockDate dan clear sama-sama kosong atau diisi bersamaan, format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter",
         "403: tanpa capability period.lock atau tanpa izin edit modul journal"
       ],
       "related": [
         "period_lock_get",
         "fy_close"
       ],
-      "doc": "### period_lock_set\n\n**Ringkasan:** Mengatur, memajukan, memundurkan, atau membuka (lockDate null) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `journal` / `edit`, capability `period.lock`)\n- **Handler:** `PUT /api/period-lock` (src/routes/periodLock.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `lockDate` | body | `string` | ya | Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB), atau null untuk membuka kunci. |\n| `reason` | body | `string` | tidak | Alasan perubahan (maks. 500 karakter); wajib minimal 5 karakter saat kunci dimundurkan atau dibuka. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"period_lock_set\",\n  \"args\": {\n    \"lockDate\": \"<lockDate>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah kunci periode menjadi <lockDate>? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan.\"\n}\n```\n\n**Isi hasil:** { message, lockDate, previousLockDate, changed, logId } (changed=false bila tanggalnya sama; tidak ada riwayat baru).\n\n**Efek pembukuan/stok:** Tidak membuat jurnal. Mengubah tanggal kunci periode global (period_lock) dan menulis satu baris riwayat (period_lock_logs: tanggal lama, tanggal baru, alasan, user). Menunggu posting yang sedang berjalan selesai.\n\n**Teks konfirmasi:** Ubah kunci periode menjadi {lockDate}? Dokumen bertanggal sampai tanggal itu tidak bisa diposting, diubah, atau dibatalkan.\n\n**Prasyarat**\n\n- Capability period.lock.\n- Alasan diisi bila tanggal dimundurkan atau kunci dibuka.\n\n**Error umum**\n\n- 400 PERIOD_LOCK_NOT_PAST: tanggal kunci hari ini atau sesudahnya; hanya hari yang sudah lewat yang bisa dikunci\n- 400 PERIOD_LOCK_REASON_REQUIRED: memundurkan atau membuka kunci tanpa alasan minimal 5 karakter\n- 400: format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter\n- 403: tanpa capability period.lock atau tanpa izin edit modul journal\n\n**Tool terkait:** [`period_lock_get`](#period_lock_get), [`fy_close`](#fy_close)\n",
+      "doc": "### period_lock_set\n\n**Ringkasan:** Mengatur, memajukan, memundurkan, atau membuka (clear=true, tanpa lockDate) kunci periode bulanan. Setelah dikunci, semua posting, edit, dan pembatalan bertanggal pada atau sebelum lockDate ditolak PERIOD_LOCKED (kecuali quotation, SO, PO, proforma, inquiry, surat jalan sementara). Memundurkan atau membuka kunci wajib alasan dan tercatat di riwayat. Butuh capability period.lock (default hanya Admin).\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `journal` / `edit`, capability `period.lock`)\n- **Handler:** `PUT /api/period-lock` (src/routes/periodLock.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `lockDate` | body | `string` | tidak | Tanggal kunci baru YYYY-MM-DD (harus sebelum hari ini, hari bisnis WIB). Wajib kecuali clear=true. |\n| `clear` | body | `boolean` | tidak | true untuk membuka kunci (tanpa lockDate); butuh alasan. |\n| `reason` | body | `string` | tidak | Alasan perubahan (maks. 500 karakter); wajib minimal 5 karakter saat kunci dimundurkan atau dibuka. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"period_lock_set\",\n  \"args\": {\n    \"lockDate\": \"<lockDate>\",\n    \"clear\": true\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah kunci periode bulanan sesuai rincian (lockDate baru, atau clear=true untuk membuka kunci)? Dokumen bertanggal sampai tanggal kunci tidak bisa diposting, diubah, atau dibatalkan.\"\n}\n```\n\n**Isi hasil:** { message, lockDate, previousLockDate, changed, logId } (changed=false bila tanggalnya sama; tidak ada riwayat baru).\n\n**Efek pembukuan/stok:** Tidak membuat jurnal. Mengubah tanggal kunci periode global (period_lock) dan menulis satu baris riwayat (period_lock_logs: tanggal lama, tanggal baru, alasan, user). Menunggu posting yang sedang berjalan selesai.\n\n**Teks konfirmasi:** Ubah kunci periode bulanan sesuai rincian (lockDate baru, atau clear=true untuk membuka kunci)? Dokumen bertanggal sampai tanggal kunci tidak bisa diposting, diubah, atau dibatalkan.\n\n**Prasyarat**\n\n- Capability period.lock.\n- Alasan diisi bila tanggal dimundurkan atau kunci dibuka.\n\n**Error umum**\n\n- 400 PERIOD_LOCK_NOT_PAST: tanggal kunci hari ini atau sesudahnya; hanya hari yang sudah lewat yang bisa dikunci\n- 400 PERIOD_LOCK_REASON_REQUIRED: memundurkan atau membuka kunci tanpa alasan minimal 5 karakter\n- 400: lockDate dan clear sama-sama kosong atau diisi bersamaan, format tanggal bukan YYYY-MM-DD atau tanggal tidak ada, alasan lebih dari 500 karakter\n- 403: tanpa capability period.lock atau tanpa izin edit modul journal\n\n**Tool terkait:** [`period_lock_get`](#period_lock_get), [`fy_close`](#fy_close)\n",
       "example": {
         "tool": "period_lock_set",
         "args": {
-          "lockDate": "<lockDate>"
+          "lockDate": "<lockDate>",
+          "clear": true
         }
       }
     },

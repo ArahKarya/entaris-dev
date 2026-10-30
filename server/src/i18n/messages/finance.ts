@@ -367,6 +367,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Tanggal kunci wajib diisi (YYYY-MM-DD), atau null untuk membuka kunci.": "Lock date is required (YYYY-MM-DD), or null to remove the lock.",
   "Tanggal kunci harus berformat YYYY-MM-DD.": "Lock date must be in YYYY-MM-DD format.",
   "Tanggal kunci tidak valid.": "Lock date is not a valid date.",
+  "clear harus true atau false.": "clear must be true or false.",
+  "Isi tanggal kunci atau clear: true, tidak keduanya.": "Give a lock date or clear: true, not both.",
   "Alasan maksimal 500 karakter.": "Reason can be at most 500 characters.",
   "jurnal": "journal",
   "pembayaran": "payment",
