@@ -13285,7 +13285,7 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "customer_deposit",
-      "desc": "Membatalkan uang muka pelanggan: jurnal penerimaan dibalik, saldo uang muka pelanggan berkurang, status Cancelled. Ditolak bila sudah dipakai pada faktur. CATATAN: berbeda dengan pembatalan aplikasi, endpoint ini tidak mensyaratkan capability doc.cancel.",
+      "desc": "Membatalkan uang muka pelanggan: jurnal penerimaan dibalik, saldo uang muka pelanggan berkurang, status Cancelled. Ditolak bila sudah dipakai pada Invoice atau sudah pernah di-refund. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -13309,6 +13309,7 @@
       "outputSummary": "{ message: 'Uang muka pelanggan berhasil dibatalkan.' }.",
       "handler": "PATCH /api/customer-deposits/:id/cancel",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
@@ -13319,10 +13320,16 @@
         "400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.",
         "400: bukan tipe uang muka pelanggan.",
         "400: sudah dibatalkan.",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
+        "400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan",
+        "403: tanpa capability doc.cancel"
       ],
       "prerequisites": [
-        "Tahun buku dokumen dan jurnalnya masih terbuka."
+        "Tahun buku dokumen dan jurnalnya masih terbuka.",
+        "Belum ada refund (refundedAmount = 0).",
+        "Bukan uang muka hasil Retur Penjualan (yang itu dibatalkan lewat retur).",
+        "User memiliki capability doc.cancel."
       ]
     },
     {
@@ -15914,15 +15921,16 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "stock_transfer",
-      "desc": "Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Catatan: tidak ada pengecekan stok tujuan cukup, sehingga bisa membuat saldo gudang tujuan negatif.",
+      "desc": "Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Ditolak bila batch TransferIn sudah dipakai pergerakan lain (sourceMovementId) atau stok gudang tujuan kurang dari qty transfer. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
-        "Accountant",
-        "StaffProduksi"
+        "Accountant"
       ],
       "input": {
-        "id": "string"
+        "id": "string",
+        "allowNegativeStock": "boolean",
+        "negativeStockReason": "string"
       },
       "params": [
         {
@@ -15931,6 +15939,20 @@
           "type": "string",
           "required": true,
           "description": "UUID transfer."
+        },
+        {
+          "name": "allowNegativeStock",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Paksa batal walau stok gudang tujuan jadi minus. Butuh capability inventory.negative_stock dan negativeStockReason minimal 10 karakter. Tidak melewati penolakan batch terpakai."
+        },
+        {
+          "name": "negativeStockReason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan bypass stok minus (wajib bila allowNegativeStock)."
         }
       ],
       "output": {
@@ -15939,23 +15961,28 @@
       "outputSummary": "Transfer dengan status Cancelled.",
       "handler": "PATCH /api/stock-transfers/:id/cancel",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL.",
+      "postingEffect": "Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).",
       "confirm_template": "Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.",
-      "accessNote": "Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.",
       "errors": [
         "400: transfer sudah dibatalkan",
         "404: transfer tidak ditemukan",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
+        "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock"
       ],
       "related": [
         "stf_get"
       ],
       "prerequisites": [
-        "Tahun buku tanggal transfer masih terbuka."
+        "Tahun buku tanggal transfer masih terbuka.",
+        "User memiliki capability doc.cancel.",
+        "Barang yang diterima gudang tujuan belum dipakai."
       ]
     },
     {
@@ -15963,7 +15990,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "vendor_deposit",
-      "desc": "Membatalkan uang muka vendor: jurnal pembukuan dibalik. Ditolak bila uang muka sudah diaplikasikan ke faktur (batalkan aplikasinya dulu).",
+      "desc": "Membatalkan uang muka vendor: jurnal pembukuan dibalik. Ditolak bila uang muka sudah diaplikasikan ke Invoice (batalkan aplikasinya dulu) atau sudah pernah di-refund. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -15987,25 +16014,29 @@
       "outputSummary": "Uang muka dengan status Cancelled.",
       "handler": "PATCH /api/vendor-deposits/:id/cancel",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
       "draftCapable": false,
       "postingEffect": "Reverse jurnal uang muka (asal: DR Uang Muka Vendor 1.3 / CR Kas-Bank): jurnal Cancelled, ledger isCancelled, saldo akun dan depositBalance pemasok dibalik.",
       "confirm_template": "Batalkan uang muka vendor {id}? Jurnal kas/bank terkait akan dibalik.",
-      "accessNote": "Hanya butuh izin edit modul vendor_deposit (tidak ada requireCap doc.cancel di endpoint ini, berbeda dengan pembatalan aplikasi uang muka).",
       "errors": [
         "400: Deposit sudah dibatalkan",
         "400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu",
         "400: Bukan tipe uang muka vendor",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
+        "403: tanpa capability doc.cancel"
       ],
       "related": [
         "vdep_apply_cancel",
         "pay_record"
       ],
       "prerequisites": [
-        "Tahun buku dokumen dan jurnalnya masih terbuka."
+        "Tahun buku dokumen dan jurnalnya masih terbuka.",
+        "Belum ada refund (refundedAmount = 0).",
+        "User memiliki capability doc.cancel."
       ]
     },
     {
@@ -27389,12 +27420,11 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "delivery_order",
-      "desc": "Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice.",
+      "desc": "Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
-        "Accountant",
-        "StaffProduksi"
+        "Accountant"
       ],
       "input": {
         "id": "string",
@@ -27528,6 +27558,7 @@
       "outputSummary": "DeliveryOrder setelah diedit.",
       "handler": "PUT /api/delivery-orders/:id",
       "permAction": "edit",
+      "requiresCapability": "doc.cancel",
       "enabled": true,
       "level": 1,
       "phase": 1,
@@ -27541,7 +27572,8 @@
         "403: bypass stok minus butuh capability.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
-        "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan"
+        "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan",
+        "403: tanpa capability doc.cancel"
       ],
       "related": [
         "do_patch",
@@ -27549,7 +27581,8 @@
       ],
       "prerequisites": [
         "Tahun buku tanggal lama dan tanggal baru masih terbuka.",
-        "Tanggal baru di bulan yang sama dengan tanggal lama."
+        "Tanggal baru di bulan yang sama dengan tanggal lama.",
+        "User memiliki capability doc.cancel."
       ]
     },
     {

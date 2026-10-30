@@ -220,8 +220,8 @@ router.patch('/:id', async (req: AuthRequest, res) => {
 
 // PUT /:id full edit: reverse old movements, re-apply new items
 // Allowed only when DO is Submitted and not yet linked to an invoice.
-// doNumber is preserved.
-router.put('/:id', async (req: AuthRequest, res) => {
+// doNumber is preserved. Reversing posted movements needs the doc.cancel capability.
+router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const body = validateBody(CreateDeliveryOrderSchema, req.body, res);
   if (!body) return;
   if (body.allowNegativeStock && !(await hasCap(req.user!.role, 'inventory.negative_stock'))) {

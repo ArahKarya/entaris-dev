@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 
-vi.mock('../../lib/prisma', () => ({ prisma: new Proxy({}, { get: () => ({ findUnique: vi.fn() }) }) }));
+const models = vi.hoisted(() => ({} as Record<string, { findUnique: Mock }>));
+vi.mock('../../lib/prisma', () => ({
+  prisma: new Proxy({}, { get: (_t, key: string) => (models[key] ??= { findUnique: vi.fn() }) }),
+}));
 vi.mock('../../lib/logger', () => ({ logger: { warn: vi.fn(), error: vi.fn() } }));
 
 import {
@@ -62,6 +65,16 @@ describe('matchSnapshotTarget (default registry)', () => {
     ]) {
       expect(prefixes).toContain(p);
     }
+  });
+});
+
+describe('delivery note snapshot', () => {
+  it('keeps the old lines, since a full edit (PUT) replaces them', async () => {
+    const before = { id: ID, doNumber: 'SJ-1', items: [{ itemName: 'Beras', quantity: '10000' }] };
+    models.deliveryOrder.findUnique.mockResolvedValue(before);
+    const res = await captureBeforeSnapshot('PUT', `/api/delivery-orders/${ID}`);
+    expect(models.deliveryOrder.findUnique).toHaveBeenCalledWith({ where: { id: ID }, include: { items: true } });
+    expect(res?.snapshot).toEqual(before);
   });
 });
 

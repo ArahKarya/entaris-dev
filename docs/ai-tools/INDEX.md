@@ -91,7 +91,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`do_list`](penjualan.md#do_list) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/delivery-orders` |
 | [`do_patch`](penjualan.md#do_patch) | penjualan | write | tidak | Admin, Accountant, StaffProduksi | `PATCH /api/delivery-orders/:id` |
 | [`do_pending`](penjualan.md#do_pending) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/delivery-orders/pending` |
-| [`do_update`](penjualan.md#do_update) | penjualan | critical | tidak | Admin, Accountant, StaffProduksi | `PUT /api/delivery-orders/:id` |
+| [`do_update`](penjualan.md#do_update) | penjualan | critical | tidak | Admin, Accountant | `PUT /api/delivery-orders/:id` |
 | [`doc_pdf_get`](penjualan.md#doc_pdf_get) | penjualan | read | - | Admin, Accountant, StaffProduksi, Viewer | `POST /api/attachments/pdf-link` |
 | [`eambill_cancel`](pengajuan-pembayaran.md#eambill_cancel) | pengajuan-pembayaran | critical | tidak | Admin, Accountant | `POST /api/payment-requests/eam/:kind/:id/cancel` |
 | [`eambill_list`](pengajuan-pembayaran.md#eambill_list) | pengajuan-pembayaran | read | - | Admin, Accountant | `GET /api/payment-requests/eam` |
@@ -493,7 +493,7 @@ Total **504** tool (read 232 · write 165 · critical 107); semuanya aktif secar
 | [`sret_eligible`](penjualan.md#sret_eligible) | penjualan | read | - | Admin, Accountant, StaffProduksi | `GET /api/sales-returns/eligible/:invoiceId` |
 | [`sret_get`](penjualan.md#sret_get) | penjualan | read | - | Admin, Accountant, StaffProduksi | `GET /api/sales-returns/:id` |
 | [`sret_list`](penjualan.md#sret_list) | penjualan | read | - | Admin, Accountant, StaffProduksi | `GET /api/sales-returns` |
-| [`stf_cancel`](persediaan.md#stf_cancel) | persediaan | critical | tidak | Admin, Accountant, StaffProduksi | `PATCH /api/stock-transfers/:id/cancel` |
+| [`stf_cancel`](persediaan.md#stf_cancel) | persediaan | critical | tidak | Admin, Accountant | `PATCH /api/stock-transfers/:id/cancel` |
 | [`stf_create`](persediaan.md#stf_create) | persediaan | critical | tidak | Admin, Accountant, StaffProduksi | `POST /api/stock-transfers` |
 | [`stf_get`](persediaan.md#stf_get) | persediaan | read | - | Admin, Accountant, StaffProduksi | `GET /api/stock-transfers/:id` |
 | [`stf_list`](persediaan.md#stf_list) | persediaan | read | - | Admin, Accountant, StaffProduksi | `GET /api/stock-transfers` |

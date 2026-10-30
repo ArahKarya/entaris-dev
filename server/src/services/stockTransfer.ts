@@ -8,6 +8,17 @@ import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
 
+/** Error code: the destination warehouse no longer holds the transferred stock. */
+export const STOCK_TRANSFER_CANCEL_INSUFFICIENT_STOCK = 'TRANSFER_CANCEL_INSUFFICIENT_STOCK';
+/** Error code: an active movement picked a TransferIn batch of this transfer (sourceMovementId). */
+export const STOCK_TRANSFER_CANCEL_BATCH_USED = 'TRANSFER_CANCEL_BATCH_USED';
+
+export interface CancelStockTransferOptions {
+  /** Let the destination go negative; the route requires inventory.negative_stock and a reason. */
+  allowNegativeStock?: boolean;
+  negativeStockReason?: string | null;
+}
+
 export interface SubmitStockTransferInput {
   date: string;
   fromWarehouseId: string;
@@ -169,11 +180,19 @@ export async function submitStockTransferInTx(
   return transfer;
 }
 
-/** Reverse a submitted stock transfer: restore both warehouses and cancel the paired movements. */
+/**
+ * Reverse a submitted stock transfer: restore both warehouses and cancel the paired movements.
+ * Rejected when a TransferIn batch is already consumed, or when the destination no longer holds
+ * the stock (unless opts.allowNegativeStock).
+ */
 export async function cancelStockTransferInTx(
   tx: Tx,
   transferId: string,
+  opts: CancelStockTransferOptions = {},
 ) {
+  // Row lock: a second concurrent cancel waits here, then sees status Cancelled, so the stock
+  // checks below never run against a reversal that is about to commit.
+  await tx.$queryRaw`SELECT id FROM stock_transfers WHERE id = ${transferId} FOR UPDATE`;
   const transfer = await tx.stockTransfer.findUnique({
     where: { id: transferId },
     include: { items: true },
@@ -182,15 +201,67 @@ export async function cancelStockTransferInTx(
   if (transfer.status === 'Cancelled') throw new BusinessError('Transfer sudah dibatalkan.');
   await assertPeriodsOpen(tx, [{ date: transfer.date }, { fiscalYearId: transfer.fiscalYearId }], 'transfer stok');
 
+  // Block when an outbound movement picked one of the TransferIn batches; cancelling would
+  // orphan its cost basis. Same rule as STT cancel; not covered by the negative-stock bypass.
+  const transferIns = await tx.stockMovement.findMany({
+    where: { referenceType: 'StockTransfer', referenceId: transferId, movementType: 'TransferIn', isCancelled: false },
+    select: { id: true },
+  });
+  if (transferIns.length > 0) {
+    const consumers = await tx.stockMovement.findMany({
+      where: { sourceMovementId: { in: transferIns.map((m) => m.id) }, isCancelled: false },
+      select: { movementNumber: true, referenceNumber: true },
+      take: 5,
+    });
+    if (consumers.length > 0) {
+      const ref = consumers.map((c) => c.referenceNumber || c.movementNumber).join(', ');
+      throw new BusinessError(
+        `Tidak dapat membatalkan transfer ${transfer.transferNumber}: barang yang diterima di gudang tujuan sudah dipakai di transaksi lain (${ref}). ` +
+          'Batalkan transaksi tersebut terlebih dahulu.',
+        STOCK_TRANSFER_CANCEL_BATCH_USED,
+      );
+    }
+  }
+
+  // The destination must still hold what it received (per item, lines summed).
+  const qtyByItem = new Map<string, Decimal>();
+  for (const ti of transfer.items) {
+    qtyByItem.set(ti.itemId, (qtyByItem.get(ti.itemId) ?? new Decimal(0)).plus(ti.quantity.toString()));
+  }
+  for (const [itemId, qty] of qtyByItem) {
+    // Lock the destination row first; the read below then sees any outbound movement that committed meanwhile.
+    await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE item_id = ${itemId} AND warehouse_id = ${transfer.toWarehouseId} FOR UPDATE`;
+    const stockRow = await tx.inventoryStock.findUnique({
+      where: { itemId_warehouseId: { itemId, warehouseId: transfer.toWarehouseId } },
+    });
+    const available = stockRow ? new Decimal(stockRow.currentStock.toString()) : new Decimal(0);
+    if (available.gte(qty)) continue;
+    if (!opts.allowNegativeStock) {
+      const item = await tx.inventoryItem.findUnique({ where: { id: itemId }, select: { name: true, unit: true } });
+      const toWh = await tx.warehouse.findUnique({ where: { id: transfer.toWarehouseId }, select: { name: true } });
+      throw new BusinessError(
+        `Tidak dapat membatalkan transfer ${transfer.transferNumber}: stok '${item?.name ?? itemId}' di ${toWh?.name ?? transfer.toWarehouseId} hanya ${available.toFixed(3)} ${item?.unit ?? ''}, perlu ${qty.toFixed(3)}. ` +
+          'Barang sudah keluar dari gudang tujuan. Batalkan transaksi tersebut dulu.',
+        STOCK_TRANSFER_CANCEL_INSUFFICIENT_STOCK,
+      );
+    }
+    logger.warn(
+      { transferId, itemId, available: available.toNumber(), reverseQty: qty.toNumber(), reason: opts.negativeStockReason },
+      'Stock transfer cancel with negative stock bypass',
+    );
+  }
+
   for (const ti of transfer.items) {
     const qty = Number(ti.quantity);
     await tx.inventoryStock.update({
       where: { itemId_warehouseId: { itemId: ti.itemId, warehouseId: transfer.fromWarehouseId } },
       data: { currentStock: { increment: qty } },
     });
-    await tx.inventoryStock.update({
+    // Upsert: with the bypass the destination row may be missing.
+    await tx.inventoryStock.upsert({
       where: { itemId_warehouseId: { itemId: ti.itemId, warehouseId: transfer.toWarehouseId } },
-      data: { currentStock: { decrement: qty } },
+      create: { itemId: ti.itemId, warehouseId: transfer.toWarehouseId, currentStock: -qty },
+      update: { currentStock: { decrement: qty } },
     });
   }
 

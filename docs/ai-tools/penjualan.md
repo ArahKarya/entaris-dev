@@ -374,11 +374,11 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### cdep_cancel
 
-**Ringkasan:** Membatalkan uang muka pelanggan: jurnal penerimaan dibalik, saldo uang muka pelanggan berkurang, status Cancelled. Ditolak bila sudah dipakai pada faktur. CATATAN: berbeda dengan pembatalan aplikasi, endpoint ini tidak mensyaratkan capability doc.cancel.
+**Ringkasan:** Membatalkan uang muka pelanggan: jurnal penerimaan dibalik, saldo uang muka pelanggan berkurang, status Cancelled. Ditolak bila sudah dipakai pada Invoice atau sudah pernah di-refund. Butuh capability doc.cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`)
+- **Roles & izin:** Admin, Accountant (modul `customer_deposit` / `edit`, capability `doc.cancel`)
 - **Handler:** `PATCH /api/customer-deposits/:id/cancel` (src/routes/customerDeposits.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -420,6 +420,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 **Prasyarat**
 
 - Tahun buku dokumen dan jurnalnya masih terbuka.
+- Belum ada refund (refundedAmount = 0).
+- Bukan uang muka hasil Retur Penjualan (yang itu dibatalkan lewat retur).
+- User memiliki capability doc.cancel.
 
 **Error umum**
 
@@ -427,6 +430,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: bukan tipe uang muka pelanggan.
 - 400: sudah dibatalkan.
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
+- 400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan
+- 403: tanpa capability doc.cancel
 
 ### cdep_list
 
@@ -1750,11 +1756,11 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### do_update
 
-**Ringkasan:** Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice.
+**Ringkasan:** Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice. Butuh capability doc.cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `delivery_order` / `edit`)
+- **Roles & izin:** Admin, Accountant (modul `delivery_order` / `edit`, capability `doc.cancel`)
 - **Catatan akses:** Risiko direklasifikasi dari write (membalik dan menerapkan ulang pergerakan stok).
 - **Handler:** `PUT /api/delivery-orders/:id` (src/routes/deliveryOrders.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
@@ -1823,6 +1829,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - Tahun buku tanggal lama dan tanggal baru masih terbuka.
 - Tanggal baru di bulan yang sama dengan tanggal lama.
+- User memiliki capability doc.cancel.
 
 **Error umum**
 
@@ -1832,6 +1839,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 - 400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan
+- 403: tanpa capability doc.cancel
 
 **Tool terkait:** [`do_patch`](#do_patch), [`do_cancel`](#do_cancel)
 

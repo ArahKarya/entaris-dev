@@ -170,5 +170,7 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Batch sumber \"{0}\" sudah dibatalkan.": "Source batch \"{0}\" is cancelled.",
   "Batch sumber untuk \"{0}\" bukan stok masuk.": "Source batch for \"{0}\" is not a stock receipt.",
   "Transfer sudah dibatalkan.": "Transfer is already cancelled.",
+  "Tidak dapat membatalkan transfer {0}: barang yang diterima di gudang tujuan sudah dipakai di transaksi lain ({1}). Batalkan transaksi tersebut terlebih dahulu.": "Cannot cancel transfer {0}: goods received at the destination warehouse are already used in other transactions ({1}). Cancel those transactions first.",
+  "Tidak dapat membatalkan transfer {0}: stok '{1}' di {2} hanya {3} {4}, perlu {5}. Barang sudah keluar dari gudang tujuan. Batalkan transaksi tersebut dulu.": "Cannot cancel transfer {0}: stock of '{1}' in {2} is only {3} {4}, {5} is needed. The goods have already left the destination warehouse. Cancel those transactions first.",
   "Status transfer tidak dikenal.": "Unknown transfer status.",
 };

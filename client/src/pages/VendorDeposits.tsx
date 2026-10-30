@@ -9,7 +9,7 @@ import { CheckCircle2, Clock, Plus, Undo2, Wallet, XCircle } from 'lucide-react'
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import api from '@/lib/api';
-import { can } from '@/lib/permissions';
+import { can, cap } from '@/lib/permissions';
 import { formatDate, formatNumber, formatRupiah, toNumber } from '@/lib/format';
 import { statusOptions } from '@/lib/status';
 import { useListState } from '@/hooks/useListState';
@@ -98,6 +98,8 @@ export const VendorDeposits = () => {
   const [cancelTarget, setCancelTarget] = useState<{ id: string; paymentNumber: string } | null>(null);
   const [refundTarget, setRefundTarget] = useState<VendorDepositRow | null>(null);
   const canEdit = can('vendor_deposit', 'edit');
+  // Cancelling a deposit also needs the doc.cancel capability (server: requireCap).
+  const canCancel = canEdit && cap('doc.cancel');
 
   const depositsQuery = useQuery({
     queryKey: ['vendor-deposits', 'list', list.params],
@@ -246,7 +248,8 @@ export const VendorDeposits = () => {
                   label: t('depositList.actions.cancel'),
                   icon: XCircle,
                   tone: 'danger',
-                  hidden: !canEdit || isCancelled,
+                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED).
+                  hidden: !canCancel || isCancelled || d.totalRefunded > 0,
                   onSelect: () => setCancelTarget({ id: d.id, paymentNumber: d.paymentNumber }),
                 },
               ]}
@@ -255,7 +258,7 @@ export const VendorDeposits = () => {
         },
       },
     ],
-    [canEdit, t],
+    [canEdit, canCancel, t],
   );
 
   const kpiMoney = (v: number | undefined) => (v === undefined ? '—' : formatRupiah(v, { compact: true }));

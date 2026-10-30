@@ -12,6 +12,10 @@ import { BusinessError, handleRouteError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
+import {
+  assertDepositNotRefunded,
+  findUnlinkedDepositJournal,
+} from '../services/depositCancelGuard';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -179,8 +183,8 @@ router.get('/balance/:partyId', async (req, res) => {
   }
 });
 
-// PATCH /api/vendor-deposits/:id/cancel — cancel a vendor deposit payment
-router.patch('/:id/cancel', async (req: AuthRequest, res) => {
+// PATCH /api/vendor-deposits/:id/cancel — cancel a vendor deposit payment (requires doc.cancel)
+router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
 
   try {
@@ -202,6 +206,7 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
       if (deposit.depositApplications.length > 0) {
         throw new BusinessError('Deposit sudah digunakan untuk invoice. Batalkan penggunaan terlebih dahulu.');
       }
+      assertDepositNotRefunded(deposit);
 
       // The journal's year when there is one; legacy deposits without a journal use their own.
       await assertPeriodOpen(tx, { fiscalYearId: deposit.journalEntry?.fiscalYearId ?? deposit.fiscalYearId }, 'uang muka');
@@ -209,25 +214,18 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
       const depositAmount = Number(deposit.amount);
 
       // Void the journal in place (JE Cancelled, ALE isCancelled, balances reversed per item).
-      if (deposit.journalEntry) {
-        await voidJournalInTx(tx, deposit.journalEntry, 'uang muka');
+      // Deposits posted before the payment→journal link still have their journal, found unlinked.
+      const journal = deposit.journalEntry ?? (await findUnlinkedDepositJournal(tx, { ...deposit, paymentType: 'VendorDeposit' }));
+      if (journal) {
+        await voidJournalInTx(tx, journal, 'uang muka');
       } else {
-        // No linked journal (legacy imports) — reverse account balances directly
+        // No journal and no ledger rows at all — reverse account balances directly.
+        // Never add a [BATAL] reversal JV: there is no original to pair it with.
         const vendorDepositAccount = await systemAccounts.getAccount('VENDOR_DEPOSIT');
         const openingEquityAccount = await systemAccounts.getAccount('OPENING_EQUITY');
-
-        {
-          // Reverse: CR Vendor Deposit / DR Ekuitas Saldo Awal
-          await updateAccountBalance(tx, vendorDepositAccount.id, 0, depositAmount);
-          await updateAccountBalance(tx, openingEquityAccount.id, depositAmount, 0);
-
-          // Never add a [BATAL] reversal JV: the original is soft-cancelled elsewhere, so it
-          // would double-reverse the balance. Defensively soft-cancel legacy imported ALE rows.
-          await tx.accountingLedgerEntry.updateMany({
-            where: { description: { contains: deposit.paymentNumber }, isCancelled: false },
-            data: { isCancelled: true },
-          });
-        }
+        // Reverse: CR Vendor Deposit / DR Ekuitas Saldo Awal
+        await updateAccountBalance(tx, vendorDepositAccount.id, 0, depositAmount);
+        await updateAccountBalance(tx, openingEquityAccount.id, depositAmount, 0);
       }
 
       // Restore party deposit balance

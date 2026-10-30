@@ -9,7 +9,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { CheckCircle2, Clock, Plus, Undo2, Wallet, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
-import { can } from '@/lib/permissions';
+import { can, cap } from '@/lib/permissions';
 import { formatDate, formatNumber, formatRupiah, toNumber } from '@/lib/format';
 import { statusOptions } from '@/lib/status';
 import { useListState } from '@/hooks/useListState';
@@ -97,6 +97,8 @@ export const CustomerDeposits = () => {
   const [cancelTarget, setCancelTarget] = useState<{ id: string; paymentNumber: string } | null>(null);
   const [refundTarget, setRefundTarget] = useState<CustomerDepositRow | null>(null);
   const canEdit = can('customer_deposit', 'edit');
+  // Cancelling a deposit also needs the doc.cancel capability (server: requireCap).
+  const canCancel = canEdit && cap('doc.cancel');
 
   const depositsQuery = useQuery({
     queryKey: ['customer-deposits', 'list', list.params],
@@ -244,7 +246,8 @@ export const CustomerDeposits = () => {
                   label: t('customerDepositsPage.actions.cancel'),
                   icon: XCircle,
                   tone: 'danger',
-                  hidden: !canEdit || isCancelled,
+                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED).
+                  hidden: !canCancel || isCancelled || d.totalRefunded > 0,
                   onSelect: () => setCancelTarget({ id: d.id, paymentNumber: d.paymentNumber }),
                 },
               ]}
@@ -253,7 +256,7 @@ export const CustomerDeposits = () => {
         },
       },
     ],
-    [canEdit, t],
+    [canEdit, canCancel, t],
   );
 
   const kpiMoney = (v: number | undefined) => (v === undefined ? '—' : formatRupiah(v, { compact: true }));

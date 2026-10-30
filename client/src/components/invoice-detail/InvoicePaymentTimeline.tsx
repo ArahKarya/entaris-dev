@@ -23,7 +23,8 @@ interface InvoicePaymentTimelineProps {
   entries: PaymentTimelineEntry[];
   isSales: boolean;
   invoiceCancelled: boolean;
-  onCancelDepositApp: (appId: string) => void;
+  /** Omitted when the user may not cancel deposit applications (no doc.cancel). */
+  onCancelDepositApp?: (appId: string) => void;
 }
 
 export function InvoicePaymentTimeline({
@@ -106,7 +107,7 @@ export function InvoicePaymentTimeline({
                 >
                   {formatRupiah(Number(entry.amount))}
                 </span>
-                {isDeposit && !cancelled && !invoiceCancelled && (
+                {isDeposit && !cancelled && !invoiceCancelled && onCancelDepositApp && (
                   <Button
                     variant="ghost"
                     size="icon-sm"

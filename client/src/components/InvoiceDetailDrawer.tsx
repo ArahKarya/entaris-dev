@@ -11,6 +11,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog, LoadingState } from '@/components/shared';
+import { cap } from '@/lib/permissions';
 import { useCompanyPDF } from '../lib/pdf/useCompanyPDF';
 import { mergeInvoicePdfWithAttachments } from '../lib/pdf/mergePdfWithAttachments';
 import type { AttachmentRef } from '../lib/pdf/mergePdfWithAttachments';
@@ -298,7 +299,9 @@ const InvoiceDetailDrawer: React.FC<Props> = ({ type, invoiceId, onClose, onEdit
   const { paymentBreakdown, paidFromDeposit, paidFromCash, partyDepositBalance } = deriveInvoicePdfArgs(type, invoice);
 
   const isOverdue = invoice?.dueDate && new Date(invoice.dueDate) < new Date() && outstanding > 0;
-  const canCancel = invoice && invoice.status !== 'Cancelled' && (invoice.status !== 'Paid' || grandTotal === 0); // invoice Rp 0 (sumbangan) auto-Paid tapi tetap boleh dibatalkan
+  // Invoice and deposit-application cancels need the doc.cancel capability (server: requireCap).
+  const canCancelDocs = cap('doc.cancel');
+  const canCancel = canCancelDocs && invoice && invoice.status !== 'Cancelled' && (invoice.status !== 'Paid' || grandTotal === 0); // invoice Rp 0 (sumbangan) auto-Paid tapi tetap boleh dibatalkan
   const canEdit = invoice && invoice.status !== 'Cancelled';
 
   const startEditing = () => {
@@ -479,7 +482,7 @@ const InvoiceDetailDrawer: React.FC<Props> = ({ type, invoiceId, onClose, onEdit
                   entries={paymentTimeline}
                   isSales={isSales}
                   invoiceCancelled={invoice.status === 'Cancelled'}
-                  onCancelDepositApp={setCancelDepositAppId}
+                  onCancelDepositApp={canCancelDocs ? setCancelDepositAppId : undefined}
                 />
 
                 {/* Apply Deposit Banner (has outstanding) */}
