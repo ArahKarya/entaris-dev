@@ -246,7 +246,8 @@ export const CustomerDeposits = () => {
                   label: t('customerDepositsPage.actions.cancel'),
                   icon: XCircle,
                   tone: 'danger',
-                  hidden: !canCancel || isCancelled,
+                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED).
+                  hidden: !canCancel || isCancelled || d.totalRefunded > 0,
                   onSelect: () => setCancelTarget({ id: d.id, paymentNumber: d.paymentNumber }),
                 },
               ]}

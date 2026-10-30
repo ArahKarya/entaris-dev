@@ -422,9 +422,10 @@ export const PurchaseInvoices = () => {
         type="purchase"
         invoiceId={selectedId}
         onClose={() => setSelectedId(null)}
-        onEditFull={(invoice: PurchaseInvoiceRow) => {
+        // Full edit cancels the invoice first, so it needs doc.cancel like the row action.
+        onEditFull={canRecreate ? (invoice: PurchaseInvoiceRow) => {
           if (invoice?.id) setEditConfirmTarget(invoice);
-        }}
+        } : undefined}
       />
 
       <PaymentModal isOpen={isPayOpen} onClose={() => setIsPayOpen(false)} defaultType="Pay" />
