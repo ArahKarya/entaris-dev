@@ -7,6 +7,7 @@ import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBa
 import { validateBody } from '../utils/validate';
 import { CreatePaymentSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { systemAccounts } from '../services/systemAccounts';
 import { submitPaymentInTx } from '../services/paymentSubmit';
@@ -179,6 +180,7 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
       });
       if (!payment) throw new BusinessError('Pembayaran tidak ditemukan.');
       if (payment.status === 'Cancelled') throw new BusinessError('Pembayaran sudah dibatalkan.');
+      await assertPeriodOpen(tx, { fiscalYearId: payment.fiscalYearId }, 'pembayaran');
 
       const numAmount = new Decimal(payment.amount.toString());
 
@@ -236,6 +238,8 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
         where: { entryNumber: jvNumber },
       });
       if (journal) {
+        // Balances are reversed from the payment below, so only the journal's own year is checked here.
+        await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId }, 'pembayaran');
         await tx.journalEntry.update({
           where: { id: journal.id },
           data: { status: 'Cancelled', cancelledAt: new Date() },

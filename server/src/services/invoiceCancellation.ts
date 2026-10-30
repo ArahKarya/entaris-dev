@@ -4,13 +4,15 @@ import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
 import { cancelDocumentJournals } from '../utils/journalCancel';
+import { assertPeriodOpen } from '../utils/periodGuard';
 
 type Tx = Prisma.TransactionClient;
 
 /**
  * Cancel a sales invoice: cancel its JE, COGS JE and their -suffixed satellites (balances reversed per JE item account, so
  * per-item COGS sub-accounts are restored), reverse its own stock movements, recompute party
- * outstanding. Caller owns the transaction.
+ * outstanding. Rejected with PERIOD_CLOSED when the invoice's fiscal year, or that of any journal
+ * it voids, is closed. Caller owns the transaction.
  */
 export async function cancelSalesInvoiceInTx(
   tx: Tx,
@@ -24,6 +26,8 @@ export async function cancelSalesInvoiceInTx(
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan.');
   // Invoice Rp 0 (sumbangan) otomatis Paid tanpa pembayaran → tetap boleh dibatalkan.
   if (invoice.status === 'Paid' && Number(invoice.grandTotal) !== 0) throw new BusinessError('Invoice sudah lunas, tidak bisa dibatalkan.');
+  // A closed year stays as reported; the correction is a manual journal in the open period.
+  await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId }, 'invoice');
 
   const allocations = await tx.paymentAllocation.findMany({
     where: { invoiceType: 'SalesInvoice', invoiceId: invoice.id },
@@ -108,6 +112,8 @@ export async function cancelPurchaseInvoiceInTx(
   if (!invoice) throw new BusinessError('Invoice tidak ditemukan.');
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan.');
   if (invoice.status === 'Paid') throw new BusinessError('Invoice sudah lunas, tidak bisa dibatalkan.');
+  // Also covers the legacy branch below that reverses balances without a journal.
+  await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId }, 'invoice');
 
   const allocations = await tx.paymentAllocation.findMany({
     where: { invoiceType: 'PurchaseInvoice', invoiceId: invoice.id },

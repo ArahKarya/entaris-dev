@@ -71,8 +71,11 @@ function makeTx(pr: ReturnType<typeof makeRequest>, opts: { fiscalYear?: object 
     },
     systemAccountMapping: { count: vi.fn(async () => 1), findFirst: vi.fn(async () => ({ accountId: 'acc-adv' })) },
     approvalRule: { findMany: vi.fn(async () => [{ minAmount: '100000', requiredRole: 'Direktur', isActive: true }]) },
-    fiscalYear: { findFirst: vi.fn(async () => (opts.fiscalYear === undefined ? { id: 'fy-2026' } : opts.fiscalYear)) },
-    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYear: { isClosed: false } })) },
+    fiscalYear: {
+      findFirst: vi.fn(async () => (opts.fiscalYear === undefined ? { id: 'fy-2026' } : opts.fiscalYear)),
+      findUnique: vi.fn(async (): Promise<{ id: string; name: string; isClosed: boolean } | null> => ({ id: 'fy-2026', name: '2026', isClosed: false })),
+    },
+    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026' })) },
     accountingLedgerEntry: { createMany: vi.fn(async () => ({ count: 2 })) },
   };
   return tx;
@@ -202,8 +205,12 @@ describe('cancelPaymentRequestPaymentInTx', () => {
 
   it('refuses when the journal year is closed', async () => {
     const tx = makeTx(makeRequest({ status: 'PAID', journalEntryId: 'je-1' }));
-    tx.journalEntry.findUnique = vi.fn(async () => ({ fiscalYear: { isClosed: true } }));
-    await expect(cancelPaymentRequestPaymentInTx(asTx(tx), 'pr-1', finance, 'Salah rekening')).rejects.toThrow(/ditutup/);
+    tx.fiscalYear.findUnique = vi.fn(async () => ({ id: 'fy-2025', name: '2025', isClosed: true }));
+    await expect(cancelPaymentRequestPaymentInTx(asTx(tx), 'pr-1', finance, 'Salah rekening')).rejects.toMatchObject({
+      code: 'PERIOD_CLOSED',
+      message: expect.stringMatching(/2025 sudah ditutup/),
+    });
+    expect(tx.paymentRequest.updateMany).not.toHaveBeenCalled();
     expect(cancelJournalInTx).not.toHaveBeenCalled();
   });
 });

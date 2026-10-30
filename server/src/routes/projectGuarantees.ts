@@ -6,7 +6,8 @@
 // GL:
 //   Setor      : DR Uang Jaminan (PROJECT_GUARANTEE, 1.8) / CR Kas-Bank
 //   Settlement : DR Kas-Bank (kembali) + DR Beban (hangus) / CR Uang Jaminan
-//   Cancel     : soft-cancel (JE Cancelled + ALE isCancelled + reverse saldo)
+//   Cancel     : soft-cancel (JE Cancelled + ALE isCancelled + reverse saldo), voidJournalInTx;
+//                ditolak bila tahun buku sudah ditutup
 //
 // PENTING: semua baris JE/ALE modul ini TANPA partyId — applyPartyImpact
 // menaikkan party.outstandingAmount utk baris ASSET ber-party (tidak ada
@@ -24,6 +25,8 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
 import { CreateProjectGuaranteeSchema, SettleProjectGuaranteeSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
+import { voidJournalByIdInTx } from '../utils/journalCancel';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
@@ -468,9 +471,10 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       if (guarantee.settlements.length > 0) {
         throw new BusinessError('Sudah ada settlement aktif. Batalkan settlement terlebih dahulu.');
       }
+      await assertPeriodOpen(tx, { fiscalYearId: guarantee.fiscalYearId }, 'uang jaminan');
 
       if (guarantee.journalEntryId) {
-        await softCancelJournal(tx, guarantee.journalEntryId);
+        await voidJournalByIdInTx(tx, guarantee.journalEntryId, 'uang jaminan');
       }
 
       await tx.projectGuarantee.update({
@@ -504,8 +508,12 @@ router.post('/settlements/:id/cancel', requireCap('doc.cancel'), async (req: Aut
       if (!guarantee) throw new BusinessError('Uang jaminan tidak ditemukan.');
       if (guarantee.status === 'Dibatalkan') throw new BusinessError('Uang jaminan induk sudah dibatalkan.');
 
+      // A settlement has no fiscal year of its own: its journal's year decides (voidJournalByIdInTx),
+      // or its date when it has no journal.
       if (settlement.journalEntryId) {
-        await softCancelJournal(tx, settlement.journalEntryId);
+        await voidJournalByIdInTx(tx, settlement.journalEntryId, 'uang jaminan');
+      } else {
+        await assertPeriodOpen(tx, { date: settlement.date }, 'uang jaminan');
       }
 
       await tx.projectGuaranteeSettlement.update({
@@ -529,28 +537,5 @@ router.post('/settlements/:id/cancel', requireCap('doc.cancel'), async (req: Aut
     return handleRouteError(res, error, 'POST /project-guarantees/settlements/:id/cancel', 'Gagal membatalkan settlement.');
   }
 });
-
-// Soft-cancel JE: status Cancelled + ALE isCancelled + reverse saldo akun.
-// JANGAN buat JV balikan ([BATAL]) — menggandakan DR/CR mentah di ALE dan
-// merusak health check sinkronisasi ALE↔JI (lihat vendorDeposits.ts).
-async function softCancelJournal(tx: Prisma.TransactionClient, journalEntryId: string): Promise<void> {
-  const journal = await tx.journalEntry.findUnique({
-    where: { id: journalEntryId },
-    include: { items: true },
-  });
-  if (!journal || journal.status === 'Cancelled') return;
-
-  for (const item of journal.items) {
-    await updateAccountBalance(tx, item.accountId, Number(item.credit), Number(item.debit));
-  }
-  await tx.journalEntry.update({
-    where: { id: journal.id },
-    data: { status: 'Cancelled', cancelledAt: new Date() },
-  });
-  await tx.accountingLedgerEntry.updateMany({
-    where: { referenceId: journal.id, isCancelled: false },
-    data: { isCancelled: true },
-  });
-}
 
 export default router;

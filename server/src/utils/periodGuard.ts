@@ -20,7 +20,21 @@ export type PeriodRef = { date: Date } | { fiscalYearId: string };
  * What is being posted or cancelled, as it reads mid-sentence in the error message.
  * A fixed set so each noun has its own entry in the i18n dictionary.
  */
-export type PeriodLabel = 'jurnal' | 'invoice' | 'pembayaran' | 'uang muka' | 'uang jaminan' | 'penyusutan' | 'dokumen';
+export type PeriodLabel =
+  | 'jurnal'
+  | 'invoice'
+  | 'pembayaran'
+  | 'uang muka'
+  | 'uang jaminan'
+  | 'penyusutan'
+  | 'retur'
+  | 'mutasi stok'
+  | 'surat jalan'
+  | 'produksi'
+  | 'stok opname'
+  | 'transfer stok'
+  | 'penerimaan barang'
+  | 'dokumen';
 
 const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;

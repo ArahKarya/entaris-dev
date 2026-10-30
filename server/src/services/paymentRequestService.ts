@@ -9,6 +9,7 @@ import Decimal from 'decimal.js';
 import { z } from 'zod';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { updateBalancesForItems } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
 import { PaymentRequestInputSchema } from '../utils/schemas';
@@ -493,8 +494,9 @@ export async function cancelPaymentRequestPaymentInTx(tx: Tx, id: string, actor:
   const pr = await loadRequest(tx, id);
   assertOk(checkCancelPayment(pr, actor));
   if (pr.journalEntryId) {
-    const je = await tx.journalEntry.findUnique({ where: { id: pr.journalEntryId }, select: { fiscalYear: { select: { isClosed: true } } } });
-    if (je?.fiscalYear.isClosed) throw new BusinessError('Tahun buku jurnal pembayaran sudah ditutup; pembayaran tidak bisa dibatalkan.');
+    // Checked before the claim so a closed year leaves the request untouched (cancelJournalInTx checks again).
+    const je = await tx.journalEntry.findUnique({ where: { id: pr.journalEntryId }, select: { fiscalYearId: true } });
+    if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'pembayaran');
   }
   await claimStatus(tx, id, ['PAID'], {
     status: 'APPROVED',

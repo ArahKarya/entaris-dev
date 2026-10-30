@@ -79,8 +79,11 @@ function makeTx(pr: ReturnType<typeof makeRequest>, opts: { lines?: Row[]; fisca
       findMany: vi.fn(async (): Promise<Array<{ id: string; accountNumber: string; name: string }>> => []),
     },
     systemAccountMapping: { count: vi.fn(async () => 1), findFirst: vi.fn(async () => ({ accountId: 'acc-adv' })) },
-    fiscalYear: { findFirst: vi.fn(async () => (opts.fiscalYear === undefined ? { id: 'fy-2026' } : opts.fiscalYear)) },
-    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYear: { isClosed: false } })) },
+    fiscalYear: {
+      findFirst: vi.fn(async () => (opts.fiscalYear === undefined ? { id: 'fy-2026' } : opts.fiscalYear)),
+      findUnique: vi.fn(async (): Promise<{ id: string; name: string; isClosed: boolean } | null> => ({ id: 'fy-2026', name: '2026', isClosed: false })),
+    },
+    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026' })) },
     accountingLedgerEntry: { createMany: vi.fn(async () => ({ count: 2 })) },
   };
 }
@@ -262,8 +265,9 @@ describe('cancelSettlementPostingInTx', () => {
 
   it('refuses when the journal year is closed, for non-finance, and when not settled', async () => {
     const closed = makeTx(settled());
-    closed.journalEntry.findUnique = vi.fn(async () => ({ fiscalYear: { isClosed: true } }));
-    await expect(cancelSettlementPostingInTx(asTx(closed), 'pr-1', finance, 'Salah akun')).rejects.toThrow(/ditutup/);
+    closed.fiscalYear.findUnique = vi.fn(async () => ({ id: 'fy-2025', name: '2025', isClosed: true }));
+    await expect(cancelSettlementPostingInTx(asTx(closed), 'pr-1', finance, 'Salah akun')).rejects.toMatchObject({ code: 'PERIOD_CLOSED' });
+    expect(closed.paymentRequest.updateMany).not.toHaveBeenCalled();
     expect(cancelJournalInTx).not.toHaveBeenCalled();
     await expect(cancelSettlementPostingInTx(asTx(makeTx(settled())), 'pr-1', supervisor, 'Salah akun')).rejects.toThrow(/Keuangan/);
     await expect(cancelSettlementPostingInTx(asTx(makeTx(makeRequest({ settlementStatus: 'PENDING_FINANCE' }))), 'pr-1', finance, 'Salah akun')).rejects.toThrow(/belum diposting/);
