@@ -309,7 +309,8 @@ const DeliveryOrderDetailDrawer: React.FC<Props> = ({ doId, onClose }) => {
 
                 {status === 'Submitted' && (
                   <>
-                    {canEdit && (
+                    {/* A full edit reverses the posted movements, so the server also requires doc.cancel. */}
+                    {canEdit && isAdmin && (
                       <Button
                         variant="outline"
                         className={footBtn}
