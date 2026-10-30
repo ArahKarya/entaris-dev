@@ -642,6 +642,7 @@
     "rowActions": "Aksi untuk {{number}}",
     "actions": {
       "refund": "Refund / offset",
+      "refunds": "Lihat refund",
       "cancel": "Batalkan"
     },
     "title": "Uang Muka Supplier",

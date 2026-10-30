@@ -642,6 +642,7 @@
     "rowActions": "Actions for {{number}}",
     "actions": {
       "refund": "Refund / offset",
+      "refunds": "View refunds",
       "cancel": "Cancel"
     },
     "title": "Supplier Deposits",
