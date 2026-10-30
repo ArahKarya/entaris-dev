@@ -3,7 +3,8 @@
  *
  * getOpenFiscalYear puts 31 Dec 23:30 WIB in the old year and 1 Jan 03:00 WIB in the new one,
  * and bulk depreciation for December and January both find their fiscal year (December used
- * to fail because the year "ended" at 31 Dec 07:00 WIB). Fiscal years are stored the way the
+ * to fail because the year "ended" at 31 Dec 07:00 WIB), while a month split by a fiscal-year
+ * boundary is still refused. Fiscal years are stored the way the
  * API stores them (`new Date('YYYY-MM-DD')`, UTC midnight). Everything runs in a rollback
  * transaction in a far future year.
  */
@@ -70,6 +71,36 @@ async function twoYears(tx: Tx) {
   return { oldFy: await mk(OLD), newFy: await mk(NEW) };
 }
 
+async function makeAsset(tx: Tx, fiscalYearId: string, periodDays: string[]) {
+  const [assetAcc, expenseAcc, accumAcc] = await Promise.all([
+    tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true } }),
+    tx.account.findFirst({ where: { rootType: 'EXPENSE', isGroup: false, isActive: true } }),
+    tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true }, skip: 1 }),
+  ]);
+  if (!assetAcc || !expenseAcc || !accumAcc) throw new Error('Need asset and expense detail accounts.');
+  const tag = Math.random().toString(36).slice(2, 8);
+  return tx.fixedAsset.create({
+    data: {
+      assetNumber: `IT-FA-${tag}`,
+      name: 'Mesin uji',
+      category: 'Mesin',
+      acquisitionDate: new Date(periodDays[0]),
+      acquisitionCost: 1_200_000,
+      usefulLifeMonths: 12,
+      bookValue: 1_200_000,
+      assetAccountId: assetAcc.id,
+      depreciationAccountId: expenseAcc.id,
+      accumulatedDepAccountId: accumAcc.id,
+      fiscalYearId,
+      createdBy: userId,
+      // Schedule rows as the API writes them: the 1st of each month at UTC midnight.
+      depreciationEntries: {
+        create: periodDays.map((day) => ({ periodDate: new Date(`${day}T00:00:00.000Z`), amount: 100_000 })),
+      },
+    },
+  });
+}
+
 d('fiscal year lookup by business day', () => {
   it('assigns year-end instants to the right year', async () => {
     await inRollback(async (tx) => {
@@ -84,36 +115,7 @@ d('fiscal year lookup by business day', () => {
   it('posts bulk depreciation for December and January', async () => {
     await inRollback(async (tx) => {
       const { oldFy, newFy } = await twoYears(tx);
-      const [assetAcc, expenseAcc, accumAcc] = await Promise.all([
-        tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true } }),
-        tx.account.findFirst({ where: { rootType: 'EXPENSE', isGroup: false, isActive: true } }),
-        tx.account.findFirst({ where: { rootType: 'ASSET', isGroup: false, isActive: true }, skip: 1 }),
-      ]);
-      if (!assetAcc || !expenseAcc || !accumAcc) throw new Error('Need asset and expense detail accounts.');
-      const tag = Math.random().toString(36).slice(2, 8);
-      const asset = await tx.fixedAsset.create({
-        data: {
-          assetNumber: `IT-FA-${tag}`,
-          name: 'Mesin uji',
-          category: 'Mesin',
-          acquisitionDate: new Date(`${OLD}-12-01`),
-          acquisitionCost: 1_200_000,
-          usefulLifeMonths: 12,
-          bookValue: 1_200_000,
-          assetAccountId: assetAcc.id,
-          depreciationAccountId: expenseAcc.id,
-          accumulatedDepAccountId: accumAcc.id,
-          fiscalYearId: oldFy.id,
-          createdBy: userId,
-          // Schedule rows as the API writes them: the 1st of each month at UTC midnight.
-          depreciationEntries: {
-            create: [
-              { periodDate: new Date(`${OLD}-12-01T00:00:00.000Z`), amount: 100_000 },
-              { periodDate: new Date(`${NEW}-01-01T00:00:00.000Z`), amount: 100_000 },
-            ],
-          },
-        },
-      });
+      const asset = await makeAsset(tx, oldFy.id, [`${OLD}-12-01`, `${NEW}-01-01`]);
 
       for (const [month, fy] of [[`${OLD}-12`, oldFy], [`${NEW}-01`, newFy]] as const) {
         const r = await callRoute(fixedAssetsRouter, 'post', '/depreciate-bulk', { body: { month }, userId });
@@ -124,6 +126,22 @@ d('fiscal year lookup by business day', () => {
         });
         expect(entry, month).not.toBeNull();
       }
+    });
+  });
+
+  it('refuses bulk depreciation for a month split by a fiscal-year boundary', async () => {
+    await inRollback(async (tx) => {
+      const tag = Math.random().toString(36).slice(2, 8);
+      const mk = (name: string, start: string, end: string) =>
+        tx.fiscalYear.create({ data: { name: `IT-FY-${name}-${tag}`, startDate: new Date(start), endDate: new Date(end) } });
+      const fyA = await mk('A', `${OLD}-03-15`, `${NEW}-03-14`);
+      await mk('B', `${NEW}-03-15`, `${NEW + 1}-03-14`);
+      const asset = await makeAsset(tx, fyA.id, [`${NEW}-03-01`]);
+
+      const r = await callRoute(fixedAssetsRouter, 'post', '/depreciate-bulk', { body: { month: `${NEW}-03` }, userId });
+      expect(r.status, JSON.stringify(r.body)).toBe(400);
+      const posted = await tx.depreciationEntry.count({ where: { fixedAssetId: asset.id, isPosted: true } });
+      expect(posted).toBe(0);
     });
   });
 });

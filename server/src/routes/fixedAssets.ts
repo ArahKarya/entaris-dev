@@ -418,10 +418,12 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       });
     }
 
-    // Fiscal year overlapping the month's last business day (closed years are not filtered here)
+    // Fiscal year covering the whole business month (first and last day); a month split by a
+    // fiscal-year boundary is refused. Closed years are not filtered here.
+    const firstDay = businessDayRange(period.firstDay);
     const lastDay = businessDayRange(period.lastDay);
     const fiscalYear = await prisma.fiscalYear.findFirst({
-      where: { startDate: { lt: lastDay.lt }, endDate: { gte: lastDay.gte } },
+      where: { startDate: { lt: firstDay.lt }, endDate: { gte: lastDay.gte } },
       orderBy: { startDate: 'desc' },
     });
     if (!fiscalYear) {
