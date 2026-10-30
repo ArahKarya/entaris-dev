@@ -147,13 +147,32 @@ async function assertNotLocked(tx: Tx, day: string, label: PeriodLabel): Promise
 }
 
 /**
- * The first business day after the period lock date (YYYY-MM-DD), or null when no lock is set.
- * For postings that fall into a locked month and move to the first open day instead (recurring
- * catch-up, month-end settlement). Share-locks the lock row like the guard does.
+ * The first business day (YYYY-MM-DD) after the period lock date that lies in an open fiscal year,
+ * or null when no lock is set. For postings that fall into a locked month and move to the first
+ * open day instead (recurring catch-up, month-end settlement): the day after the lock, or the start
+ * of the next open fiscal year when that day's year is closed. Throws FISCAL_YEAR_MISSING when no
+ * open year covers or follows it. Share-locks the lock row like the guard does; the posting itself
+ * still goes through assertPeriodOpen.
  */
 export async function firstOpenBusinessDay(tx: Tx): Promise<string | null> {
   const lockDate = await readLockDate(tx);
-  return lockDate === null ? null : addDays(lockDate, 1);
+  if (lockDate === null) return null;
+  const day = addDays(lockDate, 1);
+  const local = businessDayRange(day);
+  const utcStart = new Date(`${day}T00:00:00.000Z`);
+  // Same bounds as findFiscalYearForDate: the earliest open year ending on or after `day`.
+  const fy = await tx.fiscalYear.findFirst({
+    where: { isClosed: false, endDate: { gte: earlier(local.gte, utcStart) } },
+    orderBy: { startDate: 'asc' },
+  });
+  if (!fy) {
+    throw new BusinessError(
+      `Tidak ada tahun buku terbuka mulai ${day}. Buat atau buka kembali tahun buku terlebih dahulu.`,
+      FISCAL_YEAR_MISSING,
+    );
+  }
+  const start = businessDay(fy.startDate);
+  return start > day ? start : day;
 }
 
 /**

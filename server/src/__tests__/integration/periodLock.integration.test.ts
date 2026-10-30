@@ -4,6 +4,8 @@
  * Lock date 31 Mar, today 25 Apr: a 15 Mar invoice is rejected PERIOD_LOCKED, cancelling a March
  * invoice is rejected, a March quotation or purchase order is still accepted. PUT /period-lock
  * needs period.lock, a reason to move the lock back, and a past date; every change is logged.
+ * Bulk depreciation checks a mid-month lock against the 1st-of-month dates it posts; generate-dummy
+ * skips the lock; firstOpenBusinessDay skips a closed year.
  *
  * The lock row is global. Every case changes it only inside a rollback transaction (the route
  * harness makes the route's own transaction a savepoint), so nothing is committed; the cases stay
@@ -15,10 +17,10 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type Tx } from '../helpers/routeHarness';
-import { createFiscalYear } from '../helpers/periodFixture';
+import { closedThenOpenYears, createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { BusinessError } from '../../utils/errors';
-import { PERIOD_LOCKED, assertPeriodOpen, firstOpenBusinessDay } from '../../utils/periodGuard';
+import { FISCAL_YEAR_MISSING, PERIOD_LOCKED, assertPeriodOpen, firstOpenBusinessDay } from '../../utils/periodGuard';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -384,19 +386,21 @@ d('period lock: row locking', () => {
     const isLocked = new Promise<void>((r) => { locked = r; });
     const events: string[] = [];
     const posting = prisma.$transaction(async (tx) => {
-      expect(await firstOpenBusinessDay(tx)).toBeNull();
+      const year = await createFiscalYear(tx, { year: Y });
+      await assertPeriodOpen(tx, { fiscalYearId: year.id, date: new Date(`${Y}-06-15T03:00:00Z`) }, 'invoice');
       locked();
       await held;
       events.push('posting ends');
-    });
+      throw new RollbackSentinel();
+    }).catch((e) => { if (!(e instanceof RollbackSentinel)) throw e; });
 
     await isLocked;
     const change = prisma.$transaction(async (tx) => {
-      // Never committed: the lock row is global.
-      const result = await setPeriodLockInTx(tx, { lockDate: '2001-01-31', userId: adminId, today: '2001-02-01' });
+      // Never committed: the lock row is global. The reason covers a stored lock later than 2001.
+      const result = await setPeriodLockInTx(tx, { lockDate: '2001-01-31', reason: 'Uji antrean kunci', userId: adminId, today: '2001-02-01' });
       events.push('lock changed');
       expect(result.changed).toBe(true);
-      expect(await firstOpenBusinessDay(tx)).toBe('2001-02-01');
+      expect(await lockRow(tx)).toBe('2001-01-31');
       throw new RollbackSentinel();
     }, { timeout: 15000 }).catch((e) => { if (!(e instanceof RollbackSentinel)) throw e; });
 
@@ -406,4 +410,36 @@ d('period lock: row locking', () => {
     await Promise.all([posting, change]);
     expect(events).toEqual(['posting ends', 'lock changed']);
   }, 20000);
+});
+
+d('period lock: firstOpenBusinessDay', () => {
+  /** Sets the lock inside the rollback transaction; the reason covers a backward move from the stored date. */
+  const setLock = (tx: Tx, lockDate: string | null, today: string) =>
+    setPeriodLockInTx(tx, { lockDate, reason: 'Uji hari terbuka pertama', userId: adminId, today });
+
+  it('is null without a lock and the day after the lock when that day is in an open year', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: Y });
+      await setLock(tx, null, `${Y}-06-15`);
+      expect(await firstOpenBusinessDay(tx)).toBeNull();
+      await setLock(tx, `${Y}-04-30`, `${Y}-06-15`);
+      expect(await firstOpenBusinessDay(tx)).toBe(`${Y}-05-01`);
+    });
+  });
+
+  it('skips a closed year to the start of the next open one', async () => {
+    await inRollback(async (tx) => {
+      await closedThenOpenYears(tx, Y - 1);
+      await setLock(tx, `${Y - 1}-11-30`, `${Y}-01-15`);
+      expect(await firstOpenBusinessDay(tx)).toBe(`${Y}-01-01`);
+    });
+  });
+
+  it('throws FISCAL_YEAR_MISSING when no open year covers or follows the day after the lock', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: 2199, isClosed: true });
+      await setLock(tx, '2199-11-30', '2199-12-15');
+      expect(await codeOf(firstOpenBusinessDay(tx))).toBe(FISCAL_YEAR_MISSING);
+    });
+  });
 });
