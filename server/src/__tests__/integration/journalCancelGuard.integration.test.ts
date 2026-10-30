@@ -129,8 +129,9 @@ d('journalMenuCancelBlockReason', () => {
     await inRollback(async (tx) => {
       const fy = await fiscalYear(tx, false);
       const je = await journal(tx, fy.id, `JV-209903-${uniq()}`);
-      const item = await tx.inventoryItem.findFirst({ where: { isActive: true } });
-      if (!item) throw new Error('No inventory item.');
+      const item = await tx.inventoryItem.create({
+        data: { code: `IT-JCG-ITEM-${uniq()}`, name: `Barang uji jurnal ${uniq()}`, unit: 'kg', isActive: true },
+      });
       await tx.stockMovement.create({
         data: {
           movementNumber: `SM-IT-${uniq()}`, date: new Date('2099-03-01'), movementType: 'In',
