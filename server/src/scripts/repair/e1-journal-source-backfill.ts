@@ -10,6 +10,7 @@
 
 import { writeFileSync } from 'node:fs';
 import { prisma } from '../../lib/prisma';
+import { csvCell } from '../../utils/csv';
 import {
   classifyLegacyJournal,
   isNearImportBatch,
@@ -45,11 +46,6 @@ function parseArgs(argv: readonly string[]): Options {
   if (argv.includes('--apply') && argv.includes('--dry-run')) throw new Error('Use either --apply or --dry-run.');
   return opts;
 }
-
-const csvCell = (v: unknown): string => {
-  const s = v === null || v === undefined ? '' : v instanceof Date ? v.toISOString() : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 
 interface CsvRow {
   id: string;
