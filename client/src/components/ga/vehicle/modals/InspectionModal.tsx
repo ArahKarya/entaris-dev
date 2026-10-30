@@ -21,6 +21,7 @@ import { useInspectionCategories, useUserOptions } from '../vehicle-queries';
 import { apiError, numOrNull } from '../vehicle-model';
 import { ToneBadge } from '../vehicle-ui';
 import { FieldRow, ModalForm, ModalShell, SelectField, TextAreaField, TextField } from './form-kit';
+import { todayLocal } from '@/lib/date';
 
 interface Props {
   assetId: string;
@@ -48,7 +49,7 @@ export function InspectionModal({ assetId, onClose, onSaved }: Props) {
   const categories = useInspectionCategories();
   const { data: users = [] } = useUserOptions('ga-users-inspector-picker');
 
-  const [tanggal, setTanggal] = useState(() => new Date().toISOString().slice(0, 10));
+  const [tanggal, setTanggal] = useState(() => todayLocal());
   const [odometer, setOdometer] = useState('');
   const [notes, setNotes] = useState('');
   const [inspectorUserId, setInspectorUserId] = useState('');

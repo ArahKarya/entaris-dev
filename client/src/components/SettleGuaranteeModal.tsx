@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DateInput, Field } from '@/components/shared';
 import { FormError, OverlayBody, OverlayFooter, OverlayHeader } from './sales/dialog-parts-b';
 import { NONE_VALUE, dialogShellClass } from './sales/dialog-classes-b';
+import { todayLocal } from '@/lib/date';
 
 interface Guarantee {
   id: string;
@@ -33,7 +34,7 @@ interface Props {
 // bisa parsial dan berulang sampai sisa habis.
 const SettleGuaranteeModal: React.FC<Props> = ({ isOpen, onClose, guarantee }) => {
   const { t } = useTranslation('finance');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const [date, setDate] = useState(today);
   const [returnAmount, setReturnAmount] = useState<number>(0);
   const [forfeitAmount, setForfeitAmount] = useState<number>(0);

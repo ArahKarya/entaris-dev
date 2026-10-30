@@ -18,6 +18,7 @@ import { PDFDownloadLink } from '@react-pdf/renderer';
 import QuotationPDF from '../lib/pdf/QuotationPDF';
 import { useCompanyPDF } from '../lib/pdf/useCompanyPDF';
 import { canCreateSalesOrderFromQuotation } from './sales/so-from-quotation';
+import { todayLocal } from '@/lib/date';
 
 interface Props {
   quotationId: string | null;
@@ -82,9 +83,9 @@ const QuotationDetailDrawer: React.FC<Props> = ({ quotationId, onClose, onEdit }
       const payloadRes = await api.get(`/quotations/${quotationId}/convert-payload`);
       const p = payloadRes.data;
       // Create sales invoice via existing endpoint (which posts GL)
-      const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+      const dueDate = todayLocal(30);
       const invRes = await api.post('/sales/invoices', {
-        date: new Date().toISOString().split('T')[0],
+        date: todayLocal(),
         dueDate,
         partyId: p.partyId,
         items: p.items.map((it: any) => ({

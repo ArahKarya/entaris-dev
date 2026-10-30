@@ -25,6 +25,7 @@ import {
 import { formDialogClass, formShellClass, numberInputClass } from '@/components/sales-a/overlay-classes';
 import { InvoiceLineRow, type InvoiceItem } from '@/components/sales-a/InvoiceLineRow';
 import { InvoiceDOPicker, type PendingDO } from '@/components/sales-a/InvoiceDOPicker';
+import { todayLocal } from '@/lib/date';
 
 
 const MAX_ATTACHMENTS = 5;
@@ -43,8 +44,8 @@ const SalesInvoiceModal: React.FC<{
   prefillFromDO?: { doId: string; partyId: string } | null;
 }> = ({ isOpen, onClose, prefillFromDO }) => {
   const { t } = useTranslation('sales');
-  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [dueDate, setDueDate] = useState(() => new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState(() => todayLocal());
+  const [dueDate, setDueDate] = useState(() => todayLocal(30));
   const [partyId, setPartyId] = useState('');
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('Net 30');
@@ -167,8 +168,8 @@ const SalesInvoiceModal: React.FC<{
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
       queryClient.invalidateQueries({ queryKey: ['coa'] });
       queryClient.invalidateQueries({ queryKey: ['attachments'] });
-      setInvoiceDate(new Date().toISOString().split('T')[0]);
-      setDueDate(new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
+      setInvoiceDate(todayLocal());
+      setDueDate(todayLocal(30));
       setPartyId('');
       setNotes('');
       setTerms('Net 30');

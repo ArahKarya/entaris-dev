@@ -35,6 +35,7 @@ import {
   type MachineLine,
   type OutputLineItem,
 } from './production/run-form-utils';
+import { todayLocal } from '@/lib/date';
 
 interface Props {
   isOpen: boolean;
@@ -50,7 +51,7 @@ interface Props {
 }
 
 const DRAFTS_ENDPOINT = '/inventory/production-runs/drafts';
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => todayLocal();
 
 export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPayload, resubmitRequestId, draft }: Props) {
   const { t } = useTranslation('production');

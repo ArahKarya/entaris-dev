@@ -25,6 +25,7 @@ import {
 import { ComboboxField } from '@/components/overlays/ComboboxField';
 import { BatchSelect } from '@/components/overlays/BatchSelect';
 import { fetchBatches, allocateFifo } from '@/lib/fifoAllocate';
+import { todayLocal } from '@/lib/date';
 
 interface TransferItemRow {
   id: string;
@@ -58,7 +59,7 @@ interface ModalProps {
 
 export function StockTransferModal({ isOpen, onClose }: ModalProps) {
   const { t } = useTranslation('inventory');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [fromWarehouseId, setFromWarehouseId] = useState('');

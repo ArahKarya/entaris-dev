@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsCard } from '@/components/settings/SettingsCard';
 import { CopyButton } from './CopyButton';
 import { MCP_STATUS_KEY, MCP_TOKENS_KEY } from './keys';
+import { todayLocal } from '@/lib/date';
 
 export interface McpTokenRow {
   id: string;
@@ -181,7 +182,7 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t('mcp.tokens.expiresOptional')} hint={t('mcp.tokens.expiresHint')}>
-              {(control) => <DateInput id={control.id} value={expires} onChange={setExpires} min={new Date().toISOString().slice(0, 10)} />}
+              {(control) => <DateInput id={control.id} value={expires} onChange={setExpires} min={todayLocal()} />}
             </Field>
             <Field label={t('mcp.tokens.rateLimit')}>
               <Input type="number" inputMode="numeric" min={1} max={6000} value={rate} onChange={(e) => setRate(e.target.value)} />

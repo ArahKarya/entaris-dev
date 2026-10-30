@@ -23,6 +23,7 @@ import { apiError } from '@/components/fixed-assets/errors';
 import { PR_ENDPOINT } from '../payment-request';
 import { KIND_META, type GaBill } from './eam-bills';
 import { useTranslation } from 'react-i18next';
+import { todayLocal } from '@/lib/date';
 
 type Method = 'JOURNAL' | 'PURCHASE_INVOICE';
 
@@ -42,7 +43,7 @@ interface EamBillPayDialogProps {
 
 const METHODS: readonly Method[] = ['JOURNAL', 'PURCHASE_INVOICE'];
 
-const toIsoDay = (d: string | null) => (d ? String(d).split('T')[0] : new Date().toISOString().split('T')[0]);
+const toIsoDay = (d: string | null) => (d ? String(d).split('T')[0] : todayLocal());
 
 export function EamBillPayDialog({ bill, onClose, onSuccess }: EamBillPayDialogProps) {
   const { t } = useTranslation('eam');

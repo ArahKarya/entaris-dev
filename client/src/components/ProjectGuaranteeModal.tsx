@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DateInput, Field } from '@/components/shared';
 import { FormError, OverlayBody, OverlayFooter, OverlayHeader } from './sales/dialog-parts-b';
 import { dialogShellClass, moneyInputClass } from './sales/dialog-classes-b';
+import { todayLocal } from '@/lib/date';
 
 /** Stored values (sent to the API as-is) and the key of their translated label. */
 const GUARANTEE_TYPES = [
@@ -30,7 +31,7 @@ interface ProjectGuaranteeModalProps {
 
 const ProjectGuaranteeModal: React.FC<ProjectGuaranteeModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('finance');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [partyId, setPartyId] = useState('');

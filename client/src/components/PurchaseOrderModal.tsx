@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { formatRupiah, LOCALE } from '@/lib/format';
 import { computePoTotals, PAYMENT_TERM_PRESETS, poDueDate } from '@/lib/purchaseOrderCalc';
 import { usePartyPicker } from '@/hooks/usePartyPicker';
+import { todayLocal } from '@/lib/date';
 
 const UNITS = ['Kg', 'Ton', 'Sak', 'Liter', 'Pcs', 'Box', 'Unit', 'Set', 'Meter'];
 
@@ -120,7 +121,7 @@ interface SavedPo { poNumber: string; approvalRequestId?: string | null }
 const PurchaseOrderModal: React.FC<Props> = ({ onClose, mode = 'create', source = null }) => {
   const { t } = useTranslation('purchasing');
   const queryClient = useQueryClient();
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const isEdit = mode === 'edit' && !!source;
   // Draft (edit or new) offers "Simpan Draf" + "Ajukan"; an ordered PO only "Simpan Perubahan".
   const isDraftFlow = !isEdit || source?.status === 'Draft';

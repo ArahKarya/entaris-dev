@@ -18,6 +18,7 @@ import { dialogShellClass } from './sales/dialog-classes-b';
 import { can } from '@/lib/permissions';
 import { currentUserId } from '@/lib/crm';
 import { SalesOwnerSelect } from './crm/SalesOwnerSelect';
+import { todayLocal } from '@/lib/date';
 
 interface InquiryItem {
   id: string;
@@ -46,7 +47,7 @@ interface Props {
 const InquiryModal: React.FC<Props> = ({ isOpen, onClose, editTarget }) => {
   const { t } = useTranslation('sales');
   const isEdit = Boolean(editTarget?.id);
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [date, setDate] = useState(today);
   const [channel, setChannel] = useState('Lainnya');

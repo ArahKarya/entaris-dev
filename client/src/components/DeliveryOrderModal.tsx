@@ -28,6 +28,7 @@ import { WarehouseSelect } from '@/components/sales-a/WarehouseSelect';
 import { cap } from '@/lib/permissions';
 
 import { addNoteRows, fillIfEmpty, removeNoteRows, rowsFromNote, type SjsLinkable } from '@/lib/sjsPrefill';
+import { todayLocal } from '@/lib/date';
 
 const UNITS = ['Kg', 'Ton', 'Sak', 'Liter', 'Pcs', 'Box', 'Unit', 'Set', 'Meter'];
 
@@ -83,7 +84,7 @@ interface Props {
 
 const DeliveryOrderModal: React.FC<Props> = ({ onClose, editDO }) => {
   const { t } = useTranslation('sales');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const isEdit = !!editDO;
 
   const [date, setDate] = useState(() => editDO ? editDO.date.slice(0, 10) : today);

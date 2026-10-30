@@ -7,6 +7,7 @@ import { ArrowLeft, Printer, Download } from 'lucide-react';
 import PDFDownloadButton from '../PDFDownloadButton';
 import ReportTableSkeleton from './ReportTableSkeleton';
 import { useCompanySettings } from '../../contexts/CompanySettingsContext';
+import { todayLocal } from '@/lib/date';
 
 // Date Filters
 
@@ -37,7 +38,7 @@ function formatPeriodLabel(filter?: DateFilter): string {
   if (filter.mode === 'single') {
     return i18n.t('reportLayout.asOf', { ns: 'reports', date: filter.date });
   }
-  return i18n.t('reportLayout.asOf', { ns: 'reports', date: new Date().toISOString().slice(0, 10) });
+  return i18n.t('reportLayout.asOf', { ns: 'reports', date: todayLocal() });
 }
 
 interface ReportLayoutProps {

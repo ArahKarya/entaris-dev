@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Field, LoadingState, PageHeader, StatCard } from '@/components/shared';
 import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField';
+import { todayLocal } from '@/lib/date';
 
 interface OpnameItem {
   id: string;
@@ -36,7 +37,7 @@ interface Props {
 
 export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
   const { t } = useTranslation('inventory');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayLocal());
   const [warehouseId, setWarehouseId] = useState('');
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');

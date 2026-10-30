@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DateInput, Field, type ComboboxOption } from '@/components/shared';
 import { FormError, OverlayBody, OverlayFooter, OverlayHeader } from './sales/dialog-parts-b';
 import { dialogShellClass } from './sales/dialog-classes-b';
+import { todayLocal } from '@/lib/date';
 
 const UNITS = ['Kg', 'Ton', 'Sak', 'Liter', 'Pcs', 'Box', 'Unit', 'Set', 'Meter'];
 
@@ -30,7 +31,7 @@ interface Props {
 const TemporaryDeliveryNoteModal: React.FC<Props> = ({ onClose, editNote }) => {
   const { t } = useTranslation('sales');
   const isEdit = !!editNote;
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const queryClient = useQueryClient();
 
   const [date, setDate] = useState(() => (editNote ? String(editNote.date).slice(0, 10) : today));

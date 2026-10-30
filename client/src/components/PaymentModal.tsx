@@ -16,6 +16,7 @@ import { usePartyPicker } from '@/hooks/usePartyPicker';
 import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
 import AttachmentUpload from './AttachmentUpload';
 import AttachmentPreview from './AttachmentPreview';
+import { todayLocal } from '@/lib/date';
 
 type PaymentType = 'Receive' | 'Pay' | 'VendorRefund' | 'CustomerRefund';
 
@@ -27,7 +28,7 @@ interface PaymentModalProps {
 
 const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, defaultType = 'Receive' }) => {
   const { t } = useTranslation('finance');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const [paymentType, setPaymentType] = useState<PaymentType>(defaultType);
   const [date, setDate] = useState(today);
@@ -50,7 +51,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, defaultTyp
   useEffect(() => {
     if (isOpen) {
       setPaymentType(defaultType);
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(todayLocal());
       setPartyId('');
       setAmount('');
       setAccountId('');
