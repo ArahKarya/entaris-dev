@@ -1251,12 +1251,11 @@ Aturan wajib:
 
 ### stf_cancel
 
-**Ringkasan:** Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Catatan: tidak ada pengecekan stok tujuan cukup, sehingga bisa membuat saldo gudang tujuan negatif.
+**Ringkasan:** Membatalkan Transfer Stok: stok dikembalikan ke gudang asal dan dikurangi dari gudang tujuan, pergerakan terkait ditandai batal, status menjadi Cancelled. Ditolak bila batch TransferIn sudah dipakai pergerakan lain (sourceMovementId) atau stok gudang tujuan kurang dari qty transfer. Butuh capability doc.cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin, Accountant, StaffProduksi (modul `stock_transfer` / `edit`)
-- **Catatan akses:** Tidak butuh capability doc.cancel - cukup izin edit modul stock_transfer.
+- **Roles & izin:** Admin, Accountant (modul `stock_transfer` / `edit`, capability `doc.cancel`)
 - **Handler:** `PATCH /api/stock-transfers/:id/cancel` (src/routes/stockTransfers.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1265,6 +1264,8 @@ Aturan wajib:
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | UUID transfer. |
+| `allowNegativeStock` | body | `boolean` | tidak | Paksa batal walau stok gudang tujuan jadi minus. Butuh capability inventory.negative_stock dan negativeStockReason minimal 10 karakter. Tidak melewati penolakan batch terpakai. |
+| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus (wajib bila allowNegativeStock). |
 
 **Contoh pemanggilan**
 
@@ -1291,19 +1292,24 @@ Aturan wajib:
 
 **Isi hasil:** Transfer dengan status Cancelled.
 
-**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL.
+**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).
 
 **Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.
 
 **Prasyarat**
 
 - Tahun buku tanggal transfer masih terbuka.
+- User memiliki capability doc.cancel.
+- Barang yang diterima gudang tujuan belum dipakai.
 
 **Error umum**
 
 - 400: transfer sudah dibatalkan
 - 404: transfer tidak ditemukan
+- 400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu
+- 400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock
 
 **Tool terkait:** [`stf_get`](#stf_get)
 

@@ -1558,12 +1558,11 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 ### vdep_cancel
 
-**Ringkasan:** Membatalkan uang muka vendor: jurnal pembukuan dibalik. Ditolak bila uang muka sudah diaplikasikan ke faktur (batalkan aplikasinya dulu).
+**Ringkasan:** Membatalkan uang muka vendor: jurnal pembukuan dibalik. Ditolak bila uang muka sudah diaplikasikan ke Invoice (batalkan aplikasinya dulu) atau sudah pernah di-refund. Butuh capability doc.cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
-- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`)
-- **Catatan akses:** Hanya butuh izin edit modul vendor_deposit (tidak ada requireCap doc.cancel di endpoint ini, berbeda dengan pembatalan aplikasi uang muka).
+- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)
 - **Handler:** `PATCH /api/vendor-deposits/:id/cancel` (src/routes/vendorDeposits.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1605,6 +1604,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 **Prasyarat**
 
 - Tahun buku dokumen dan jurnalnya masih terbuka.
+- Belum ada refund (refundedAmount = 0).
+- User memiliki capability doc.cancel.
 
 **Error umum**
 
@@ -1612,6 +1613,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu
 - 400: Bukan tipe uang muka vendor
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
+- 403: tanpa capability doc.cancel
 
 **Tool terkait:** [`vdep_apply_cancel`](#vdep_apply_cancel), [`pay_record`](kas-bank.md#pay_record)
 
