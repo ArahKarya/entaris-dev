@@ -2,8 +2,27 @@
 // Pure: the backfill script gathers the facts (link columns, audit rows, templates) and this
 // module applies the rules top-down, first match wins. A NULL source means "not manual", so only
 // confident results should ever be written; low-confidence rows stay NULL for the accountant.
+// Also holds the Journal-menu allowlist: which source types the menu may cancel.
 
-import type { JournalSourceType } from '@prisma/client';
+import { JournalSourceType } from '@prisma/client';
+
+/**
+ * Source types the Journal menu (PATCH /journals/:id/cancel) may cancel: journals a person made
+ * (by hand, by import, from a template or from the cash book), which have no other cancel path.
+ * Everything else, a NULL (unknown legacy) source included, is undone from its source document,
+ * or corrected with a manual reversing journal. Mirrored in client/src/lib/journalSource.ts.
+ */
+export const MENU_CANCELLABLE_SOURCES: ReadonlySet<JournalSourceType> = new Set([
+  JournalSourceType.MANUAL,
+  JournalSourceType.IMPORT,
+  JournalSourceType.RECURRING,
+  JournalSourceType.CASH_BOOK,
+]);
+
+/** True when the Journal menu may cancel a journal with this source type. */
+export function isMenuCancellableSource(sourceType: JournalSourceType | null): boolean {
+  return sourceType !== null && MENU_CANCELLABLE_SOURCES.has(sourceType);
+}
 
 export type ClassifyConfidence = 'high' | 'medium' | 'low';
 

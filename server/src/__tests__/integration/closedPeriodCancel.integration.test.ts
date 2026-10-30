@@ -633,7 +633,7 @@ d('closed fiscal year: guarantees, GA, journal menu and depreciation', () => {
       await close(tx, old);
       const before = await ledgerState(tx, [je.id]);
 
-      expectPeriodClosed(await callRoute(journalsRouter, 'patch', '/:id/cancel', { params: { id: je.id }, userId }));
+      expectPeriodClosed(await callRoute(journalsRouter, 'patch', '/:id/cancel', { params: { id: je.id }, ...(await canceller(tx)) }));
 
       expect(await ledgerState(tx, [je.id])).toEqual(before);
     });
