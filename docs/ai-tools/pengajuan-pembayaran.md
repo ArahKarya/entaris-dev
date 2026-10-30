@@ -192,10 +192,15 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 
 **Teks konfirmasi:** BATALKAN posting Tagihan EAM {kind} {id}?
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: tagihan belum diposting
 - 400: faktur sudah dibayar
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`eambill_pay`](#eambill_pay)
 
@@ -673,11 +678,15 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 
 **Teks konfirmasi:** BATALKAN pembayaran Pengajuan {id}? Jurnal akan di-void. Alasan: {reason}
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: belum dibayar
 - 400: pertanggungjawaban uang muka sudah berjalan
-- 400: tahun buku ditutup
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`payreq_pay`](#payreq_pay)
 
@@ -1253,9 +1262,13 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 
 **Teks konfirmasi:** BATALKAN posting pertanggungjawaban {id}? Alasan: {reason}
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
-- 400: tahun buku jurnal sudah ditutup
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`payreq_settlement_post`](#payreq_settlement_post)
 

@@ -3,6 +3,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { updateBalancesForItems } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
+import { voidJournalInTx } from '../utils/journalCancel';
 
 /**
  * Post EAM vehicle service cost: DR expense (default 6.7) / CR cash-bank (default 1.1.1) or 2.1.1.
@@ -163,7 +164,8 @@ export async function postVehicleServiceJournalInTx(
 }
 
 /**
- * Membatalkan jurnal sebuah service log (soft-cancel, konsisten dgn jalur ERP lain)
+ * Membatalkan jurnal sebuah service log (soft-cancel, konsisten dgn jalur ERP lain; ditolak bila
+ * tahun buku jurnalnya sudah ditutup)
  * lalu melepas tautan di service log agar bisa diposting ulang.
  */
 export async function cancelVehicleServiceJournalInTx(
@@ -183,24 +185,8 @@ export async function cancelVehicleServiceJournalInTx(
   });
   if (!entry) throw new BusinessError('Jurnal tidak ditemukan.');
 
-  if (entry.status !== 'Cancelled') {
-    await updateBalancesForItems(
-      tx,
-      entry.items.map((i) => ({
-        accountId: i.accountId,
-        debit: Number(i.credit),
-        credit: Number(i.debit),
-      })),
-    );
-    await tx.journalEntry.update({
-      where: { id: entry.id },
-      data: { status: 'Cancelled', cancelledAt: new Date() },
-    });
-    await tx.accountingLedgerEntry.updateMany({
-      where: { referenceId: entry.id, isCancelled: false },
-      data: { isCancelled: true },
-    });
-  }
+  // Rejected when the journal's fiscal year is closed; an already cancelled journal is only unlinked.
+  await voidJournalInTx(tx, entry);
 
   await tx.gaVehicleServiceLog.update({
     where: { id: log.id },

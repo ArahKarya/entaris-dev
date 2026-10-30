@@ -14,6 +14,8 @@ export interface AiToolApprovalOutcome {
   docNumber?: string;
   documentType?: string;
   error?: string;
+  /** Error code from the handler (e.g. PERIOD_CLOSED); POST /approvals/requests/:id/approve returns it. */
+  code?: string;
 }
 
 export async function approveQueuedToolCall(
@@ -39,7 +41,7 @@ export async function approveQueuedToolCall(
       data: { status: 'Pending', payload: failed as unknown as Prisma.InputJsonValue },
     });
     logger.warn({ requestId: request.id, error: exec.error }, 'MCP: eksekusi pengajuan AIRA gagal; dikembalikan ke Pending');
-    return { ok: false, error: `Eksekusi gagal: ${exec.error ?? 'tidak diketahui'}` };
+    return { ok: false, error: `Eksekusi gagal: ${exec.error ?? 'tidak diketahui'}`, ...(exec.code ? { code: exec.code } : {}) };
   }
 
   await prisma.approvalRequest.update({

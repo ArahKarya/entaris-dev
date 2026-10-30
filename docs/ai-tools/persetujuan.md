@@ -159,6 +159,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 
 - 400: Pengajuan sudah diproses
 - 400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)
+- 400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get), [`appr_reject`](#appr_reject), [`appr_request_revision`](#appr_request_revision)
 

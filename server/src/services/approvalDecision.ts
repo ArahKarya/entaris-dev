@@ -3,6 +3,7 @@
 
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
+import { BusinessError } from '../utils/errors';
 import { submitPurchaseInvoiceInTx } from './purchaseInvoiceSubmit';
 import { submitProductionRunInTx } from './productionRunSubmit';
 import { submitSalesReturnInTx } from './salesReturnSubmit';
@@ -31,6 +32,8 @@ export interface DecideApprovalResult {
   docNumber?: string;
   documentType?: string;
   error?: string;
+  /** BusinessError code of a failed execution (e.g. PERIOD_CLOSED); the request stays Pending. */
+  code?: string;
 }
 
 /**
@@ -214,6 +217,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Decide
     return { ok: true, status: 'NeedsRevision', documentType: request.documentType };
   } catch (error: any) {
     logger.error({ err: error, requestId, action }, 'decideApproval error');
-    return { ok: false, error: error?.message || 'Gagal memproses keputusan approval.' };
+    const code = error instanceof BusinessError ? error.code : undefined;
+    return { ok: false, error: error?.message || 'Gagal memproses keputusan approval.', ...(code ? { code } : {}) };
   }
 }

@@ -2,7 +2,8 @@
 // Only hand-made journals may be cancelled there. Journals posted by a module (closing,
 // depreciation, stock, deposits, GA, payment requests, guarantees) must be undone from
 // that module, otherwise the source document stays "posted" while its ledger lines vanish.
-// Journals in a closed fiscal year are never cancellable from the menu.
+// Journals in a closed fiscal year are never cancellable from the menu (the route rejects them first
+// with assertPeriodOpen, so the client gets the PERIOD_CLOSED code; the check below is for other callers).
 
 import type { Prisma } from '@prisma/client';
 

@@ -321,10 +321,16 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Teks konfirmasi:** Batalkan pemakaian uang muka (aplikasi {id})?
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: aplikasi tidak ditemukan.
 - 400: aplikasi sudah dibatalkan.
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
 
 ### cdep_balance
 
@@ -411,11 +417,16 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Teks konfirmasi:** Batalkan uang muka pelanggan {id} (jurnal dibalik)?
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.
 - 400: bukan tipe uang muka pelanggan.
 - 400: sudah dibatalkan.
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 ### cdep_list
 
@@ -3677,11 +3688,16 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Teks konfirmasi:** Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: invoice sudah lunas.
 - 400: ada pembayaran teralokasi — batalkan pembayaran dulu.
 - 400: ada alokasi uang muka aktif — batalkan alokasi dulu.
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 ### si_create
 
@@ -4489,10 +4505,15 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.
 - 400: retur sudah dibatalkan.
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 ### sret_create
 

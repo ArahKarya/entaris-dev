@@ -4,6 +4,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { updateBalancesForItems, recalcPartyOutstanding } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
+import { voidJournalInTx } from '../utils/journalCancel';
 
 /**
  * GA/EAM bill posting (vehicle tax, EAM service logs, spare-part MRs). Two paths:
@@ -265,31 +266,18 @@ async function createExpensePurchaseInvoice(
   return { invoice, journalEntry };
 }
 
-/** Soft-cancel JE + balikkan saldo. Dipakai semua jalur pembatalan GA. */
+/**
+ * Soft-cancel JE + balikkan saldo (voidJournalInTx: ditolak bila tahun buku jurnal sudah ditutup).
+ * Dipakai semua jalur pembatalan GA dan Pengajuan Pembayaran.
+ */
 export async function cancelJournalInTx(tx: Tx, journalEntryId: string) {
   const entry = await tx.journalEntry.findUnique({
     where: { id: journalEntryId },
     include: { items: true },
   });
   if (!entry) throw new BusinessError('Jurnal tidak ditemukan.');
-  if (entry.status === 'Cancelled') return entry;
+  if (!(await voidJournalInTx(tx, entry))) return entry;
 
-  await updateBalancesForItems(
-    tx,
-    entry.items.map((i) => ({
-      accountId: i.accountId,
-      debit: Number(i.credit),
-      credit: Number(i.debit),
-    })),
-  );
-  await tx.journalEntry.update({
-    where: { id: entry.id },
-    data: { status: 'Cancelled', cancelledAt: new Date() },
-  });
-  await tx.accountingLedgerEntry.updateMany({
-    where: { referenceId: entry.id, isCancelled: false },
-    data: { isCancelled: true },
-  });
   const partyIds = Array.from(
     new Set(entry.items.map((i) => i.partyId).filter((p): p is string => !!p)),
   );

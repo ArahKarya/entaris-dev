@@ -944,6 +944,12 @@
       "confirm_template": "BATALKAN jurnal log servis {sid} kendaraan {id}. Setujui?",
       "related": [
         "ga_veh_post_service_journal"
+      ],
+      "errors": [
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -13307,7 +13313,11 @@
       "errors": [
         "400: deposit sudah digunakan untuk faktur — batalkan penggunaan dulu.",
         "400: bukan tipe uang muka pelanggan.",
-        "400: sudah dibatalkan."
+        "400: sudah dibatalkan.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -15310,13 +15320,14 @@
       "postingEffect": "Membalik saldo akun & saldo pihak; efek samping aplikasi uang muka/refund pelanggan yang ditautkan ikut dibalik. Tidak ada efek stok. Catatan kode: tidak ada capability doc.cancel pada endpoint ini.",
       "confirm_template": "Batalkan (reverse) jurnal {id}?",
       "prerequisites": [
-        "Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka."
+        "Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka.",
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ],
       "errors": [
         "404: tidak ditemukan",
         "400: sudah dibatalkan",
         "400: jurnal terkait pembayaran/dokumen sumber",
-        "400: tahun buku sudah ditutup",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)"
       ],
       "related": [
@@ -15429,11 +15440,15 @@
       "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
       "errors": [
         "400: Uang jaminan sudah dibatalkan",
-        "400: Sudah ada settlement aktif - batalkan settlement dulu"
+        "400: Sudah ada settlement aktif - batalkan settlement dulu",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pg_settlement_cancel",
         "pg_create"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -15971,11 +15986,15 @@
       "errors": [
         "400: Deposit sudah dibatalkan",
         "400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu",
-        "400: Bukan tipe uang muka vendor"
+        "400: Bukan tipe uang muka vendor",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "vdep_apply_cancel",
         "pay_record"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -16095,7 +16114,8 @@
       ],
       "errors": [
         "400: Pengajuan sudah diproses",
-        "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)"
+        "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
+        "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending"
       ],
       "related": [
         "appr_request_get",
@@ -16811,7 +16831,12 @@
       "confirm_template": "Batalkan pemakaian uang muka (aplikasi {id})?",
       "errors": [
         "400: aplikasi tidak ditemukan.",
-        "400: aplikasi sudah dibatalkan."
+        "400: aplikasi sudah dibatalkan.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -17430,11 +17455,16 @@
       "confirm_template": "Posting penyusutan jadwal {entryId} untuk aset {id}?",
       "errors": [
         "404: jadwal tidak ditemukan",
-        "400: depresiasi sudah diposting"
+        "400: depresiasi sudah diposting",
+        "400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup",
+        "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat"
       ],
       "related": [
         "fa_get",
         "fa_depreciate_bulk"
+      ],
+      "prerequisites": [
+        "Tahun buku untuk periode penyusutan ada dan masih terbuka."
       ]
     },
     {
@@ -17542,6 +17572,13 @@
       "related": [
         "fa_depreciate",
         "fa_list"
+      ],
+      "errors": [
+        "400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup",
+        "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat"
+      ],
+      "prerequisites": [
+        "Tahun buku untuk periode penyusutan ada dan masih terbuka."
       ]
     },
     {
@@ -22490,10 +22527,13 @@
       "errors": [
         "400: belum dibayar",
         "400: pertanggungjawaban uang muka sudah berjalan",
-        "400: tahun buku ditutup"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "payreq_pay"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -22806,10 +22846,13 @@
       "confirm_template": "BATALKAN posting pertanggungjawaban {id}? Alasan: {reason}",
       "accessNote": "Keuangan.",
       "errors": [
-        "400: tahun buku jurnal sudah ditutup"
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "payreq_settlement_post"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -23176,10 +23219,14 @@
       "accessNote": "Hanya Keuangan: izin payment_request edit pada seluruh endpoint /payment-requests/eam.",
       "errors": [
         "400: tagihan belum diposting",
-        "400: faktur sudah dibayar"
+        "400: faktur sudah dibayar",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "eambill_pay"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -23544,12 +23591,16 @@
       "errors": [
         "400: Pembayaran sudah dibatalkan",
         "400: Gunakan endpoint Uang Muka untuk membatalkan deposit",
-        "400: Refund belum mendukung cancel otomatis"
+        "400: Refund belum mendukung cancel otomatis",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pay_get",
         "vdep_cancel",
         "pi_cancel"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -23797,11 +23848,15 @@
       "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
       "errors": [
         "400: Settlement sudah dibatalkan",
-        "400: Uang jaminan induk sudah dibatalkan"
+        "400: Uang jaminan induk sudah dibatalkan",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pg_get",
         "pg_settle"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -24446,12 +24501,16 @@
         "400: Invoice sudah dibatalkan",
         "400: Invoice sudah lunas",
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
-        "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu"
+        "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
       ],
       "related": [
         "pay_cancel",
         "vdep_apply_cancel",
         "gr_cancel"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -24522,11 +24581,14 @@
       "confirm_template": "Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?",
       "prerequisites": [
         "PI berstatus Submitted/Paid (belum dibatalkan)",
-        "Tidak ada permintaan revisi Pending untuk PI yang sama"
+        "Tidak ada permintaan revisi Pending untuk PI yang sama",
+        "Tahun buku untuk tanggal revisi (hari ini) ada dan terbuka; jurnal revisi masuk tahun buku tanggal itu, invoice dari tahun tertutup tetap boleh direvisi."
       ],
       "errors": [
         "409: sudah ada pengajuan Pending untuk dokumen ini",
-        "400: alasan minimal 10 karakter"
+        "400: alasan minimal 10 karakter",
+        "400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup",
+        "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat"
       ],
       "related": [
         "pi_get",
@@ -25814,7 +25876,11 @@
       "confirm_template": "Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
-        "400: retur sudah dibatalkan."
+        "400: retur sudah dibatalkan.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -26104,7 +26170,11 @@
       "errors": [
         "400: invoice sudah lunas.",
         "400: ada pembayaran teralokasi — batalkan pembayaran dulu.",
-        "400: ada alokasi uang muka aktif — batalkan alokasi dulu."
+        "400: ada alokasi uang muka aktif — batalkan alokasi dulu.",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {
@@ -26938,11 +27008,16 @@
       "accessNote": "Butuh capability doc.cancel (default hanya Admin).",
       "errors": [
         "400: Aplikasi uang muka tidak ditemukan",
-        "400: Aplikasi sudah dibatalkan"
+        "400: Aplikasi sudah dibatalkan",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku"
       ],
       "related": [
         "vdep_apply",
         "pi_get"
+      ],
+      "prerequisites": [
+        "Tahun buku dokumen dan jurnalnya masih terbuka."
       ]
     },
     {

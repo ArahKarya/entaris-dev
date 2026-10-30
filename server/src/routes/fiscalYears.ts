@@ -62,6 +62,9 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
 
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Waits for postings and cancels that passed assertPeriodOpen (FOR SHARE) to commit, and
+      // makes later ones wait for this close, so the sums below see every committed change.
+      await tx.$queryRaw`SELECT id FROM fiscal_years WHERE id = ${id} FOR UPDATE`;
       const year = await tx.fiscalYear.findUnique({ where: { id } });
       if (!year) throw new BusinessError('Tahun buku tidak ditemukan.');
       if (year.isClosed) throw new BusinessError('Tahun buku sudah ditutup.');
@@ -197,6 +200,8 @@ router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, re
 
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Same row lock as the close; see POST /:id/close.
+      await tx.$queryRaw`SELECT id FROM fiscal_years WHERE id = ${fyId} FOR UPDATE`;
       const year = await tx.fiscalYear.findUnique({ where: { id: fyId } });
       if (!year) throw new BusinessError('Tahun buku tidak ditemukan.');
       if (!year.isClosed) throw new BusinessError('Tahun buku belum ditutup.');

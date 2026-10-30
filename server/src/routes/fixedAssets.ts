@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import { validateBody } from '../utils/validate';
+import { handleRouteError } from '../utils/errors';
+import { assertPeriodOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
 import Decimal from 'decimal.js';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import { businessDayRange, businessMonthRange, businessToday } from '../utils/businessDate';
@@ -276,10 +278,8 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
     const asset = entry.fixedAsset;
 
     const result = await prisma.$transaction(async (tx) => {
-      const fiscalYear = await tx.fiscalYear.findFirst({
-        where: { startDate: { lte: entry.periodDate }, endDate: { gte: entry.periodDate } },
-      });
-      if (!fiscalYear) throw new Error('Tahun buku tidak ditemukan.');
+      // Year by business day of the period; a closed or missing year is a 400 with its code.
+      const fiscalYear = await assertPeriodOpen(tx, { date: entry.periodDate }, 'penyusutan');
 
       // Generate journal entry number
       const count = await tx.journalEntry.count();
@@ -349,8 +349,7 @@ router.post('/:id/depreciate', async (req: AuthRequest, res) => {
 
     res.json({ success: true, journalEntryId: result.id });
   } catch (error) {
-    logger.error(error, 'POST /fixed-assets/:id/depreciate error');
-    res.status(500).json({ error: 'Gagal posting depresiasi.' });
+    return handleRouteError(res, error, 'POST /fixed-assets/:id/depreciate', 'Gagal posting depresiasi.');
   }
 });
 
@@ -420,7 +419,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
     }
 
     // Fiscal year covering the whole business month (first and last day); a month split by a
-    // fiscal-year boundary is refused. Closed years are not filtered here.
+    // fiscal-year boundary is refused. A closed year is rejected inside the transaction.
     const firstDay = businessDayRange(period.firstDay);
     const lastDay = businessDayRange(period.lastDay);
     const fiscalYear = await prisma.fiscalYear.findFirst({
@@ -430,6 +429,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
     if (!fiscalYear) {
       return res.status(400).json({
         error: `Tahun buku untuk ${yy}-${String(mm).padStart(2, '0')} tidak ditemukan.`,
+        code: FISCAL_YEAR_MISSING,
       });
     }
 
@@ -437,6 +437,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
     const userId = req.user!.userId;
 
     const result = await prisma.$transaction(async (tx) => {
+      await assertPeriodOpen(tx, { fiscalYearId: fiscalYear.id }, 'penyusutan');
       // Pull starting JE number once, increment locally to avoid N round-trips
       const startCount = await tx.journalEntry.count();
       const jeNumbers: string[] = [];
@@ -512,8 +513,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       message: `Berhasil post ${result.posted} entry depresiasi (${result.posted} jurnal) untuk periode ${yy}-${String(mm).padStart(2, '0')}.`,
     });
   } catch (error) {
-    logger.error(error, 'POST /fixed-assets/depreciate-bulk error');
-    return res.status(500).json({ error: 'Gagal posting depresiasi bulk.' });
+    return handleRouteError(res, error, 'POST /fixed-assets/depreciate-bulk', 'Gagal posting depresiasi bulk.');
   }
 });
 

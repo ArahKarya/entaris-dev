@@ -818,11 +818,16 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: Pembayaran sudah dibatalkan
 - 400: Gunakan endpoint Uang Muka untuk membatalkan deposit
 - 400: Refund belum mendukung cancel otomatis
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`pay_get`](#pay_get), [`vdep_cancel`](pembelian.md#vdep_cancel), [`pi_cancel`](pembelian.md#pi_cancel)
 
@@ -1176,10 +1181,15 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Teks konfirmasi:** Batalkan uang jaminan {id}? Jurnal setoran akan dibalik.
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: Uang jaminan sudah dibatalkan
 - 400: Sudah ada settlement aktif - batalkan settlement dulu
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`pg_settlement_cancel`](#pg_settlement_cancel), [`pg_create`](#pg_create)
 
@@ -1455,10 +1465,15 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Teks konfirmasi:** Batalkan settlement uang jaminan {id}? Jurnal akan dibalik.
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: Settlement sudah dibatalkan
 - 400: Uang jaminan induk sudah dibatalkan
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`pg_get`](#pg_get), [`pg_settle`](#pg_settle)
 

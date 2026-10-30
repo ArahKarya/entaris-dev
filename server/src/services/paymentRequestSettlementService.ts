@@ -12,6 +12,7 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { BusinessError } from '../utils/errors';
 import type { PaymentRequestSettlementDraftSchema } from '../utils/schemas';
 import { cancelJournalInTx } from './gaFinance';
@@ -262,8 +263,9 @@ export async function cancelSettlementPostingInTx(tx: Tx, id: string, actor: Act
   const pr = await loadRequest(tx, id);
   assertOk(checkCancelSettlementPosting(pr, actor));
   if (pr.settlementJournalId) {
-    const je = await tx.journalEntry.findUnique({ where: { id: pr.settlementJournalId }, select: { fiscalYear: { select: { isClosed: true } } } });
-    if (je?.fiscalYear.isClosed) throw new BusinessError('Tahun buku jurnal pertanggungjawaban sudah ditutup; posting tidak bisa dibatalkan.');
+    // Checked before the claim so a closed year leaves the settlement untouched (cancelJournalInTx checks again).
+    const je = await tx.journalEntry.findUnique({ where: { id: pr.settlementJournalId }, select: { fiscalYearId: true } });
+    if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
   }
   await claimSettlement(tx, id, ['SETTLED'], {
     settlementStatus: 'PENDING_FINANCE',

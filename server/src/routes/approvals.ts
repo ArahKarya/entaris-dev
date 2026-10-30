@@ -281,7 +281,7 @@ router.post('/requests/:id/approve', requireCap('approval.decide'), async (req: 
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error });
+  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -293,7 +293,7 @@ router.post('/requests/:id/reject', requireCap('approval.decide'), async (req: A
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error });
+  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -306,7 +306,7 @@ router.post('/requests/:id/request-revision', requireCap('approval.decide'), asy
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error });
+  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 

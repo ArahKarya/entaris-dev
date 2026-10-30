@@ -93,4 +93,65 @@ d('assertPeriodOpen', () => {
       expect((await assertPeriodOpen(tx, { date: new Date('2095-12-31T18:00:00Z') }, 'invoice')).id).toBe(open.id);
     });
   });
+
+  describe('row lock against a concurrent year close', () => {
+    // These need committed rows on two connections, so the year is created for real and deleted after.
+    async function withCommittedYear(year: number, fn: (fyId: string) => Promise<void>) {
+      const fy = await createFiscalYear(prisma as unknown as Tx, { year });
+      try {
+        await fn(fy.id);
+      } finally {
+        await prisma.fiscalYear.delete({ where: { id: fy.id } });
+      }
+    }
+
+    it('waits for a close in progress and then reports PERIOD_CLOSED', async () => {
+      await withCommittedYear(2096, async (fyId) => {
+        const closer = await pool.connect();
+        try {
+          // What POST /fiscal-years/:id/close does first, then the flag it commits at the end.
+          await closer.query('BEGIN');
+          await closer.query('SELECT id FROM fiscal_years WHERE id = $1 FOR UPDATE', [fyId]);
+          await closer.query('UPDATE fiscal_years SET is_closed = true WHERE id = $1', [fyId]);
+
+          let settled = false;
+          const guard = codeOf(prisma.$transaction((tx) => assertPeriodOpen(tx, { fiscalYearId: fyId }, 'invoice'))).finally(() => {
+            settled = true;
+          });
+          await new Promise((r) => setTimeout(r, 300));
+          expect(settled).toBe(false);
+
+          await closer.query('COMMIT');
+          expect(await guard).toBe(PERIOD_CLOSED);
+        } finally {
+          await closer.query('ROLLBACK').catch(() => undefined);
+          closer.release();
+        }
+      });
+    });
+
+    it('holds a share lock until its transaction ends, so a close cannot start meanwhile', async () => {
+      await withCommittedYear(2097, async (fyId) => {
+        let release!: () => void;
+        const held = new Promise<void>((r) => { release = r; });
+        let locked!: () => void;
+        const isLocked = new Promise<void>((r) => { locked = r; });
+        const cancel = prisma.$transaction(async (tx) => {
+          await assertPeriodOpen(tx, { fiscalYearId: fyId }, 'invoice');
+          locked();
+          await held;
+        });
+
+        const closer = await pool.connect();
+        try {
+          await isLocked;
+          await expect(closer.query('SELECT id FROM fiscal_years WHERE id = $1 FOR UPDATE NOWAIT', [fyId])).rejects.toMatchObject({ code: '55P03' });
+        } finally {
+          release();
+          await cancel;
+          closer.release();
+        }
+      });
+    });
+  });
 });

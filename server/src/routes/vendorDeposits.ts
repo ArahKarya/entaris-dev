@@ -9,6 +9,8 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
 import { ApplyVendorDepositSchema, RefundVendorDepositSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
+import { voidJournalInTx } from '../utils/journalCancel';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
@@ -183,6 +185,8 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
+      await tx.$queryRaw`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`;
       const deposit = await tx.payment.findUnique({
         where: { id },
         include: {
@@ -199,23 +203,14 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
         throw new BusinessError('Deposit sudah digunakan untuk invoice. Batalkan penggunaan terlebih dahulu.');
       }
 
+      // The journal's year when there is one; legacy deposits without a journal use their own.
+      await assertPeriodOpen(tx, { fiscalYearId: deposit.journalEntry?.fiscalYearId ?? deposit.fiscalYearId }, 'uang muka');
+
       const depositAmount = Number(deposit.amount);
 
-      // Reverse journal entry balances
+      // Void the journal in place (JE Cancelled, ALE isCancelled, balances reversed per item).
       if (deposit.journalEntry) {
-        for (const item of deposit.journalEntry.items) {
-          await updateAccountBalance(tx, item.accountId, item.credit, item.debit);
-        }
-        await tx.journalEntry.update({
-          where: { id: deposit.journalEntry.id },
-          data: { status: 'Cancelled', cancelledAt: new Date() },
-        });
-        // Soft-cancel original ALE rows. Mirrored [BATAL] rows next to live originals would
-        // double ALE DR/CR totals and break the ALE vs JournalItem sync health check.
-        await tx.accountingLedgerEntry.updateMany({
-          where: { referenceId: deposit.journalEntry.id, isCancelled: false },
-          data: { isCancelled: true },
-        });
+        await voidJournalInTx(tx, deposit.journalEntry, 'uang muka');
       } else {
         // No linked journal (legacy imports) — reverse account balances directly
         const vendorDepositAccount = await systemAccounts.getAccount('VENDOR_DEPOSIT');
@@ -378,8 +373,11 @@ router.post('/apply', async (req: AuthRequest, res) => {
 router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   try {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const applicationId = req.params.id as string;
+      // Row lock: a second concurrent cancel waits here, then sees isCancelled.
+      await tx.$queryRaw`SELECT id FROM vendor_deposit_applications WHERE id = ${applicationId} FOR UPDATE`;
       const application = await tx.vendorDepositApplication.findUnique({
-        where: { id: req.params.id as string },
+        where: { id: applicationId },
         include: {
           depositPayment: true,
           purchaseInvoice: { include: { supplier: true } },
@@ -392,21 +390,12 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
       const applyAmount = new Decimal(application.appliedAmount.toString());
       const applyAmountNum = applyAmount.toNumber();
 
-      // Cancel journal entry
+      // Void the application journal; rejected when its fiscal year (the apply date's) is closed.
+      // Legacy applications without a journal are checked against the apply date's year.
       if (application.journalEntry) {
-        await tx.journalEntry.update({
-          where: { id: application.journalEntry.id },
-          data: { status: 'Cancelled', cancelledAt: new Date() },
-        });
-        await tx.accountingLedgerEntry.updateMany({
-          where: { referenceId: application.journalEntry.id },
-          data: { isCancelled: true },
-        });
-
-        // Reverse account balances from journal items
-        for (const item of application.journalEntry.items) {
-          await updateAccountBalance(tx, item.accountId, item.credit, item.debit);
-        }
+        await voidJournalInTx(tx, application.journalEntry, 'uang muka');
+      } else {
+        await assertPeriodOpen(tx, { date: application.appliedAt }, 'uang muka');
       }
 
       // Restore invoice outstanding

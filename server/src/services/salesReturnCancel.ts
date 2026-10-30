@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
-import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
+import { recalcPartyOutstanding } from '../utils/accountBalance';
+import { voidJournalInTx } from '../utils/journalCancel';
+import { assertPeriodOpen } from '../utils/periodGuard';
 
 type Tx = Prisma.TransactionClient;
 
@@ -13,17 +15,21 @@ type Tx = Prisma.TransactionClient;
  *   - restore the original invoice's outstanding by arReducedAmount
  *   - cancel the linked CustomerDeposit Payment (blocked if already applied)
  *   - recompute party outstanding
+ * Rejected with PERIOD_CLOSED when the return's fiscal year, or a journal's, is closed.
  */
 export async function cancelSalesReturnInTx(
   tx: Tx,
   returnId: string,
 ): Promise<{ id: string; status: 'Cancelled' }> {
+  // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
+  await tx.$queryRaw`SELECT id FROM sales_returns WHERE id = ${returnId} FOR UPDATE`;
   const ret = await tx.salesReturn.findUnique({
     where: { id: returnId },
     include: { salesInvoice: true },
   });
   if (!ret) throw new BusinessError('Retur tidak ditemukan.');
   if (ret.status === 'Cancelled') throw new BusinessError('Retur sudah dibatalkan.');
+  await assertPeriodOpen(tx, { fiscalYearId: ret.fiscalYearId }, 'retur');
 
   // Block if the credit (customer deposit) it created has been applied.
   if (ret.customerDepositId) {
@@ -39,20 +45,9 @@ export async function cancelSalesReturnInTx(
 
   // Reverse main + COGS journals.
   for (const jvNumber of [`JV-${ret.returnNumber}`, `JV-COGS-${ret.returnNumber}`]) {
-    const journal = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber } });
+    const journal = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber }, include: { items: true } });
     if (!journal || journal.status === 'Cancelled') continue;
-    await tx.journalEntry.update({
-      where: { id: journal.id },
-      data: { status: 'Cancelled', cancelledAt: new Date() },
-    });
-    await tx.accountingLedgerEntry.updateMany({
-      where: { referenceId: journal.id, isCancelled: false },
-      data: { isCancelled: true },
-    });
-    const items = await tx.journalItem.findMany({ where: { journalEntryId: journal.id } });
-    for (const ji of items) {
-      await updateAccountBalance(tx, ji.accountId, ji.credit, ji.debit);
-    }
+    await voidJournalInTx(tx, journal, 'retur');
   }
 
   // Cancel stock movements created by this return + decrement stock back.

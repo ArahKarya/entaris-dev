@@ -11,6 +11,7 @@ import { validateBody } from '../utils/validate';
 import { CreateJournalSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { journalMenuCancelBlockReason } from '../services/journalCancelGuard';
+import { assertPeriodOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -201,7 +202,9 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
       });
       if (claimed.count === 0) throw new BusinessError('Jurnal sudah dibatalkan.');
 
-      // Only hand-made journals in an open fiscal year; module journals are undone from their module.
+      // Closed fiscal year first so the client gets the PERIOD_CLOSED code; then only hand-made
+      // journals pass, module journals are undone from their module.
+      await assertPeriodOpen(tx, { fiscalYearId: entry.fiscalYearId }, 'jurnal');
       const blockReason = await journalMenuCancelBlockReason(tx, entry.id);
       if (blockReason) throw new BusinessError(blockReason);
 

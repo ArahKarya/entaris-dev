@@ -2113,6 +2113,14 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 
 **Teks konfirmasi:** BATALKAN jurnal log servis {sid} kendaraan {id}. Setujui?
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
+**Error umum**
+
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+
 **Tool terkait:** [`ga_veh_post_service_journal`](#ga_veh_post_service_journal)
 
 ### ga_veh_cancel_service_req

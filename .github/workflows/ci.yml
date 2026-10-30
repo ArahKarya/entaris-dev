@@ -62,7 +62,10 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run lint
+      # The server program outgrows Node's default heap; the Dockerfile build raises it the same way.
       - run: npx tsc --noEmit
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       # Unit tests only; integration tests run in the `integration` job below.
       - run: npm test
       # Business-day helpers must not depend on the host TZ: rerun them in WIB (runner is UTC).

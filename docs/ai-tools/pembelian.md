@@ -481,12 +481,17 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: Invoice sudah dibatalkan
 - 400: Invoice sudah lunas
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)
 
@@ -794,11 +799,14 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - PI berstatus Submitted/Paid (belum dibatalkan)
 - Tidak ada permintaan revisi Pending untuk PI yang sama
+- Tahun buku untuk tanggal revisi (hari ini) ada dan terbuka; jurnal revisi masuk tahun buku tanggal itu, invoice dari tahun tertutup tetap boleh direvisi.
 
 **Error umum**
 
 - 409: sudah ada pengajuan Pending untuk dokumen ini
 - 400: alasan minimal 10 karakter
+- 400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup
+- 400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat
 
 **Tool terkait:** [`pi_get`](#pi_get), [`pi_cancel`](#pi_cancel)
 
@@ -1493,10 +1501,16 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Teks konfirmasi:** Batalkan aplikasi uang muka {id}? Hutang faktur akan dipulihkan.
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: Aplikasi uang muka tidak ditemukan
 - 400: Aplikasi sudah dibatalkan
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
 
 **Tool terkait:** [`vdep_apply`](#vdep_apply), [`pi_get`](#pi_get)
 
@@ -1586,11 +1600,16 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Teks konfirmasi:** Batalkan uang muka vendor {id}? Jurnal kas/bank terkait akan dibalik.
 
+**Prasyarat**
+
+- Tahun buku dokumen dan jurnalnya masih terbuka.
+
 **Error umum**
 
 - 400: Deposit sudah dibatalkan
 - 400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu
 - 400: Bukan tipe uang muka vendor
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 
 **Tool terkait:** [`vdep_apply_cancel`](#vdep_apply_cancel), [`pay_record`](kas-bank.md#pay_record)
 
