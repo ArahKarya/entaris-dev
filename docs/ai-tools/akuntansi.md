@@ -662,10 +662,16 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Teks konfirmasi:** Posting penyusutan jadwal {entryId} untuk aset {id}?
 
+**Prasyarat**
+
+- Tahun buku untuk periode penyusutan ada dan masih terbuka.
+
 **Error umum**
 
 - 404: jadwal tidak ditemukan
 - 400: depresiasi sudah diposting
+- 400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup
+- 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
 
 **Tool terkait:** [`fa_get`](#fa_get), [`fa_depreciate_bulk`](#fa_depreciate_bulk)
 
@@ -715,6 +721,15 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Efek pembukuan/stok:** Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. dryRun=true: tidak ada efek.
 
 **Teks konfirmasi:** Posting penyusutan massal bulan {month} (dryRun={dryRun})?
+
+**Prasyarat**
+
+- Tahun buku untuk periode penyusutan ada dan masih terbuka.
+
+**Error umum**
+
+- 400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup
+- 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
 
 **Tool terkait:** [`fa_depreciate`](#fa_depreciate), [`fa_list`](#fa_list)
 
@@ -1267,13 +1282,14 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Prasyarat**
 
 - Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka.
+- Tahun buku dokumen dan jurnalnya masih terbuka.
 
 **Error umum**
 
 - 404: tidak ditemukan
 - 400: sudah dibatalkan
 - 400: jurnal terkait pembayaran/dokumen sumber
-- 400: tahun buku sudah ditutup
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)
 
 **Tool terkait:** [`je_get`](#je_get), [`je_create`](#je_create)
