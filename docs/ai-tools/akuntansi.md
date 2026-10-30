@@ -32,7 +32,7 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 | `coa_set_balance` aset/beban naik | akun | Ekuitas Saldo Awal 3.1 | Turun: kebalikannya |
 | `coa_set_balance` kewajiban/ekuitas/pendapatan naik | Ekuitas Saldo Awal 3.1 | akun | Turun: kebalikannya |
 | `fy_close` (laba) | Laba Tahun Berjalan 3.4 | Laba Ditahan 3.2 | Rugi: kebalikannya; saldo berjalan akun pendapatan & beban tahun itu di-nol-kan |
-| `fy_reopen` | Laba Ditahan 3.2 | Laba Tahun Berjalan 3.4 | Membalik jurnal penutup dan mengembalikan saldo pendapatan/beban |
+| `fy_reopen` | (tanpa jurnal baru) | (tanpa jurnal baru) | Jurnal penutup `CLOSE-<nama>` yang aktif dibatalkan, bukan dibalik dan bukan dihapus (status Cancelled beserta alasannya); efeknya pada 3.2 dan 3.4 hilang dan saldo pendapatan/beban kembali. Penutupan berikutnya bernomor `CLOSE-<nama>-R2`, `-R3`, ... |
 | `fa_depreciate` / bulk | Beban Penyusutan (akun aset) | Akumulasi Penyusutan | Jurnal `DEP-…`; nilai buku aset berkurang |
 
 Akun sistem utama (jangan dihapus/diubah; didefinisikan di `constants/accountNumbers.ts`): 1.1.x Kas/Bank, 1.2.1 Piutang Usaha, 1.3 Uang Muka Pembelian, 1.4.0 Persediaan, 1.5.6 Uang Muka Karyawan, 2.1.1 Hutang Usaha, 2.1.5 Hutang Belum Tagih, 3.1 Ekuitas Saldo Awal, 3.2 Laba Ditahan, 3.4 Laba Tahun Berjalan, 4.1 Penjualan, 4.2 Pendapatan Jasa, 5 HPP, 5.11 Selisih Harga Pembelian.
@@ -55,7 +55,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **`je_cancel` pada jurnal otomatis** selalu ditolak (`JOURNAL_NOT_MANUAL`); gunakan pembatalan dokumen asal (faktur, pembayaran, aplikasi/offset uang muka) atau jurnal balik manual untuk jurnal lama tanpa sumber.
 - **`coa_update`** hanya benar-benar menyimpan nomor, nama, status grup, dan aktif. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail.
 - **`coa_delete`** menolak bila ada sub-akun, pemetaan akun sistem, tautan ke item persediaan/jasa, mutasi buku besar, atau saldo bukan nol.
-- **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. `fy_reopen` membalikkannya.
+- **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
 - **`fa_dispose` tidak dapat dibatalkan lewat API** dan tidak menjurnal; sertakan jurnal manual untuk laba/rugi pelepasan dan penghapusan akumulasi penyusutan.
 - **`sysacct_update`** mengubah akun DR/CR semua posting otomatis berikutnya; salah petakan berarti pembukuan salah di seluruh modul.
