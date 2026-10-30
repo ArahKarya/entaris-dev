@@ -14,6 +14,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
+import { createCapUser } from '../helpers/rbacFixture';
 import { BusinessError } from '../../utils/errors';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 
@@ -40,16 +41,15 @@ const d = hasDb ? describe : describe.skip;
 
 let prisma: PrismaClient;
 let pool: Pool;
+/** The acting user and its role, created in each rollback transaction. */
 let userId: string;
+let role: string;
 let warehouseId: string;
 
 beforeAll(async () => {
   if (!hasDb) return;
   pool = new Pool({ connectionString: process.env.DATABASE_URL });
   prisma = new PrismaClient({ adapter: new PrismaPg(pool as any) });
-  const user = await prisma.user.findFirst({ where: { role: 'Admin', isActive: true } });
-  if (!user) throw new Error('No admin user.');
-  userId = user.id;
   const wh = await prisma.warehouse.findFirst({ where: { isActive: true }, orderBy: { code: 'asc' } });
   if (!wh) throw new Error('No active warehouse.');
   warehouseId = wh.id;
@@ -69,6 +69,8 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
     await prisma.$transaction(async (tx) => {
       state.tx = tx;
       try {
+        // Movement edits and cancels and opname cancels require doc.cancel.
+        ({ userId, role } = await createCapUser(tx, ['doc.cancel']));
         await fn(tx);
       } finally {
         state.tx = null;
@@ -177,7 +179,7 @@ async function journalIdsOf(tx: Tx, documentNumber: string): Promise<string[]> {
 
 /** POST /inventory/movements; returns the created movement. */
 async function postMovement(tx: Tx, body: Record<string, unknown>) {
-  const r = await callRoute(movementsRouter, 'post', '/', { body: { warehouseId, ...body }, userId });
+  const r = await callRoute(movementsRouter, 'post', '/', { body: { warehouseId, ...body }, userId, role });
   expect(r.status, JSON.stringify(r.body)).toBe(201);
   return tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } });
 }
@@ -193,7 +195,7 @@ d('closed fiscal year: stock movements', () => {
       await close(tx, old);
 
       const before = await snapshot(tx, [item.id], [mov.journalEntryId!]);
-      expectPeriodClosed(await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: mov.id }, userId }));
+      expectPeriodClosed(await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: mov.id }, userId, role }));
       expect(await snapshot(tx, [item.id], [mov.journalEntryId!])).toEqual(before);
     });
   });
@@ -209,7 +211,7 @@ d('closed fiscal year: stock movements', () => {
       expectPeriodClosed(await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: mov.id },
         body: { movementType: 'AdjustmentOut', quantity: 5_000, unitCost: 10_000, date: `${Y + 1}-01-05` },
-        userId,
+        userId, role,
       }));
       expect(await snapshot(tx, [item.id], [mov.journalEntryId!])).toEqual(before);
     });
@@ -228,7 +230,7 @@ d('closed fiscal year: stock movements', () => {
       expectPeriodClosed(await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: mov.id },
         body: { movementType: 'AdjustmentIn', quantity: 10, unitCost: 0, date: `${Y}-12-20` },
-        userId,
+        userId, role,
       }));
       expect(await snapshot(tx, [item.id], [])).toEqual(before);
     });
@@ -244,7 +246,7 @@ d('closed fiscal year: stock movements', () => {
       const r = await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: mov.id },
         body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-05` },
-        userId,
+        userId, role,
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       const edited = await tx.stockMovement.findUniqueOrThrow({ where: { id: mov.id } });
@@ -268,12 +270,12 @@ d('closed fiscal year: stock movements', () => {
       const r = await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: edited.id },
         body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-10` },
-        userId,
+        userId, role,
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: edited.id } })).fiscalYearId).toBe(next.id);
 
-      const c = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: cancelled.id }, userId });
+      const c = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: cancelled.id }, userId, role });
       expect(c.status, JSON.stringify(c.body)).toBe(200);
       expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: cancelled.id } })).isCancelled).toBe(true);
     });
@@ -287,7 +289,7 @@ d('closed fiscal year: stock opname', () => {
     await tx.stockOpname.updateMany({ where: { status: 'Draft' }, data: { status: 'Cancelled' } });
     const r = await callRoute(stockOpnameRouter, 'post', '/', {
       body: { date: `${Y}-12-20`, warehouseId, items: [{ itemId, actualStock }] },
-      userId,
+      userId, role,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     const so = await tx.stockOpname.findUniqueOrThrow({ where: { id: r.body.id } });
@@ -303,7 +305,7 @@ d('closed fiscal year: stock opname', () => {
       await close(tx, old);
 
       const before = await snapshot(tx, [item.id], jeIds);
-      expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId }));
+      expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId, role }));
       expect(await snapshot(tx, [item.id], jeIds)).toEqual(before);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).not.toBe('Cancelled');
     });
@@ -317,7 +319,7 @@ d('closed fiscal year: stock opname', () => {
       expect(jeIds).toEqual([]);
       await close(tx, old);
 
-      expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId }));
+      expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId, role }));
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).toBe('Submitted');
     });
   });
