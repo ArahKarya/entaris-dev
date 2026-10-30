@@ -964,7 +964,8 @@
       "title": "Cancel journal",
       "description": "Cancel journal {{number}}? The related account balances will be restored. This cannot be undone.",
       "confirm": "Yes, cancel"
-    }
+    },
+    "periodLock": "The period up to {{date}} is locked: journals dated up to that day cannot be created or cancelled."
   },
   "journalDetailDrawer": {
     "loadingTitle": "Loading…",

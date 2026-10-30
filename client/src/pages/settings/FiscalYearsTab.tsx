@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { SettingsCard } from '../../components/settings/SettingsCard';
+import { PeriodLockCard } from '../../components/settings/PeriodLockCard';
 
 interface FiscalYear {
   id: string;
@@ -160,6 +161,9 @@ export const FiscalYearsTab: React.FC = () => {
           </ul>
         )}
       </SettingsCard>
+
+      {/* GET /period-lock is behind the journal right; the form inside needs period.lock. */}
+      {can('journal') && <PeriodLockCard />}
 
       <ConfirmDialog
         open={confirmClose !== null}
