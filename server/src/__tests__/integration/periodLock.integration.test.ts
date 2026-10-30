@@ -31,6 +31,7 @@ import { PERIOD_LOCK_NOT_PAST, PERIOD_LOCK_REASON_REQUIRED, setPeriodLockInTx } 
 import periodLockRouter from '../../routes/periodLock';
 import quotationsRouter from '../../routes/quotations';
 import fixedAssetsRouter from '../../routes/fixedAssets';
+import dummyDataRouter from '../../routes/settings/dummyData';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -234,6 +235,23 @@ d('period lock: postings and cancels', () => {
       expect(await tx.depreciationEntry.findUniqueOrThrow({ where: { id: entry.id } })).toMatchObject({ isPosted: true });
     });
   });
+
+  it('generate-dummy skips the lock: demo data dated in the locked months is still created', async () => {
+    await inRollback(async (tx) => {
+      // The route refuses to run while demo data exists; hide any (rolled back with the rest).
+      await tx.party.updateMany({ where: { isDummy: true }, data: { isDummy: false } });
+      const year = await createFiscalYear(tx, { year: Y });
+      clockAt(`${Y}-06-15T03:00:00Z`);
+      expect((await lockAt(tx, `${Y}-05-31`)).status).toBe(200);
+
+      const r = await callRoute(dummyDataRouter, 'post', '/generate-dummy', { userId: adminId, role: 'Admin' });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      // Stock movements before June (opening stock on 1 April, April and May runs) are in the locked window.
+      const opening = await tx.stockMovement.count({ where: { fiscalYearId: year.id, date: { lt: new Date(`${Y}-06-01`) } } });
+      expect(opening).toBeGreaterThan(0);
+      expect(await lockRow(tx)).toBe(`${Y}-05-31`);
+    });
+  }, 60000);
 });
 
 d('period lock: PUT /period-lock', () => {

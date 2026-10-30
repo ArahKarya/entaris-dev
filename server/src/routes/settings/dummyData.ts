@@ -393,7 +393,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
 
       if (gkpItem && gkgItem && berasPrm) {
         const genSM = generateDocumentNumber;
-        const getFY = getOpenFiscalYear;
+        const getFY = (t: typeof tx, date: Date) => getOpenFiscalYear(t, date, DEMO_FY);
 
         // Opening stock (saldo awal) for newly created dummy items — recorded as
         // movements + per-warehouse rows, never by writing currentStock directly.
