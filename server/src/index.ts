@@ -40,6 +40,7 @@ import chatHistoryRoutes from './routes/chatHistory';
 import mcpRouter from './mcp/router';
 import settingsRoutes from './routes/settings';
 import fiscalYearRoutes from './routes/fiscalYears';
+import periodLockRoutes from './routes/periodLock';
 import inventoryRoutes from './routes/inventory';
 import searchRoutes from './routes/search';
 import usersRoutes from './routes/users';
@@ -212,6 +213,8 @@ app.use('/api/coa', requireWrite('coa'), coaRoutes);
 app.use('/api/parties', requireWrite('parties'), partyRoutes);
 app.use('/api/warehouses', requireWrite('warehouse'), warehouseRoutes);
 app.use('/api/fiscal-years', requireWrite('settings'), fiscalYearRoutes);
+// Monthly lock: journal rights plus period.lock on PUT (in the file); not behind the settings gate.
+app.use('/api/period-lock', requirePerm('journal'), periodLockRoutes);
 app.use('/api/tax', requireWrite('settings'), taxRoutes);
 app.use('/api/system-accounts', requireWrite('settings'), systemAccountRoutes);
 app.use('/api/service-items', requireWrite('sales_invoice'), serviceItemRoutes);
