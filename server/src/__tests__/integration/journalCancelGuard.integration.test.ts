@@ -3,7 +3,8 @@
  *
  * Only hand-made journals in an open fiscal year are cancellable there. Closing, depreciation
  * and document-derived journals, journals in a closed year, and deposit-module journals the
- * menu cannot unwind must be undone from their own module.
+ * menu cannot unwind must be undone from their own module; deposit refunds from the refund cancel
+ * on the deposit page.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -108,7 +109,6 @@ d('journalMenuCancelBlockReason', () => {
     'Aplikasi Uang Muka Pelanggan: PAY-1 → SI-1',
     'Aplikasi Uang Muka: PAY-2 → PI-2',
     'Offset UM Vendor: PAY-3 → PI-3',
-    'Refund UM Vendor: PAY-4 - PT A',
   ])('blocks deposit-module journal "%s"', async (narration) => {
     await inRollback(async (tx) => {
       const fy = await fiscalYear(tx, false);
@@ -143,11 +143,24 @@ d('journalMenuCancelBlockReason', () => {
     });
   });
 
-  it('still allows customer refund/offset journals, which the menu unwinds itself', async () => {
+  it('still allows customer offset journals, which the menu unwinds itself', async () => {
     await inRollback(async (tx) => {
       const fy = await fiscalYear(tx, false);
-      const je = await journal(tx, fy.id, `JV-209903-${uniq()}`, 'Refund UM Pelanggan: PAY-5 - PT B');
+      const je = await journal(tx, fy.id, `JV-209903-${uniq()}`, 'Offset UM Pelanggan: PAY-5 → SI-5');
       expect(await journalMenuCancelBlockReason(tx, je.id)).toBeNull();
+    });
+  });
+
+  it.each([
+    ['a customer refund by narration', 'Refund UM Pelanggan: PAY-6 - PT B', null],
+    ['a supplier refund by narration', 'Refund UM Vendor: PAY-7 - PT C', null],
+    ['a refund tagged DEPOSIT_REFUND', 'Pengembalian uang muka', 'DEPOSIT_REFUND'],
+  ] as const)('points %s to the deposit page refund cancel', async (_label, narration, sourceType) => {
+    await inRollback(async (tx) => {
+      const fy = await fiscalYear(tx, false);
+      const je = await journal(tx, fy.id, `JV-209903-${uniq()}`, narration);
+      if (sourceType) await tx.journalEntry.update({ where: { id: je.id }, data: { sourceType } });
+      expect(await journalMenuCancelBlockReason(tx, je.id)).toMatch(/Batalkan refund/);
     });
   });
 });

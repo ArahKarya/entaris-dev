@@ -6,13 +6,14 @@
 // with assertPeriodOpen, so the client gets the PERIOD_CLOSED code; the check below is for other callers).
 
 import type { Prisma } from '@prisma/client';
+import { DEPOSIT_REFUND_MENU_MESSAGE, isDepositRefundJournal } from './depositRefundCancel';
 
 type Tx = Prisma.TransactionClient;
 
 const MODULE_NUMBER_PREFIX = /^(CLOSE|DEP|FA)-/;
 // Manual journals are numbered JV-YYYYMM-NNNN; JV-<letters>… is derived from a source document.
 const DOCUMENT_NUMBER_PREFIX = /^JV-[A-Z]/;
-const MODULE_NARRATION = /^(Aplikasi Uang Muka|Offset UM Vendor:|Refund UM Vendor:)/;
+const MODULE_NARRATION = /^(Aplikasi Uang Muka|Offset UM Vendor:)/;
 // Purchase-invoice price revisions use a plain JV number and no link column.
 const PRICE_REVISION_NARRATION = /^Revisi harga /;
 
@@ -23,6 +24,7 @@ export async function journalMenuCancelBlockReason(tx: Tx, journalId: string): P
     select: {
       entryNumber: true,
       narration: true,
+      sourceType: true,
       fiscalYear: { select: { name: true, isClosed: true } },
       payment: { select: { id: true } },
       stockMovement: { select: { id: true } },
@@ -49,8 +51,11 @@ export async function journalMenuCancelBlockReason(tx: Tx, journalId: string): P
   if (PRICE_REVISION_NARRATION.test(entry.narration ?? '')) {
     return 'Jurnal ini adalah revisi harga invoice pembelian. Membatalkannya dari Buku Besar membuat nilai invoice dan persediaan tidak cocok; buat jurnal koreksi atau revisi harga baru.';
   }
+  if (isDepositRefundJournal(entry)) {
+    return DEPOSIT_REFUND_MENU_MESSAGE;
+  }
   if (MODULE_NARRATION.test(entry.narration ?? '')) {
-    return 'Jurnal ini dibuat dari modul Uang Muka. Batalkan aplikasinya dari modul Uang Muka; untuk refund atau offset uang muka Supplier, buat jurnal koreksi.';
+    return 'Jurnal ini dibuat dari modul Uang Muka. Batalkan aplikasinya dari modul Uang Muka; untuk offset uang muka Supplier, buat jurnal koreksi.';
   }
 
   const linkedToModule =
