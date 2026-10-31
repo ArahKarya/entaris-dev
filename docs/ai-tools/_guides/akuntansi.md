@@ -33,7 +33,7 @@ Yang TIDAK menghasilkan jurnal (sering disangka sebaliknya): `fa_create`, `fa_im
 
 Toolset ini tidak memakai antrian `ApprovalRequest`. Pengamanannya berlapis:
 - Izin modul: `coa`, `journal`, `fixed_assets`, `settings` (edit). Default hanya Admin untuk `coa` dan `settings`; Accountant bisa `journal` dan `fixed_assets`.
-- Capability `doc.cancel` (default hanya Admin) untuk `coa_delete`, `fy_close`, `fy_reopen`, `tax_delete_config`.
+- Capability `doc.cancel` (default Admin dan Akuntan) untuk `coa_delete`, `fy_close_checklist`, `fy_close`, `fy_reopen`, `tax_delete_config`.
 - Capability `period.lock` (default hanya Admin) untuk `period_lock_set`.
 - `sysacct_update` memeriksa role Admin secara eksplisit.
 Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manusia (antrian approval) bila dipanggil agen.
@@ -45,7 +45,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **`je_cancel` pada jurnal otomatis** selalu ditolak (`JOURNAL_NOT_MANUAL`); gunakan pembatalan dokumen asal (faktur, pembayaran, aplikasi/offset uang muka) atau jurnal balik manual untuk jurnal lama tanpa sumber.
 - **`coa_update`** hanya benar-benar menyimpan nomor, nama, status grup, dan aktif. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail.
 - **`coa_delete`** menolak bila ada sub-akun, pemetaan akun sistem, tautan ke item persediaan/jasa, mutasi buku besar, atau saldo bukan nol.
-- **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
+- **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. Panggil `fy_close_checklist` dulu: `fy_close` ditolak dengan `CLOSE_CHECKLIST_FAILED` selama ada butir yang memblokir (tahun sebelumnya masih terbuka, jurnal/invoice/pembayaran Draft di tahun itu, penyusutan bulan-bulan tahun itu belum diposting, ledger tidak seimbang atau tidak sinkron dengan jurnal, akun sistem penutup belum dipetakan). Peringatan (draft lain, surat jalan belum ditagih) tidak memblokir. Selisih ledger lama yang tercatat di baseline saat rilis tidak memblokir selama nominalnya sama; laporkan butir yang memblokir ke pengguna, jangan mencoba menutup ulang. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
 - **`fa_dispose` tidak dapat dibatalkan lewat API** dan tidak menjurnal; sertakan jurnal manual untuk laba/rugi pelepasan dan penghapusan akumulasi penyusutan.
 - **`sysacct_update`** mengubah akun DR/CR semua posting otomatis berikutnya; salah petakan berarti pembukuan salah di seluruh modul.

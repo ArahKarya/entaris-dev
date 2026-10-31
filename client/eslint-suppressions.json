@@ -386,7 +386,7 @@
   },
   "src/pages/settings/FiscalYearsTab.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 3
+      "count": 2
     }
   },
   "src/pages/settings/NotificationsTab.tsx": {

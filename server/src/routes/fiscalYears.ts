@@ -10,6 +10,7 @@ import { assertYearEndNotLocked } from '../utils/periodGuard';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { cancelTrail } from '../utils/cancelClaim';
 import { systemAccounts } from '../services/systemAccounts';
+import { CloseChecklistFailedError, assertCloseChecklistPasses, runCloseChecklist } from '../services/fiscalYearClose';
 import { SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
 import { logger } from '../lib/logger';
 
@@ -116,6 +117,23 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/fiscal-years/:id/close-checklist: what blocks or warns before closing the year (preview;
+// the close runs the same checks again inside its transaction). The mount opens GET to every user,
+// and the checklist names documents, so it needs doc.cancel like the close itself.
+router.get('/:id/close-checklist', requireCap('doc.cancel'), async (req, res) => {
+  const id = req.params.id as string;
+  try {
+    const checklist = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const year = await tx.fiscalYear.findUnique({ where: { id } });
+      if (!year) throw new BusinessError('Tahun buku tidak ditemukan.');
+      return runCloseChecklist(tx, year);
+    }, { timeout: 30000 });
+    return res.json(checklist);
+  } catch (error) {
+    return handleRouteError(res, error, 'GET /fiscal-years/:id/close-checklist', 'Gagal memuat daftar cek tutup buku.');
+  }
+});
+
 // POST /api/fiscal-years (requires settings edit permission)
 router.post('/', async (req, res) => {
   const body = validateBody(CreateFiscalYearSchema, req.body, res);
@@ -150,7 +168,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// POST /api/fiscal-years/:id/close: requires settings edit permission and the doc.cancel capability
+// POST /api/fiscal-years/:id/close: requires settings edit permission and the doc.cancel capability.
+// Refused with CLOSE_CHECKLIST_FAILED (and the checklist) while a blocking check fails.
 router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const userId = req.user!.userId;
@@ -167,6 +186,8 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
 
       const retainedEarningsAccountId = await mappedAccountId('RETAINED_EARNINGS');
       const currentProfitAccountId = await mappedAccountId('CURRENT_PROFIT');
+      // After FOR UPDATE, so nothing the checklist counts can change before this close commits.
+      await assertCloseChecklistPasses(tx, year);
 
       const [revAgg, expAgg] = await Promise.all([
         tx.accountingLedgerEntry.aggregate({
@@ -235,6 +256,9 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
 
     return res.json(result);
   } catch (error: any) {
+    if (error instanceof CloseChecklistFailedError) {
+      return res.status(400).json({ error: error.message, code: error.code, checklist: error.checklist });
+    }
     return handleRouteError(res, error, 'POST /fiscal-years/:id/close', 'Gagal menutup tahun buku.');
   }
 });

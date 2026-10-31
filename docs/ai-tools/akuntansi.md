@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/akuntansi` · 36 tool (read 15, write 8, critical 13)
+Endpoint MCP target: `/mcp/akuntansi` · 37 tool (read 16, write 8, critical 13)
 
 ## Tujuan
 
@@ -43,7 +43,7 @@ Yang TIDAK menghasilkan jurnal (sering disangka sebaliknya): `fa_create`, `fa_im
 
 Toolset ini tidak memakai antrian `ApprovalRequest`. Pengamanannya berlapis:
 - Izin modul: `coa`, `journal`, `fixed_assets`, `settings` (edit). Default hanya Admin untuk `coa` dan `settings`; Accountant bisa `journal` dan `fixed_assets`.
-- Capability `doc.cancel` (default hanya Admin) untuk `coa_delete`, `fy_close`, `fy_reopen`, `tax_delete_config`.
+- Capability `doc.cancel` (default Admin dan Akuntan) untuk `coa_delete`, `fy_close_checklist`, `fy_close`, `fy_reopen`, `tax_delete_config`.
 - Capability `period.lock` (default hanya Admin) untuk `period_lock_set`.
 - `sysacct_update` memeriksa role Admin secara eksplisit.
 Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manusia (antrian approval) bila dipanggil agen.
@@ -55,7 +55,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **`je_cancel` pada jurnal otomatis** selalu ditolak (`JOURNAL_NOT_MANUAL`); gunakan pembatalan dokumen asal (faktur, pembayaran, aplikasi/offset uang muka) atau jurnal balik manual untuk jurnal lama tanpa sumber.
 - **`coa_update`** hanya benar-benar menyimpan nomor, nama, status grup, dan aktif. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail.
 - **`coa_delete`** menolak bila ada sub-akun, pemetaan akun sistem, tautan ke item persediaan/jasa, mutasi buku besar, atau saldo bukan nol.
-- **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
+- **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. Panggil `fy_close_checklist` dulu: `fy_close` ditolak dengan `CLOSE_CHECKLIST_FAILED` selama ada butir yang memblokir (tahun sebelumnya masih terbuka, jurnal/invoice/pembayaran Draft di tahun itu, penyusutan bulan-bulan tahun itu belum diposting, ledger tidak seimbang atau tidak sinkron dengan jurnal, akun sistem penutup belum dipetakan). Peringatan (draft lain, surat jalan belum ditagih) tidak memblokir. Selisih ledger lama yang tercatat di baseline saat rilis tidak memblokir selama nominalnya sama; laporkan butir yang memblokir ke pengguna, jangan mencoba menutup ulang. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
 - **`fa_dispose` tidak dapat dibatalkan lewat API** dan tidak menjurnal; sertakan jurnal manual untuk laba/rugi pelepasan dan penghapusan akumulasi penyusutan.
 - **`sysacct_update`** mengubah akun DR/CR semua posting otomatis berikutnya; salah petakan berarti pembukuan salah di seluruh modul.
@@ -103,6 +103,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | [`fa_summary_by_category`](#fa_summary_by_category) | read | - | `GET /api/fixed-assets/summary/by-category` |
 | [`fa_update`](#fa_update) | write | tidak | `PUT /api/fixed-assets/:id` |
 | [`fy_close`](#fy_close) | critical | tidak | `POST /api/fiscal-years/:id/close` |
+| [`fy_close_checklist`](#fy_close_checklist) | read | - | `GET /api/fiscal-years/:id/close-checklist` |
 | [`fy_create`](#fy_create) | write | tidak | `POST /api/fiscal-years` |
 | [`fy_list`](#fy_list) | read | - | `GET /api/fiscal-years` |
 | [`fy_reopen`](#fy_reopen) | critical | tidak | `POST /api/fiscal-years/:id/reopen` |
@@ -1106,7 +1107,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### fy_close
 
-**Ringkasan:** Tutup buku: menghitung laba/rugi tahun itu dari ledger pendapatan dan beban, memposting jurnal penutup, lalu menandai tahun buku isClosed sehingga tidak ada posting baru pada periode tersebut.
+**Ringkasan:** Tutup buku: menjalankan daftar cek tutup buku (lihat fy_close_checklist) di dalam transaksi, lalu menghitung laba/rugi tahun itu dari ledger pendapatan dan beban, memposting jurnal penutup, dan menandai tahun buku isClosed sehingga tidak ada posting baru pada periode tersebut. Ditolak selama ada butir daftar cek yang memblokir.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1153,15 +1154,67 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - Capability doc.cancel.
 - Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan.
+- Daftar cek tutup buku tanpa butir yang memblokir (cek dulu dengan fy_close_checklist): tahun buku sebelumnya sudah ditutup; tidak ada jurnal, invoice, atau pembayaran Draft bertanggal di tahun ini; penyusutan aset aktif bulan-bulan tahun ini sudah diposting; ledger tahun ini seimbang dan sinkron dengan baris jurnal (selisih lama yang tercatat di baseline dengan nominal sama diabaikan).
 
 **Error umum**
 
+- 400 CLOSE_CHECKLIST_FAILED: daftar cek tutup buku masih memblokir; body memuat `checklist` (sama dengan fy_close_checklist) yang merinci butirnya
 - 400 ACCOUNT_MAPPING_MISSING: akun sistem Laba Tahun Berjalan (CURRENT_PROFIT) atau Laba Ditahan (RETAINED_EARNINGS) belum dipetakan
 - 400: tahun buku sudah ditutup
 - 400: tahun buku tidak ditemukan
 - 403: tanpa capability doc.cancel atau tanpa izin edit modul settings
 
-**Tool terkait:** [`fy_reopen`](#fy_reopen), [`fy_list`](#fy_list)
+**Tool terkait:** [`fy_close_checklist`](#fy_close_checklist), [`fy_reopen`](#fy_reopen), [`fy_list`](#fy_list)
+
+### fy_close_checklist
+
+**Ringkasan:** Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir.
+
+- **Risk / tier:** `read` / Auto
+- **Roles & izin:** Admin, Accountant (modul `settings` / `view`, capability `doc.cancel`)
+- **Catatan akses:** GET di /api/fiscal-years terbuka bagi semua user login, tetapi endpoint ini memerlukan capability doc.cancel karena menyebut dokumen.
+- **Handler:** `GET /api/fiscal-years/:id/close-checklist` (src/routes/fiscalYears.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "fy_close_checklist",
+  "args": {
+    "id": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<{ fiscalYear: { id, name, startDay, endDay, isClosed }, canClose, blocking, warnings, chec>"
+}
+```
+
+**Isi hasil:** { fiscalYear: { id, name, startDay, endDay, isClosed }, canClose, blocking, warnings, checks: [{ id, severity: block|warn, status: ok|fail, count, baselinedCount, items: [{ key, kind, label, date?, amount?, baselined? }] (maks. 50 per cek) }] }.
+
+**Prasyarat**
+
+- Capability doc.cancel.
+
+**Error umum**
+
+- 400: tahun buku tidak ditemukan
+- 403: tanpa capability doc.cancel
+
+**Tool terkait:** [`fy_close`](#fy_close), [`fy_list`](#fy_list)
 
 ### fy_create
 
@@ -1253,7 +1306,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Isi hasil:** Array tahun buku terurut terbaru.
 
-**Tool terkait:** [`fy_close`](#fy_close)
+**Tool terkait:** [`fy_close`](#fy_close), [`fy_close_checklist`](#fy_close_checklist)
 
 ### fy_reopen
 

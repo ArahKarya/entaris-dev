@@ -487,7 +487,7 @@
       "reopenError": "Could not reopen the fiscal year."
     },
     "title": "Accounting Periods",
-    "description": "Closing a year creates a closing journal; reopening deletes it. Both actions require the document cancellation permission.",
+    "description": "Closing a year runs the checklist and then creates a closing journal; reopening cancels it. Both actions require the document cancellation permission.",
     "new": "New Fiscal Year",
     "loading": "Loading fiscal years…",
     "empty": {
@@ -501,6 +501,60 @@
     "closeConfirm": {
       "title": "Close fiscal year {{name}}?",
       "description": "A closing journal will be created and revenue/expense balances will be moved to retained earnings."
+    },
+    "checklist": {
+      "loading": "Checking the year-close checklist…",
+      "loadFailed": "Failed to load the year-close checklist.",
+      "ready": "All checks passed. The fiscal year is ready to close.",
+      "readyWithWarnings_one": "Nothing blocks the close; review {{count}} warning first.",
+      "readyWithWarnings_other": "Nothing blocks the close; review {{count}} warnings first.",
+      "blocked_one": "{{count}} check still blocks the close.",
+      "blocked_other": "{{count}} checks still block the close.",
+      "blocking": "blocking",
+      "warning": "warning",
+      "passed": "Passed checks",
+      "more_one": "+{{count}} more",
+      "more_other": "+{{count}} more",
+      "baselined_one": "{{count}} old difference is in the baseline (does not block)",
+      "baselined_other": "{{count}} old differences are in the baseline (do not block)",
+      "checks": {
+        "prev-year-open": {
+          "title": "Previous fiscal year",
+          "hint": "An earlier fiscal year is still open. Close it first, oldest first."
+        },
+        "drafts-ledger": {
+          "title": "Draft journals, invoices and payments",
+          "hint": "Post or delete the Draft documents dated in this year."
+        },
+        "drafts-other": {
+          "title": "Other drafts",
+          "hint": "Cash book drafts, production drafts, stock transfers or stock counts dated in this year are not finished."
+        },
+        "depreciation-unposted": {
+          "title": "Fixed asset depreciation",
+          "hint": "Depreciation for months of this year is not posted. Post it from Fixed Assets."
+        },
+        "ledger-balanced": {
+          "title": "Ledger balance",
+          "hint": "The ledger debit and credit of this document differ."
+        },
+        "ale-vs-journal": {
+          "title": "Ledger matches journals",
+          "hint": "The ledger rows of this journal differ from its journal lines."
+        },
+        "system-accounts": {
+          "title": "Year-close system accounts",
+          "hint": "Map Current Year Profit and Retained Earnings in Settings > System Accounts."
+        },
+        "do-uninvoiced": {
+          "title": "Uninvoiced delivery notes",
+          "hint": "Delivery notes up to this year end have no invoice yet."
+        }
+      },
+      "roles": {
+        "CURRENT_PROFIT": "Current Year Profit",
+        "RETAINED_EARNINGS": "Retained Earnings"
+      }
     },
     "reopenConfirm": {
       "title": "Reopen fiscal year {{name}}?",

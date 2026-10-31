@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { SettingsCard } from '../../components/settings/SettingsCard';
 import { PeriodLockCard } from '../../components/settings/PeriodLockCard';
+import { FiscalYearCloseDialog } from '../../components/settings/FiscalYearCloseDialog';
 
 interface FiscalYear {
   id: string;
@@ -68,15 +69,6 @@ export const FiscalYearsTab: React.FC = () => {
       toast.success(t('fiscal.toast.created'));
     },
     onError: (error: any) => toast.error(error.response?.data?.error || t('fiscal.toast.createError')),
-  });
-
-  const closeMutation = useMutation({
-    mutationFn: async (yearId: string) => api.post(`/fiscal-years/${yearId}/close`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
-      toast.success(t('fiscal.toast.closed'));
-    },
-    onError: (error: any) => toast.error(error.response?.data?.error || t('fiscal.toast.closeError')),
   });
 
   const reopenMutation = useMutation({
@@ -147,7 +139,7 @@ export const FiscalYearsTab: React.FC = () => {
                 {canCloseReopen && (
                   <div className="mt-4">
                     {!year.isClosed ? (
-                      <Button variant="outline" size="sm" className="w-full" onClick={() => setConfirmClose(year)} disabled={closeMutation.isPending}>
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => setConfirmClose(year)}>
                         <Lock aria-hidden /> {t('fiscal.close')}
                       </Button>
                     ) : (
@@ -166,16 +158,8 @@ export const FiscalYearsTab: React.FC = () => {
       {/* GET /period-lock is behind the journal right; the form inside needs period.lock. */}
       {can('journal') && <PeriodLockCard />}
 
-      <ConfirmDialog
-        open={confirmClose !== null}
-        onOpenChange={(o) => !o && setConfirmClose(null)}
-        tone="danger"
-        title={t('fiscal.closeConfirm.title', { name: confirmClose?.name ?? '' })}
-        description={t('fiscal.closeConfirm.description')}
-        confirmLabel={t('fiscal.close')}
-        loading={closeMutation.isPending}
-        onConfirm={() => (confirmClose ? closeMutation.mutateAsync(confirmClose.id) : undefined)}
-      />
+      {/* The checklist comes first; closing stays disabled while a blocking check fails. */}
+      <FiscalYearCloseDialog year={confirmClose} onOpenChange={(o) => !o && setConfirmClose(null)} />
 
       <ConfirmDialog
         open={confirmReopen !== null}
