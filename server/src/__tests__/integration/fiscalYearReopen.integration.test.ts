@@ -18,6 +18,10 @@
  *
  * Route handlers run through the route harness, whose `$transaction` is a savepoint; everything
  * runs in a rollback transaction in far-future years with fixtures made here.
+ *
+ * The year-close checklist gate is stubbed to pass: it is covered by
+ * fiscalYearCloseChecklist.integration.test.ts, and here the seeded 2026 year (open) would always
+ * block a far-future close through prev-year-open.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -29,6 +33,10 @@ import { createCapUser } from '../helpers/rbacFixture';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
+vi.mock('../../services/fiscalYearClose', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/fiscalYearClose')>()),
+  assertCloseChecklistPasses: vi.fn(async () => undefined),
+}));
 
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { systemAccounts } from '../../services/systemAccounts';

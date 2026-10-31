@@ -34,6 +34,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Gagal menutup tahun buku.": "Failed to close the fiscal year.",
   "Tahun buku belum ditutup.": "Fiscal year is not closed yet.",
   "Gagal membuka kembali tahun buku.": "Failed to reopen the fiscal year.",
+  "Gagal memuat daftar cek tutup buku.": "Failed to load the year-close checklist.",
+  "Tahun buku {0} belum bisa ditutup: {1} pemeriksaan daftar cek masih memblokir. Buka daftar cek tutup buku untuk rinciannya.": "Fiscal year {0} cannot be closed yet: {1} checklist checks still block it. Open the year-close checklist for details.",
   "Alasan membuka kembali tahun buku wajib diisi (minimal 5 karakter).": "A reason (at least 5 characters) is required to reopen the fiscal year.",
   "Tahun buku {0} sesudahnya sudah ditutup. Buka kembali {1} dulu, lalu buka tahun buku {2}.": "The later fiscal year {0} is already closed. Reopen {1} first, then reopen fiscal year {2}.",
   "Periode s.d. {0} sudah dikunci, termasuk akhir tahun buku {1} ({2}). Mundurkan kunci periode ke sebelum {3} dulu, lalu buka kembali tahun buku.": "The period up to {0} is locked, including the end of fiscal year {1} ({2}). Move the period lock back to before {3} first, then reopen the fiscal year.",
