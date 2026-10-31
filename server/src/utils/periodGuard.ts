@@ -5,7 +5,7 @@
 
 import type { FiscalYear, Prisma } from '@prisma/client';
 import { BusinessError } from './errors';
-import { addDays, businessDayOf, businessDayRange } from './businessDate';
+import { addDays, businessDayOf, businessDayRange, startOfBusinessDay, type InstantRange } from './businessDate';
 
 type Tx = Prisma.TransactionClient;
 
@@ -60,6 +60,17 @@ const MS_PER_DAY = 86_400_000;
 function businessDay(date: Date): string {
   if (date.getTime() % MS_PER_DAY === 0) return date.toISOString().slice(0, 10);
   return businessDayOf(date);
+}
+
+/**
+ * First and last business day of a fiscal year and the half-open instant range that covers them,
+ * [first day 00:00, day after the last day 00:00) in the business offset. A document stored at local
+ * or UTC midnight of any day of the year falls inside it.
+ */
+export function fiscalYearRange(fy: Pick<FiscalYear, 'startDate' | 'endDate'>): InstantRange & { startDay: string; endDay: string } {
+  const startDay = businessDay(fy.startDate);
+  const endDay = businessDay(fy.endDate);
+  return { startDay, endDay, gte: startOfBusinessDay(startDay), lt: startOfBusinessDay(addDays(endDay, 1)) };
 }
 
 /** Options of the period guard. */

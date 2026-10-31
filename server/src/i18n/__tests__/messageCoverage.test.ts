@@ -23,6 +23,8 @@ const IGNORED = new Set<string>([
   'No Admin user available to attribute public inquiry to',
   'Inventory item {0} not found during COGS backfill settle.',
   'HTTP {0}',
+  // Programming error at module load (duplicate year-close check id), never reaches a client.
+  'Close check {0} is already registered',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */
