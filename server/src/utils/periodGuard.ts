@@ -147,6 +147,22 @@ async function assertNotLocked(tx: Tx, day: string, label: PeriodLabel): Promise
 }
 
 /**
+ * Throws PERIOD_LOCKED when the lock date reaches the last day of `fy`. A reopen checks this first:
+ * the closing journal is dated on that day, so the lock has to move back before the year can open.
+ * Share-locks the lock row like the guard does.
+ */
+export async function assertYearEndNotLocked(tx: Tx, fy: Pick<FiscalYear, 'name' | 'endDate'>): Promise<void> {
+  const lockDate = await readLockDate(tx);
+  const end = businessDay(fy.endDate);
+  if (lockDate !== null && end <= lockDate) {
+    throw new BusinessError(
+      `Periode s.d. ${lockDate} sudah dikunci, termasuk akhir tahun buku ${fy.name} (${end}). Mundurkan kunci periode ke sebelum ${end} dulu, lalu buka kembali tahun buku.`,
+      PERIOD_LOCKED,
+    );
+  }
+}
+
+/**
  * The first business day (YYYY-MM-DD) after the period lock date that lies in an open fiscal year,
  * or null when no lock is set. For postings that fall into a locked month and move to the first
  * open day instead (recurring catch-up, month-end settlement): the day after the lock, or the start

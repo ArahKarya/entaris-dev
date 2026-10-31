@@ -504,7 +504,9 @@
     },
     "reopenConfirm": {
       "title": "Buka kembali tahun buku {{name}}?",
-      "description": "Jurnal penutup akan dihapus dan saldo pendapatan/beban akan dipulihkan."
+      "description": "Jurnal penutup dibatalkan (tetap tersimpan sebagai riwayat) dan saldo pendapatan/beban dipulihkan. Tidak bisa dilakukan selama tahun buku sesudahnya masih ditutup atau kunci periode mencakup akhir tahun ini.",
+      "reasonLabel": "Alasan membuka kembali",
+      "reasonPlaceholder": "Contoh: koreksi persediaan akhir tahun"
     },
     "form": {
       "title": "Tambah Tahun Buku",

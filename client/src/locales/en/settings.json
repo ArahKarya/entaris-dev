@@ -504,7 +504,9 @@
     },
     "reopenConfirm": {
       "title": "Reopen fiscal year {{name}}?",
-      "description": "The closing journal will be deleted and revenue/expense balances will be restored."
+      "description": "The closing journal is cancelled (kept as history) and revenue/expense balances are restored. Not possible while a later fiscal year is still closed or the period lock covers this year end.",
+      "reasonLabel": "Reason for reopening",
+      "reasonPlaceholder": "Example: year-end inventory correction"
     },
     "form": {
       "title": "Add Fiscal Year",

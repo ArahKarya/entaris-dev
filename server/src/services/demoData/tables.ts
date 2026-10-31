@@ -71,6 +71,7 @@ export const DATA_TABLES = [
   'delivery_order_items',
   'delivery_orders',
   'depreciation_entries',
+  'fiscal_year_events',
   'fixed_assets',
   'ga_asset_photos',
   'ga_asset_qrs',

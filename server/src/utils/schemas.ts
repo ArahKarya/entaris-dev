@@ -452,6 +452,15 @@ export const CreateFiscalYearSchema = z.object({
   endDate: z.string().min(1, 'Tanggal selesai wajib diisi.').regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal selesai harus berformat YYYY-MM-DD.'),
 });
 
+// Reopen of a closed fiscal year: the reason is stored on the cancelled CLOSE journal and the event.
+export const ReopenFiscalYearSchema = z.object({
+  reason: z
+    .string({ error: 'Alasan membuka kembali tahun buku wajib diisi (minimal 5 karakter).' })
+    .trim()
+    .min(5, 'Alasan membuka kembali tahun buku wajib diisi (minimal 5 karakter).')
+    .max(500, 'Alasan maksimal 500 karakter.'),
+});
+
 // Monthly period lock (PUT /period-lock). lockDate null, or clear: true (AIRA tool calls cannot
 // send null), clears the lock. The reason is checked in services/periodLock.ts: required (5..500)
 // only when the date moves back or is cleared.
