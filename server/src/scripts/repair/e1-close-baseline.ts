@@ -6,37 +6,51 @@
 //
 // Dry run by default: it lists what would be captured and writes nothing. --apply writes the rows,
 // one transaction per fiscal year. A second --apply is refused while the baseline already has rows,
-// because a later capture would hide mismatches made after the release; --allow-existing adds the
-// new items only (existing keys keep their first amount).
+// because a later capture would hide mismatches made after the release. A baseline-aware check that
+// another epic registers later is captured on its own: --check <id> (repeatable) limits the run to
+// the named checks, which must have no rows yet, and --allow-existing (only with --check)
+// acknowledges the rows of the other checks, which stay as they are.
 //
 // Usage (from server/, DATABASE_URL set):
-//   node dist/scripts/repair/e1-close-baseline.js [--fy <name>] [--apply [--allow-existing]] [--out file.csv]
+//   node dist/scripts/repair/e1-close-baseline.js [--fy <name>] [--check <id> ...] [--apply [--allow-existing]] [--out file.csv]
 //   (or `npx tsx src/scripts/repair/e1-close-baseline.ts …` from a source checkout)
 
 import { writeFileSync } from 'node:fs';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { csvCell } from '../../utils/csv';
-import { captureCloseBaseline, type BaselineCapture } from '../../services/fiscalYearClose';
+import {
+  assertBaselineCaptureAllowed,
+  baselineCaptureChecks,
+  captureCloseBaseline,
+  type BaselineCapture,
+} from '../../services/fiscalYearClose';
 
 interface Options {
   apply: boolean;
   allowExisting: boolean;
+  /** Only these checks; undefined = every baseline-aware check. */
+  checks: string[] | undefined;
   fy: string | null;
   out: string | null;
 }
 
 function parseArgs(argv: readonly string[]): Options {
-  const opts: Options = { apply: false, allowExisting: false, fy: null, out: null };
+  const opts: Options = { apply: false, allowExisting: false, checks: undefined, fy: null, out: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--apply') opts.apply = true;
     else if (a === '--allow-existing') opts.allowExisting = true;
-    else if (a === '--fy') opts.fy = argv[++i] ?? null;
+    else if (a === '--check') {
+      const id = argv[++i];
+      if (!id) throw new Error('--check needs a check id');
+      opts.checks = [...(opts.checks ?? []), id];
+    } else if (a === '--fy') opts.fy = argv[++i] ?? null;
     else if (a === '--out') opts.out = argv[++i] ?? null;
     else throw new Error(`Unknown argument: ${a}`);
   }
   if (opts.allowExisting && !opts.apply) throw new Error('--allow-existing only goes with --apply');
+  if (opts.allowExisting && !opts.checks) throw new Error('--allow-existing only goes with --check <id>');
   return opts;
 }
 
@@ -52,14 +66,13 @@ async function main() {
   });
   if (opts.fy && years.length === 0) throw new Error(`No fiscal year named ${opts.fy}`);
 
+  const checkIds = baselineCaptureChecks(opts.checks).map((c) => c.id);
   const existing = await prisma.closeCheckBaseline.count();
-  if (opts.apply && existing > 0 && !opts.allowExisting) {
-    throw new Error(`The baseline already has ${existing} row(s); it is captured once. Pass --allow-existing to add new items only.`);
-  }
+  if (opts.apply) await assertBaselineCaptureAllowed(prisma, { checkIds: opts.checks, allowExisting: opts.allowExisting });
 
   const rows: Row[] = [];
   for (const y of years) {
-    const captured = await prisma.$transaction((tx) => captureCloseBaseline(tx, y, opts.apply), { timeout: 120_000 });
+    const captured = await prisma.$transaction((tx) => captureCloseBaseline(tx, y, opts.apply, opts.checks), { timeout: 120_000 });
     rows.push(...captured.map((c) => ({ ...c, fiscalYear: y.name })));
   }
 
@@ -76,7 +89,7 @@ async function main() {
 
   const added = rows.filter((r) => r.added);
   const mode = opts.apply ? 'APPLIED' : 'DRY RUN';
-  console.log(`${mode}: ${added.length} new baseline item(s), ${rows.length - added.length} already in the baseline (${years.length} fiscal year(s), ${existing} row(s) before)`);
+  console.log(`${mode}: ${added.length} new baseline item(s), ${rows.length - added.length} already in the baseline (${years.length} fiscal year(s), checks ${checkIds.join(', ')}, ${existing} row(s) before)`);
   for (const y of years) {
     const own = rows.filter((r) => r.fiscalYear === y.name);
     if (own.length === 0) {

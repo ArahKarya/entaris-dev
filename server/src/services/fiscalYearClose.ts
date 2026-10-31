@@ -160,18 +160,59 @@ export interface BaselineCapture {
 }
 
 /**
- * The current items of every baseline-aware check for `fy`, written to close_check_baselines when
- * `apply` (existing keys keep their first captured amount). For the one-time capture at release
- * (scripts/repair/e1-close-baseline.ts); a dry run writes nothing.
+ * The baseline-aware checks a capture covers: all of them, or only `checkIds`. An unknown id, or a
+ * check that is not baseline-aware, is refused.
+ */
+export function baselineCaptureChecks(checkIds?: readonly string[]): readonly CloseCheck[] {
+  const aware = registry.filter((c) => c.baselineAware);
+  if (!checkIds) return aware;
+  return [...new Set(checkIds)].map((id) => {
+    const check = aware.find((c) => c.id === id);
+    if (!check) throw new Error(`${id} is not a baseline-aware close check (known: ${aware.map((c) => c.id).join(', ')})`);
+    return check;
+  });
+}
+
+/**
+ * Refuses a baseline write that could hide a mismatch made after the release, for
+ * scripts/repair/e1-close-baseline.ts. The full capture runs once, on an empty baseline. A check
+ * registered later is captured on its own: `checkIds` names it, it must have no rows yet, and
+ * `allowExisting` acknowledges the rows the other checks already have (they are not touched).
+ */
+export async function assertBaselineCaptureAllowed(
+  tx: Tx,
+  opts: { checkIds?: readonly string[]; allowExisting: boolean },
+): Promise<void> {
+  if (opts.allowExisting && !opts.checkIds) throw new Error('--allow-existing only goes with --check <id>');
+  const ids = new Set(baselineCaptureChecks(opts.checkIds).map((c) => c.id));
+  const rows = await tx.closeCheckBaseline.groupBy({ by: ['checkId'], _count: { _all: true } });
+  const own = rows.filter((r) => ids.has(r.checkId));
+  if (own.length > 0) {
+    const listed = own.map((r) => `${r.checkId} (${r._count._all})`).join(', ');
+    throw new Error(`The baseline already has rows for ${listed}; a check is captured once.`);
+  }
+  const others = rows.reduce((n, r) => n + r._count._all, 0);
+  if (others > 0 && !opts.allowExisting) {
+    throw new Error(
+      `The baseline already has ${others} row(s); it is captured once. To capture a check added later, pass --check <id> --allow-existing.`,
+    );
+  }
+}
+
+/**
+ * The current items of the baseline-aware checks for `fy` (all, or only `checkIds`), written to
+ * close_check_baselines when `apply` (existing keys keep their first captured amount). Call
+ * assertBaselineCaptureAllowed first; a dry run writes nothing.
  */
 export async function captureCloseBaseline(
   tx: Tx,
   fy: { id: string; name: string; startDate: Date; endDate: Date },
   apply: boolean,
+  checkIds?: readonly string[],
 ): Promise<BaselineCapture[]> {
   const year = closeCheckYear(fy);
   const captured: BaselineCapture[] = [];
-  for (const check of registry.filter((c) => c.baselineAware)) {
+  for (const check of baselineCaptureChecks(checkIds)) {
     const { items } = await check.run(tx, year);
     const known = await baselineAmounts(tx, check.id, items.map((i) => i.key));
     for (const item of items) captured.push({ checkId: check.id, item, added: !known.has(item.key) });

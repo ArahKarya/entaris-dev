@@ -10,7 +10,10 @@ import {
   CLOSE_CHECKLIST_FAILED,
   CLOSE_CHECK_ITEM_LIMIT,
   CloseChecklistFailedError,
+  assertBaselineCaptureAllowed,
   assertCloseChecklistPasses,
+  baselineCaptureChecks,
+  captureCloseBaseline,
   closeCheckYear,
   closeChecks,
   registerCloseCheck,
@@ -161,6 +164,60 @@ describe('runCloseChecklist', () => {
     expect(list.checks.find((c) => c.id === 'system-accounts')).toMatchObject({
       status: 'fail',
       items: [{ key: 'RETAINED_EARNINGS', kind: 'SystemAccountRole', label: 'Laba Ditahan' }],
+    });
+  });
+
+  describe('baseline capture of one check', () => {
+    // Rows already in close_check_baselines, per check id.
+    function baselineTx(rows: Record<string, number>) {
+      return makeAutoTx({
+        'closeCheckBaseline.groupBy': () => Object.entries(rows).map(([checkId, n]) => ({ checkId, _count: { _all: n } })),
+      });
+    }
+
+    it('captures only the named checks and leaves the ledger checks alone', async () => {
+      plugged.block = [{ key: 'n1', amount: '3.00' }];
+      const ledgerRuns = closeChecks()
+        .filter((c) => c.id === 'ledger-balanced' || c.id === 'ale-vs-journal')
+        .map((c) => vi.spyOn(c, 'run'));
+      const { tx: t, fn } = baselineTx({});
+      const captured = await captureCloseBaseline(t, YEAR, true, [blockCheck.id]);
+      expect(captured.map((c) => [c.checkId, c.item.key, c.added])).toEqual([[blockCheck.id, 'n1', true]]);
+      for (const run of ledgerRuns) expect(run).not.toHaveBeenCalled();
+      expect(fn('closeCheckBaseline.createMany').mock.calls[0]![0].data).toEqual([
+        { checkId: blockCheck.id, itemKey: 'n1', fiscalYearId: YEAR.id, amount: new Prisma.Decimal('3.00') },
+      ]);
+      plugged.block = [];
+    });
+
+    it('refuses an id that is unknown or not baseline-aware', () => {
+      expect(() => baselineCaptureChecks(['inventory-vs-gl'])).toThrow(/not a baseline-aware close check/);
+      expect(() => baselineCaptureChecks(['system-accounts'])).toThrow(/not a baseline-aware close check/);
+      expect(baselineCaptureChecks().map((c) => c.id)).toEqual(['ledger-balanced', 'ale-vs-journal', blockCheck.id]);
+    });
+
+    it('a second full capture is refused; --allow-existing needs --check', async () => {
+      await expect(assertBaselineCaptureAllowed(baselineTx({}).tx, { allowExisting: false })).resolves.toBeUndefined();
+      await expect(assertBaselineCaptureAllowed(baselineTx({ 'ale-vs-journal': 4 }).tx, { allowExisting: false })).rejects.toThrow(
+        /already has rows for ale-vs-journal \(4\)/,
+      );
+      await expect(assertBaselineCaptureAllowed(baselineTx({}).tx, { allowExisting: true })).rejects.toThrow(/only goes with --check/);
+    });
+
+    it('a later check is captured on its own once, acknowledging the other checks\' rows', async () => {
+      const ledgerOnly = { 'ledger-balanced': 2, 'ale-vs-journal': 3 };
+      const named = { checkIds: [blockCheck.id] };
+      await expect(assertBaselineCaptureAllowed(baselineTx(ledgerOnly).tx, { ...named, allowExisting: false })).rejects.toThrow(
+        /already has 5 row\(s\).*--allow-existing/,
+      );
+      await expect(assertBaselineCaptureAllowed(baselineTx(ledgerOnly).tx, { ...named, allowExisting: true })).resolves.toBeUndefined();
+      await expect(
+        assertBaselineCaptureAllowed(baselineTx({ ...ledgerOnly, [blockCheck.id]: 1 }).tx, { ...named, allowExisting: true }),
+      ).rejects.toThrow(new RegExp(`already has rows for ${blockCheck.id} \\(1\\)`));
+      // Naming a ledger check cannot re-open its capture either.
+      await expect(
+        assertBaselineCaptureAllowed(baselineTx(ledgerOnly).tx, { checkIds: ['ale-vs-journal'], allowExisting: true }),
+      ).rejects.toThrow(/already has rows for ale-vs-journal/);
     });
   });
 });
