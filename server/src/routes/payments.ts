@@ -9,6 +9,7 @@ import { CancelReasonSchema, CreatePaymentSchema } from '../utils/schemas';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { assertPeriodOpen } from '../utils/periodGuard';
+import { cancelJournalsInTx } from '../services/ledger/cancelJournals';
 import { logger } from '../lib/logger';
 import { systemAccounts } from '../services/systemAccounts';
 import { submitPaymentInTx } from '../services/paymentSubmit';
@@ -189,8 +190,6 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
       await claimCancel(tx.payment, payment.id, { status: 'Cancelled', cancelledAt: new Date(), ...trail });
       await assertPeriodOpen(tx, { fiscalYearId: payment.fiscalYearId }, 'pembayaran');
 
-      const numAmount = new Decimal(payment.amount.toString());
-
       // Deposits must be cancelled via their own endpoints (vendor-deposits / customer-deposits
       // PATCH /:id/cancel); cancelling here too causes a double cancel and GL drift.
       if (payment.paymentType === 'VendorDeposit') {
@@ -239,46 +238,25 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
       // Delete allocations
       await tx.paymentAllocation.deleteMany({ where: { paymentId: payment.id } });
 
-      // Cancel related ledger entries — match the JV number format used on creation
-      const jvNumber = `JV-${payment.paymentNumber}`;
-      const journal = await tx.journalEntry.findUnique({
-        where: { entryNumber: jvNumber },
+      // Void the payment's journal: its ledger entries are cancelled and account balances reversed
+      // per journal line, so an AR/AP remap after posting cannot move the wrong account (P-11).
+      const journal = await tx.journalEntry.findFirst({
+        where: payment.journalEntryId ? { id: payment.journalEntryId } : { entryNumber: `JV-${payment.paymentNumber}` },
+        include: { items: true },
       });
       if (journal) {
-        // Balances are reversed from the payment below, so only the journal's own year is checked here.
-        await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId }, 'pembayaran');
-        await tx.journalEntry.update({
-          where: { id: journal.id },
-          data: { status: 'Cancelled', cancelledAt: new Date(), ...trail },
-        });
-        await tx.accountingLedgerEntry.updateMany({
-          where: { referenceId: journal.id },
-          data: { isCancelled: true },
-        });
-      }
-
-      // Reverse account balances — load splits if any, else fall back to single accountId
-      const arAccount = await systemAccounts.getAccount('AR');
-      const apAccount = await systemAccounts.getAccount('AP');
-      const numAmountVal = numAmount.toNumber();
-
-      const paymentSplits = await tx.paymentSplit.findMany({ where: { paymentId: payment.id } });
-      const reverseSplits = paymentSplits.length > 0
-        ? paymentSplits.map((s) => ({ accountId: s.accountId, amount: Number(s.amount) }))
-        : [{ accountId: payment.accountId, amount: numAmountVal }];
-
-      if (payment.paymentType === 'Receive') {
-        // Original: each split DR; AR CR. Reverse: each split CR; AR DR.
-        for (const sp of reverseSplits) {
-          await updateAccountBalance(tx, sp.accountId, 0, sp.amount);
+        const voided = await cancelJournalsInTx(tx, [journal], { label: 'pembayaran', trail });
+        if (voided.length === 0) {
+          logger.warn(
+            { paymentId: payment.id, journalId: journal.id },
+            'Payment cancel: journal was already cancelled, balances left as they are',
+          );
         }
-        await updateAccountBalance(tx, arAccount.id, numAmountVal, 0);
       } else {
-        // Original: each split CR; AP DR. Reverse: each split DR; AP CR.
-        for (const sp of reverseSplits) {
-          await updateAccountBalance(tx, sp.accountId, sp.amount, 0);
-        }
-        await updateAccountBalance(tx, apAccount.id, 0, numAmountVal);
+        // Legacy payment posted without a journal: reverse from the nominal amount and the current
+        // AR/AP mapping, as before. Rejecting it would leave the payment impossible to cancel.
+        logger.warn({ paymentId: payment.id, paymentNumber: payment.paymentNumber }, 'Payment cancel: no journal, nominal reversal');
+        await reverseNominalPaymentBalances(tx, payment);
       }
 
       // Recalc party outstanding from invoice data (source of truth)
@@ -292,5 +270,36 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
     return handleRouteError(res, error, 'POST /payments/:id/cancel', 'Gagal membatalkan pembayaran.');
   }
 });
+
+/**
+ * Balance reversal for a legacy payment that has no journal: the splits (or the payment account)
+ * and the AR/AP account mapped today, for the nominal amount.
+ */
+async function reverseNominalPaymentBalances(
+  tx: Prisma.TransactionClient,
+  payment: { id: string; paymentType: string; accountId: string; amount: Prisma.Decimal },
+): Promise<void> {
+  const amount = new Decimal(payment.amount.toString()).toNumber();
+  const paymentSplits = await tx.paymentSplit.findMany({ where: { paymentId: payment.id } });
+  const reverseSplits = paymentSplits.length > 0
+    ? paymentSplits.map((s) => ({ accountId: s.accountId, amount: Number(s.amount) }))
+    : [{ accountId: payment.accountId, amount }];
+
+  if (payment.paymentType === 'Receive') {
+    // Original: each split DR; AR CR. Reverse: each split CR; AR DR.
+    const arAccount = await systemAccounts.getAccount('AR');
+    for (const sp of reverseSplits) {
+      await updateAccountBalance(tx, sp.accountId, 0, sp.amount);
+    }
+    await updateAccountBalance(tx, arAccount.id, amount, 0);
+  } else {
+    // Original: each split CR; AP DR. Reverse: each split DR; AP CR.
+    const apAccount = await systemAccounts.getAccount('AP');
+    for (const sp of reverseSplits) {
+      await updateAccountBalance(tx, sp.accountId, sp.amount, 0);
+    }
+    await updateAccountBalance(tx, apAccount.id, 0, amount);
+  }
+}
 
 export default router;

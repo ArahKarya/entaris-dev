@@ -58,7 +58,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 |---|---|
 | PO (buat/ubah/ajukan/tutup/batal) | Tidak ada GL, stok, WAC |
 | STT submit (`gr_create`) | DR Persediaan (1.4.0) / CR Hutang Belum Tagih (2.1.5). Stok masuk, WAC dihitung ulang. Titipan pelanggan: GL nol |
-| STT batal (`gr_cancel`) | Jurnal balik `JV-{stt}-CXL`: DR 2.1.5 / CR 1.4.0; stok dibalik; `qtyReceived` PO dikurangi |
+| STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dibalik; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`) |
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
 | PI dari STT | DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang |
 | Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> 5.11. Lawan selalu Hutang Usaha (2.1.1) |
@@ -151,7 +151,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 ### gr_cancel
 
-**Ringkasan:** Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual dibalik, dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila PI terkait masih aktif (batalkan PI dulu).
+**Ringkasan:** Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual STT dibatalkan (void, tanpa jurnal balik -CXL), dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila ada baris STT yang masih ditagih di PI yang belum dibatalkan (batalkan PI dulu).
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -194,14 +194,14 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** STT dengan status Cancelled.
 
-**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal balik JV-{stt}-CXL: DR Hutang Belum Tagih (2.1.5) / CR Persediaan (1.4.0); jurnal asal berstatus Cancelled. qtyReceived PO dikurangi.
+**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.
 
 **Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.
 
 **Prasyarat**
 
 - STT berstatus Submitted
-- PI terkait (bila ada) sudah dibatalkan
+- Semua PI yang menagih baris STT ini (bila ada) sudah dibatalkan
 - Tahun buku dokumen dan jurnalnya masih terbuka.
 
 **Error umum**
@@ -209,6 +209,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: STT sudah dibatalkan
 - 400: STT legacy - batalkan PI-nya
 - 400: ada PI Paid / PI belum dibatalkan
+- 400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu
 - 400: stok tidak cukup untuk dibalikkan
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
