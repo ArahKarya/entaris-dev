@@ -3490,7 +3490,8 @@
       "phase": 1,
       "accessNote": "GET terbuka bagi semua user login (requireWrite settings).",
       "related": [
-        "fy_close"
+        "fy_close",
+        "fy_close_checklist"
       ]
     },
     {
@@ -17411,11 +17412,57 @@
       ]
     },
     {
+      "name": "fy_close_checklist",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "settings",
+      "desc": "Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID dokumen/rekaman (UUID)."
+        }
+      ],
+      "output": {
+        "status": "string"
+      },
+      "outputSummary": "{ fiscalYear: { id, name, startDay, endDay, isClosed }, canClose, blocking, warnings, checks: [{ id, severity: block|warn, status: ok|fail, count, baselinedCount, items: [{ key, kind, label, date?, amount?, baselined? }] (maks. 50 per cek) }] }.",
+      "handler": "GET /api/fiscal-years/:id/close-checklist",
+      "permAction": "view",
+      "requiresCapability": "doc.cancel",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "accessNote": "GET di /api/fiscal-years terbuka bagi semua user login, tetapi endpoint ini memerlukan capability doc.cancel karena menyebut dokumen.",
+      "prerequisites": [
+        "Capability doc.cancel."
+      ],
+      "errors": [
+        "400: tahun buku tidak ditemukan",
+        "403: tanpa capability doc.cancel"
+      ],
+      "related": [
+        "fy_close",
+        "fy_list"
+      ]
+    },
+    {
       "name": "fy_close",
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "settings",
-      "desc": "Tutup buku: menghitung laba/rugi tahun itu dari ledger pendapatan dan beban, memposting jurnal penutup, lalu menandai tahun buku isClosed sehingga tidak ada posting baru pada periode tersebut.",
+      "desc": "Tutup buku: menjalankan daftar cek tutup buku (lihat fy_close_checklist) di dalam transaksi, lalu menghitung laba/rugi tahun itu dari ledger pendapatan dan beban, memposting jurnal penutup, dan menandai tahun buku isClosed sehingga tidak ada posting baru pada periode tersebut. Ditolak selama ada butir daftar cek yang memblokir.",
       "risk": "critical",
       "roles": [
         "Admin"
@@ -17447,15 +17494,18 @@
       "confirm_template": "TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.",
       "prerequisites": [
         "Capability doc.cancel.",
-        "Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan."
+        "Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan.",
+        "Daftar cek tutup buku tanpa butir yang memblokir (cek dulu dengan fy_close_checklist): tahun buku sebelumnya sudah ditutup; tidak ada jurnal, invoice, atau pembayaran Draft bertanggal di tahun ini; penyusutan aset aktif bulan-bulan tahun ini sudah diposting; ledger tahun ini seimbang dan sinkron dengan baris jurnal (selisih lama yang tercatat di baseline dengan nominal sama diabaikan)."
       ],
       "errors": [
+        "400 CLOSE_CHECKLIST_FAILED: daftar cek tutup buku masih memblokir; body memuat `checklist` (sama dengan fy_close_checklist) yang merinci butirnya",
         "400 ACCOUNT_MAPPING_MISSING: akun sistem Laba Tahun Berjalan (CURRENT_PROFIT) atau Laba Ditahan (RETAINED_EARNINGS) belum dipetakan",
         "400: tahun buku sudah ditutup",
         "400: tahun buku tidak ditemukan",
         "403: tanpa capability doc.cancel atau tanpa izin edit modul settings"
       ],
       "related": [
+        "fy_close_checklist",
         "fy_reopen",
         "fy_list"
       ]

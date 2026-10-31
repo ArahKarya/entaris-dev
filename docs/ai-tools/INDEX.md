@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **511** tool (read 235 · write 165 · critical 111); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **512** tool (read 236 · write 165 · critical 111); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -12,7 +12,7 @@ Total **511** tool (read 235 · write 165 · critical 111); semuanya aktif secar
 | [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
-| [Akuntansi](akuntansi.md) | 36 | 15 | 8 | 13 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
+| [Akuntansi](akuntansi.md) | 37 | 16 | 8 | 13 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
 | [Kas & Bank](kas-bank.md) | 37 | 15 | 13 | 9 | Pembayaran/penerimaan, rekonsiliasi bank, transaksi berulang, uang jaminan proyek. |
 | [Aset & Umum (EAM)](aset-umum.md) | 141 | 49 | 68 | 24 | Aset, kendaraan, gedung, equipment, maintenance, dokumen legal, inventaris umum, MR. |
 | [Pengajuan Pembayaran](pengajuan-pembayaran.md) | 32 | 9 | 11 | 12 | Pengajuan pembayaran, verifikasi, pembayaran, pertanggungjawaban, antrian Tagihan EAM. |
@@ -111,6 +111,7 @@ Total **511** tool (read 235 · write 165 · critical 111); semuanya aktif secar
 | [`fa_summary_by_category`](akuntansi.md#fa_summary_by_category) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/fixed-assets/summary/by-category` |
 | [`fa_update`](akuntansi.md#fa_update) | akuntansi | write | tidak | Admin, Accountant | `PUT /api/fixed-assets/:id` |
 | [`fy_close`](akuntansi.md#fy_close) | akuntansi | critical | tidak | Admin | `POST /api/fiscal-years/:id/close` |
+| [`fy_close_checklist`](akuntansi.md#fy_close_checklist) | akuntansi | read | - | Admin, Accountant | `GET /api/fiscal-years/:id/close-checklist` |
 | [`fy_create`](akuntansi.md#fy_create) | akuntansi | write | tidak | Admin | `POST /api/fiscal-years` |
 | [`fy_list`](akuntansi.md#fy_list) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/fiscal-years` |
 | [`fy_reopen`](akuntansi.md#fy_reopen) | akuntansi | critical | tidak | Admin | `POST /api/fiscal-years/:id/reopen` |
