@@ -82,7 +82,8 @@ async function validateParty(tx: Tx, partyId: string) {
 export async function createTemporaryNoteInTx(tx: Tx, body: TdnInput, userId: string) {
   const date = new Date(body.date);
   if (isNaN(date.getTime())) throw new BusinessError('Format tanggal tidak valid.');
-  const fy = await getOpenFiscalYear(tx, date);
+  // No stock or GL effect (see the top of this file), so the period lock does not apply.
+  const fy = await getOpenFiscalYear(tx, date, { ignoreLock: true });
   await validateParty(tx, body.partyId);
   if (body.salesOrderId) await assertSalesOrderLinkable(tx, body.salesOrderId, body.partyId);
   const items = await validateAndResolveItems(tx, body.items);

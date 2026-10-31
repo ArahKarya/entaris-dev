@@ -41,6 +41,8 @@ export const KEEP_TABLES = [
   'parties',
   'party_contacts',
   'payment_request_types',
+  'period_lock',
+  'period_lock_logs',
   'production_cost_standards',
   'production_processes',
   'role_capabilities',

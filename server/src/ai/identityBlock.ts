@@ -26,6 +26,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   'approval.view_all': 'dapat melihat seluruh antrian persetujuan',
   'doc.cancel': 'dapat membatalkan dokumen yang sudah diposting',
   'inventory.negative_stock': 'boleh membuat stok bernilai negatif',
+  'period.lock': 'dapat mengunci atau membuka kunci periode bulanan',
   'rbac.manage': 'dapat mengelola pengguna, peran, dan token AIRA',
 };
 

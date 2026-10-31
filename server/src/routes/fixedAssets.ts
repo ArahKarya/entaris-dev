@@ -8,7 +8,7 @@ import { validateBody } from '../utils/validate';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { CancelReasonSchema } from '../utils/schemas';
 import { cancelTrail, STALE_STATUS } from '../utils/cancelClaim';
-import { assertPeriodOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
+import { assertPeriodOpen, assertPeriodsOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
 import Decimal from 'decimal.js';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import { businessDayRange, businessMonthRange, businessToday } from '../utils/businessDate';
@@ -475,8 +475,14 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       // the same order as a single post and an un-post, so none of them deadlock with this run.
       const assetIds = [...new Set(dueEntries.map((e) => e.fixedAssetId))].sort();
       await tx.$queryRaw`SELECT id FROM fixed_assets WHERE id IN (${Prisma.join(assetIds)}) ORDER BY id FOR UPDATE`;
-      // Dated the month's last day, the latest periodDate of the run.
-      await assertPeriodOpen(tx, { fiscalYearId: fiscalYear.id, date: lastDay.gte }, 'penyusutan');
+      // The fiscal year once for the whole month; the lock date for every periodDate posted below
+      // (schedules date entries on the 1st, and a lock date can fall mid-month).
+      const postedDays = [...new Set(dueEntries.map((e) => e.periodDate.getTime()))].map((t) => new Date(t));
+      await assertPeriodsOpen(
+        tx,
+        [lastDay.gte, ...postedDays].map((date) => ({ fiscalYearId: fiscalYear.id, date })),
+        'penyusutan',
+      );
       // Pull starting JE number once, increment locally to avoid N round-trips
       const startCount = await tx.journalEntry.count();
       const jeNumbers: string[] = [];

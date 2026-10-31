@@ -731,6 +731,7 @@ Aturan wajib:
 - 400: stok tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_create`](#inv_mov_create)
 
@@ -803,6 +804,7 @@ Aturan wajib:
 - 400: tidak ada tahun fiskal aktif untuk tanggal ini
 - 400: stok di gudang tidak cukup
 - 400: item tidak aktif / tidak ditemukan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`inv_mov_cancel`](#inv_mov_cancel), [`inv_mov_list`](#inv_mov_list), [`opn_create`](#opn_create)
 
@@ -1021,6 +1023,7 @@ Aturan wajib:
 - 400: pembalikan stok lama membuat stok negatif
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 403: tanpa capability doc.cancel
 
 **Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_cancel`](#inv_mov_cancel)
@@ -1082,6 +1085,7 @@ Aturan wajib:
 - 400: stok item tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`opn_get`](#opn_get)
 
@@ -1154,6 +1158,7 @@ Aturan wajib:
 - 400: masih ada stok opname Draft
 - 400: stok aktual tidak boleh negatif
 - 400: item tidak ditemukan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`opn_get`](#opn_get), [`opn_cancel`](#opn_cancel), [`inv_items_list`](#inv_items_list)
 
@@ -1309,6 +1314,7 @@ Aturan wajib:
 - 400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu
 - 400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock
 
 **Tool terkait:** [`stf_get`](#stf_get)
@@ -1387,6 +1393,7 @@ Aturan wajib:
 - 400: gudang asal dan tujuan tidak boleh sama
 - 400: stok item di gudang asal tidak cukup
 - 400: gudang tidak aktif
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`stf_get`](#stf_get), [`stf_cancel`](#stf_cancel), [`wh_stock_snapshot`](#wh_stock_snapshot)
 

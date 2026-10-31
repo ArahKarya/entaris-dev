@@ -19,6 +19,14 @@ describe('buildRequest', () => {
     expect(r.body).toEqual({ cashAccountId: 'c1', paymentDate: '2026-10-01' });
   });
 
+  it('period_lock_set can clear the lock: clear=true without lockDate passes and reaches the body', () => {
+    const tool = getTool('period_lock_set')!;
+    const args = { clear: true, reason: 'Buka semua periode' };
+    expect(missingRequired(tool, args)).toEqual([]);
+    expect(validateArgs(tool, args)).toEqual([]);
+    expect(buildRequest(tool, args).body).toEqual(args);
+  });
+
   it('GET: non-path args become the query string (arrays repeated, empties dropped)', () => {
     const tool = { ...getTool('coa_list')!, params: [] };
     const r = buildRequest(tool, { search: 'kas', ids: ['a', 'b'], empty: '', nil: null });

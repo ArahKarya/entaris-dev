@@ -72,7 +72,8 @@ router.post('/inquiry', inquirySubmitLimiter, async (req, res) => {
     // Use a default system user as `created_by` because no auth context exists.
     const date = new Date();
     const result = await prisma.$transaction(async (tx) => {
-      const fy = await getOpenFiscalYear(tx, date);
+      // An inquiry has no GL or stock effect, so the period lock does not apply.
+      const fy = await getOpenFiscalYear(tx, date, { ignoreLock: true });
       const inquiryNumber = await generateDocumentNumber(tx, 'INQ', date, fy.id);
 
       // Find any Admin user to attribute as creator (system can't fail just

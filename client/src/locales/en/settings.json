@@ -515,6 +515,41 @@
       "endDate": "End date",
       "cancel": "Cancel",
       "save": "Save"
+    },
+    "lock": {
+      "title": "Period Lock",
+      "description": "The date up to which the books are locked. Documents dated on or before it cannot be posted, changed or cancelled, except quotations, sales orders, purchase orders, proformas, inquiries and temporary delivery notes.",
+      "loading": "Loading the period lock…",
+      "loadFailed": "Failed to load the period lock.",
+      "retry": "Try again",
+      "lockedUntil": "Locked up to {{date}}",
+      "none": "No period is locked.",
+      "updatedBy": "Changed by {{name}}, {{date}}",
+      "date": "Lock up to",
+      "dateHint": "Past days only. Usually the last day of a month that has been reviewed.",
+      "reason": "Reason",
+      "reasonHint": "Required when the lock moves back or is removed (at least 5 characters).",
+      "save": "Save Lock",
+      "clear": "Remove Lock",
+      "history": "Change history",
+      "historyEmpty": "No changes yet.",
+      "noLock": "no lock",
+      "columns": {
+        "when": "When",
+        "user": "By",
+        "change": "Change",
+        "reason": "Reason"
+      },
+      "errors": {
+        "dateRequired": "Choose a lock date.",
+        "datePast": "The lock date must be before today.",
+        "reasonRequired": "A reason (at least 5 characters) is required to move the lock back or remove it."
+      },
+      "toast": {
+        "saved": "Period locked up to {{date}}.",
+        "cleared": "Period lock removed.",
+        "saveError": "Failed to save the period lock."
+      }
     }
   },
   "notifications": {

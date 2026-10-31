@@ -1,7 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeAutoTx } from '../../__tests__/helpers/autoTx';
 import { BusinessError } from '../errors';
-import { assertPeriodOpen, assertPeriodsOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_BUSY, PERIOD_CLOSED, YEAR_LOCK_WAIT_MS } from '../periodGuard';
+import {
+  assertPeriodOpen, assertPeriodsOpen, firstOpenBusinessDay, resolveJournalFiscalYear,
+  FISCAL_YEAR_MISSING, PERIOD_BUSY, PERIOD_CLOSED, PERIOD_LOCKED, YEAR_LOCK_WAIT_MS,
+} from '../periodGuard';
+import { getOpenFiscalYear } from '../fiscalYear';
 import { translateMessage } from '../../i18n/translateMessage';
 
 const openFy = { id: 'fy-1', name: '2026', isClosed: false };
@@ -206,5 +210,101 @@ describe('assertPeriodsOpen', () => {
     const e = await caught(assertPeriodsOpen(tx, [{ date: new Date('2026-03-01T00:00:00Z') }, { fiscalYearId: 'fy-0', date: new Date('2025-03-01T00:00:00Z') }], 'surat jalan'));
     expect(e.code).toBe(PERIOD_CLOSED);
     expect(e.message).toMatch(/surat jalan di periode ini/);
+  });
+});
+
+/** FOR SHARE reads: the fiscal-year row by id, and the period_lock row answering `lockDate`. */
+const withLock =
+  (lockDate: string | null, ...rows: { id: string; isClosed: boolean }[]) =>
+  (sql: TemplateStringsArray, id: string) =>
+    sql.join('?').includes('period_lock') ? [{ lock_date: lockDate }] : lockRows(...rows)(sql, id);
+
+describe('period lock date', () => {
+  // Lock date 31 Mar 2026: postings dated up to that business day are rejected.
+  const lockedTx = (lockDate: string | null = '2026-03-31') =>
+    makeAutoTx({ 'fiscalYear.findFirst': () => openFy, 'fiscalYear.findUnique': () => openFy, $queryRaw: withLock(lockDate, openFy) });
+
+  it('rejects a 15 Mar invoice with PERIOD_LOCKED and an English translation', async () => {
+    const e = await caught(assertPeriodOpen(lockedTx().tx, { date: new Date('2026-03-15T00:00:00Z') }, 'invoice'));
+    expect(e.code).toBe(PERIOD_LOCKED);
+    expect(e.message).toBe(
+      'Periode s.d. 2026-03-31 sudah dikunci; invoice bertanggal 2026-03-15 tidak bisa diposting, diubah, atau dibatalkan. Minta pemegang hak Kunci Periode memundurkan kunci.',
+    );
+    expect(translateMessage(e.message, 'en')).toBe(
+      'The period up to 2026-03-31 is locked; this invoice dated 2026-03-15 cannot be posted, changed or cancelled. Ask a holder of the Period Lock right to move the lock back.',
+    );
+  });
+
+  it('rejects the lock date itself and accepts the day after', async () => {
+    expect((await caught(assertPeriodOpen(lockedTx().tx, { date: new Date('2026-03-31T00:00:00Z') }, 'jurnal'))).code).toBe(PERIOD_LOCKED);
+    await expect(assertPeriodOpen(lockedTx().tx, { date: new Date('2026-04-01T00:00:00Z') }, 'jurnal')).resolves.toEqual(openFy);
+  });
+
+  it('compares the WIB business day: 1 Apr 03:00 WIB (31 Mar UTC) is open, 31 Mar 23:30 WIB is locked', async () => {
+    await expect(assertPeriodOpen(lockedTx().tx, { date: new Date('2026-03-31T20:00:00Z') }, 'jurnal')).resolves.toEqual(openFy);
+    expect((await caught(assertPeriodOpen(lockedTx().tx, { date: new Date('2026-03-31T16:30:00Z') }, 'jurnal'))).code).toBe(PERIOD_LOCKED);
+  });
+
+  it('checks the document date on cancel paths that pass the stored fiscal year', async () => {
+    const e = await caught(assertPeriodOpen(lockedTx().tx, { fiscalYearId: 'fy-1', date: new Date('2026-03-20T00:00:00Z') }, 'invoice'));
+    expect(e.code).toBe(PERIOD_LOCKED);
+  });
+
+  it('share-locks the period_lock row', async () => {
+    const { tx, fn } = lockedTx();
+    await assertPeriodOpen(tx, { date: new Date('2026-05-01T00:00:00Z') }, 'jurnal');
+    expect(rawCalls(fn('$queryRaw')).map(([sql]) => sql)).toContain('SELECT lock_date::text AS lock_date FROM period_lock WHERE id = 1 FOR SHARE');
+  });
+
+  it('passes every date when no lock is set or the row is missing', async () => {
+    await expect(assertPeriodOpen(lockedTx(null).tx, { date: new Date('2020-01-01T00:00:00Z') }, 'jurnal')).resolves.toEqual(openFy);
+    const { tx } = makeAutoTx({ 'fiscalYear.findFirst': () => openFy, $queryRaw: lockRows(openFy) });
+    await expect(assertPeriodOpen(tx, { date: new Date('2020-01-01T00:00:00Z') }, 'jurnal')).resolves.toEqual(openFy);
+  });
+
+  it('ignoreLock skips the lock date but not the fiscal-year checks', async () => {
+    const { tx, fn } = lockedTx();
+    await expect(getOpenFiscalYear(tx, new Date('2026-03-15T00:00:00Z'), { ignoreLock: true })).resolves.toEqual(openFy);
+    expect(rawCalls(fn('$queryRaw')).some(([sql]) => sql.includes('period_lock'))).toBe(false);
+    const closed = makeAutoTx({ 'fiscalYear.findFirst': () => closedFy, $queryRaw: withLock('2026-03-31', closedFy) });
+    expect((await caught(getOpenFiscalYear(closed.tx, new Date('2025-03-15T00:00:00Z'), { ignoreLock: true }))).code).toBe(PERIOD_CLOSED);
+  });
+
+  it('getOpenFiscalYear applies the lock by default', async () => {
+    expect((await caught(getOpenFiscalYear(lockedTx().tx, new Date('2026-02-10T00:00:00Z')))).code).toBe(PERIOD_LOCKED);
+  });
+
+  it('a closed year reports PERIOD_CLOSED before the lock date is read', async () => {
+    const { tx, fn } = makeAutoTx({ 'fiscalYear.findUnique': () => closedFy, $queryRaw: withLock('2026-03-31', closedFy) });
+    expect((await caught(assertPeriodOpen(tx, { fiscalYearId: 'fy-0', date: new Date('2025-03-01T00:00:00Z') }, 'jurnal'))).code).toBe(PERIOD_CLOSED);
+    expect(rawCalls(fn('$queryRaw')).some(([sql]) => sql.includes('period_lock'))).toBe(false);
+  });
+
+  it('assertPeriodsOpen checks the lock for every distinct day, even within one fiscal year', async () => {
+    const { tx, fn } = lockedTx();
+    const e = await caught(
+      assertPeriodsOpen(tx, [{ fiscalYearId: 'fy-1', date: new Date('2026-04-10T00:00:00Z') }, { fiscalYearId: 'fy-1', date: new Date('2026-03-10T00:00:00Z') }], 'produksi'),
+    );
+    expect(e.code).toBe(PERIOD_LOCKED);
+    expect(e.message).toMatch(/produksi bertanggal 2026-03-10/);
+    expect(fn('fiscalYear.findUnique')).toHaveBeenCalledTimes(1);
+  });
+
+  // The earliest open fiscal year ending on or after the day after the lock, as findFirst answers it.
+  const yearTx = (lockDate: string | null, year: { startDate: Date } | null) =>
+    makeAutoTx({ 'fiscalYear.findFirst': () => year, $queryRaw: withLock(lockDate) });
+  const fy2026 = { ...openFy, startDate: new Date('2026-01-01T00:00:00Z') };
+  const fy2027 = { id: 'fy-2', name: '2027', isClosed: false, startDate: new Date('2027-01-01T00:00:00Z') };
+
+  it('firstOpenBusinessDay is the day after the lock date, or null without a lock', async () => {
+    expect(await firstOpenBusinessDay(yearTx('2026-03-31', fy2026).tx)).toBe('2026-04-01');
+    expect(await firstOpenBusinessDay(yearTx('2026-12-31', fy2027).tx)).toBe('2027-01-01');
+    expect(await firstOpenBusinessDay(yearTx(null, fy2026).tx)).toBeNull();
+  });
+
+  it('firstOpenBusinessDay moves to the start of the next open year, and throws when there is none', async () => {
+    // Lock 31 Mar 2026 while 2026 is closed: the earliest open year is 2027.
+    expect(await firstOpenBusinessDay(yearTx('2026-03-31', fy2027).tx)).toBe('2027-01-01');
+    expect((await caught(firstOpenBusinessDay(yearTx('2026-03-31', null).tx))).code).toBe(FISCAL_YEAR_MISSING);
   });
 });

@@ -964,7 +964,8 @@
       "title": "Batalkan Jurnal",
       "description": "Apakah Anda yakin ingin membatalkan jurnal {{number}}? Saldo akun terkait akan dikembalikan. Tindakan ini tidak dapat dibatalkan.",
       "confirm": "Ya, Batalkan"
-    }
+    },
+    "periodLock": "Periode s.d. {{date}} dikunci: jurnal bertanggal sampai hari itu tidak bisa dibuat atau dibatalkan."
   },
   "journalDetailDrawer": {
     "loadingTitle": "Memuat…",

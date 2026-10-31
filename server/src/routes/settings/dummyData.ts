@@ -12,6 +12,9 @@ import { DUMMY_LEDGER_MARKERS, matchGenericDummyJournals, specificDummyNarration
 
 const router = Router();
 
+/** Demo data is dated in past months on purpose, so it skips the period lock (fiscal-year checks still apply). */
+const DEMO_FY = { ignoreLock: true } as const;
+
 // POST /api/settings/generate-dummy: requires settings edit permission.
 router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
   if (await prisma.demoDataBatch.findFirst({ select: { id: true } })) {
@@ -150,7 +153,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
           const taxAmt = subtotal.mul(11).div(100);
           const grandTotal = subtotal.plus(taxAmt).toDecimalPlaces(2).toNumber();
 
-          const fy = await getOpenFiscalYear(tx, date);
+          const fy = await getOpenFiscalYear(tx, date, DEMO_FY);
           const invNum = await generateDocumentNumber(tx, 'PI', date, fy.id);
 
           const pi = await tx.purchaseInvoice.create({
@@ -195,7 +198,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
           const taxAmt = subtotal.mul(11).div(100);
           const grandTotal = subtotal.plus(taxAmt).toDecimalPlaces(2).toNumber();
 
-          const fy = await getOpenFiscalYear(tx, date);
+          const fy = await getOpenFiscalYear(tx, date, DEMO_FY);
           const siInvNum = await generateDocumentNumber(tx, 'SI', date, fy.id);
 
           const si = await tx.salesInvoice.create({
@@ -249,7 +252,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
           // Create payment for first 2 of 5 sales invoices (40% collection rate, leaves AR balance)
           if (i < 2) {
             const payDate = new Date(date.getTime() + 7 * 86400000); // 7 days after invoice
-            const payFy = await getOpenFiscalYear(tx, payDate);
+            const payFy = await getOpenFiscalYear(tx, payDate, DEMO_FY);
             const payNum = await generateDocumentNumber(tx, 'PAY', payDate, payFy.id);
             const payment = await tx.payment.create({
               data: {
@@ -291,7 +294,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
         });
         for (const pi of monthPIs) {
           const payDate = new Date(new Date(pi.date).getTime() + 14 * 86400000);
-          const payFy = await getOpenFiscalYear(tx, payDate);
+          const payFy = await getOpenFiscalYear(tx, payDate, DEMO_FY);
           const payNum = await generateDocumentNumber(tx, 'PAY', payDate, payFy.id);
           const piAmount = Number(pi.grandTotal);
           await tx.payment.create({
@@ -327,7 +330,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
         // Gaji
         const gajiDate = new Date(month.getFullYear(), month.getMonth(), 25);
         const gajiAmount = 8000000 + Math.floor(Math.random() * 4000000);
-        const fyGaji = await getOpenFiscalYear(tx, gajiDate);
+        const fyGaji = await getOpenFiscalYear(tx, gajiDate, DEMO_FY);
         const jeGaji = await generateDocumentNumber(tx, 'JV', gajiDate, fyGaji.id);
         await tx.journalEntry.create({
           data: {
@@ -348,7 +351,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
         // Listrik
         const listrikDate = new Date(month.getFullYear(), month.getMonth(), 10);
         const listrikAmount = 1500000 + Math.floor(Math.random() * 1000000);
-        const fyListrik = await getOpenFiscalYear(tx, listrikDate);
+        const fyListrik = await getOpenFiscalYear(tx, listrikDate, DEMO_FY);
         const jeListrik = await generateDocumentNumber(tx, 'JV', listrikDate, fyListrik.id);
         await tx.journalEntry.create({
           data: {
@@ -390,7 +393,7 @@ router.post('/generate-dummy', requirePerm('settings'), async (req, res) => {
 
       if (gkpItem && gkgItem && berasPrm) {
         const genSM = generateDocumentNumber;
-        const getFY = getOpenFiscalYear;
+        const getFY = (t: typeof tx, date: Date) => getOpenFiscalYear(t, date, DEMO_FY);
 
         // Opening stock (saldo awal) for newly created dummy items — recorded as
         // movements + per-warehouse rows, never by writing currentStock directly.

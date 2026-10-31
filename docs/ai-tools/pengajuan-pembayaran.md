@@ -201,6 +201,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: tagihan belum diposting
 - 400: faktur sudah dibayar
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`eambill_pay`](#eambill_pay)
 
@@ -322,6 +323,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: akun debit = akun kredit
 - 400: vendor wajib untuk PURCHASE_INVOICE
 - 400: sudah diposting
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`eambill_list`](#eambill_list), [`eambill_cancel`](#eambill_cancel)
 
@@ -687,6 +689,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: belum dibayar
 - 400: pertanggungjawaban uang muka sudah berjalan
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`payreq_pay`](#payreq_pay)
 
@@ -981,6 +984,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: akun biaya baris N belum diisi
 - 400: akun kas sama dengan akun biaya
 - 400: tahun buku ditutup
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`payreq_set_accounts`](#payreq_set_accounts), [`payreq_cancel_payment`](#payreq_cancel_payment), [`coa_flat`](akuntansi.md#coa_flat)
 
@@ -1269,6 +1273,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 **Error umum**
 
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`payreq_settlement_post`](#payreq_settlement_post)
 
@@ -1336,6 +1341,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: pertanggungjawaban belum disetujui atasan
 - 400: tanggal sebelum tanggal bayar
 - 400: tahun buku ditutup
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`payreq_settlement_preview`](#payreq_settlement_preview), [`payreq_settlement_cancel_posting`](#payreq_settlement_cancel_posting)
 

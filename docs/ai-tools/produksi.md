@@ -1080,6 +1080,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 403: hanya pembuat draft yang boleh memostingnya
 - 400: stok input tidak cukup (draft tetap Draft, lastError terisi)
 - 404: draft tidak ditemukan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`prod_draft_get`](#prod_draft_get), [`prod_run_get`](#prod_run_get), [`prod_run_update`](#prod_run_update)
 
@@ -1452,6 +1453,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400: alasan bypass < 10 karakter
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get)
 
@@ -1712,6 +1714,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 403: tidak berwenang bypass validasi stok
 - 400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)
 

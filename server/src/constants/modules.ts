@@ -71,6 +71,8 @@ export const CAPABILITIES: CapabilityDef[] = [
   { key: 'approval.view_all', label: 'Lihat semua pengajuan (bukan hanya milik sendiri)' },
   { key: 'inventory.negative_stock', label: 'Bypass validasi stok minus' },
   { key: 'rbac.manage', label: 'Kelola Role & Hak Akses' },
+  // Default Admin only (super-admin): not in DEFAULT_CAPS and no BACKFILL_CAPS entry. An Admin can grant it per role.
+  { key: 'period.lock', label: 'Kunci / buka kunci periode bulanan' },
 ];
 
 export const CAPABILITY_KEYS = CAPABILITIES.map((c) => c.key);

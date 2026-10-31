@@ -515,6 +515,41 @@
       "endDate": "Tanggal selesai",
       "cancel": "Batal",
       "save": "Simpan"
+    },
+    "lock": {
+      "title": "Kunci Periode",
+      "description": "Tanggal sampai mana pembukuan dikunci. Dokumen bertanggal pada atau sebelum tanggal ini tidak bisa diposting, diubah, atau dibatalkan, kecuali quotation, SO, PO, proforma, inquiry, dan surat jalan sementara.",
+      "loading": "Memuat kunci periode…",
+      "loadFailed": "Gagal memuat kunci periode.",
+      "retry": "Coba lagi",
+      "lockedUntil": "Terkunci s.d. {{date}}",
+      "none": "Belum ada periode yang dikunci.",
+      "updatedBy": "Diubah oleh {{name}}, {{date}}",
+      "date": "Kunci s.d. tanggal",
+      "dateHint": "Hanya hari yang sudah lewat. Biasanya hari terakhir bulan yang sudah selesai diperiksa.",
+      "reason": "Alasan",
+      "reasonHint": "Wajib saat kunci dimundurkan atau dibuka (minimal 5 karakter).",
+      "save": "Simpan Kunci",
+      "clear": "Buka Kunci",
+      "history": "Riwayat perubahan",
+      "historyEmpty": "Belum ada perubahan.",
+      "noLock": "tanpa kunci",
+      "columns": {
+        "when": "Waktu",
+        "user": "Oleh",
+        "change": "Perubahan",
+        "reason": "Alasan"
+      },
+      "errors": {
+        "dateRequired": "Pilih tanggal kunci.",
+        "datePast": "Tanggal kunci harus sebelum hari ini.",
+        "reasonRequired": "Alasan wajib diisi (minimal 5 karakter) saat kunci dimundurkan atau dibuka."
+      },
+      "toast": {
+        "saved": "Periode dikunci s.d. {{date}}.",
+        "cleared": "Kunci periode dibuka.",
+        "saveError": "Gagal menyimpan kunci periode."
+      }
     }
   },
   "notifications": {

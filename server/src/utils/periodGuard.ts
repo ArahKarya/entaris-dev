@@ -5,13 +5,13 @@
 
 import type { FiscalYear, Prisma } from '@prisma/client';
 import { BusinessError } from './errors';
-import { businessDayOf, businessDayRange } from './businessDate';
+import { addDays, businessDayOf, businessDayRange } from './businessDate';
 
 type Tx = Prisma.TransactionClient;
 
 export const PERIOD_CLOSED = 'PERIOD_CLOSED';
 export const FISCAL_YEAR_MISSING = 'FISCAL_YEAR_MISSING';
-/** Reserved for the period lock date; nothing raises it until that column exists. */
+/** The date is on or before the monthly period lock date (period_lock.lock_date). */
 export const PERIOD_LOCKED = 'PERIOD_LOCKED';
 /** The year row stayed locked by a running close or reopen past YEAR_LOCK_WAIT_MS; retry later. */
 export const PERIOD_BUSY = 'PERIOD_BUSY';
@@ -60,6 +60,16 @@ const MS_PER_DAY = 86_400_000;
 function businessDay(date: Date): string {
   if (date.getTime() % MS_PER_DAY === 0) return date.toISOString().slice(0, 10);
   return businessDayOf(date);
+}
+
+/** Options of the period guard. */
+export interface PeriodGuardOptions {
+  /**
+   * Skip the monthly lock date (the fiscal-year checks still apply). Only for documents without
+   * a GL or stock effect, which use the fiscal year for numbering alone: quotation, sales order,
+   * proforma, inquiry, purchase order, temporary delivery note, and demo data.
+   */
+  ignoreLock?: boolean;
 }
 
 const earlier = (a: Date, b: Date): Date => (a.getTime() <= b.getTime() ? a : b);
@@ -116,12 +126,69 @@ async function lockFiscalYearRow(tx: Tx, fy: FiscalYear, label: PeriodLabel): Pr
 }
 
 /**
- * Returns the fiscal year for the reference when it exists and is open, and holds a share lock
- * on its row for the rest of the transaction (see lockFiscalYearRow).
- * Throws BusinessError FISCAL_YEAR_MISSING when none covers it, PERIOD_CLOSED when it is closed,
- * PERIOD_BUSY when a close or reopen of that year is still running after YEAR_LOCK_WAIT_MS.
+ * The period lock date (YYYY-MM-DD), or null when none is set. Share-locks the single
+ * period_lock row until the transaction ends: PUT /period-lock takes FOR UPDATE on it, so moving
+ * the lock waits for running postings, and a posting that starts later sees the new date.
  */
-export async function assertPeriodOpen(tx: Tx, ref: PeriodRef, label: PeriodLabel): Promise<FiscalYear> {
+async function readLockDate(tx: Tx): Promise<string | null> {
+  const rows = await tx.$queryRaw<{ lock_date: string | null }[]>`SELECT lock_date::text AS lock_date FROM period_lock WHERE id = 1 FOR SHARE`;
+  return rows[0]?.lock_date ?? null;
+}
+
+/** Throws PERIOD_LOCKED when the business day `day` is on or before the lock date. */
+async function assertNotLocked(tx: Tx, day: string, label: PeriodLabel): Promise<void> {
+  const lockDate = await readLockDate(tx);
+  if (lockDate !== null && day <= lockDate) {
+    throw new BusinessError(
+      `Periode s.d. ${lockDate} sudah dikunci; ${label} bertanggal ${day} tidak bisa diposting, diubah, atau dibatalkan. Minta pemegang hak Kunci Periode memundurkan kunci.`,
+      PERIOD_LOCKED,
+    );
+  }
+}
+
+/**
+ * The first business day (YYYY-MM-DD) after the period lock date that lies in an open fiscal year,
+ * or null when no lock is set. For postings that fall into a locked month and move to the first
+ * open day instead (recurring catch-up, month-end settlement): the day after the lock, or the start
+ * of the next open fiscal year when that day's year is closed. Throws FISCAL_YEAR_MISSING when no
+ * open year covers or follows it. Share-locks the lock row like the guard does; the posting itself
+ * still goes through assertPeriodOpen.
+ */
+export async function firstOpenBusinessDay(tx: Tx): Promise<string | null> {
+  const lockDate = await readLockDate(tx);
+  if (lockDate === null) return null;
+  const day = addDays(lockDate, 1);
+  const local = businessDayRange(day);
+  const utcStart = new Date(`${day}T00:00:00.000Z`);
+  // Same bounds as findFiscalYearForDate: the earliest open year ending on or after `day`.
+  const fy = await tx.fiscalYear.findFirst({
+    where: { isClosed: false, endDate: { gte: earlier(local.gte, utcStart) } },
+    orderBy: { startDate: 'asc' },
+  });
+  if (!fy) {
+    throw new BusinessError(
+      `Tidak ada tahun buku terbuka mulai ${day}. Buat atau buka kembali tahun buku terlebih dahulu.`,
+      FISCAL_YEAR_MISSING,
+    );
+  }
+  const start = businessDay(fy.startDate);
+  return start > day ? start : day;
+}
+
+/**
+ * Returns the fiscal year for the reference when it exists and is open, and holds a share lock
+ * on its row for the rest of the transaction (see lockFiscalYearRow). Then checks the monthly
+ * lock date against the reference's business day, unless `opts.ignoreLock`.
+ * Throws BusinessError FISCAL_YEAR_MISSING when none covers it, PERIOD_CLOSED when it is closed,
+ * PERIOD_BUSY when a close or reopen of that year is still running after YEAR_LOCK_WAIT_MS,
+ * PERIOD_LOCKED when the date is on or before the lock date.
+ */
+export async function assertPeriodOpen(
+  tx: Tx,
+  ref: PeriodRef,
+  label: PeriodLabel,
+  opts: PeriodGuardOptions = {},
+): Promise<FiscalYear> {
   const found =
     ref.fiscalYearId !== undefined
       ? await tx.fiscalYear.findUnique({ where: { id: ref.fiscalYearId } })
@@ -140,13 +207,15 @@ export async function assertPeriodOpen(tx: Tx, ref: PeriodRef, label: PeriodLabe
       PERIOD_CLOSED,
     );
   }
+  if (!opts.ignoreLock) await assertNotLocked(tx, businessDay(ref.date), label);
   return fy;
 }
 
 /**
- * assertPeriodOpen for every reference given, once per distinct date or fiscal year. Edit and
- * cancel paths pass the document's date and its stored fiscal year: an older edit that moved the
- * date can leave the stored id stale, and journals booked to that id must stay untouched too.
+ * assertPeriodOpen for every reference given: the fiscal-year check once per distinct date or
+ * fiscal year, the lock date once per distinct business day. Edit and cancel paths pass the
+ * document's date and its stored fiscal year: an older edit that moved the date can leave the
+ * stored id stale, and journals booked to that id must stay untouched too.
  */
 export async function assertPeriodsOpen(
   tx: Tx,
@@ -154,12 +223,19 @@ export async function assertPeriodsOpen(
   label: PeriodLabel,
 ): Promise<void> {
   const seen = new Set<string>();
+  const lockChecked = new Set<string>();
   for (const ref of refs) {
     if (!ref) continue;
     const key = ref.fiscalYearId !== undefined ? `fy:${ref.fiscalYearId}` : `date:${ref.date.getTime()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    await assertPeriodOpen(tx, ref, label);
+    const day = businessDay(ref.date);
+    if (!seen.has(key)) {
+      seen.add(key);
+      lockChecked.add(day);
+      await assertPeriodOpen(tx, ref, label);
+    } else if (!lockChecked.has(day)) {
+      lockChecked.add(day);
+      await assertNotLocked(tx, day, label);
+    }
   }
 }
 

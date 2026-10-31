@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { CalendarRange, ChevronDown, Eye, Info, Plus, Upload, XCircle } from 'lucide-react';
+import { CalendarRange, ChevronDown, Eye, Info, Lock, Plus, Upload, XCircle } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -38,6 +38,7 @@ import {
 import JournalEntryModal from '@/components/JournalEntryModal';
 import ImportModal from '@/components/ImportModal';
 import JournalDetailDrawer from '@/components/JournalDetailDrawer';
+import { showDay, usePeriodLock } from '@/lib/periodLock';
 
 type Money = string | number;
 
@@ -154,6 +155,8 @@ export const GeneralLedger = () => {
   const canEdit = can('journal', 'edit');
   // Same gates as PATCH /journals/:id/cancel: journal edit right plus doc.cancel.
   const canCancel = canEdit && cap('doc.cancel');
+  // Read-only notice: the lock is set in Pengaturan > Tahun Buku, which roles without settings do not see.
+  const lockDate = usePeriodLock().data?.lockDate ?? null;
   const queryClient = useQueryClient();
   const accounts = useAccountOptions();
 
@@ -332,6 +335,13 @@ export const GeneralLedger = () => {
           ) : undefined
         }
       />
+
+      {lockDate && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="gl-period-lock">
+          <Lock className="size-4 shrink-0" aria-hidden />
+          {t('generalLedger.periodLock', { date: showDay(lockDate, '') })}
+        </p>
+      )}
 
       {canEdit && (
         <aside

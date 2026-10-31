@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **509** tool (read 234 · write 165 · critical 110); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **511** tool (read 235 · write 165 · critical 111); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -12,7 +12,7 @@ Total **509** tool (read 234 · write 165 · critical 110); semuanya aktif secar
 | [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
-| [Akuntansi](akuntansi.md) | 34 | 14 | 8 | 12 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
+| [Akuntansi](akuntansi.md) | 36 | 15 | 8 | 13 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
 | [Kas & Bank](kas-bank.md) | 37 | 15 | 13 | 9 | Pembayaran/penerimaan, rekonsiliasi bank, transaksi berulang, uang jaminan proyek. |
 | [Aset & Umum (EAM)](aset-umum.md) | 141 | 49 | 68 | 24 | Aset, kendaraan, gedung, equipment, maintenance, dokumen legal, inventaris umum, MR. |
 | [Pengajuan Pembayaran](pengajuan-pembayaran.md) | 32 | 9 | 11 | 12 | Pengajuan pembayaran, verifikasi, pembayaran, pertanggungjawaban, antrian Tagihan EAM. |
@@ -365,6 +365,8 @@ Total **509** tool (read 234 · write 165 · critical 110); semuanya aktif secar
 | [`payreqtype_delete`](pengajuan-pembayaran.md#payreqtype_delete) | pengajuan-pembayaran | write | tidak | Admin | `DELETE /api/payment-request-types/:id` |
 | [`payreqtype_list`](pengajuan-pembayaran.md#payreqtype_list) | pengajuan-pembayaran | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/payment-request-types` |
 | [`payreqtype_update`](pengajuan-pembayaran.md#payreqtype_update) | pengajuan-pembayaran | write | tidak | Admin | `PUT /api/payment-request-types/:id` |
+| [`period_lock_get`](akuntansi.md#period_lock_get) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/period-lock` |
+| [`period_lock_set`](akuntansi.md#period_lock_set) | akuntansi | critical | tidak | Admin | `PUT /api/period-lock` |
 | [`pg_cancel`](kas-bank.md#pg_cancel) | kas-bank | critical | tidak | Admin, Accountant | `PATCH /api/project-guarantees/:id/cancel` |
 | [`pg_create`](kas-bank.md#pg_create) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/project-guarantees` |
 | [`pg_get`](kas-bank.md#pg_get) | kas-bank | read | - | Admin, Accountant, Viewer | `GET /api/project-guarantees/:id` |

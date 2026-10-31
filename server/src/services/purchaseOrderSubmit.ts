@@ -122,7 +122,8 @@ export async function submitPurchaseOrderInTx(
   const parsedDate = new Date(body.date);
   if (isNaN(parsedDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
 
-  const fiscalYear = await getOpenFiscalYear(tx, parsedDate);
+  // A PO has no GL or stock effect: the year only numbers it, so the period lock does not apply.
+  const fiscalYear = await getOpenFiscalYear(tx, parsedDate, { ignoreLock: true });
 
   await assertSupplier(tx, body.partyId);
   await assertWarehouse(tx, body.warehouseId);
@@ -288,7 +289,8 @@ export async function updatePurchaseOrderInTx(tx: Tx, poId: string, body: Submit
 
   const parsedDate = new Date(body.date);
   if (isNaN(parsedDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
-  const fiscalYear = await getOpenFiscalYear(tx, parsedDate);
+  // A PO has no GL or stock effect: the year only numbers it, so the period lock does not apply.
+  const fiscalYear = await getOpenFiscalYear(tx, parsedDate, { ignoreLock: true });
   await assertSupplier(tx, body.partyId);
   await assertWarehouse(tx, body.warehouseId);
 

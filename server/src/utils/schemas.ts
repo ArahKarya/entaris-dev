@@ -452,6 +452,30 @@ export const CreateFiscalYearSchema = z.object({
   endDate: z.string().min(1, 'Tanggal selesai wajib diisi.').regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal selesai harus berformat YYYY-MM-DD.'),
 });
 
+// Monthly period lock (PUT /period-lock). lockDate null, or clear: true (AIRA tool calls cannot
+// send null), clears the lock. The reason is checked in services/periodLock.ts: required (5..500)
+// only when the date moves back or is cleared.
+export const SetPeriodLockSchema = z
+  .object({
+    lockDate: z
+      .string({ error: 'Tanggal kunci wajib diisi (YYYY-MM-DD), atau null untuk membuka kunci.' })
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal kunci harus berformat YYYY-MM-DD.')
+      .refine((d) => !isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().startsWith(d), 'Tanggal kunci tidak valid.')
+      .nullable()
+      .optional(),
+    clear: z.boolean({ error: 'clear harus true atau false.' }).optional(),
+    reason: z.string().trim().max(500, 'Alasan maksimal 500 karakter.').nullable().optional(),
+  })
+  .refine((b) => b.lockDate !== undefined || b.clear === true, {
+    message: 'Tanggal kunci wajib diisi (YYYY-MM-DD), atau null untuk membuka kunci.',
+    path: ['lockDate'],
+  })
+  .refine((b) => !(b.clear === true && typeof b.lockDate === 'string'), {
+    message: 'Isi tanggal kunci atau clear: true, tidak keduanya.',
+    path: ['clear'],
+  })
+  .transform(({ lockDate, clear, reason }) => ({ lockDate: clear ? null : (lockDate ?? null), reason }));
+
 // Inventory Item
 export const CreateInventoryItemSchema = z.object({
   code: z.string().min(1, 'Kode item wajib diisi.'),

@@ -157,7 +157,8 @@ router.post('/', async (req: AuthRequest, res) => {
     if (isNaN(validUntil.getTime())) throw new BusinessError('Format tanggal berlaku-sampai tidak valid.');
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const fiscalYear = await getOpenFiscalYear(tx, date);
+      // No GL or stock effect: the year only numbers the document, so the period lock does not apply.
+      const fiscalYear = await getOpenFiscalYear(tx, date, { ignoreLock: true });
       const quotationNumber = await generateDocumentNumber(tx, 'QO', date, fiscalYear.id);
       const items = resolveItems(body.items);
       const totals = computeTotals(items, body.potongan ?? 0, body.biayaLain ?? 0);

@@ -7,7 +7,7 @@ import { hasCap } from '../permissionService';
 import { createDemoApi, type DemoActor, type DemoApi } from './api';
 import { makeRecorder, makeScheduler, makeSkipper, sortEvents, type DemoContext, type DemoEvent } from './context';
 import { activeDemoBatch, findNonEmptyDataTables, hasLegacyDummyData } from './guard';
-import { createMasters, ensureFiscalYears, postOpeningBalances, resolveAccounts } from './scenario/setup';
+import { createMasters, ensureFiscalYears, ensurePeriodUnlocked, postOpeningBalances, resolveAccounts } from './scenario/setup';
 import { schedulePurchasing, type PurchaseState } from './scenario/purchasing';
 import { scheduleSales, type SalesState } from './scenario/sales';
 import { scheduleSalesExtras } from './scenario/salesExtras';
@@ -93,6 +93,7 @@ export async function runBatch(batchId: string, admin: DemoActor, api: DemoApi):
       schedule: makeScheduler(today, queue),
     };
     await progress('Tahun buku');
+    await ensurePeriodUnlocked(today);
     await ensureFiscalYears(api, admin, today, ctx.record);
     done++;
     await progress('Akun');

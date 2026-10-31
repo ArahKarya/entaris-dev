@@ -9,6 +9,7 @@ type Line = { accountId: string; debit: number; credit: number };
 const makeJournal = (id: string, entryNumber: string, items: Line[], fiscalYearId = 'fy-open', status = 'Submitted') => ({
   id,
   entryNumber,
+  date: new Date('2026-03-10T00:00:00Z'),
   fiscalYearId,
   status,
   items: items.map((item, idx) => ({ id: `ji-${id}-${idx}`, ...item })),
