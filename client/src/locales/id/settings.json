@@ -487,7 +487,7 @@
       "reopenError": "Gagal membuka tahun buku."
     },
     "title": "Periode Akuntansi",
-    "description": "Tutup buku membuat jurnal penutup; buka kembali menghapusnya. Kedua aksi memerlukan hak pembatalan dokumen.",
+    "description": "Tutup buku menjalankan daftar cek lalu membuat jurnal penutup; buka kembali membatalkannya. Kedua aksi memerlukan hak pembatalan dokumen.",
     "new": "Tahun Buku Baru",
     "loading": "Memuat tahun buku…",
     "empty": {
@@ -501,6 +501,56 @@
     "closeConfirm": {
       "title": "Tutup tahun buku {{name}}?",
       "description": "Jurnal penutup akan dibuat dan saldo pendapatan/beban akan direset ke laba ditahan."
+    },
+    "checklist": {
+      "loading": "Memeriksa daftar cek tutup buku…",
+      "loadFailed": "Gagal memuat daftar cek tutup buku.",
+      "ready": "Semua pemeriksaan lolos. Tahun buku siap ditutup.",
+      "readyWithWarnings_one": "Tidak ada yang memblokir; {{count}} peringatan sebaiknya ditinjau dulu.",
+      "readyWithWarnings_other": "Tidak ada yang memblokir; {{count}} peringatan sebaiknya ditinjau dulu.",
+      "blocked_one": "{{count}} pemeriksaan masih memblokir tutup buku.",
+      "blocked_other": "{{count}} pemeriksaan masih memblokir tutup buku.",
+      "blocking": "memblokir",
+      "warning": "peringatan",
+      "passed": "Pemeriksaan yang lolos",
+      "more_one": "+{{count}} lainnya",
+      "more_other": "+{{count}} lainnya",
+      "baselined_one": "{{count}} selisih lama tercatat di baseline (tidak memblokir)",
+      "baselined_other": "{{count}} selisih lama tercatat di baseline (tidak memblokir)",
+      "checks": {
+        "prev-year-open": {
+          "title": "Tahun buku sebelumnya",
+          "hint": "Tahun buku sebelumnya masih terbuka. Tutup dulu, berurutan dari yang paling lama."
+        },
+        "drafts-ledger": {
+          "title": "Jurnal, invoice, dan pembayaran Draft",
+          "hint": "Posting atau hapus dokumen Draft yang bertanggal di tahun ini."
+        },
+        "drafts-other": {
+          "title": "Draft lain",
+          "hint": "Draft buku kas, draft produksi, transfer stok, atau stok opname bertanggal di tahun ini belum diselesaikan."
+        },
+        "depreciation-unposted": {
+          "title": "Penyusutan aset tetap",
+          "hint": "Penyusutan bulan-bulan tahun ini belum diposting. Posting lewat menu Aset Tetap."
+        },
+        "ledger-balanced": {
+          "title": "Keseimbangan buku besar",
+          "hint": "Debit dan kredit buku besar dokumen ini tidak sama."
+        },
+        "ale-vs-journal": {
+          "title": "Buku besar sesuai jurnal",
+          "hint": "Baris buku besar jurnal ini tidak sama dengan baris jurnalnya."
+        },
+        "system-accounts": {
+          "title": "Akun sistem tutup buku",
+          "hint": "Petakan Laba Tahun Berjalan dan Laba Ditahan di Pengaturan > Akun Sistem."
+        },
+        "do-uninvoiced": {
+          "title": "Surat jalan belum ditagih",
+          "hint": "Surat jalan sampai akhir tahun ini belum dibuatkan invoice."
+        }
+      }
     },
     "reopenConfirm": {
       "title": "Buka kembali tahun buku {{name}}?",
