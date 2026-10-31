@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/akuntansi` · 33 tool (read 14, write 8, critical 11)
+Endpoint MCP target: `/mcp/akuntansi` · 34 tool (read 14, write 8, critical 12)
 
 ## Tujuan
 
@@ -94,6 +94,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | [`fa_create`](#fa_create) | write | tidak | `POST /api/fixed-assets` |
 | [`fa_depreciate`](#fa_depreciate) | critical | tidak | `POST /api/fixed-assets/:id/depreciate` |
 | [`fa_depreciate_bulk`](#fa_depreciate_bulk) | critical | tidak | `POST /api/fixed-assets/depreciate-bulk` |
+| [`fa_depreciation_cancel`](#fa_depreciation_cancel) | critical | tidak | `POST /api/fixed-assets/:id/depreciation/:entryId/cancel` |
 | [`fa_dispose`](#fa_dispose) | critical | tidak | `POST /api/fixed-assets/:id/dispose` |
 | [`fa_get`](#fa_get) | read | - | `GET /api/fixed-assets/:id` |
 | [`fa_import`](#fa_import) | write | tidak | `POST /api/fixed-assets/import` |
@@ -669,11 +670,11 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Error umum**
 
 - 404: jadwal tidak ditemukan
-- 400: depresiasi sudah diposting
+- 400 STALE_STATUS: depresiasi sudah diposting (juga klik ganda/retry atau posting lain yang lebih dulu; tidak diposting dua kali)
 - 400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
 
-**Tool terkait:** [`fa_get`](#fa_get), [`fa_depreciate_bulk`](#fa_depreciate_bulk)
+**Tool terkait:** [`fa_get`](#fa_get), [`fa_depreciate_bulk`](#fa_depreciate_bulk), [`fa_depreciation_cancel`](#fa_depreciation_cancel)
 
 ### fa_depreciate_bulk
 
@@ -718,7 +719,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Isi hasil:** { posted, totalAmount, jeNumbers, skipped, items[] } (dryRun: dryRun=true tanpa posting).
 
-**Efek pembukuan/stok:** Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. dryRun=true: tidak ada efek.
+**Efek pembukuan/stok:** Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. Baris yang sudah diposting permintaan lain atau asetnya dilepas sejak daftar dibaca dilewati (skipped). dryRun=true: tidak ada efek.
 
 **Teks konfirmasi:** Posting penyusutan massal bulan {month} (dryRun={dryRun})?
 
@@ -732,6 +733,74 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat
 
 **Tool terkait:** [`fa_depreciate`](#fa_depreciate), [`fa_list`](#fa_list)
+
+### fa_depreciation_cancel
+
+**Ringkasan:** Membatalkan posting satu baris jadwal penyusutan aset: jurnal DEP-… di-void, baris kembali belum diposting, akumulasi penyusutan turun dan nilai buku naik sebesar nilai baris. Hanya baris terposting terakhir (periode paling akhir) per aset; batalkan mundur satu per satu. Setelah dibatalkan baris bisa diposting ulang (fa_depreciate) dengan nomor DEP baru. Butuh capability doc.cancel.
+
+- **Risk / tier:** `critical` / Wajib-Approve
+- **Draft-capable:** tidak (efek langsung)
+- **Roles & izin:** Admin, Accountant (modul `fixed_assets` / `edit`, capability `doc.cancel`)
+- **Handler:** `POST /api/fixed-assets/:id/depreciation/:entryId/cancel` (src/routes/fixedAssets.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID aset. |
+| `entryId` | path | `string` | ya | ID baris jadwal penyusutan yang sudah diposting (dari fa_get → depreciationEntries). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal penyusutan. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "fa_depreciation_cancel",
+  "args": {
+    "id": "<id>",
+    "entryId": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "action",
+  "status": "pending_approval",
+  "approvalId": "<id>",
+  "confirm": "Batalkan posting penyusutan baris <id> aset <id>? Jurnal penyusutannya di-void dan nilai buku aset dipulihkan."
+}
+```
+
+**Isi hasil:** { message: 'Posting penyusutan dibatalkan.', id (aset), entryId, journalEntryId, entryNumber, amount, accumulatedDepreciation, bookValue }.
+
+**Efek pembukuan/stok:** Void jurnal DEP-… baris itu (DR Beban Penyusutan / CR Akumulasi Penyusutan): jurnal Cancelled dengan ID pembatal dan alasan, ledger isCancelled, saldo akun dibalik. Baris jadwal isPosted=false (journalEntryId dikosongkan); accumulatedDepreciation aset berkurang dan bookValue bertambah sebesar nilai baris. Nomor DEP tidak dipakai ulang.
+
+**Teks konfirmasi:** Batalkan posting penyusutan baris {entryId} aset {id}? Jurnal penyusutannya di-void dan nilai buku aset dipulihkan.
+
+**Prasyarat**
+
+- Aset berstatus Active (aset yang sudah dilepas tidak bisa dibatalkan posting penyusutannya; koreksi lewat jurnal manual) dan baris jadwal yang dibatalkan adalah baris terposting dengan periode paling akhir.
+- Tahun buku jurnal penyusutan masih terbuka.
+- User memiliki capability doc.cancel.
+
+**Error umum**
+
+- 400 DEPRECIATION_NOT_LAST: masih ada baris periode lebih akhir yang terposting; batalkan dari periode terakhir dulu
+- 400 STALE_STATUS: baris belum diposting atau postingnya sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
+- 400 PERIOD_CLOSED: tahun buku jurnal penyusutan tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 FIXED_ASSET_NOT_ACTIVE: aset sudah dilepas (Disposed); pelepasan tidak bisa dibatalkan, jadi posting penyusutannya dikoreksi lewat jurnal manual
+- 400 DEPRECIATION_ENTRY_NOT_FOUND: baris jadwal tidak ditemukan atau bukan milik aset ini
+- 400 DEPRECIATION_JOURNAL_MISSING: jurnal penyusutan baris ini tidak ada atau sudah dibatalkan di luar modul Aset Tetap; koreksi lewat jurnal manual
+- 400: aset tidak ditemukan
+- 403: tanpa capability doc.cancel
+- 400: alasan pembatalan maksimal 500 karakter
+
+**Tool terkait:** [`fa_get`](#fa_get), [`fa_depreciate`](#fa_depreciate)
 
 ### fa_dispose
 

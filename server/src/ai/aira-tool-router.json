@@ -17667,16 +17667,90 @@
       "confirm_template": "Posting penyusutan jadwal {entryId} untuk aset {id}?",
       "errors": [
         "404: jadwal tidak ditemukan",
-        "400: depresiasi sudah diposting",
+        "400 STALE_STATUS: depresiasi sudah diposting (juga klik ganda/retry atau posting lain yang lebih dulu; tidak diposting dua kali)",
         "400 PERIOD_CLOSED: tahun buku periode penyusutan sudah ditutup",
         "400 FISCAL_YEAR_MISSING: tahun buku untuk periode penyusutan belum dibuat"
       ],
       "related": [
         "fa_get",
-        "fa_depreciate_bulk"
+        "fa_depreciate_bulk",
+        "fa_depreciation_cancel"
       ],
       "prerequisites": [
         "Tahun buku untuk periode penyusutan ada dan masih terbuka."
+      ]
+    },
+    {
+      "name": "fa_depreciation_cancel",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "fixed_assets",
+      "desc": "Membatalkan posting satu baris jadwal penyusutan aset: jurnal DEP-… di-void, baris kembali belum diposting, akumulasi penyusutan turun dan nilai buku naik sebesar nilai baris. Hanya baris terposting terakhir (periode paling akhir) per aset; batalkan mundur satu per satu. Setelah dibatalkan baris bisa diposting ulang (fa_depreciate) dengan nomor DEP baru. Butuh capability doc.cancel.",
+      "risk": "critical",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "id": "string",
+        "entryId": "string",
+        "reason": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID aset."
+        },
+        {
+          "name": "entryId",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID baris jadwal penyusutan yang sudah diposting (dari fa_get → depreciationEntries)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal penyusutan."
+        }
+      ],
+      "output": {
+        "status": "string"
+      },
+      "outputSummary": "{ message: 'Posting penyusutan dibatalkan.', id (aset), entryId, journalEntryId, entryNumber, amount, accumulatedDepreciation, bookValue }.",
+      "handler": "POST /api/fixed-assets/:id/depreciation/:entryId/cancel",
+      "permAction": "edit",
+      "requiresCapability": "doc.cancel",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Void jurnal DEP-… baris itu (DR Beban Penyusutan / CR Akumulasi Penyusutan): jurnal Cancelled dengan ID pembatal dan alasan, ledger isCancelled, saldo akun dibalik. Baris jadwal isPosted=false (journalEntryId dikosongkan); accumulatedDepreciation aset berkurang dan bookValue bertambah sebesar nilai baris. Nomor DEP tidak dipakai ulang.",
+      "confirm_template": "Batalkan posting penyusutan baris {entryId} aset {id}? Jurnal penyusutannya di-void dan nilai buku aset dipulihkan.",
+      "errors": [
+        "400 DEPRECIATION_NOT_LAST: masih ada baris periode lebih akhir yang terposting; batalkan dari periode terakhir dulu",
+        "400 STALE_STATUS: baris belum diposting atau postingnya sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)",
+        "400 PERIOD_CLOSED: tahun buku jurnal penyusutan tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 FIXED_ASSET_NOT_ACTIVE: aset sudah dilepas (Disposed); pelepasan tidak bisa dibatalkan, jadi posting penyusutannya dikoreksi lewat jurnal manual",
+        "400 DEPRECIATION_ENTRY_NOT_FOUND: baris jadwal tidak ditemukan atau bukan milik aset ini",
+        "400 DEPRECIATION_JOURNAL_MISSING: jurnal penyusutan baris ini tidak ada atau sudah dibatalkan di luar modul Aset Tetap; koreksi lewat jurnal manual",
+        "400: aset tidak ditemukan",
+        "403: tanpa capability doc.cancel",
+        "400: alasan pembatalan maksimal 500 karakter"
+      ],
+      "prerequisites": [
+        "Aset berstatus Active (aset yang sudah dilepas tidak bisa dibatalkan posting penyusutannya; koreksi lewat jurnal manual) dan baris jadwal yang dibatalkan adalah baris terposting dengan periode paling akhir.",
+        "Tahun buku jurnal penyusutan masih terbuka.",
+        "User memiliki capability doc.cancel."
+      ],
+      "related": [
+        "fa_get",
+        "fa_depreciate"
       ]
     },
     {
@@ -17779,7 +17853,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. dryRun=true: tidak ada efek.",
+      "postingEffect": "Per baris jadwal jatuh tempo: jurnal DEP-… DR Beban Penyusutan / CR Akumulasi Penyusutan; aset diperbarui. Baris yang sudah diposting permintaan lain atau asetnya dilepas sejak daftar dibaca dilewati (skipped). dryRun=true: tidak ada efek.",
       "confirm_template": "Posting penyusutan massal bulan {month} (dryRun={dryRun})?",
       "related": [
         "fa_depreciate",
