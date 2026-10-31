@@ -25,6 +25,11 @@ const IGNORED = new Set<string>([
   'HTTP {0}',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
+  // Refusals of the one-time baseline capture script (scripts/repair/e1-close-baseline.ts), CLI only.
+  '{0} is not a baseline-aware close check (known: {1})',
+  '--allow-existing only goes with --check <id>',
+  'The baseline already has rows for {0}; a check is captured once.',
+  'The baseline already has {0} row(s); it is captured once. To capture a check added later, pass --check <id> --allow-existing.',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */
