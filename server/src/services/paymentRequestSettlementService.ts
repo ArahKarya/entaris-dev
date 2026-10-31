@@ -264,8 +264,8 @@ export async function cancelSettlementPostingInTx(tx: Tx, id: string, actor: Act
   assertOk(checkCancelSettlementPosting(pr, actor));
   if (pr.settlementJournalId) {
     // Checked before the claim so a closed year leaves the settlement untouched (cancelJournalInTx checks again).
-    const je = await tx.journalEntry.findUnique({ where: { id: pr.settlementJournalId }, select: { fiscalYearId: true } });
-    if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
+    const je = await tx.journalEntry.findUnique({ where: { id: pr.settlementJournalId }, select: { fiscalYearId: true, date: true } });
+    if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'jurnal');
   }
   await claimSettlement(tx, id, ['SETTLED'], {
     settlementStatus: 'PENDING_FINANCE',

@@ -34,7 +34,7 @@ export async function cancelSalesReturnInTx(
   if (ret.status === 'Cancelled') throw new BusinessError('Retur sudah dibatalkan.');
   // First write; any rejection below rolls it back.
   await claimCancel(tx.salesReturn, ret.id, { status: 'Cancelled', cancelledAt: new Date() });
-  await assertPeriodOpen(tx, { fiscalYearId: ret.fiscalYearId }, 'retur');
+  await assertPeriodOpen(tx, { fiscalYearId: ret.fiscalYearId, date: ret.date }, 'retur');
 
   // Block if the credit (customer deposit) it created has been applied.
   if (ret.customerDepositId) {

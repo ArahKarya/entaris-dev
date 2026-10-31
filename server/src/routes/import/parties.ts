@@ -102,13 +102,13 @@ router.post(
 
           // Find existing party by name or create new. An existing party keeps its balances and
           // journals: re-import only refreshes profile fields (audit G-25 / S-21).
-          let party = await prisma.party.findFirst({
+          const existing = await prisma.party.findFirst({
             where: { name: row.name, partyType: row.partyType },
           });
           const hasOpeningBalances = openingBalance > 0 || depositBalance > 0 || customerDepositBalance > 0;
-          if (party) {
-            party = await prisma.party.update({
-              where: { id: party.id },
+          if (existing) {
+            await prisma.party.update({
+              where: { id: existing.id },
               data: partyData,
             });
             if (hasOpeningBalances) {
@@ -120,224 +120,214 @@ router.post(
             success++;
             continue;
           }
-          // Resolve system accounts and the fiscal year before creating the party, so a setup gap
-          // fails the row without leaving a party whose balances have no journal behind them.
+
           const isCustomer = row.partyType === 'Customer' || row.partyType === 'Both';
           const isSupplier = row.partyType === 'Supplier' || row.partyType === 'Both';
-          const now = new Date();
-          const openingSetup = hasOpeningBalances
-            ? {
-                arAccount: await systemAccounts.getAccount('AR'),
-                apAccount: await systemAccounts.getAccount('AP'),
-                vendorDepositAccount: await systemAccounts.getAccount('VENDOR_DEPOSIT'),
-                customerDepositAccount: await systemAccounts.getAccount('CUSTOMER_DEPOSIT'),
-                openingEquityAccount: await systemAccounts.getAccount('OPENING_EQUITY'),
-                fiscalYear: await getOpenFiscalYear(prisma as any, now),
-              }
-            : null;
-
-          party = await prisma.party.create({
-            data: {
-              ...partyData,
-              outstandingAmount: openingBalance,
-              depositBalance,
-              customerDepositBalance,
-            },
-          });
-
-          // Create opening balance journals if needed
-          if (openingSetup) {
-            const { arAccount, apAccount, vendorDepositAccount, customerDepositAccount, openingEquityAccount, fiscalYear } = openingSetup;
-
-            {
-
-              // AR/AP opening balance journal
-              if (openingBalance > 0) {
-                const receivableAccount = isCustomer ? arAccount : apAccount;
-                {
-                  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-                    // Inside the transaction so the advisory lock is held until the journal is created.
-                    const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
-                    const journal = await tx.journalEntry.create({
-                      data: {
-                        entryNumber: jvNumber,
-                        date: now,
-                        narration: `Saldo awal ${isCustomer ? 'piutang' : 'hutang'}: ${row.name}`,
-                        status: 'Submitted',
-                        fiscalYearId: fiscalYear.id,
-                        createdBy: req.user!.userId,
-                        submittedAt: now,
-                        sourceType: 'OPENING',
-                        items: {
-                          create: isCustomer
-                            ? [
-                                { accountId: receivableAccount.id, partyId: party.id, debit: openingBalance, credit: 0, description: `Saldo awal piutang: ${row.name}` },
-                                { accountId: openingEquityAccount.id, debit: 0, credit: openingBalance, description: `Saldo awal piutang: ${row.name}` },
-                              ]
-                            : [
-                                { accountId: openingEquityAccount.id, debit: openingBalance, credit: 0, description: `Saldo awal hutang: ${row.name}` },
-                                { accountId: receivableAccount.id, partyId: party.id, debit: 0, credit: openingBalance, description: `Saldo awal hutang: ${row.name}` },
-                              ],
-                        },
-                      },
-                      include: { items: true },
-                    });
-
-                    await tx.accountingLedgerEntry.createMany({
-                      data: journal.items.map((item) => ({
-                        date: now,
-                        accountId: item.accountId,
-                        partyId: item.partyId,
-                        debit: item.debit,
-                        credit: item.credit,
-                        referenceType: 'JournalEntry' as const,
-                        referenceId: journal.id,
-                        description: item.description || `Saldo awal: ${row.name}`,
-                        fiscalYearId: fiscalYear.id,
-                      })),
-                    });
-
-                    await updateBalancesForItems(
-                      tx,
-                      journal.items.map((i) => ({ accountId: i.accountId, debit: i.debit, credit: i.credit })),
-                    );
-                  }, { timeout: 15000 });
-                }
-              }
-
-              // Vendor deposit: Payment record + GL journal
-              if (depositBalance > 0 && isSupplier) {
-                await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-                  const payNumber = await generateDocumentNumber(tx, 'PAY', now, fiscalYear.id);
-                  const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
-
-                  // GL journal: DR Uang Muka Pembelian (1.3) / CR Ekuitas Saldo Awal
-                  const journal = await tx.journalEntry.create({
-                    data: {
-                      entryNumber: jvNumber,
-                      date: now,
-                      narration: `Saldo awal uang muka vendor: ${row.name}`,
-                      status: 'Submitted',
-                      fiscalYearId: fiscalYear.id,
-                      createdBy: req.user!.userId,
-                      submittedAt: now,
-                      sourceType: 'OPENING',
-                      items: {
-                        create: [
-                          { accountId: vendorDepositAccount.id, partyId: party.id, debit: depositBalance, credit: 0, description: `Saldo awal uang muka vendor: ${row.name}` },
-                          { accountId: openingEquityAccount.id, debit: 0, credit: depositBalance, description: `Saldo awal uang muka vendor: ${row.name}` },
-                        ],
-                      },
-                    },
-                    include: { items: true },
-                  });
-
-                  // Payment record so it appears in vendor deposit module
-                  await tx.payment.create({
-                    data: {
-                      paymentNumber: payNumber,
-                      date: now,
-                      paymentType: 'VendorDeposit',
-                      partyId: party.id,
-                      accountId: vendorDepositAccount.id,
-                      amount: depositBalance,
-                      status: 'Submitted',
-                      notes: `Saldo awal uang muka vendor dari import: ${row.name}`,
-                      createdBy: req.user!.userId,
-                      journalEntryId: journal.id,
-                      fiscalYearId: fiscalYear.id,
-                      submittedAt: now,
-                    },
-                  });
-
-                  await tx.accountingLedgerEntry.createMany({
-                    data: journal.items.map((item) => ({
-                      date: now,
-                      accountId: item.accountId,
-                      partyId: item.partyId,
-                      debit: item.debit,
-                      credit: item.credit,
-                      referenceType: 'JournalEntry' as const,
-                      referenceId: journal.id,
-                      description: item.description || `Saldo awal uang muka vendor: ${row.name}`,
-                      fiscalYearId: fiscalYear.id,
-                    })),
-                  });
-
-                  await updateBalancesForItems(
-                    tx,
-                    journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) }))
-                  );
-                }, { timeout: 15000 });
-              }
-
-              // Customer deposit: Payment record + GL journal
-              if (customerDepositBalance > 0 && isCustomer) {
-                await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-                  const payNumber = await generateDocumentNumber(tx, 'PAY', now, fiscalYear.id);
-                  const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
-
-                  // GL journal: DR Ekuitas Saldo Awal / CR Uang Muka Pelanggan (2.1.2)
-                  const journal = await tx.journalEntry.create({
-                    data: {
-                      entryNumber: jvNumber,
-                      date: now,
-                      narration: `Saldo awal uang muka pelanggan: ${row.name}`,
-                      status: 'Submitted',
-                      fiscalYearId: fiscalYear.id,
-                      createdBy: req.user!.userId,
-                      submittedAt: now,
-                      sourceType: 'OPENING',
-                      items: {
-                        create: [
-                          { accountId: openingEquityAccount.id, debit: customerDepositBalance, credit: 0, description: `Saldo awal uang muka pelanggan: ${row.name}` },
-                          { accountId: customerDepositAccount.id, partyId: party.id, debit: 0, credit: customerDepositBalance, description: `Saldo awal uang muka pelanggan: ${row.name}` },
-                        ],
-                      },
-                    },
-                    include: { items: true },
-                  });
-
-                  // Payment record so it appears in customer deposit module
-                  await tx.payment.create({
-                    data: {
-                      paymentNumber: payNumber,
-                      date: now,
-                      paymentType: 'CustomerDeposit',
-                      partyId: party.id,
-                      accountId: customerDepositAccount.id,
-                      amount: customerDepositBalance,
-                      status: 'Submitted',
-                      notes: `Saldo awal uang muka pelanggan dari import: ${row.name}`,
-                      createdBy: req.user!.userId,
-                      journalEntryId: journal.id,
-                      fiscalYearId: fiscalYear.id,
-                      submittedAt: now,
-                    },
-                  });
-
-                  await tx.accountingLedgerEntry.createMany({
-                    data: journal.items.map((item) => ({
-                      date: now,
-                      accountId: item.accountId,
-                      partyId: item.partyId,
-                      debit: item.debit,
-                      credit: item.credit,
-                      referenceType: 'JournalEntry' as const,
-                      referenceId: journal.id,
-                      description: item.description || `Saldo awal uang muka pelanggan: ${row.name}`,
-                      fiscalYearId: fiscalYear.id,
-                    })),
-                  });
-
-                  await updateBalancesForItems(
-                    tx,
-                    journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) }))
-                  );
-                }, { timeout: 15000 });
-              }
-            }
+          const newPartyData = {
+            ...partyData,
+            outstandingAmount: openingBalance,
+            depositBalance,
+            customerDepositBalance,
+          };
+          if (!hasOpeningBalances) {
+            await prisma.party.create({ data: newPartyData });
+            success++;
+            continue;
           }
+
+          // Resolve system accounts before anything is written, so a setup gap fails the row.
+          const arAccount = await systemAccounts.getAccount('AR');
+          const apAccount = await systemAccounts.getAccount('AP');
+          const vendorDepositAccount = await systemAccounts.getAccount('VENDOR_DEPOSIT');
+          const customerDepositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
+          const openingEquityAccount = await systemAccounts.getAccount('OPENING_EQUITY');
+          const now = new Date();
+
+          // The party and its opening journals commit together. The period guard runs inside the
+          // same transaction, so the year row stays share-locked until the journals are written: a
+          // running year close is waited for and the row fails, instead of posting into a closed year
+          // or leaving a party whose balances have no journal behind them.
+          await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+            const fiscalYear = await getOpenFiscalYear(tx, now);
+            const created = await tx.party.create({ data: newPartyData });
+
+            // AR/AP opening balance journal
+            if (openingBalance > 0) {
+              const receivableAccount = isCustomer ? arAccount : apAccount;
+              const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
+              const journal = await tx.journalEntry.create({
+                data: {
+                  entryNumber: jvNumber,
+                  date: now,
+                  narration: `Saldo awal ${isCustomer ? 'piutang' : 'hutang'}: ${row.name}`,
+                  status: 'Submitted',
+                  fiscalYearId: fiscalYear.id,
+                  createdBy: req.user!.userId,
+                  submittedAt: now,
+                  sourceType: 'OPENING',
+                  items: {
+                    create: isCustomer
+                      ? [
+                          { accountId: receivableAccount.id, partyId: created.id, debit: openingBalance, credit: 0, description: `Saldo awal piutang: ${row.name}` },
+                          { accountId: openingEquityAccount.id, debit: 0, credit: openingBalance, description: `Saldo awal piutang: ${row.name}` },
+                        ]
+                      : [
+                          { accountId: openingEquityAccount.id, debit: openingBalance, credit: 0, description: `Saldo awal hutang: ${row.name}` },
+                          { accountId: receivableAccount.id, partyId: created.id, debit: 0, credit: openingBalance, description: `Saldo awal hutang: ${row.name}` },
+                        ],
+                  },
+                },
+                include: { items: true },
+              });
+
+              await tx.accountingLedgerEntry.createMany({
+                data: journal.items.map((item) => ({
+                  date: now,
+                  accountId: item.accountId,
+                  partyId: item.partyId,
+                  debit: item.debit,
+                  credit: item.credit,
+                  referenceType: 'JournalEntry' as const,
+                  referenceId: journal.id,
+                  description: item.description || `Saldo awal: ${row.name}`,
+                  fiscalYearId: fiscalYear.id,
+                })),
+              });
+
+              await updateBalancesForItems(
+                tx,
+                journal.items.map((i) => ({ accountId: i.accountId, debit: i.debit, credit: i.credit })),
+              );
+            }
+
+            // Vendor deposit: Payment record + GL journal
+            if (depositBalance > 0 && isSupplier) {
+              const payNumber = await generateDocumentNumber(tx, 'PAY', now, fiscalYear.id);
+              const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
+
+              // GL journal: DR Uang Muka Pembelian (1.3) / CR Ekuitas Saldo Awal
+              const journal = await tx.journalEntry.create({
+                data: {
+                  entryNumber: jvNumber,
+                  date: now,
+                  narration: `Saldo awal uang muka vendor: ${row.name}`,
+                  status: 'Submitted',
+                  fiscalYearId: fiscalYear.id,
+                  createdBy: req.user!.userId,
+                  submittedAt: now,
+                  sourceType: 'OPENING',
+                  items: {
+                    create: [
+                      { accountId: vendorDepositAccount.id, partyId: created.id, debit: depositBalance, credit: 0, description: `Saldo awal uang muka vendor: ${row.name}` },
+                      { accountId: openingEquityAccount.id, debit: 0, credit: depositBalance, description: `Saldo awal uang muka vendor: ${row.name}` },
+                    ],
+                  },
+                },
+                include: { items: true },
+              });
+
+              // Payment record so it appears in vendor deposit module
+              await tx.payment.create({
+                data: {
+                  paymentNumber: payNumber,
+                  date: now,
+                  paymentType: 'VendorDeposit',
+                  partyId: created.id,
+                  accountId: vendorDepositAccount.id,
+                  amount: depositBalance,
+                  status: 'Submitted',
+                  notes: `Saldo awal uang muka vendor dari import: ${row.name}`,
+                  createdBy: req.user!.userId,
+                  journalEntryId: journal.id,
+                  fiscalYearId: fiscalYear.id,
+                  submittedAt: now,
+                },
+              });
+
+              await tx.accountingLedgerEntry.createMany({
+                data: journal.items.map((item) => ({
+                  date: now,
+                  accountId: item.accountId,
+                  partyId: item.partyId,
+                  debit: item.debit,
+                  credit: item.credit,
+                  referenceType: 'JournalEntry' as const,
+                  referenceId: journal.id,
+                  description: item.description || `Saldo awal uang muka vendor: ${row.name}`,
+                  fiscalYearId: fiscalYear.id,
+                })),
+              });
+
+              await updateBalancesForItems(
+                tx,
+                journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) }))
+              );
+            }
+
+            // Customer deposit: Payment record + GL journal
+            if (customerDepositBalance > 0 && isCustomer) {
+              const payNumber = await generateDocumentNumber(tx, 'PAY', now, fiscalYear.id);
+              const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
+
+              // GL journal: DR Ekuitas Saldo Awal / CR Uang Muka Pelanggan (2.1.2)
+              const journal = await tx.journalEntry.create({
+                data: {
+                  entryNumber: jvNumber,
+                  date: now,
+                  narration: `Saldo awal uang muka pelanggan: ${row.name}`,
+                  status: 'Submitted',
+                  fiscalYearId: fiscalYear.id,
+                  createdBy: req.user!.userId,
+                  submittedAt: now,
+                  sourceType: 'OPENING',
+                  items: {
+                    create: [
+                      { accountId: openingEquityAccount.id, debit: customerDepositBalance, credit: 0, description: `Saldo awal uang muka pelanggan: ${row.name}` },
+                      { accountId: customerDepositAccount.id, partyId: created.id, debit: 0, credit: customerDepositBalance, description: `Saldo awal uang muka pelanggan: ${row.name}` },
+                    ],
+                  },
+                },
+                include: { items: true },
+              });
+
+              // Payment record so it appears in customer deposit module
+              await tx.payment.create({
+                data: {
+                  paymentNumber: payNumber,
+                  date: now,
+                  paymentType: 'CustomerDeposit',
+                  partyId: created.id,
+                  accountId: customerDepositAccount.id,
+                  amount: customerDepositBalance,
+                  status: 'Submitted',
+                  notes: `Saldo awal uang muka pelanggan dari import: ${row.name}`,
+                  createdBy: req.user!.userId,
+                  journalEntryId: journal.id,
+                  fiscalYearId: fiscalYear.id,
+                  submittedAt: now,
+                },
+              });
+
+              await tx.accountingLedgerEntry.createMany({
+                data: journal.items.map((item) => ({
+                  date: now,
+                  accountId: item.accountId,
+                  partyId: item.partyId,
+                  debit: item.debit,
+                  credit: item.credit,
+                  referenceType: 'JournalEntry' as const,
+                  referenceId: journal.id,
+                  description: item.description || `Saldo awal uang muka pelanggan: ${row.name}`,
+                  fiscalYearId: fiscalYear.id,
+                })),
+              });
+
+              await updateBalancesForItems(
+                tx,
+                journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) }))
+              );
+            }
+          }, { timeout: 15000 });
 
           success++;
         } catch (err: any) {

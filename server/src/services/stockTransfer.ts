@@ -202,7 +202,7 @@ export async function cancelStockTransferInTx(
   if (transfer.status === 'Cancelled') throw new BusinessError('Transfer sudah dibatalkan.');
   // First write; any rejection below rolls it back.
   await claimCancel(tx.stockTransfer, transferId, { status: 'Cancelled', cancelledAt: new Date() });
-  await assertPeriodsOpen(tx, [{ date: transfer.date }, { fiscalYearId: transfer.fiscalYearId }], 'transfer stok');
+  await assertPeriodsOpen(tx, [{ date: transfer.date }, { fiscalYearId: transfer.fiscalYearId, date: transfer.date }], 'transfer stok');
 
   // Block when an outbound movement picked one of the TransferIn batches; cancelling would
   // orphan its cost basis. Same rule as STT cancel; not covered by the negative-stock bypass.

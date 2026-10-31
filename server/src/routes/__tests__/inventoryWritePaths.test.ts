@@ -132,7 +132,7 @@ describe('stock opname header warehouse', () => {
 
   const opnameTx = (systemStock: string) =>
     makeAutoTx({
-      'fiscalYear.findFirst': () => ({ id: 'fy-2026' }),
+      ...fiscalYearHandlers(),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: systemStock }],
       'inventoryStock.findMany': () => [{ itemId: ITEM_ID, currentStock: systemStock }],
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
@@ -152,7 +152,7 @@ describe('stock opname header warehouse', () => {
 
   it('falls back to the default warehouse when none is picked', async () => {
     current = makeAutoTx({
-      'fiscalYear.findFirst': () => ({ id: 'fy-2026' }),
+      ...fiscalYearHandlers(),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: '10' }],
       'warehouse.findFirst': () => ({ id: 'wh-default' }),
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),

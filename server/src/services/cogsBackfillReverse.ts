@@ -44,7 +44,7 @@ export async function closeCogsBackfillForSalesInvoice(
     const je = await tx.journalEntry.findUnique({ where: { id: jeId }, include: { items: true } });
     if (!je || je.status === 'Cancelled') continue;
     // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
-    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
+    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'jurnal');
     await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date(), ...cancelTrailData(trail) } });
     await tx.accountingLedgerEntry.updateMany({ where: { referenceId: jeId }, data: { isCancelled: true } });
     for (const ji of je.items) affectedAccountIds.add(ji.accountId);
@@ -95,7 +95,7 @@ export async function reverseCogsSettlementsByTrigger(
     const je = await tx.journalEntry.findUnique({ where: { id: jeId }, include: { items: true } });
     if (!je || je.status === 'Cancelled') continue;
     // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
-    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'jurnal');
+    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'jurnal');
     await tx.journalEntry.update({ where: { id: jeId }, data: { status: 'Cancelled', cancelledAt: new Date(), ...cancelTrailData(trail) } });
     await tx.accountingLedgerEntry.updateMany({ where: { referenceId: jeId }, data: { isCancelled: true } });
     for (const ji of je.items) affectedAccountIds.add(ji.accountId);

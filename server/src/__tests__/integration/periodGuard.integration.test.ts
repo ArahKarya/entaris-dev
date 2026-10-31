@@ -1,5 +1,6 @@
 /**
- * Integration test: assertPeriodOpen / resolveJournalFiscalYear against real fiscal-year rows.
+ * Integration test: assertPeriodOpen / resolveJournalFiscalYear / getOpenFiscalYear against real
+ * fiscal-year rows.
  *
  * Fiscal years are stored at UTC midnight of their first and last day (routes/fiscalYears.ts).
  * The guard must still find the year for any instant on those business days (WIB), and report
@@ -10,7 +11,8 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { BusinessError } from '../../utils/errors';
-import { assertPeriodOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_CLOSED } from '../../utils/periodGuard';
+import { assertPeriodOpen, resolveJournalFiscalYear, FISCAL_YEAR_MISSING, PERIOD_BUSY, PERIOD_CLOSED, YEAR_LOCK_WAIT_MS } from '../../utils/periodGuard';
+import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { closedThenOpenYears, createFiscalYear } from '../helpers/periodFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -79,7 +81,16 @@ d('assertPeriodOpen', () => {
   it('reports a date with no fiscal year as FISCAL_YEAR_MISSING', async () => {
     await inRollback(async (tx) => {
       expect(await codeOf(assertPeriodOpen(tx, { date: new Date('2094-06-15T03:00:00Z') }, 'jurnal'))).toBe(FISCAL_YEAR_MISSING);
-      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: 'missing-fy-id' }, 'dokumen'))).toBe(FISCAL_YEAR_MISSING);
+      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: 'missing-fy-id', date: new Date('2094-06-15T03:00:00Z') }, 'dokumen'))).toBe(FISCAL_YEAR_MISSING);
+    });
+  });
+
+  it('getOpenFiscalYear reports a missing year and a closed one with the same codes', async () => {
+    await inRollback(async (tx) => {
+      expect(await codeOf(getOpenFiscalYear(tx, new Date('2094-06-15T03:00:00Z')))).toBe(FISCAL_YEAR_MISSING);
+      const { open } = await closedThenOpenYears(tx, 2095);
+      expect(await codeOf(getOpenFiscalYear(tx, new Date('2095-08-01T03:00:00Z')))).toBe(PERIOD_CLOSED);
+      expect((await getOpenFiscalYear(tx, new Date('2095-12-31T18:00:00Z'))).id).toBe(open.id);
     });
   });
 
@@ -87,8 +98,8 @@ d('assertPeriodOpen', () => {
     await inRollback(async (tx) => {
       const { closed, open } = await closedThenOpenYears(tx, 2095);
       expect(await codeOf(assertPeriodOpen(tx, { date: new Date('2095-08-01T03:00:00Z') }, 'invoice'))).toBe(PERIOD_CLOSED);
-      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: closed.id }, 'invoice'))).toBe(PERIOD_CLOSED);
-      expect((await assertPeriodOpen(tx, { fiscalYearId: open.id }, 'invoice')).id).toBe(open.id);
+      expect(await codeOf(assertPeriodOpen(tx, { fiscalYearId: closed.id, date: new Date('2095-08-01T03:00:00Z') }, 'invoice'))).toBe(PERIOD_CLOSED);
+      expect((await assertPeriodOpen(tx, { fiscalYearId: open.id, date: new Date('2096-02-01T03:00:00Z') }, 'invoice')).id).toBe(open.id);
       // The first business day of the open year is not swallowed by the closed one.
       expect((await assertPeriodOpen(tx, { date: new Date('2095-12-31T18:00:00Z') }, 'invoice')).id).toBe(open.id);
     });
@@ -115,7 +126,7 @@ d('assertPeriodOpen', () => {
           await closer.query('UPDATE fiscal_years SET is_closed = true WHERE id = $1', [fyId]);
 
           let settled = false;
-          const guard = codeOf(prisma.$transaction((tx) => assertPeriodOpen(tx, { fiscalYearId: fyId }, 'invoice'))).finally(() => {
+          const guard = codeOf(prisma.$transaction((tx) => assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2096-06-15T03:00:00Z') }, 'invoice'))).finally(() => {
             settled = true;
           });
           await new Promise((r) => setTimeout(r, 300));
@@ -130,6 +141,69 @@ d('assertPeriodOpen', () => {
       });
     });
 
+    it('makes a new posting through getOpenFiscalYear wait for a close in progress, then reports PERIOD_CLOSED', async () => {
+      await withCommittedYear(2086, async (fyId) => {
+        const closer = await pool.connect();
+        try {
+          await closer.query('BEGIN');
+          await closer.query('SELECT id FROM fiscal_years WHERE id = $1 FOR UPDATE', [fyId]);
+          await closer.query('UPDATE fiscal_years SET is_closed = true WHERE id = $1', [fyId]);
+
+          let settled = false;
+          // A posting dated inside the year: found by date, then locked behind the close.
+          const posting = codeOf(prisma.$transaction((tx) => getOpenFiscalYear(tx, new Date('2086-06-15T03:00:00Z')))).finally(() => {
+            settled = true;
+          });
+          await new Promise((r) => setTimeout(r, 300));
+          expect(settled).toBe(false);
+
+          await closer.query('COMMIT');
+          expect(await posting).toBe(PERIOD_CLOSED);
+        } finally {
+          await closer.query('ROLLBACK').catch(() => undefined);
+          closer.release();
+        }
+      });
+    });
+
+    it('gives up with PERIOD_BUSY when a close outlasts the wait, before a default 5 s transaction expires', async () => {
+      await withCommittedYear(2087, async (fyId) => {
+        const closer = await pool.connect();
+        try {
+          await closer.query('BEGIN');
+          await closer.query('SELECT id FROM fiscal_years WHERE id = $1 FOR UPDATE', [fyId]);
+
+          const started = Date.now();
+          // Prisma's default interactive timeout (5 s), as most posting routes use.
+          const posting = await codeOf(prisma.$transaction((tx) => getOpenFiscalYear(tx, new Date('2087-06-15T03:00:00Z'))));
+          const waited = Date.now() - started;
+
+          expect(posting).toBe(PERIOD_BUSY);
+          expect(waited).toBeGreaterThanOrEqual(YEAR_LOCK_WAIT_MS - 100);
+          expect(waited).toBeLessThan(5000);
+        } finally {
+          await closer.query('ROLLBACK').catch(() => undefined);
+          closer.release();
+        }
+      });
+    }, 15000);
+
+    it("puts the transaction's own lock_timeout back after the year row is locked", async () => {
+      await withCommittedYear(2088, async (fyId) => {
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '7s'");
+          await assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2088-06-15T03:00:00Z') }, 'jurnal');
+          const [{ lock_timeout }] = await tx.$queryRaw<{ lock_timeout: string }[]>`SELECT current_setting('lock_timeout') AS lock_timeout`;
+          expect(lock_timeout).toBe('7s');
+        });
+        await prisma.$transaction(async (tx) => {
+          await assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2088-06-15T03:00:00Z') }, 'jurnal');
+          const [{ lock_timeout }] = await tx.$queryRaw<{ lock_timeout: string }[]>`SELECT current_setting('lock_timeout') AS lock_timeout`;
+          expect(lock_timeout).toBe('0');
+        });
+      });
+    });
+
     it('holds a share lock until its transaction ends, so a close cannot start meanwhile', async () => {
       await withCommittedYear(2097, async (fyId) => {
         let release!: () => void;
@@ -137,7 +211,7 @@ d('assertPeriodOpen', () => {
         let locked!: () => void;
         const isLocked = new Promise<void>((r) => { locked = r; });
         const cancel = prisma.$transaction(async (tx) => {
-          await assertPeriodOpen(tx, { fiscalYearId: fyId }, 'invoice');
+          await assertPeriodOpen(tx, { fiscalYearId: fyId, date: new Date('2097-06-15T03:00:00Z') }, 'invoice');
           locked();
           await held;
         });

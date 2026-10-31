@@ -368,7 +368,7 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
           include: { items: true },
         });
         if (oldJe) {
-          await assertPeriodOpen(tx, { fiscalYearId: oldJe.fiscalYearId }, 'mutasi stok');
+          await assertPeriodOpen(tx, { fiscalYearId: oldJe.fiscalYearId, date: oldJe.date }, 'mutasi stok');
           oldAffectedAccountIds.push(...oldJe.items.map(ji => ji.accountId));
           await tx.accountingLedgerEntry.updateMany({
             where: { referenceId: oldMov.journalEntryId },
@@ -569,7 +569,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
           where: { id: movement.journalEntryId },
           include: { items: true },
         });
-        if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId }, 'mutasi stok');
+        if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'mutasi stok');
         await tx.journalEntry.update({
           where: { id: movement.journalEntryId },
           data: { status: 'Cancelled', cancelledAt: new Date() },

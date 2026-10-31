@@ -345,7 +345,7 @@ async function prepareProductionEdit(db: Db, runId: string, rawBody: Body) {
   if (run.isCancelled) throw new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.');
   // Same period check as editProductionRunInTx, so an edit of a closed period never enters the
   // queue; the edit checks again when the request is approved.
-  await assertPeriodsOpen(db, [{ date: run.date }, { fiscalYearId: run.fiscalYearId }], 'produksi');
+  await assertPeriodsOpen(db, [{ date: run.date }, { fiscalYearId: run.fiscalYearId, date: run.date }], 'produksi');
   const newDate = new Date(String(body.date ?? ''));
   if (!isNaN(newDate.getTime())) await assertPeriodOpen(db, { date: newDate }, 'produksi');
 

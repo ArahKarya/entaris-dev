@@ -8,6 +8,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { logger } from '../lib/logger';
 import { BusinessError } from '../utils/errors';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { PERIOD_BUSY } from '../utils/periodGuard';
 import { buildRowJournalLines, descriptionPattern, isAdvanceType, isTxnType, type JournalLineDraft } from '../utils/cashBookRules';
 import { assertCashAccount, postJournalInTx } from './paymentRequestService';
 import { EDITABLE_STATUSES, RowErrorsError, dayString } from './cashBookDraft';
@@ -108,7 +109,8 @@ async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): P
       try {
         fyCache.set(day, { id: (await getOpenFiscalYear(tx, row.rowDate)).id });
       } catch (err) {
-        if (!(err instanceof BusinessError)) throw err;
+        // PERIOD_BUSY ends a lock wait that aborted the transaction: it cannot be a row error.
+        if (!(err instanceof BusinessError) || err.code === PERIOD_BUSY) throw err;
         fyCache.set(day, { error: err.message });
       }
     }

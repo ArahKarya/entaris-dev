@@ -1,31 +1,18 @@
-import { Prisma } from '@prisma/client';
-import { BusinessError } from './errors';
-import { businessDayOf, businessDayRange } from './businessDate';
+import type { FiscalYear, Prisma } from '@prisma/client';
+import { assertPeriodOpen, type PeriodLabel } from './periodGuard';
 
 /**
- * Find the open fiscal year that contains the business day (WIB by default) of the given date.
- * A fiscal year matches when it overlaps that day, so years stored at UTC midnight or at WIB
- * midnight both cover 31 Dec 23:30 and 1 Jan 03:00 WIB correctly. When an odd end time makes
- * two years overlap one day, the later year wins.
- * Throws BusinessError if not found or already closed.
+ * The open fiscal year for a new document dated `date`, found by its business day (WIB by
+ * default). It is the period guard (assertPeriodOpen): the year row stays share-locked until the
+ * transaction ends, so a posting either commits before a running year close sums the year, or
+ * waits for it (bounded, see YEAR_LOCK_WAIT_MS) and is rejected.
+ * Throws BusinessError FISCAL_YEAR_MISSING when no year covers the day, PERIOD_CLOSED when it is closed,
+ * PERIOD_BUSY when a close or reopen of that year is still running after YEAR_LOCK_WAIT_MS.
  */
-export async function getOpenFiscalYear(
+export function getOpenFiscalYear(
   tx: Prisma.TransactionClient,
-  date: Date
-) {
-  const { gte, lt } = businessDayRange(businessDayOf(date));
-  const fiscalYear = await tx.fiscalYear.findFirst({
-    where: {
-      isClosed: false,
-      startDate: { lt },
-      endDate: { gte },
-    },
-    orderBy: { startDate: 'desc' },
-  });
-
-  if (!fiscalYear) {
-    throw new BusinessError('Tahun fiskal tidak ditemukan atau sudah ditutup untuk tanggal ini.');
-  }
-
-  return fiscalYear;
+  date: Date,
+  opts: { label?: PeriodLabel } = {},
+): Promise<FiscalYear> {
+  return assertPeriodOpen(tx, { date }, opts.label ?? 'dokumen');
 }

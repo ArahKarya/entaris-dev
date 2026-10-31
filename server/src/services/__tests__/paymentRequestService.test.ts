@@ -136,10 +136,21 @@ describe('payPaymentRequestInTx', () => {
   });
 
   it('rejects a payment dated in a closed fiscal period — nothing is posted', async () => {
+    const closedFy = { id: 'fy-2025', name: '2025', isClosed: true };
+    const tx = makeTx(makeRequest(), { fiscalYear: closedFy });
+    tx.fiscalYear.findUnique = vi.fn(async () => closedFy);
+    await expect(
+      payPaymentRequestInTx(asTx(tx), 'pr-1', finance, { cashAccountId: 'acc-cash', paymentDate: '2025-12-31' }),
+    ).rejects.toMatchObject({ code: 'PERIOD_CLOSED' });
+    expect(tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(tx.paymentRequest.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a payment dated outside every fiscal year — nothing is posted', async () => {
     const tx = makeTx(makeRequest(), { fiscalYear: null });
     await expect(
       payPaymentRequestInTx(asTx(tx), 'pr-1', finance, { cashAccountId: 'acc-cash', paymentDate: '2025-12-31' }),
-    ).rejects.toThrow(/Tahun fiskal/);
+    ).rejects.toMatchObject({ code: 'FISCAL_YEAR_MISSING' });
     expect(tx.journalEntry.create).not.toHaveBeenCalled();
     expect(tx.paymentRequest.updateMany).not.toHaveBeenCalled();
   });

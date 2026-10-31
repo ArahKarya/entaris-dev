@@ -188,7 +188,7 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
       // First write: a concurrent second cancel gets STALE_STATUS instead of reopening the invoices
       // and reversing the balances again. The rejections below roll the claim back.
       await claimCancel(tx.payment, payment.id, { status: 'Cancelled', cancelledAt: new Date(), ...trail });
-      await assertPeriodOpen(tx, { fiscalYearId: payment.fiscalYearId }, 'pembayaran');
+      await assertPeriodOpen(tx, { fiscalYearId: payment.fiscalYearId, date: payment.date }, 'pembayaran');
 
       // Deposits must be cancelled via their own endpoints (vendor-deposits / customer-deposits
       // PATCH /:id/cancel); cancelling here too causes a double cancel and GL drift.

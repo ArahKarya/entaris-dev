@@ -216,7 +216,13 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       await assertDepositNotFromSalesReturn(tx, deposit.id);
 
       // The journal's year when there is one; legacy deposits without a journal use their own.
-      await assertPeriodOpen(tx, { fiscalYearId: deposit.journalEntry?.fiscalYearId ?? deposit.fiscalYearId }, 'uang muka');
+      await assertPeriodOpen(
+        tx,
+        deposit.journalEntry
+          ? { fiscalYearId: deposit.journalEntry.fiscalYearId, date: deposit.journalEntry.date }
+          : { fiscalYearId: deposit.fiscalYearId, date: deposit.date },
+        'uang muka',
+      );
 
       const depositAmount = Number(deposit.amount);
 

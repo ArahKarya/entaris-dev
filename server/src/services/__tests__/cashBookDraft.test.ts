@@ -408,11 +408,32 @@ describe('postCashBookDraft', () => {
   it('rejects a row dated in a closed fiscal year', async () => {
     const { db, tx, id } = await seeded();
     openFy.mockImplementation(async (_tx: unknown, date: Date) => {
-      if (date.toISOString().startsWith('2026-10-03')) throw new BusinessError('Tahun fiskal tidak ditemukan atau sudah ditutup untuk tanggal ini.');
+      if (date.toISOString().startsWith('2026-10-03')) {
+        throw new BusinessError(
+          'Tahun buku 2026 sudah ditutup; dokumen di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.',
+          'PERIOD_CLOSED',
+        );
+      }
       return { id: 'fy1' };
     });
     const err = await postCashBookDraft(db, id, 'u1').catch((e) => e);
-    expect(err.rowErrors[0]).toMatch(/Baris 1: Tanggal 2026-10-03: Tahun fiskal/);
+    expect(err.rowErrors[0]).toMatch(/Baris 1: Tanggal 2026-10-03: Tahun buku 2026 sudah ditutup/);
+    expect(postJournal).not.toHaveBeenCalled();
+    expect(tx.drafts.get(id).status).toBe('Draft');
+  });
+
+  it('partial: a year close still running (PERIOD_BUSY) aborts the whole post instead of becoming a row error', async () => {
+    const { db, tx, id } = await seeded();
+    const busy = new BusinessError(
+      'Tahun buku 2026 sedang ditutup atau dibuka kembali; dokumen belum bisa diproses. Coba lagi beberapa saat lagi.',
+      'PERIOD_BUSY',
+    );
+    openFy.mockImplementation(async (_tx: unknown, date: Date) => {
+      if (date.toISOString().startsWith('2026-10-03')) throw busy;
+      return { id: 'fy1' };
+    });
+    // The lock wait aborted the transaction, so no other row may be posted in it.
+    await expect(postCashBookDraft(db, id, 'u1', { partial: true })).rejects.toBe(busy);
     expect(postJournal).not.toHaveBeenCalled();
     expect(tx.drafts.get(id).status).toBe('Draft');
   });

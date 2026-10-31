@@ -416,7 +416,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       if (!so) throw new BusinessError('Stok opname tidak ditemukan.');
       if (so.status === 'Cancelled') throw new BusinessError('Stok opname sudah dibatalkan.');
       if (so.status === 'Draft') throw new BusinessError('Stok opname Draft tidak perlu dibatalkan.');
-      await assertPeriodsOpen(tx, [{ date: so.date }, { fiscalYearId: so.fiscalYearId }], 'stok opname');
+      await assertPeriodsOpen(tx, [{ date: so.date }, { fiscalYearId: so.fiscalYearId, date: so.date }], 'stok opname');
 
       // Reverse stock movements
       const itemsWithMovement = so.items.filter((i: any) => i.movementId);
