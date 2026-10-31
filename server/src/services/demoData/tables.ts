@@ -65,6 +65,7 @@ export const DATA_TABLES = [
   'bank_reconciliations',
   'cash_book_draft_rows',
   'cash_book_drafts',
+  'close_check_baselines',
   'cogs_backfill_queue',
   'cogs_backfill_settlements',
   'customer_deposit_applications',

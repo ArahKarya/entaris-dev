@@ -885,6 +885,7 @@ model FiscalYear {
   fixedAssets      FixedAsset[]
   cogsBackfills    CogsBackfillQueue[]     @relation("CogsBackfillFY")
   events           FiscalYearEvent[]
+  closeBaselines   CloseCheckBaseline[]
   createdAt        DateTime                @default(now()) @map("created_at")
 
   @@map("fiscal_years")
@@ -908,6 +909,23 @@ model FiscalYearEvent {
 
   @@index([fiscalYearId, createdAt])
   @@map("fiscal_year_events")
+}
+
+/// Year-close checklist baseline (services/fiscalYearClose.ts): ledger mismatches that already
+/// existed at release, captured once by scripts/repair/e1-close-baseline.ts. A blocking check skips
+/// an item whose (checkId, itemKey) is here with the same amount. itemKey carries the fiscal year
+/// id where the check needs it, so the key alone is unique.
+model CloseCheckBaseline {
+  checkId      String      @map("check_id")
+  itemKey      String      @map("item_key")
+  fiscalYearId String?     @map("fiscal_year_id")
+  fiscalYear   FiscalYear? @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  amount       Decimal     @db.Decimal(20, 2)
+  capturedAt   DateTime    @default(now()) @map("captured_at") @db.Timestamptz(3)
+
+  @@id([checkId, itemKey])
+  @@index([fiscalYearId])
+  @@map("close_check_baselines")
 }
 
 model User {
