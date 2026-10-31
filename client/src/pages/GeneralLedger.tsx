@@ -12,7 +12,8 @@ import { toast } from 'sonner';
 import api from '@/lib/api';
 import { formatDate, formatRupiah, toNumber } from '@/lib/format';
 import { statusOptions } from '@/lib/status';
-import { can } from '@/lib/permissions';
+import { can, cap } from '@/lib/permissions';
+import { isMenuCancellable } from '@/lib/journalSource';
 import { useListState } from '@/hooks/useListState';
 import { useTableDensity } from '@/hooks/useTableDensity';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,8 @@ interface JournalRow {
   date: string;
   status: string;
   narration: string | null;
+  /** Origin of the journal; only hand-made ones are cancellable here (lib/journalSource.ts). */
+  sourceType: string | null;
   items: JournalLine[];
   user?: { fullName: string } | null;
 }
@@ -68,8 +71,6 @@ interface AccountOption {
 const ENDPOINT = '/journals';
 const FILTER_KEYS = ['status', 'accountId', 'startDate', 'endDate'] as const;
 const STATUS_FILTER = statusOptions(['Submitted', 'Cancelled'], 'journal');
-/** Same guard as PATCH /journals/:id/cancel: auto journals are cancelled at their source. */
-const AUTO_JOURNAL = /^JV-(PAY|SI|PI|COGS)/;
 /** URL params that mean "the user already chose what to see". */
 const LIST_URL_KEYS = ['q', 'page', 'sort', ...FILTER_KEYS];
 
@@ -151,6 +152,8 @@ export const GeneralLedger = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; entryNumber: string } | null>(null);
   const canEdit = can('journal', 'edit');
+  // Same gates as PATCH /journals/:id/cancel: journal edit right plus doc.cancel.
+  const canCancel = canEdit && cap('doc.cancel');
   const queryClient = useQueryClient();
   const accounts = useAccountOptions();
 
@@ -286,18 +289,18 @@ export const GeneralLedger = () => {
         meta: { align: 'right', headerClassName: 'w-12', cellClassName: 'w-12 py-0' },
         cell: ({ row }) => {
           const je = row.original;
-          const auto = AUTO_JOURNAL.test(je.entryNumber);
+          const atSource = !isMenuCancellable(je.sourceType);
           return (
             <RowActions
               label={t('generalLedger.rowActions', { number: je.entryNumber })}
               actions={[
                 { label: t('generalLedger.actions.view'), icon: Eye, onSelect: () => setSelectedId(je.id) },
                 {
-                  label: auto ? t('generalLedger.actions.cancelAtSource') : t('generalLedger.actions.cancel'),
+                  label: atSource ? t('generalLedger.actions.cancelAtSource') : t('generalLedger.actions.cancel'),
                   icon: XCircle,
                   tone: 'danger',
-                  disabled: auto,
-                  hidden: !canEdit || je.status === 'Cancelled',
+                  disabled: atSource,
+                  hidden: !canCancel || je.status === 'Cancelled',
                   onSelect: () => setCancelTarget({ id: je.id, entryNumber: je.entryNumber }),
                 },
               ]}
@@ -306,7 +309,7 @@ export const GeneralLedger = () => {
         },
       },
     ],
-    [canEdit, t],
+    [canCancel, t],
   );
 
   return (

@@ -930,7 +930,7 @@
     "create": "New journal",
     "help": {
       "label": "How journal cancellation works",
-      "body": "Automatic journals (<num>JV-PAY</num>, <num>JV-SI</num>, <num>JV-PI</num>, <num>JV-COGS</num>) are cancelled from their source module so invoices, payments, and balances are updated too. This page only cancels manual journals."
+      "body": "Only journals made by hand (entered directly, imported, recurring, or from the Cash Book) can be cancelled here. Journals from other modules (e.g. <num>JV-PAY</num>, <num>JV-SI</num>, <num>JV-STT</num>, deposits, year-end closing, depreciation) are cancelled from their source document so invoices, payments, and balances are updated too. Older journals whose origin is not recorded are corrected with a manual reversing journal."
     },
     "filters": {
       "searchLabel": "Search journals",

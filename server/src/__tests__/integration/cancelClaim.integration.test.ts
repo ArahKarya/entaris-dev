@@ -22,6 +22,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { callRoute, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
+import { createCapUser } from '../helpers/rbacFixture';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
 import { BusinessError } from '../../utils/errors';
 
@@ -58,6 +59,7 @@ import journalsRouter from '../../routes/journals';
 import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { STALE_STATUS } from '../../utils/cancelClaim';
+import { invalidatePermissionCache } from '../../services/permissionService';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -103,6 +105,22 @@ function holdNextCommit() {
   return { applied, release };
 }
 
+/**
+ * A committed user whose role holds only doc.cancel (the Journal menu cancel needs it; CI has no
+ * built-in roles). Both racing connections must see it, so it is committed; `remove` deletes it.
+ */
+async function committedCanceller(): Promise<{ actor: { userId: string; role: string }; remove: () => Promise<void> }> {
+  const actor = await createCapUser(prisma as unknown as Tx, ['doc.cancel']);
+  return {
+    actor,
+    remove: async () => {
+      await prisma.user.delete({ where: { id: actor.userId } });
+      await prisma.role.delete({ where: { key: actor.role } });
+      invalidatePermissionCache();
+    },
+  };
+}
+
 /** Starts `p` and reports whether it settled within `ms`; the second cancel must be waiting. */
 async function stillPending(p: Promise<unknown>, ms = 300): Promise<boolean> {
   let settled = false;
@@ -143,6 +161,8 @@ d('journal menu cancel run twice at once', () => {
     const balancesBefore = await prisma.account.findMany({ where: { id: { in: [ar.id, equity.id] } }, select: { id: true, balance: true } });
     const balance = async (id: string) => Number((await prisma.account.findUniqueOrThrow({ where: { id } })).balance);
     const arBefore = await balance(ar.id);
+    const canceller = await committedCanceller();
+    const { actor } = canceller;
     let journalId: string | undefined;
     try {
       const created = await callRoute(journalsRouter, 'post', '/', {
@@ -164,10 +184,10 @@ d('journal menu cancel run twice at once', () => {
       const first = callRoute(journalsRouter, 'patch', '/:id/cancel', {
         params: { id: journalId },
         body: { reason: '  Salah input customer  ' },
-        userId,
+        ...actor,
       });
       await applied;
-      const second = callRoute(journalsRouter, 'patch', '/:id/cancel', { params: { id: journalId }, userId });
+      const second = callRoute(journalsRouter, 'patch', '/:id/cancel', { params: { id: journalId }, ...actor });
       expect(await stillPending(second)).toBe(true);
 
       release();
@@ -180,7 +200,7 @@ d('journal menu cancel run twice at once', () => {
       expect(Number((await prisma.party.findUniqueOrThrow({ where: { id: customer.id } })).outstandingAmount)).toBe(0);
       const journal = await prisma.journalEntry.findUniqueOrThrow({ where: { id: journalId } });
       expect(journal.status).toBe('Cancelled');
-      expect(journal.cancelledById).toBe(userId);
+      expect(journal.cancelledById).toBe(actor.userId);
       expect(journal.cancelReason).toBe('Salah input customer');
       expect(await prisma.accountingLedgerEntry.count({ where: { referenceId: journalId, isCancelled: false } })).toBe(0);
     } finally {
@@ -196,17 +216,23 @@ d('journal menu cancel run twice at once', () => {
       }
       await prisma.party.delete({ where: { id: customer.id } });
       await prisma.fiscalYear.delete({ where: { id: fy.id } });
+      await canceller.remove();
     }
   });
 
   it('rejects a reason longer than 500 characters before touching the journal', async () => {
-    const res = await callRoute(journalsRouter, 'patch', '/:id/cancel', {
-      params: { id: '00000000-0000-0000-0000-000000000000' },
-      body: { reason: 'x'.repeat(501) },
-      userId,
-    });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Alasan pembatalan maksimal 500 karakter.');
+    const canceller = await committedCanceller();
+    try {
+      const res = await callRoute(journalsRouter, 'patch', '/:id/cancel', {
+        params: { id: '00000000-0000-0000-0000-000000000000' },
+        body: { reason: 'x'.repeat(501) },
+        ...canceller.actor,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Alasan pembatalan maksimal 500 karakter.');
+    } finally {
+      await canceller.remove();
+    }
   });
 });
 

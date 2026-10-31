@@ -1,10 +1,11 @@
 /**
  * Integration test: which journals the Journal menu may cancel (audit G-7, G-3).
  *
- * Only hand-made journals in an open fiscal year are cancellable there. Closing, depreciation
- * and document-derived journals, journals in a closed year, and deposit-module journals the
- * menu cannot unwind must be undone from their own module; deposit refunds from the refund cancel
- * on the deposit page.
+ * Only hand-made journals in an open fiscal year are cancellable there. This guard is the second
+ * layer behind the route's source-type allowlist (journalMenuSource.integration.test.ts). Closing,
+ * depreciation and document-derived journals, journals in a closed year, and deposit-module
+ * journals (applications and offsets, customer and supplier) must be undone from their own module;
+ * deposit refunds from the refund cancel on the deposit page.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -109,6 +110,7 @@ d('journalMenuCancelBlockReason', () => {
     'Aplikasi Uang Muka Pelanggan: PAY-1 → SI-1',
     'Aplikasi Uang Muka: PAY-2 → PI-2',
     'Offset UM Vendor: PAY-3 → PI-3',
+    'Offset UM Pelanggan: PAY-5 → SI-5',
   ])('blocks deposit-module journal "%s"', async (narration) => {
     await inRollback(async (tx) => {
       const fy = await fiscalYear(tx, false);
@@ -143,11 +145,28 @@ d('journalMenuCancelBlockReason', () => {
     });
   });
 
-  it('still allows customer offset journals, which the menu unwinds itself', async () => {
+  it('blocks a journal linked to a customer deposit application, whatever its narration', async () => {
     await inRollback(async (tx) => {
       const fy = await fiscalYear(tx, false);
-      const je = await journal(tx, fy.id, `JV-209903-${uniq()}`, 'Offset UM Pelanggan: PAY-5 → SI-5');
-      expect(await journalMenuCancelBlockReason(tx, je.id)).toBeNull();
+      const je = await journal(tx, fy.id, `JV-209903-${uniq()}`);
+      const customer = await tx.party.create({ data: { name: `IT-JCG-Customer-${uniq()}`, partyType: 'Customer', isActive: true } });
+      const account = await tx.account.findFirstOrThrow({ where: { isGroup: false, isActive: true } });
+      const deposit = await tx.payment.create({
+        data: {
+          paymentNumber: `IT-JCG-PAY-${uniq()}`, date: new Date('2099-03-01'), partyId: customer.id, accountId: account.id,
+          paymentType: 'CustomerDeposit', amount: 1, status: 'Submitted', fiscalYearId: fy.id, createdBy: userId,
+        },
+      });
+      const invoice = await tx.salesInvoice.create({
+        data: {
+          invoiceNumber: `IT-JCG-SI-${uniq()}`, date: new Date('2099-03-01'), partyId: customer.id,
+          grandTotal: 1, outstanding: 0, status: 'Paid', fiscalYearId: fy.id, createdBy: userId,
+        },
+      });
+      await tx.customerDepositApplication.create({
+        data: { depositPaymentId: deposit.id, salesInvoiceId: invoice.id, appliedAmount: 1, journalEntryId: je.id, createdBy: userId },
+      });
+      expect(await journalMenuCancelBlockReason(tx, je.id)).toMatch(/modul lain/);
     });
   });
 

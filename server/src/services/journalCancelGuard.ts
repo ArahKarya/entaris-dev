@@ -1,5 +1,7 @@
 // Guard for cancelling a journal from the Journal menu (PATCH /journals/:id/cancel).
-// Only hand-made journals may be cancelled there. Journals posted by a module (closing,
+// Only hand-made journals may be cancelled there. The route first checks the source-type
+// allowlist (isMenuCancellableSource); this guard is the second layer, by number, narration and
+// link columns, for a hand-made source type that still belongs to a module document. Journals posted by a module (closing,
 // depreciation, stock, deposits, GA, payment requests, guarantees) must be undone from
 // that module, otherwise the source document stays "posted" while its ledger lines vanish.
 // Journals in a closed fiscal year are never cancellable from the menu (the route rejects them first
@@ -10,10 +12,16 @@ import { DEPOSIT_REFUND_MENU_MESSAGE, isDepositRefundJournal } from './depositRe
 
 type Tx = Prisma.TransactionClient;
 
+/** Error code: the Journal menu cancels only hand-made journals. */
+export const JOURNAL_NOT_MANUAL = 'JOURNAL_NOT_MANUAL';
+
+export const JOURNAL_NOT_MANUAL_MESSAGE =
+  'Jurnal ini tidak dibuat manual (asalnya modul lain atau tidak tercatat), jadi tidak bisa dibatalkan dari menu Jurnal. Batalkan dari dokumen sumbernya, atau buat jurnal balik manual untuk mengoreksinya.';
+
 const MODULE_NUMBER_PREFIX = /^(CLOSE|DEP|FA)-/;
 // Manual journals are numbered JV-YYYYMM-NNNN; JV-<letters>… is derived from a source document.
 const DOCUMENT_NUMBER_PREFIX = /^JV-[A-Z]/;
-const MODULE_NARRATION = /^(Aplikasi Uang Muka|Offset UM Vendor:)/;
+const MODULE_NARRATION = /^(Aplikasi Uang Muka|Offset UM (Vendor|Pelanggan):)/;
 // Purchase-invoice price revisions use a plain JV number and no link column.
 const PRICE_REVISION_NARRATION = /^Revisi harga /;
 
@@ -29,6 +37,7 @@ export async function journalMenuCancelBlockReason(tx: Tx, journalId: string): P
       payment: { select: { id: true } },
       stockMovement: { select: { id: true } },
       depositApplication: { select: { id: true } },
+      customerDepositApplication: { select: { id: true } },
       gaVehicleServiceLog: { select: { id: true } },
       gaVehicleTax: { select: { id: true } },
       gaMaterialRequest: { select: { id: true } },
@@ -55,12 +64,13 @@ export async function journalMenuCancelBlockReason(tx: Tx, journalId: string): P
     return DEPOSIT_REFUND_MENU_MESSAGE;
   }
   if (MODULE_NARRATION.test(entry.narration ?? '')) {
-    return 'Jurnal ini dibuat dari modul Uang Muka. Batalkan aplikasinya dari modul Uang Muka; untuk offset uang muka Supplier, buat jurnal koreksi.';
+    return 'Jurnal ini dibuat dari modul Uang Muka. Batalkan aplikasi atau offset-nya dari modul Uang Muka; bila tidak ada di sana, buat jurnal koreksi.';
   }
 
   const linkedToModule =
     entry.stockMovement ||
     entry.depositApplication ||
+    entry.customerDepositApplication ||
     entry.gaVehicleServiceLog ||
     entry.gaVehicleTax ||
     entry.gaMaterialRequest ||

@@ -10,6 +10,7 @@ import { validateBody } from '../utils/validate';
 import { ApplyVendorDepositSchema, CancelReasonSchema, RefundVendorDepositSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
+import { voidDepositApplicationJournalInTx } from '../services/depositApplicationCancel';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
@@ -392,10 +393,11 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
       const applyAmount = new Decimal(application.appliedAmount.toString());
       const applyAmountNum = applyAmount.toNumber();
 
-      // Void the application journal; rejected when its fiscal year (the apply date's) is closed.
+      // Void the application journal; rejected when its fiscal year (the apply date's) is closed,
+      // or when it was already cancelled (the old Journal menu already reversed the deposit balance).
       // Legacy applications without a journal are checked against the apply date's year.
       if (application.journalEntry) {
-        await voidJournalInTx(tx, application.journalEntry, 'uang muka', cancelTrail(req.user!.userId, body.reason));
+        await voidDepositApplicationJournalInTx(tx, application.journalEntry, cancelTrail(req.user!.userId, body.reason));
       } else {
         await assertPeriodOpen(tx, { date: application.appliedAt }, 'uang muka');
       }

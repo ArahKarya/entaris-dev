@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
-import Decimal from 'decimal.js';
 import { prisma } from '../lib/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, requireCap } from '../middleware/auth';
 import { updateBalancesForItems } from '../utils/accountBalance';
 import { applyPartyImpact } from '../utils/partyBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
@@ -11,7 +10,12 @@ import { validateBody } from '../utils/validate';
 import { CancelReasonSchema, CreateJournalSchema } from '../utils/schemas';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { BusinessError, handleRouteError } from '../utils/errors';
-import { journalMenuCancelBlockReason } from '../services/journalCancelGuard';
+import {
+  JOURNAL_NOT_MANUAL,
+  JOURNAL_NOT_MANUAL_MESSAGE,
+  journalMenuCancelBlockReason,
+} from '../services/journalCancelGuard';
+import { isMenuCancellableSource } from '../services/ledger/journalSource';
 import {
   DEPOSIT_REFUND_MENU_MESSAGE,
   isDepositRefundJournal,
@@ -183,8 +187,9 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
-// PATCH /api/journals/:id/cancel — cancel a journal entry and reverse balances
-router.patch('/:id/cancel', async (req: AuthRequest, res) => {
+// PATCH /api/journals/:id/cancel — cancel a hand-made journal (MANUAL, IMPORT, RECURRING,
+// CASH_BOOK) and reverse balances. Every other journal is undone from its source document.
+router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
   if (!body) return;
@@ -218,8 +223,13 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
       if (isDepositRefundJournal(entry)) {
         throw new BusinessError(DEPOSIT_REFUND_MENU_MESSAGE, JOURNAL_USE_DEPOSIT_REFUND_CANCEL);
       }
+      // Allowlist by source type; a NULL (unknown legacy) source is never cancellable here.
+      if (!isMenuCancellableSource(entry.sourceType)) {
+        throw new BusinessError(JOURNAL_NOT_MANUAL_MESSAGE, JOURNAL_NOT_MANUAL);
+      }
+      // Second layer: a hand-made source type linked to a module document still goes to that module.
       const blockReason = await journalMenuCancelBlockReason(tx, entry.id);
-      if (blockReason) throw new BusinessError(blockReason);
+      if (blockReason) throw new BusinessError(blockReason, JOURNAL_NOT_MANUAL);
 
       // Reverse account balances (swap debit↔credit to undo)
       await updateBalancesForItems(
@@ -243,30 +253,6 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
         })),
         'reverse',
       );
-
-      // Undo offset side-effects created by customerDeposits.ts.
-      // Offset JVs: linked customer_deposit_applications → mark cancelled and
-      // restore the sales invoice outstanding + status.
-      const offsetApps = await tx.customerDepositApplication.findMany({
-        where: { journalEntryId: entry.id, isCancelled: false },
-      });
-      for (const app of offsetApps) {
-        await tx.customerDepositApplication.update({
-          where: { id: app.id },
-          data: { isCancelled: true, cancelledAt: new Date() },
-        });
-        const inv = await tx.salesInvoice.findUnique({ where: { id: app.salesInvoiceId } });
-        if (inv) {
-          const restored = new Decimal(inv.outstanding.toString())
-            .plus(app.appliedAmount.toString());
-          const grandTotal = new Decimal(inv.grandTotal.toString());
-          const newStatus = restored.greaterThanOrEqualTo(grandTotal) ? 'Submitted' : 'PartiallyPaid';
-          await tx.salesInvoice.update({
-            where: { id: inv.id },
-            data: { outstanding: restored, status: newStatus },
-          });
-        }
-      }
 
       // Soft-cancel the original ALE rows, like the other cancel handlers. Adding [BATAL]
       // reversal rows instead would double ALE totals vs JournalItem and fail the health check.

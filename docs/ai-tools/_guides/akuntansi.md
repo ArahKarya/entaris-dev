@@ -5,7 +5,7 @@ Toolset Akuntansi memungkinkan AIRA membaca dan (dengan persetujuan) memelihara 
 Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pembayaran, stok, penyusutan) menghasilkan jurnal seimbang yang masuk ke buku besar tak-terhapus (`AccountingLedgerEntry`). Toolset ini adalah jalur manual/administratif di sekitar itu.
 
 1. **Bagan akun (COA)**: pohon akun bernomor bertitik (`1.1.1`, `2.1.1`, ...). Digit pertama menentukan golongan: 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 Pendapatan, 5-8 Beban. Akun grup (`isGroup`) hanya pengelompok dan tidak boleh dijurnal; transaksi selalu ke akun detail aktif. Cari `accountId` lewat `coa_flat` sebelum membuat jurnal atau pengajuan.
-2. **Jurnal manual**: `je_create` memposting jurnal `JV-…` langsung berstatus Submitted (tidak ada draf). Dipakai untuk koreksi, transfer antar bank, dan penyesuaian. Jurnal otomatis dari modul lain (awalan `JV-PAY`, `JV-SI`, `JV-PI`, `JV-COGS`, serta narasi "Aplikasi Uang Muka:") TIDAK boleh dibatalkan dari sini; batalkan dari dokumen asalnya.
+2. **Jurnal manual**: `je_create` memposting jurnal `JV-…` langsung berstatus Submitted (tidak ada draf). Dipakai untuk koreksi, transfer antar bank, dan penyesuaian. `je_cancel` hanya membatalkan jurnal buatan manusia: sumber MANUAL (`je_create`), IMPORT, RECURRING, atau CASH_BOOK (Draft Buku Kas), dan butuh capability `doc.cancel`. Jurnal dari modul lain (pembayaran, faktur, STT, HPP, uang muka, tutup buku, penyusutan, saldo awal) dan jurnal lama yang sumbernya tidak tercatat ditolak dengan `JOURNAL_NOT_MANUAL`; batalkan dari dokumen asalnya, atau buat jurnal balik manual dengan `je_create`.
 3. **Saldo awal**: `coa_set_balance` menyetel saldo akun detail ke nilai tertentu. Selisihnya diposting sebagai jurnal `OB-…` melawan Ekuitas Saldo Awal (3.1).
 4. **Tahun buku**: setiap posting wajib jatuh pada tahun buku yang terbuka (`getOpenFiscalYear`). `fy_create` membuat periode; `fy_close` menutup buku (jurnal `CLOSE-<nama>`); `fy_reopen` membukanya lagi. Periode yang ditutup menolak posting baru.
 5. **Akun sistem**: `sysacct_get`/`sysacct_update` memetakan peran akun (Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, dst.) ke akun COA konkret. Semua auto-posting membaca pemetaan ini.
@@ -41,7 +41,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - **Tahun buku tidak terbuka**: posting jurnal/saldo awal ditolak ("tahun buku tidak ditemukan/ditutup"). Periksa `fy_list` lebih dulu.
 - **Jurnal tidak seimbang**: toleransi hanya 0,01. Jangan memecah satu baris menjadi debit dan kredit sekaligus.
-- **`je_cancel` pada jurnal otomatis** selalu ditolak; gunakan pembatalan dokumen asal (faktur, pembayaran, uang muka).
+- **`je_cancel` pada jurnal otomatis** selalu ditolak (`JOURNAL_NOT_MANUAL`); gunakan pembatalan dokumen asal (faktur, pembayaran, aplikasi/offset uang muka) atau jurnal balik manual untuk jurnal lama tanpa sumber.
 - **`coa_update`** hanya benar-benar menyimpan nomor, nama, status grup, dan aktif. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail.
 - **`coa_delete`** menolak bila ada sub-akun, pemetaan akun sistem, tautan ke item persediaan/jasa, mutasi buku besar, atau saldo bukan nol.
 - **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. `fy_reopen` membalikkannya.

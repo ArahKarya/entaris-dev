@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { JournalSourceType } from '@prisma/client';
 import {
   classifyLegacyJournal,
+  isMenuCancellableSource,
   isNearImportBatch,
   meetsConfidence,
   recurringNarrations,
@@ -129,5 +131,18 @@ describe('helpers', () => {
       { name: 'Listrik', templateData: {} },
     ]);
     expect([...set].sort()).toEqual(['Listrik', 'Sewa', 'Sewa gudang bulanan']);
+  });
+});
+
+describe('isMenuCancellableSource', () => {
+  it.each(['MANUAL', 'IMPORT', 'RECURRING', 'CASH_BOOK'] as const)('the Journal menu may cancel %s', (t) => {
+    expect(isMenuCancellableSource(t)).toBe(true);
+  });
+
+  it('every other source type, and an unknown (NULL) one, is cancelled at its source', () => {
+    const others = Object.values(JournalSourceType).filter((t) => !['MANUAL', 'IMPORT', 'RECURRING', 'CASH_BOOK'].includes(t));
+    expect(others).toEqual(['OPENING', 'FY_CLOSE', 'DEPRECIATION', 'DEPOSIT_REFUND', 'DEPOSIT_OFFSET', 'SYSTEM_DOC']);
+    for (const t of others) expect(isMenuCancellableSource(t), t).toBe(false);
+    expect(isMenuCancellableSource(null)).toBe(false);
   });
 });
