@@ -172,6 +172,15 @@ function checkTitle(t: TFunction<'settings'>, id: string): string {
   return t(`fiscal.checklist.checks.${id}.title`, { defaultValue: id });
 }
 
+/**
+ * Item labels are document numbers, except a system-account role, whose server label is an
+ * Indonesian name: that one is shown in the user's language, with the server label as fallback.
+ */
+function itemLabel(t: TFunction<'settings'>, item: CloseCheckItem): string {
+  if (item.kind !== 'SystemAccountRole') return item.label;
+  return t(`fiscal.checklist.roles.${item.key}`, { defaultValue: item.label });
+}
+
 function CheckRow({ check }: { check: CloseCheckResult }) {
   const { t } = useTranslation('settings');
   const blocks = check.severity === 'block';
@@ -201,7 +210,7 @@ function CheckRow({ check }: { check: CloseCheckResult }) {
             <ul className="space-y-0.5 text-xs">
               {shown.map((item) => (
                 <li key={item.key} className="flex flex-wrap gap-x-2">
-                  <span className="font-medium text-foreground break-all">{item.label}</span>
+                  <span className="font-medium text-foreground break-all">{itemLabel(t, item)}</span>
                   {item.date && <span className="num text-muted-foreground">{showDay(item.date, '')}</span>}
                   {item.amount && <span className="num text-muted-foreground">{formatRupiah(item.amount)}</span>}
                 </li>

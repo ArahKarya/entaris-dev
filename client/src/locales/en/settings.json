@@ -550,6 +550,10 @@
           "title": "Uninvoiced delivery notes",
           "hint": "Delivery notes up to this year end have no invoice yet."
         }
+      },
+      "roles": {
+        "CURRENT_PROFIT": "Current Year Profit",
+        "RETAINED_EARNINGS": "Retained Earnings"
       }
     },
     "reopenConfirm": {

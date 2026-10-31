@@ -550,6 +550,10 @@
           "title": "Surat jalan belum ditagih",
           "hint": "Surat jalan sampai akhir tahun ini belum dibuatkan invoice."
         }
+      },
+      "roles": {
+        "CURRENT_PROFIT": "Laba Tahun Berjalan",
+        "RETAINED_EARNINGS": "Laba Ditahan"
       }
     },
     "reopenConfirm": {

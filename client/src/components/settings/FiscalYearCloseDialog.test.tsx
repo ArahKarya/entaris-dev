@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import i18n from '@/i18n';
 
 const { get, post, toastError, toastSuccess } = vi.hoisted(() => ({
   get: vi.fn(),
@@ -127,5 +128,27 @@ describe('FiscalYearCloseDialog', () => {
     renderDialog();
     const row = await screen.findByTestId('close-check-inventory-vs-gl');
     expect(within(row).getByText(/inventory-vs-gl/)).toBeInTheDocument();
+  });
+
+  it('shows a missing system-account role in the user language, not the server label', async () => {
+    get.mockResolvedValue({
+      data: list({
+        canClose: false,
+        blocking: 1,
+        checks: [{
+          id: 'system-accounts', severity: 'block', status: 'fail', count: 1, baselinedCount: 0,
+          items: [{ key: 'CURRENT_PROFIT', kind: 'SystemAccountRole', label: 'Laba Tahun Berjalan' }],
+        }],
+      }),
+    });
+    await i18n.changeLanguage('en');
+    try {
+      renderDialog();
+      const row = await screen.findByTestId('close-check-system-accounts');
+      expect(within(row).getByText('Current Year Profit')).toBeInTheDocument();
+      expect(within(row).queryByText('Laba Tahun Berjalan')).not.toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage('id');
+    }
   });
 });
