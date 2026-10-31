@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/pembelian` · 28 tool (read 12, write 5, critical 11)
+Endpoint MCP target: `/mcp/pembelian` · 30 tool (read 13, write 5, critical 12)
 
 ## Tujuan
 
@@ -65,6 +65,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 | PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik, STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
+| Batal refund uang muka (`vdep_refund_cancel`) | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pemasok pulih |
 | Batal uang muka (`vdep_cancel`) | Soft-cancel jurnal (DR 1.3 / CR Kas-Bank dibalik) |
 
 Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai **landed cost**. Total debit selalu sama dengan total kredit.
@@ -74,7 +75,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - **Gate `needsApproval(role)`**: role tanpa capability `approval.bypass` (default hanya Admin yang bypass). Untuk `pi_create` role non-bypass menghasilkan **HTTP 202** `{ pendingApproval: true, request }` dan **tidak ada** dokumen/GL/stok sampai disetujui (`ApprovalRequest` tipe `PurchaseInvoice`; eksekusi memakai pengaju sebagai aktor). Admin langsung memposting.
 - `pi_revise_price` non-bypass: antrian `PurchaseInvoiceRevisePrice` (HTTP 202). Satu permintaan Pending per PI (409 bila duplikat). Payload menyimpan snapshot `_before` untuk perbandingan.
 - PO: persetujuan berbasis `ApprovalRule` (nilai minimum), bukan role. Hasil: PO Draft + `approvalStatus=Pending`.
-- Pembatalan (`po_cancel`, `po_close`, `gr_cancel`, `pi_cancel`, `vdep_apply_cancel`) butuh capability `doc.cancel` (default hanya Admin). Catatan: `vdep_cancel` (batal uang muka) **tidak** dijaga capability, hanya izin edit modul `vendor_deposit`.
+- Pembatalan (`po_cancel`, `po_close`, `gr_cancel`, `pi_cancel`, `vdep_apply_cancel`, `vdep_refund_cancel`) butuh capability `doc.cancel` (default hanya Admin). Catatan: `vdep_cancel` (batal uang muka) **tidak** dijaga capability, hanya izin edit modul `vendor_deposit`.
 - STT dan `vdep_apply`/`vdep_refund` tidak melewati antrian approval: langsung memposting.
 
 ### Jebakan umum
@@ -142,6 +143,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | [`vdep_cancel`](#vdep_cancel) | critical | tidak | `PATCH /api/vendor-deposits/:id/cancel` |
 | [`vdep_list`](#vdep_list) | read | - | `GET /api/vendor-deposits` |
 | [`vdep_refund`](#vdep_refund) | critical | tidak | `POST /api/vendor-deposits/:id/refund` |
+| [`vdep_refund_cancel`](#vdep_refund_cancel) | critical | tidak | `POST /api/vendor-deposits/:id/refunds/:journalId/cancel` |
+| [`vdep_refund_list`](#vdep_refund_list) | read | - | `GET /api/vendor-deposits/:id/refunds` |
 | [`vdep_summary`](#vdep_summary) | read | - | `GET /api/vendor-deposits/summary` |
 
 ## Rincian tool
@@ -1622,7 +1625,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu
 - 400: Bukan tipe uang muka vendor
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
-- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund
+- 400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat vdep_refund_cancel)
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -1678,7 +1681,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 ### vdep_refund
 
-**Ringkasan:** Menyelesaikan sisa uang muka vendor lewat offset ke hutang (FIFO ke PI terlama pemasok) dan/atau pengembalian kas dari vendor ke rekening kas/bank. Minimal salah satu offsetAmount atau cashAmount > 0; total tidak boleh melebihi sisa.
+**Ringkasan:** Menyelesaikan sisa uang muka vendor lewat offset ke hutang (FIFO ke PI terlama pemasok) dan/atau pengembalian kas dari vendor ke rekening kas/bank. Minimal salah satu offsetAmount atau cashAmount > 0; total tidak boleh melebihi sisa. Refund kas bisa dibatalkan lewat vdep_refund_cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1734,7 +1737,116 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Akun yang dipilih bukan kas/bank
 - 400: Uang muka sudah dibatalkan
 
-**Tool terkait:** [`vdep_balance`](#vdep_balance), [`vdep_apply`](#vdep_apply)
+**Tool terkait:** [`vdep_balance`](#vdep_balance), [`vdep_apply`](#vdep_apply), [`vdep_refund_list`](#vdep_refund_list), [`vdep_refund_cancel`](#vdep_refund_cancel)
+
+### vdep_refund_cancel
+
+**Ringkasan:** Membatalkan satu refund kas uang muka supplier: jurnal refund di-void, refundedAmount uang muka turun sebesar refund, saldo uang muka supplier dipulihkan. Pakai journalEntryId dari vdep_refund_list. Setelah semua refund dibatalkan, uang mukanya bisa dibatalkan (vdep_cancel). Butuh capability doc.cancel.
+
+- **Risk / tier:** `critical` / Wajib-Approve
+- **Draft-capable:** tidak (efek langsung)
+- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `edit`, capability `doc.cancel`)
+- **Handler:** `POST /api/vendor-deposits/:id/refunds/:journalId/cancel` (src/routes/vendorDeposits.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID Payment uang muka. |
+| `journalId` | path | `string` | ya | ID jurnal refund (journalEntryId dari vdep_refund_list). |
+| `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal refund. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "vdep_refund_cancel",
+  "args": {
+    "id": "<id>",
+    "journalId": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "action",
+  "status": "pending_approval",
+  "approvalId": "<id>",
+  "confirm": "Batalkan refund <id> dari uang muka supplier <id>? Jurnal refund di-void dan saldo uang muka dipulihkan."
+}
+```
+
+**Isi hasil:** { message: 'Refund uang muka dibatalkan.', journalEntryId, entryNumber, amount, refundedAmount }.
+
+**Efek pembukuan/stok:** Void jurnal refund (DR Kas/Bank / CR 1.3 Uang Muka Pembelian): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. refundedAmount uang muka berkurang sebesar refund, party.depositBalance bertambah.
+
+**Teks konfirmasi:** Batalkan refund {journalId} dari uang muka supplier {id}? Jurnal refund di-void dan saldo uang muka dipulihkan.
+
+**Prasyarat**
+
+- Jurnal refund belum dibatalkan dan tahun bukunya masih terbuka.
+- User memiliki capability doc.cancel.
+
+**Error umum**
+
+- 400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi "Refund UM ..."), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)
+- 400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)
+- 400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual
+- 400: uang muka tidak ditemukan atau bukan tipe uang muka supplier (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)
+- 403: tanpa capability doc.cancel
+- 400: alasan pembatalan maksimal 500 karakter
+
+**Tool terkait:** [`vdep_refund_list`](#vdep_refund_list), [`vdep_cancel`](#vdep_cancel)
+
+### vdep_refund_list
+
+**Ringkasan:** Daftar refund kas satu uang muka supplier (jurnal refund), terbaru dulu, termasuk yang sudah dibatalkan: nomor jurnal, tanggal, jumlah, akun kas/bank, status, dan siapa/alasan pembatalannya. Jurnal lama tanpa tanda sumber hanya tampil bila bentuknya persis jurnal refund modul Uang Muka (jurnal manual bernarasi serupa tidak ikut).
+
+- **Risk / tier:** `read` / Auto
+- **Roles & izin:** Admin, Accountant (modul `vendor_deposit` / `view`)
+- **Handler:** `GET /api/vendor-deposits/:id/refunds` (src/routes/vendorDeposits.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID Payment uang muka. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "vdep_refund_list",
+  "args": {
+    "id": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<{ data: [{ journalEntryId, entryNumber, date, amount, status, narration, cashAccount, canc>"
+}
+```
+
+**Isi hasil:** { data: [{ journalEntryId, entryNumber, date, amount, status, narration, cashAccount, cancelledAt, cancelledById, cancelReason }] }.
+
+**Error umum**
+
+- 404: uang muka supplier tidak ditemukan
+
+**Tool terkait:** [`vdep_refund`](#vdep_refund), [`vdep_refund_cancel`](#vdep_refund_cancel)
 
 ### vdep_summary
 

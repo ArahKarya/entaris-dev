@@ -12,6 +12,11 @@ import { CancelReasonSchema, CreateJournalSchema } from '../utils/schemas';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { journalMenuCancelBlockReason } from '../services/journalCancelGuard';
+import {
+  DEPOSIT_REFUND_MENU_MESSAGE,
+  isDepositRefundJournal,
+  JOURNAL_USE_DEPOSIT_REFUND_CANCEL,
+} from '../services/depositRefundCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
@@ -209,6 +214,10 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
       // Closed fiscal year first so the client gets the PERIOD_CLOSED code; then only hand-made
       // journals pass, module journals are undone from their module.
       await assertPeriodOpen(tx, { fiscalYearId: entry.fiscalYearId }, 'jurnal');
+      // Deposit refunds have their own cancel on the deposit page, which also lowers refundedAmount.
+      if (isDepositRefundJournal(entry)) {
+        throw new BusinessError(DEPOSIT_REFUND_MENU_MESSAGE, JOURNAL_USE_DEPOSIT_REFUND_CANCEL);
+      }
       const blockReason = await journalMenuCancelBlockReason(tx, entry.id);
       if (blockReason) throw new BusinessError(blockReason);
 
@@ -235,7 +244,7 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
         'reverse',
       );
 
-      // Undo refund/offset side-effects created by customerDeposits.ts.
+      // Undo offset side-effects created by customerDeposits.ts.
       // Offset JVs: linked customer_deposit_applications → mark cancelled and
       // restore the sales invoice outstanding + status.
       const offsetApps = await tx.customerDepositApplication.findMany({
@@ -255,22 +264,6 @@ router.patch('/:id/cancel', async (req: AuthRequest, res) => {
           await tx.salesInvoice.update({
             where: { id: inv.id },
             data: { outstanding: restored, status: newStatus },
-          });
-        }
-      }
-
-      // Refund JVs: narration pattern "Refund UM Pelanggan: {paymentNumber} - ...".
-      // Roll back payment.refundedAmount by the DR amount on the 2.1.2 line.
-      const refundMatch = entry.narration?.match(/^Refund UM Pelanggan:\s*(\S+)/);
-      if (refundMatch) {
-        const paymentNumber = refundMatch[1];
-        const depositLine = entry.items.find(
-          (i) => i.account.accountNumber === '2.1.2' && Number(i.debit) > 0,
-        );
-        if (depositLine) {
-          await tx.payment.updateMany({
-            where: { paymentNumber },
-            data: { refundedAmount: { decrement: Number(depositLine.debit) } },
           });
         }
       }

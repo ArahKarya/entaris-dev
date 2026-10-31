@@ -38,6 +38,7 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 | `cdep_apply` | Tidak ada | DR 2.1.2 Uang Muka Pelanggan / CR 1.2.1 Piutang Usaha |
 | `cdep_refund` | Tidak ada | Offset: DR 2.1.2 / CR 1.2.1 (FIFO ke faktur terlama); refund kas: DR 2.1.2 / CR Kas/Bank (1.1.x) |
 | `cdep_cancel`, `cdep_apply_cancel` | Tidak ada | Jurnal asal dibalik (soft-cancel ledger, bukan jurnal pembalik) |
+| `cdep_refund_cancel` | Tidak ada | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pelanggan pulih. Menu Jurnal (`je_cancel`) menolak jurnal refund (`JOURNAL_USE_DEPOSIT_REFUND_CANCEL`) |
 
 Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLoaded` baris invoice -> `averageCost` item (WAC). Pembayaran invoice ada di toolset kas-bank (`pay_record`: DR Kas/Bank / CR Piutang).
 
@@ -45,7 +46,7 @@ Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLo
 
 - **Retur Penjualan** (`sret_create`): bila role pemanggil tidak punya capability `approval.bypass` (default hanya Admin), dokumen TIDAK dibuat; payload masuk antrian `ApprovalRequest` tipe `SalesReturn` (HTTP 202) dan dieksekusi saat disetujui (aktor = pengaju). Admin/role bypass langsung memposting (201).
 - **Surat Jalan** (`do_create`): antrian approval tipe `DeliveryOrder` hanya muncul pada kasus stok minus: `allowNegativeStock=true` tanpa capability `inventory.negative_stock`. Perhatikan: `so_generate_do` dan `do_update` TIDAK mengantrikan approval — keduanya menolak dengan 403 bila bypass stok minus diminta tanpa capability.
-- **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.
+- **Pembatalan** memakai capability `doc.cancel` (default hanya Admin): `quot_cancel`, `do_cancel`, `si_cancel`, `sret_cancel`, `cdep_apply_cancel`, `cdep_refund_cancel`, `tdn_cancel`, `svc_delete`. Pengecualian yang tidak ber-capability: `so_cancel` dan `cdep_cancel` (hanya izin edit modul) — pertimbangkan ini saat mengatur tier tool.
 - Keputusan approval dilakukan di toolset persetujuan; tool penjualan hanya mengantrikan.
 
 ### CRM: tindak lanjut dan catat lewat chat

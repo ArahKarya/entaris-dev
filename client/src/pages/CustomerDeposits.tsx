@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { CheckCircle2, Clock, Plus, Undo2, Wallet, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, History, Plus, Undo2, Wallet, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { can, cap } from '@/lib/permissions';
@@ -29,6 +29,7 @@ import {
 import CustomerDepositModal from '@/components/CustomerDepositModal';
 import RefundCustomerDepositModal from '@/components/RefundCustomerDepositModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { DepositRefundsDialog } from '@/components/DepositRefundsDialog';
 
 type Money = string | number;
 type DepositState = 'Active' | 'PartiallyUsed' | 'FullyUsed' | 'Cancelled';
@@ -96,6 +97,7 @@ export const CustomerDeposits = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; paymentNumber: string } | null>(null);
   const [refundTarget, setRefundTarget] = useState<CustomerDepositRow | null>(null);
+  const [refundsTarget, setRefundsTarget] = useState<CustomerDepositRow | null>(null);
   const canEdit = can('customer_deposit', 'edit');
   // Cancelling a deposit also needs the doc.cancel capability (server: requireCap).
   const canCancel = canEdit && cap('doc.cancel');
@@ -243,10 +245,17 @@ export const CustomerDeposits = () => {
                   onSelect: () => setRefundTarget(d),
                 },
                 {
+                  // Past cash refunds; each can be cancelled there (doc.cancel).
+                  label: t('customerDepositsPage.actions.refunds'),
+                  icon: History,
+                  hidden: d.totalRefunded <= 0,
+                  onSelect: () => setRefundsTarget(d),
+                },
+                {
                   label: t('customerDepositsPage.actions.cancel'),
                   icon: XCircle,
                   tone: 'danger',
-                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED).
+                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED); cancel the refunds first.
                   hidden: !canCancel || isCancelled || d.totalRefunded > 0,
                   onSelect: () => setCancelTarget({ id: d.id, paymentNumber: d.paymentNumber }),
                 },
@@ -370,6 +379,15 @@ export const CustomerDeposits = () => {
             amount: num(refundTarget.amount),
             remaining: refundTarget.remaining,
           }}
+        />
+      )}
+
+      {refundsTarget && (
+        <DepositRefundsDialog
+          key={refundsTarget.id}
+          side="customer"
+          deposit={{ id: refundsTarget.id, paymentNumber: refundsTarget.paymentNumber, partyName: refundsTarget.party?.name }}
+          onClose={() => setRefundsTarget(null)}
         />
       )}
 

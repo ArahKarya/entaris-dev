@@ -18,6 +18,7 @@ import {
   assertDepositNotFromSalesReturn,
   findUnlinkedDepositJournal,
 } from '../services/depositCancelGuard';
+import { cancelDepositRefundInTx, depositRefundSourceKey, listDepositRefunds } from '../services/depositRefundCancel';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -572,6 +573,7 @@ router.post('/:id/refund', async (req: AuthRequest, res) => {
             createdBy: req.user!.userId,
             submittedAt: new Date(),
             sourceType: 'DEPOSIT_REFUND',
+            sourceKey: depositRefundSourceKey(deposit.id),
             items: {
               create: [
                 { accountId: depositAccount.id, partyId: deposit.partyId, debit: cashNum, credit: 0, description: `Refund UM Pelanggan: ${deposit.paymentNumber}` },
@@ -615,6 +617,40 @@ router.post('/:id/refund', async (req: AuthRequest, res) => {
     return res.json(result);
   } catch (error: any) {
     return handleRouteError(res, error, 'POST /customer-deposits/:id/refund', 'Gagal memproses refund/offset uang muka.');
+  }
+});
+
+// GET /api/customer-deposits/:id/refunds — cash refunds of one deposit (refund journals), newest first.
+router.get('/:id/refunds', async (req, res) => {
+  try {
+    const refunds = await listDepositRefunds(prisma, 'customer', req.params.id as string);
+    if (!refunds) return res.status(404).json({ error: 'Uang muka tidak ditemukan.' });
+    return res.json({ data: refunds });
+  } catch (error) {
+    logger.error({ error }, 'GET /customer-deposits/:id/refunds error');
+    return res.status(500).json({ error: 'Gagal mengambil daftar refund uang muka.' });
+  }
+});
+
+// POST /api/customer-deposits/:id/refunds/:journalId/cancel — cancel one refund (requires doc.cancel):
+// voids its journal, lowers refundedAmount and restores the customer deposit balance.
+router.post('/:id/refunds/:journalId/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
+  const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
+  if (!body) return;
+  try {
+    const result = await prisma.$transaction(
+      (tx: Prisma.TransactionClient) => cancelDepositRefundInTx(tx, {
+        side: 'customer',
+        depositId: req.params.id as string,
+        journalEntryId: req.params.journalId as string,
+        userId: req.user!.userId,
+        reason: body.reason,
+      }),
+      { timeout: 15000 },
+    );
+    return res.json({ message: 'Refund uang muka dibatalkan.', ...result });
+  } catch (error) {
+    return handleRouteError(res, error, 'POST /customer-deposits/:id/refunds/:journalId/cancel', 'Gagal membatalkan refund uang muka.');
   }
 });
 

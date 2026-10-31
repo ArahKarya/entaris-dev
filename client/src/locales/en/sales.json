@@ -1520,6 +1520,7 @@
     "actions": {
       "menuLabel": "Actions for {{number}}",
       "refund": "Refund / offset",
+      "refunds": "View refunds",
       "cancel": "Cancel"
     },
     "kpi": {

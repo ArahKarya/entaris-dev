@@ -1520,6 +1520,7 @@
     "actions": {
       "menuLabel": "Aksi untuk {{number}}",
       "refund": "Refund / offset",
+      "refunds": "Lihat refund",
       "cancel": "Batalkan"
     },
     "kpi": {

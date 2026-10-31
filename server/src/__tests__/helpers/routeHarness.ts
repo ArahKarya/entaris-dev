@@ -48,6 +48,8 @@ export interface RouteResult {
 /**
  * Invoke the handlers of `METHOD path` on an Express router with a minimal req/res. `role` is the
  * role key in req.user (default 'Admin'); requireCap gates resolve it against the roles table.
+ * Like Express, the chain stops at a handler that ends the response or does not call next() (a
+ * requireCap 403 never reaches the route body); next(err) is rethrown.
  */
 export async function callRoute(
   router: Router,
@@ -59,10 +61,11 @@ export async function callRoute(
   const layer = (router.stack as Layer[]).find((l) => l.route?.path === path && l.route.methods[method]);
   if (!layer?.route) throw new Error(`route harness: ${method.toUpperCase()} ${path} not found`);
   const result: RouteResult = { status: 200, body: undefined };
+  let ended = false;
   const res = {
     status(code: number) { result.status = code; return res; },
-    json(body: unknown) { result.body = body; return res; },
-    send(body: unknown) { result.body = body; return res; },
+    json(body: unknown) { result.body = body; ended = true; return res; },
+    send(body: unknown) { result.body = body; ended = true; return res; },
     setHeader() { return res; },
   };
   const req = {
@@ -73,6 +76,12 @@ export async function callRoute(
     user: opts.userId ? { userId: opts.userId, role: opts.role ?? 'Admin' } : undefined,
     get: () => undefined,
   };
-  for (const { handle } of layer.route.stack) await handle(req, res, () => undefined);
+  for (const { handle } of layer.route.stack) {
+    let advanced = false;
+    let nextArg: unknown;
+    await handle(req, res, (arg?: unknown) => { advanced = true; nextArg = arg; });
+    if (nextArg !== undefined && nextArg !== 'route' && nextArg !== 'router') throw nextArg;
+    if (!advanced || nextArg !== undefined || ended) break;
+  }
   return result;
 }

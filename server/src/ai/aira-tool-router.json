@@ -13329,7 +13329,7 @@
         "400: bukan tipe uang muka pelanggan.",
         "400: sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
+        "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat cdep_refund_cancel)",
         "400 DEPOSIT_FROM_SALES_RETURN: uang muka berasal dari Retur Penjualan; batalkan retur tersebut, uang mukanya ikut dibatalkan",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
@@ -15310,7 +15310,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "journal",
-      "desc": "Membatalkan jurnal manual dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Ditolak: jurnal di tahun buku tertutup, jurnal tutup buku dan penyusutan, jurnal dari dokumen sumber (pembayaran, faktur, STT, produksi, HPP, revisi harga PI), jurnal modul uang muka vendor, dan jurnal yang terhubung ke stok, GA, pengajuan dana, atau uang jaminan: batalkan dari modul asalnya atau buat jurnal koreksi.",
+      "desc": "Membatalkan jurnal manual dengan membalik saldo akun (DR/CR ditukar) dan menandai status Cancelled. Ditolak: jurnal di tahun buku tertutup, jurnal tutup buku dan penyusutan, jurnal dari dokumen sumber (pembayaran, faktur, STT, produksi, HPP, revisi harga PI), jurnal modul uang muka (refund uang muka customer/supplier dibatalkan lewat cdep_refund_cancel/vdep_refund_cancel), dan jurnal yang terhubung ke stok, GA, pengajuan dana, atau uang jaminan: batalkan dari modul asalnya atau buat jurnal koreksi.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -15346,7 +15346,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik saldo akun & saldo pihak; efek samping aplikasi uang muka/refund pelanggan yang ditautkan ikut dibalik. Tidak ada efek stok. Catatan kode: tidak ada capability doc.cancel pada endpoint ini.",
+      "postingEffect": "Membalik saldo akun & saldo pihak; efek samping offset uang muka pelanggan yang ditautkan ikut dibalik; refund uang muka ditolak. Tidak ada efek stok. Catatan kode: tidak ada capability doc.cancel pada endpoint ini.",
       "confirm_template": "Batalkan (reverse) jurnal {id}?",
       "prerequisites": [
         "Jurnal manual (nomor JV-YYYYMM-NNNN) yang belum dibatalkan, di tahun buku yang masih terbuka.",
@@ -15358,6 +15358,7 @@
         "400: jurnal terkait pembayaran/dokumen sumber",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400: jurnal modul (tutup buku, penyusutan, uang muka, revisi harga, stok, GA, pengajuan dana, uang jaminan)",
+        "400 JOURNAL_USE_DEPOSIT_REFUND_CANCEL: jurnal refund uang muka; batalkan lewat cdep_refund_cancel/vdep_refund_cancel (tombol \"Batalkan refund\" di menu Uang Muka)",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -16062,7 +16063,7 @@
         "400: Deposit sudah digunakan untuk faktur - batalkan penggunaan dulu",
         "400: Bukan tipe uang muka vendor",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
-        "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund",
+        "400 DEPOSIT_REFUNDED: uang muka sudah di-refund sebagian; tidak bisa dibatalkan, sisanya tetap bisa dipakai atau di-refund (atau batalkan refundnya dulu lewat vdep_refund_cancel)",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -16722,7 +16723,7 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "customer_deposit",
-      "desc": "Menyelesaikan sisa uang muka pelanggan: offset ke piutang faktur terlama (FIFO) dan/atau refund tunai ke kas/bank. Total offset+refund tidak boleh melebihi sisa uang muka.",
+      "desc": "Menyelesaikan sisa uang muka pelanggan: offset ke piutang faktur terlama (FIFO) dan/atau refund tunai ke kas/bank. Total offset+refund tidak boleh melebihi sisa uang muka. Refund kas bisa dibatalkan lewat cdep_refund_cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -16802,7 +16803,119 @@
         "400: akun yang dipilih bukan kas/bank."
       ],
       "related": [
-        "cdep_balance"
+        "cdep_balance",
+        "cdep_refund_list",
+        "cdep_refund_cancel"
+      ]
+    },
+    {
+      "name": "cdep_refund_list",
+      "group": "Penjualan",
+      "toolset": "penjualan",
+      "module": "customer_deposit",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "desc": "Daftar refund kas satu uang muka pelanggan (jurnal refund), terbaru dulu, termasuk yang sudah dibatalkan: nomor jurnal, tanggal, jumlah, akun kas/bank, status, dan siapa/alasan pembatalannya. Jurnal lama tanpa tanda sumber hanya tampil bila bentuknya persis jurnal refund modul Uang Muka (jurnal manual bernarasi serupa tidak ikut).",
+      "risk": "read",
+      "input": {
+        "id": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID Payment uang muka."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "{ data: [{ journalEntryId, entryNumber, date, amount, status, narration, cashAccount, cancelledAt, cancelledById, cancelReason }] }.",
+      "handler": "GET /api/customer-deposits/:id/refunds",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "errors": [
+        "404: uang muka pelanggan tidak ditemukan"
+      ],
+      "related": [
+        "cdep_refund",
+        "cdep_refund_cancel"
+      ]
+    },
+    {
+      "name": "cdep_refund_cancel",
+      "group": "Penjualan",
+      "toolset": "penjualan",
+      "module": "customer_deposit",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "desc": "Membatalkan satu refund kas uang muka pelanggan: jurnal refund di-void, refundedAmount uang muka turun sebesar refund, saldo uang muka pelanggan dipulihkan. Pakai journalEntryId dari cdep_refund_list. Setelah semua refund dibatalkan, uang mukanya bisa dibatalkan (cdep_cancel). Butuh capability doc.cancel.",
+      "risk": "critical",
+      "input": {
+        "id": "string",
+        "journalId": "string",
+        "reason": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID Payment uang muka."
+        },
+        {
+          "name": "journalId",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID jurnal refund (journalEntryId dari cdep_refund_list)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal refund."
+        }
+      ],
+      "output": {
+        "status": "string"
+      },
+      "outputSummary": "{ message: 'Refund uang muka dibatalkan.', journalEntryId, entryNumber, amount, refundedAmount }.",
+      "handler": "POST /api/customer-deposits/:id/refunds/:journalId/cancel",
+      "permAction": "edit",
+      "requiresCapability": "doc.cancel",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Void jurnal refund (DR 2.1.2 Uang Muka Pelanggan / CR Kas/Bank): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. refundedAmount uang muka berkurang sebesar refund, party.customerDepositBalance bertambah.",
+      "confirm_template": "Batalkan refund {journalId} dari uang muka pelanggan {id}? Jurnal refund di-void dan saldo uang muka dipulihkan.",
+      "errors": [
+        "400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi \"Refund UM ...\"), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)",
+        "400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)",
+        "400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual",
+        "400: uang muka tidak ditemukan atau bukan tipe uang muka pelanggan (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)",
+        "403: tanpa capability doc.cancel",
+        "400: alasan pembatalan maksimal 500 karakter"
+      ],
+      "prerequisites": [
+        "Jurnal refund belum dibatalkan dan tahun bukunya masih terbuka.",
+        "User memiliki capability doc.cancel."
+      ],
+      "related": [
+        "cdep_refund_list",
+        "cdep_cancel"
       ]
     },
     {
@@ -26990,7 +27103,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "vendor_deposit",
-      "desc": "Menyelesaikan sisa uang muka vendor lewat offset ke hutang (FIFO ke PI terlama pemasok) dan/atau pengembalian kas dari vendor ke rekening kas/bank. Minimal salah satu offsetAmount atau cashAmount > 0; total tidak boleh melebihi sisa.",
+      "desc": "Menyelesaikan sisa uang muka vendor lewat offset ke hutang (FIFO ke PI terlama pemasok) dan/atau pengembalian kas dari vendor ke rekening kas/bank. Minimal salah satu offsetAmount atau cashAmount > 0; total tidak boleh melebihi sisa. Refund kas bisa dibatalkan lewat vdep_refund_cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -27068,7 +27181,119 @@
       ],
       "related": [
         "vdep_balance",
-        "vdep_apply"
+        "vdep_apply",
+        "vdep_refund_list",
+        "vdep_refund_cancel"
+      ]
+    },
+    {
+      "name": "vdep_refund_list",
+      "group": "Pembelian",
+      "toolset": "pembelian",
+      "module": "vendor_deposit",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "desc": "Daftar refund kas satu uang muka supplier (jurnal refund), terbaru dulu, termasuk yang sudah dibatalkan: nomor jurnal, tanggal, jumlah, akun kas/bank, status, dan siapa/alasan pembatalannya. Jurnal lama tanpa tanda sumber hanya tampil bila bentuknya persis jurnal refund modul Uang Muka (jurnal manual bernarasi serupa tidak ikut).",
+      "risk": "read",
+      "input": {
+        "id": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID Payment uang muka."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "{ data: [{ journalEntryId, entryNumber, date, amount, status, narration, cashAccount, cancelledAt, cancelledById, cancelReason }] }.",
+      "handler": "GET /api/vendor-deposits/:id/refunds",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "errors": [
+        "404: uang muka supplier tidak ditemukan"
+      ],
+      "related": [
+        "vdep_refund",
+        "vdep_refund_cancel"
+      ]
+    },
+    {
+      "name": "vdep_refund_cancel",
+      "group": "Pembelian",
+      "toolset": "pembelian",
+      "module": "vendor_deposit",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "desc": "Membatalkan satu refund kas uang muka supplier: jurnal refund di-void, refundedAmount uang muka turun sebesar refund, saldo uang muka supplier dipulihkan. Pakai journalEntryId dari vdep_refund_list. Setelah semua refund dibatalkan, uang mukanya bisa dibatalkan (vdep_cancel). Butuh capability doc.cancel.",
+      "risk": "critical",
+      "input": {
+        "id": "string",
+        "journalId": "string",
+        "reason": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID Payment uang muka."
+        },
+        {
+          "name": "journalId",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID jurnal refund (journalEntryId dari vdep_refund_list)."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal refund."
+        }
+      ],
+      "output": {
+        "status": "string"
+      },
+      "outputSummary": "{ message: 'Refund uang muka dibatalkan.', journalEntryId, entryNumber, amount, refundedAmount }.",
+      "handler": "POST /api/vendor-deposits/:id/refunds/:journalId/cancel",
+      "permAction": "edit",
+      "requiresCapability": "doc.cancel",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Void jurnal refund (DR Kas/Bank / CR 1.3 Uang Muka Pembelian): jurnal Cancelled, ledger isCancelled, saldo akun dibalik. refundedAmount uang muka berkurang sebesar refund, party.depositBalance bertambah.",
+      "confirm_template": "Batalkan refund {journalId} dari uang muka supplier {id}? Jurnal refund di-void dan saldo uang muka dipulihkan.",
+      "errors": [
+        "400 DEPOSIT_REFUND_MISMATCH: jurnal bukan refund dari uang muka ini, atau jurnal lama tanpa tanda sumber yang bentuknya bukan jurnal refund modul Uang Muka (mis. jurnal manual bernarasi \"Refund UM ...\"), atau refund lama yang tidak bisa dicocokkan dengan aman (koreksi lewat jurnal manual)",
+        "400 STALE_STATUS: refund sudah dibatalkan (juga hasil klik ganda/retry; tidak ada yang dibalik dua kali)",
+        "400 PERIOD_CLOSED: tahun buku jurnal refund tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 DEPOSIT_REFUND_OVER_CANCEL: jumlah refund melebihi refundedAmount tercatat; koreksi lewat jurnal manual",
+        "400: uang muka tidak ditemukan atau bukan tipe uang muka supplier (uang muka berstatus Cancelled tetap boleh: data lama yang dibatalkan saat masih ada refund dikoreksi dengan membatalkan refundnya)",
+        "403: tanpa capability doc.cancel",
+        "400: alasan pembatalan maksimal 500 karakter"
+      ],
+      "prerequisites": [
+        "Jurnal refund belum dibatalkan dan tahun bukunya masih terbuka.",
+        "User memiliki capability doc.cancel."
+      ],
+      "related": [
+        "vdep_refund_list",
+        "vdep_cancel"
       ]
     },
     {

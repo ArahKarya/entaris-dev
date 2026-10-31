@@ -534,6 +534,31 @@
     "placeholder": "Pilih…",
     "search": "Cari…"
   },
+  "depositRefundsDialog": {
+    "title": "Refund uang muka",
+    "description": "{{number}} · refund kas dari uang muka ini",
+    "loading": "Memuat refund…",
+    "loadFailed": "Gagal memuat daftar refund.",
+    "retry": "Coba lagi",
+    "empty": "Belum ada refund kas untuk uang muka ini.",
+    "listLabel": "Daftar refund {{number}}",
+    "noCashAccount": "Akun kas/bank tidak diketahui",
+    "cancelledReason": "Alasan batal: {{reason}}",
+    "cancel": "Batalkan refund",
+    "cancelAria": "Batalkan refund {{number}}",
+    "close": "Tutup",
+    "cancelDialog": {
+      "title": "Batalkan refund {{number}}?",
+      "message": "Jurnal refund {{amount}} di-void, total refund uang muka turun, dan sisa uang muka bertambah lagi sebesar refund.",
+      "reason": "Alasan (opsional)",
+      "reasonPlaceholder": "Mis. salah input jumlah atau akun kas",
+      "confirm": "Batalkan refund"
+    },
+    "toast": {
+      "cancelled": "Refund {{number}} dibatalkan.",
+      "cancelFailed": "Gagal membatalkan refund."
+    }
+  },
   "depreciationRunPanel": {
     "columns": {
       "assetNumber": "No. Aset",

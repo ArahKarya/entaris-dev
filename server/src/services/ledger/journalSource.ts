@@ -72,7 +72,11 @@ export function classifyLegacyJournal(f: LegacyJournalFacts): LegacyClassificati
   if (no.startsWith('OB-')) return result('OPENING', 'high', 'number OB- (COA opening balance)');
   if (f.inCashBookDraft) return result('CASH_BOOK', 'high', 'linked cash book draft row');
   if (CASH_BOOK_NARRATION.test(narration)) return result('CASH_BOOK', 'high', 'narration Buku Kas DKB-');
-  if (DEPOSIT_REFUND_NARRATION.test(narration)) return result('DEPOSIT_REFUND', 'high', 'narration Refund UM');
+  // The refund writer never goes through POST /journals: a hand-made journal with that narration is
+  // left to the manual rule below, so it is not offered as a refund of the deposit.
+  if (DEPOSIT_REFUND_NARRATION.test(narration) && !f.manualAudit) {
+    return result('DEPOSIT_REFUND', 'high', 'narration Refund UM');
+  }
   if (DEPOSIT_OFFSET_NARRATION.test(narration)) return result('DEPOSIT_OFFSET', 'high', 'narration Offset UM');
   if (f.openingStockMovement) return result('OPENING', 'high', 'opening stock movement');
   if (OPENING_NARRATION.test(narration)) return result('OPENING', 'high', 'narration Saldo awal');

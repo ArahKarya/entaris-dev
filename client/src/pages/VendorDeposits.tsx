@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { CheckCircle2, Clock, Plus, Undo2, Wallet, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, History, Plus, Undo2, Wallet, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import api from '@/lib/api';
@@ -29,6 +29,7 @@ import {
 import VendorDepositModal from '@/components/VendorDepositModal';
 import RefundVendorDepositModal from '@/components/RefundVendorDepositModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { DepositRefundsDialog } from '@/components/DepositRefundsDialog';
 
 type Money = string | number;
 type DepositState = 'Active' | 'PartiallyUsed' | 'FullyUsed' | 'Cancelled';
@@ -97,6 +98,7 @@ export const VendorDeposits = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; paymentNumber: string } | null>(null);
   const [refundTarget, setRefundTarget] = useState<VendorDepositRow | null>(null);
+  const [refundsTarget, setRefundsTarget] = useState<VendorDepositRow | null>(null);
   const canEdit = can('vendor_deposit', 'edit');
   // Cancelling a deposit also needs the doc.cancel capability (server: requireCap).
   const canCancel = canEdit && cap('doc.cancel');
@@ -245,10 +247,17 @@ export const VendorDeposits = () => {
                   onSelect: () => setRefundTarget(d),
                 },
                 {
+                  // Past cash refunds; each can be cancelled there (doc.cancel).
+                  label: t('depositList.actions.refunds'),
+                  icon: History,
+                  hidden: d.totalRefunded <= 0,
+                  onSelect: () => setRefundsTarget(d),
+                },
+                {
                   label: t('depositList.actions.cancel'),
                   icon: XCircle,
                   tone: 'danger',
-                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED).
+                  // The server rejects cancelling a deposit with a refund (DEPOSIT_REFUNDED); cancel the refunds first.
                   hidden: !canCancel || isCancelled || d.totalRefunded > 0,
                   onSelect: () => setCancelTarget({ id: d.id, paymentNumber: d.paymentNumber }),
                 },
@@ -372,6 +381,15 @@ export const VendorDeposits = () => {
             amount: num(refundTarget.amount),
             remaining: refundTarget.remaining,
           }}
+        />
+      )}
+
+      {refundsTarget && (
+        <DepositRefundsDialog
+          key={refundsTarget.id}
+          side="vendor"
+          deposit={{ id: refundsTarget.id, paymentNumber: refundsTarget.paymentNumber, partyName: refundsTarget.party?.name }}
+          onClose={() => setRefundsTarget(null)}
         />
       )}
 

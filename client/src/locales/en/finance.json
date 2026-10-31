@@ -534,6 +534,31 @@
     "placeholder": "Select…",
     "search": "Search…"
   },
+  "depositRefundsDialog": {
+    "title": "Deposit refunds",
+    "description": "{{number}} · cash refunds of this deposit",
+    "loading": "Loading refunds…",
+    "loadFailed": "Failed to load the refunds.",
+    "retry": "Try again",
+    "empty": "No cash refunds for this deposit yet.",
+    "listLabel": "Refunds of {{number}}",
+    "noCashAccount": "Unknown cash/bank account",
+    "cancelledReason": "Cancel reason: {{reason}}",
+    "cancel": "Cancel refund",
+    "cancelAria": "Cancel refund {{number}}",
+    "close": "Close",
+    "cancelDialog": {
+      "title": "Cancel refund {{number}}?",
+      "message": "The {{amount}} refund journal is voided, the deposit's refunded total goes down and its remaining balance goes back up by the refund.",
+      "reason": "Reason (optional)",
+      "reasonPlaceholder": "E.g. wrong amount or cash account",
+      "confirm": "Cancel refund"
+    },
+    "toast": {
+      "cancelled": "Refund {{number}} cancelled.",
+      "cancelFailed": "Failed to cancel the refund."
+    }
+  },
   "depreciationRunPanel": {
     "columns": {
       "assetNumber": "Asset no.",
