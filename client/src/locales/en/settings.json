@@ -449,7 +449,7 @@
     },
     "reset": {
       "title": "Reset All Data",
-      "description": "Delete all transactions, accounts, partners, and users; the database returns to its initial (seed) state. A safety backup is created automatically first. For development/testing only.",
+      "description": "Delete all transactions, accounts, partners, and users; the database returns to its initial (seed) state. Admin only. A safety backup is created automatically first; if it fails, the reset is cancelled.",
       "action": "Reset Data",
       "done": "Data reset. Sign in again.",
       "error": "Could not reset the data."

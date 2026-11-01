@@ -449,7 +449,7 @@
     },
     "reset": {
       "title": "Reset Seluruh Data",
-      "description": "Hapus semua transaksi, akun, mitra, dan pengguna; database dikembalikan ke kondisi awal (seed). Cadangan pengaman dibuat otomatis lebih dulu. Hanya untuk development/pengujian.",
+      "description": "Hapus semua transaksi, akun, mitra, dan pengguna; database dikembalikan ke kondisi awal (seed). Hanya Admin. Cadangan pengaman dibuat otomatis lebih dulu; jika gagal, reset dibatalkan.",
       "action": "Reset Data",
       "done": "Data direset. Silakan login ulang.",
       "error": "Gagal mereset data."
