@@ -77,7 +77,8 @@
       },
       "defaultCurrency": {
         "label": "Currency",
-        "hint": "ISO code, e.g. IDR."
+        "hint": "Bookkeeping is in Rupiah only.",
+        "value": "IDR — Rupiah"
       }
     },
     "logo": {

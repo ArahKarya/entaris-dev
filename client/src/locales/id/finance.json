@@ -1447,8 +1447,8 @@
     "lines": {
       "travelTitle": "Rencana biaya perjalanan",
       "title": "Rincian biaya",
-      "travelHint": "Perkiraan biaya per kategori, dipakai sebagai pembanding saat pertanggungjawaban. Akun biaya dipilih Keuangan.",
-      "hint": "Akun biaya dipilih oleh Keuangan saat verifikasi."
+      "travelHint": "Perkiraan biaya per kategori, dipakai sebagai pembanding saat pertanggungjawaban. Semua nominal dalam Rupiah (IDR). Akun biaya dipilih Keuangan.",
+      "hint": "Semua nominal dalam Rupiah (IDR). Akun biaya dipilih oleh Keuangan saat verifikasi."
     },
     "attachments": {
       "title": "Lampiran",
@@ -2351,7 +2351,7 @@
       },
       "fx": {
         "title": "Selisih Kurs",
-        "description": "Akun laba/rugi selisih kurs terealisasi dan belum terealisasi"
+        "description": "Dipakai lewat jurnal umum (tidak ada posting otomatis; pembukuan hanya rupiah)"
       },
       "other": {
         "title": "Pendapatan & Beban Lain-lain",
