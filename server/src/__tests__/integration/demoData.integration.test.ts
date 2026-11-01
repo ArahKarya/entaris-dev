@@ -1,6 +1,7 @@
 /**
  * Demo data end to end: generate through the real HTTP handlers, check the books, then delete and
- * check that only settings and pre-existing masters remain.
+ * check that only settings and pre-existing masters remain. The delete runs with the audit_trail
+ * append-only trigger active: only the demo's audit rows go.
  *
  * Starts the full app (src/index.ts) on a free port. Needs DATABASE_URL pointing at a database with
  * NO business data (exclusive mode) and DEMO_DATA_IT=1, so it never runs against a dev database by
@@ -99,10 +100,20 @@ d('demo data (exclusive mode)', () => {
   it('deletes everything it created and leaves settings intact', async () => {
     const { wipeDemoData } = await import('../../services/demoData/wipe');
     const { findNonEmptyDataTables } = await import('../../services/demoData/guard');
+    const { purgeAuditRows } = await import('../helpers/auditPurge');
     const usersBefore = await prisma.user.count();
     const accountsBefore = await prisma.account.count();
+    // A non-demo audit row: the append-only trigger (E7-R11) lets the wipe delete only via='demo' rows.
+    const kept = await prisma.auditLog.create({
+      data: { userId: admin.id, action: 'CREATE', entityType: 'it-demo-wipe-keep', entityId: `${Date.now()}` },
+    });
 
-    await wipeDemoData();
+    try {
+      await wipeDemoData();
+      expect(await prisma.auditLog.findUnique({ where: { id: kept.id } })).not.toBeNull();
+    } finally {
+      await purgeAuditRows(prisma, { id: kept.id });
+    }
 
     expect(await findNonEmptyDataTables()).toEqual([]);
     expect(await prisma.party.count({ where: { isDummy: true } })).toBe(0);
