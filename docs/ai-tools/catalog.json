@@ -24,7 +24,7 @@
       "produksi": 28,
       "master-data": 12
     },
-    "routes": 603
+    "routes": 602
   },
   "toolsets": [
     {
@@ -40861,7 +40861,6 @@
       "category": "destruktif-sistem",
       "exact": [
         "POST /api/settings/reset-data",
-        "POST /api/settings/generate-dummy",
         "POST /api/settings/delete-dummy",
         "GET /api/settings/demo-data",
         "POST /api/settings/demo-data/generate",

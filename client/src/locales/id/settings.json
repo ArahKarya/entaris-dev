@@ -435,7 +435,7 @@
       "deleted": "Data uji coba dihapus.",
       "deleteError": "Gagal menghapus data uji coba.",
       "legacyDeleted": "Data dummy lama dihapus.",
-      "legacyDeleteError": "Gagal menghapus data dummy lama.",
+      "legacyDeleteError": "Gagal menghapus data dummy lama. Bila sebagian ada di tahun buku yang sudah ditutup, buka kembali tahun buku itu dulu.",
       "confirm": {
         "title": "Hapus data uji coba?",
         "description": "Semua transaksi di semua modul akan dikosongkan, termasuk transaksi yang Anda catat setelah data uji coba dibuat.",

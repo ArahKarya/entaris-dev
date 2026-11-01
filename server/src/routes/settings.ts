@@ -13,9 +13,9 @@ import fs from 'fs';
 
 const router = Router();
 
-// Heavy admin tooling (generate-dummy, delete-dummy, reset-data) lives in
-// settings/dummyData.ts — kept off the main file because it was ~570 lines
-// of self-contained seed/teardown logic.
+// Destructive admin tooling lives in settings/dummyData.ts: reset-data, and delete-dummy for
+// what the old dummy generator left behind (the generator itself was removed in E7-R13).
+// Demo data (settings/demoData.ts) replaces it.
 router.use(dummyDataRouter);
 router.use(demoDataRouter);
 

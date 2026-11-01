@@ -65,7 +65,6 @@ export const DENY_RULES: DenyRule[] = [
     category: 'destruktif-sistem',
     exact: [
       'POST /api/settings/reset-data',
-      'POST /api/settings/generate-dummy',
       'POST /api/settings/delete-dummy',
       'GET /api/settings/demo-data',
       'POST /api/settings/demo-data/generate',
