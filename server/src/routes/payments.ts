@@ -13,6 +13,7 @@ import { cancelJournalsInTx } from '../services/ledger/cancelJournals';
 import { logger } from '../lib/logger';
 import { systemAccounts } from '../services/systemAccounts';
 import { submitPaymentInTx } from '../services/paymentSubmit';
+import { setSalesInvoiceOutstandingInTx } from '../services/salesInvoiceStatus';
 import { withAllocationInvoiceNumbers } from '../services/paymentAllocationDetail';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -213,15 +214,7 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
       for (const alloc of allocations) {
         const allocAmt = new Decimal(alloc.allocatedAmount.toString());
         if (alloc.invoiceType === 'SalesInvoice') {
-          const inv = await tx.salesInvoice.findUnique({ where: { id: alloc.invoiceId } });
-          if (inv) {
-            const newOutstanding = new Decimal(inv.outstanding.toString()).plus(allocAmt);
-            const newOutstandingNum = newOutstanding.toNumber();
-            await tx.salesInvoice.update({
-              where: { id: inv.id },
-              data: { outstanding: newOutstandingNum, status: newOutstanding.gte(new Decimal(inv.grandTotal.toString())) ? 'Submitted' : 'PartiallyPaid' },
-            });
-          }
+          await setSalesInvoiceOutstandingInTx(tx, alloc.invoiceId, { delta: allocAmt });
         } else if (alloc.invoiceType === 'PurchaseInvoice') {
           const inv = await tx.purchaseInvoice.findUnique({ where: { id: alloc.invoiceId } });
           if (inv) {

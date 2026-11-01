@@ -6,21 +6,28 @@ import { systemAccounts } from './systemAccounts';
 import { cancelDocumentJournals } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
+import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
 
 type Tx = Prisma.TransactionClient;
+
+/** Error code: a sales invoice with a return that is not cancelled cannot be cancelled. */
+export const INVOICE_HAS_ACTIVE_RETURNS = 'INVOICE_HAS_ACTIVE_RETURNS';
 
 /**
  * Cancel a sales invoice: cancel its JE, COGS JE and their -suffixed satellites (balances reversed per JE item account, so
  * per-item COGS sub-accounts are restored), reverse its own stock movements, recompute party
  * outstanding. Rejected with PERIOD_CLOSED when the invoice's fiscal year, or that of any journal
- * it voids, is closed. `trail` (who and why) is stored on the voided journals. Caller owns the
- * transaction.
+ * it voids, is closed, and then with INVOICE_HAS_ACTIVE_RETURNS while a return is not cancelled.
+ * `trail` (who and why) is stored on the voided journals. Caller owns the transaction.
  */
 export async function cancelSalesInvoiceInTx(
   tx: Tx,
   invoiceId: string,
   trail?: CancelTrail,
 ): Promise<{ id: string; status: 'Cancelled' }> {
+  // AR row, then the invoice row: the order a return submit and payment submit take, so a cancel
+  // racing either waits for it instead of deadlocking when its journals reverse AR.
+  await lockArThenSalesInvoiceInTx(tx, invoiceId);
   const invoice = await tx.salesInvoice.findUnique({
     where: { id: invoiceId },
     include: { customer: true },
@@ -29,10 +36,26 @@ export async function cancelSalesInvoiceInTx(
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan.');
   // First write; any rejection below rolls it back.
   await claimCancel(tx.salesInvoice, invoice.id, { status: 'Cancelled', outstanding: 0, cancelledAt: new Date() });
-  // Invoice Rp 0 (sumbangan) otomatis Paid tanpa pembayaran → tetap boleh dibatalkan.
-  if (invoice.status === 'Paid' && Number(invoice.grandTotal) !== 0) throw new BusinessError('Invoice sudah lunas, tidak bisa dibatalkan.');
+  // Counted under the row locks: a return being submitted holds them (submitSalesReturnInTx takes
+  // the same ones), so this cancel waits for it and the count sees it.
+  const activeReturns = await tx.salesReturn.count({
+    where: { salesInvoiceId: invoice.id, status: { not: 'Cancelled' } },
+  });
+  // Invoice Rp 0 (sumbangan) otomatis Paid tanpa pembayaran → tetap boleh dibatalkan. A fully
+  // returned invoice is Paid too; it gets the "cancel the returns first" answer below instead.
+  if (invoice.status === 'Paid' && Number(invoice.grandTotal) !== 0 && activeReturns === 0) {
+    throw new BusinessError('Invoice sudah lunas, tidak bisa dibatalkan.');
+  }
   // A closed year stays as reported; the correction is a manual journal in the open period.
   await assertPeriodOpen(tx, { fiscalYearId: invoice.fiscalYearId, date: invoice.date }, 'invoice');
+  // Cancelling under an active return would leave its AR credit, stock-in and customer credit
+  // standing for an invoice that no longer exists. Returns are never cancelled automatically.
+  if (activeReturns > 0) {
+    throw new BusinessError(
+      `Invoice memiliki retur aktif (${activeReturns}). Batalkan retur terlebih dahulu.`,
+      INVOICE_HAS_ACTIVE_RETURNS,
+    );
+  }
 
   const allocations = await tx.paymentAllocation.findMany({
     where: { invoiceType: 'SalesInvoice', invoiceId: invoice.id },
