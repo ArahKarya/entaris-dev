@@ -3,11 +3,11 @@ import { prisma } from '../lib/prisma';
 import { requireCap, AuthRequest } from '../middleware/auth';
 import { hasCap } from '../services/permissionService';
 import { logger } from '../lib/logger';
-import { CreatePurchaseInvoiceSchema, CreateProductionRunSchema } from '../utils/schemas';
 import { decideApproval } from '../services/approvalDecision';
 import { buildApprovalComparison, isEditDocumentType, findPendingForTarget } from '../services/approvalEditRequests';
 import { loadApprovalLookups } from '../services/approvalContextLookups';
 import { parseApprovalCheckQuery } from '../utils/approvalCheckQuery';
+import { applyResubmit, resubmitAmount } from '../services/approvalResubmit';
 
 const router = Router();
 
@@ -329,29 +329,11 @@ router.put('/requests/:id/resubmit', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Payload tidak valid.' });
     }
 
-    let amount = 0;
-    if (request.documentType === 'PurchaseInvoice') {
-      const parsed = CreatePurchaseInvoiceSchema.safeParse(rawPayload);
-      if (!parsed.success) return res.status(400).json({ error: 'Data invoice tidak valid: ' + parsed.error.issues[0]?.message });
-      amount = (parsed.data.items ?? []).reduce((s: number, it: any) => s + Number(it.amount ?? 0), 0) + Number((parsed.data as any).biayaLain ?? 0);
-    } else if (request.documentType === 'ProductionRun') {
-      const parsed = CreateProductionRunSchema.safeParse(rawPayload);
-      if (!parsed.success) return res.status(400).json({ error: 'Data produksi tidak valid: ' + parsed.error.issues[0]?.message });
-      amount = (parsed.data.inputs ?? []).reduce((s: number, it: any) => s + Number(it.quantity ?? 0), 0);
-    } else {
-      return res.status(400).json({ error: 'Tipe dokumen tidak didukung.' });
-    }
+    const priced = resubmitAmount(request.documentType, rawPayload);
+    if (!priced) return res.status(400).json({ error: 'Tipe dokumen tidak didukung.' });
+    if (!priced.ok) return res.status(400).json({ error: priced.error });
 
-    const updated = await prisma.approvalRequest.update({
-      where: { id: request.id },
-      data: {
-        payload: rawPayload,
-        amount,
-        status: 'Pending',
-        rejectedBy: null,
-        decidedAt: null,
-      },
-    });
+    const updated = await applyResubmit(prisma, request.id, rawPayload, priced.amount);
     logger.info({ requestId: request.id, by: req.user!.userId }, 'Approval resubmitted');
     res.json(updated);
   } catch (error) {
