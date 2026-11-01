@@ -308,7 +308,10 @@ describe('document movement lock and references (E3-R2)', () => {
           { itemId: ITEM_ID, difference: '-3', movementId: 'm-dead', item: ITEM },
         ],
       }),
-      'stockMovement.findUnique': ({ where }: any) => ({ warehouseId: WH, isCancelled: where.id === 'm-dead' }),
+      'stockMovement.findUnique': ({ where }: any) =>
+        where.id === 'm-dead'
+          ? { warehouseId: WH, isCancelled: true, movementType: 'AdjustmentOut', quantity: '3' }
+          : { warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn', quantity: '2' },
     });
     const res = await send('PUT', '/stock-opname/so-1/cancel', {});
     expect(res.status).toBe(200);
