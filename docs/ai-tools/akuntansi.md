@@ -143,7 +143,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | `rootType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | ya | Golongan induk; samakan dengan accountType. |
 | `parentId` | body | `string` | tidak | ID akun induk (grup) atau null untuk akun akar. |
 | `isGroup` | body | `boolean` | tidak | true = akun grup (tidak boleh dijurnal langsung). |
-| `currency` | body | `string` | tidak | Kode mata uang (default IDR). |
+| `currency` | body | enum: `IDR` | tidak | Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. Boleh dikosongkan (akun selalu IDR). |
 
 **Contoh pemanggilan**
 
@@ -185,6 +185,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - 409: Nomor akun sudah digunakan.
 - 400: induk bukan akun grup / tidak ditemukan.
+- 400: Pembukuan hanya rupiah: mata uang akun harus IDR.
 
 **Tool terkait:** [`coa_update`](#coa_update), [`coa_flat`](#coa_flat)
 
@@ -376,7 +377,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_update
 
-**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId/currency diabaikan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
+**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -395,7 +396,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | `rootType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | tidak |  |
 | `parentId` | body | `string` | tidak |  |
 | `isGroup` | body | `boolean` | tidak |  |
-| `currency` | body | `string` | tidak |  |
+| `currency` | body | enum: `IDR` | tidak | Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. |
 | `isActive` | body | `boolean` | tidak | Status aktif. |
 
 **Contoh pemanggilan**
@@ -437,6 +438,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 409: nomor akun dipakai akun lain
 - 400: akun sistem tidak boleh diganti nomor
 - 404: akun tidak ditemukan
+- 400: Pembukuan hanya rupiah: mata uang akun harus IDR.
 
 **Tool terkait:** [`coa_create`](#coa_create), [`coa_delete`](#coa_delete)
 

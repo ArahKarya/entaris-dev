@@ -36,9 +36,10 @@ Toolset **sistem** memuat fungsi pendukung yang aman diakses agen: Jejak Audit, 
 
 ### Profil perusahaan
 
-- `set_company_get` mengembalikan record tunggal (slug `default`): nama, alamat, kontak, NPWP, mata uang, `fiscalYearStartMonth`, logo (base64, bisa berukuran MB), dan `invoiceSettings` (rekening bank/catatan kaki/tanda tangan pada cetak faktur).
-- `set_company_update` adalah UPSERT PENUH, bukan patch: field yang tidak dikirim di-reset (alamat, telepon, email, NPWP menjadi kosong; `fiscalYearStartMonth` menjadi 1; mata uang menjadi IDR; `companyName` menjadi "Perusahaan Anda" bila kosong). Selalu ambil nilai sekarang dengan `set_company_get` lalu kirim ulang seluruh nilai. `dateFormat` diterima skema tetapi tidak disimpan.
-- Diklasifikasikan critical karena memengaruhi dokumen berikutnya (mata uang, awal tahun fiskal, NPWP, rekening bank yang tercetak di faktur) dan merupakan konfigurasi global.
+- `set_company_get` mengembalikan record tunggal (slug `default`): nama, alamat, kontak, NPWP, mata uang (selalu IDR), `fiscalYearStartMonth`, logo (base64, bisa berukuran MB), dan `invoiceSettings` (rekening bank/catatan kaki/tanda tangan pada cetak faktur).
+- `set_company_update` adalah UPSERT PENUH, bukan patch: field yang tidak dikirim di-reset (alamat, telepon, email, NPWP menjadi kosong; `fiscalYearStartMonth` menjadi 1; `companyName` menjadi "Perusahaan Anda" bila kosong). Selalu ambil nilai sekarang dengan `set_company_get` lalu kirim ulang seluruh nilai. `dateFormat` diterima skema tetapi tidak disimpan.
+- Pembukuan hanya rupiah: mata uang perusahaan selalu disimpan IDR. `currency` boleh dikosongkan; nilai selain `IDR` ditolak 400. Hal yang sama berlaku untuk mata uang akun (`coa_create`, `coa_update`) dan pengajuan pembayaran (`payreq_create`, `payreq_update`: "Pengajuan hanya rupiah").
+- Diklasifikasikan critical karena memengaruhi dokumen berikutnya (awal tahun fiskal, NPWP, rekening bank yang tercetak di faktur) dan merupakan konfigurasi global.
 
 ### Health check (diagnostik integritas)
 

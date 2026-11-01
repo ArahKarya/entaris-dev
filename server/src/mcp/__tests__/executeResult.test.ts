@@ -61,6 +61,15 @@ describe('validateArgs', () => {
     expect(validateArgs(num, { n: '12.5' })).toEqual([]);
     expect(validateArgs(num, { n: 'abc' })).toHaveLength(1);
   });
+
+  it('refuses a foreign currency before the approval queue (rupiah only)', () => {
+    for (const name of ['payreq_create', 'payreq_update', 'coa_create', 'coa_update', 'set_company_update']) {
+      const t = getTool(name)!;
+      expect(validateArgs(t, { currency: 'USD' }), name).toEqual(['currency harus salah satu dari: IDR']);
+      expect(validateArgs(t, { currency: 'IDR' }), name).toEqual([]);
+      expect(validateArgs(t, {}), name).toEqual([]);
+    }
+  });
 });
 
 describe('callHandler', () => {

@@ -16638,7 +16638,7 @@
         "rootType": "enum",
         "parentId": "string",
         "isGroup": "boolean",
-        "currency": "string"
+        "currency": "enum"
       },
       "params": [
         {
@@ -16700,9 +16700,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
+          "type": "enum",
           "required": false,
-          "description": "Kode mata uang (default IDR)."
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. Boleh dikosongkan (akun selalu IDR)."
         }
       ],
       "output": {
@@ -16722,7 +16725,8 @@
       ],
       "errors": [
         "409: Nomor akun sudah digunakan.",
-        "400: induk bukan akun grup / tidak ditemukan."
+        "400: induk bukan akun grup / tidak ditemukan.",
+        "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
         "coa_update",
@@ -22624,7 +22628,8 @@
         "travelStartDate": "date",
         "travelEndDate": "date",
         "travelParticipants": "string",
-        "lines": "array<object>"
+        "lines": "array<object>",
+        "currency": "enum"
       },
       "params": [
         {
@@ -22800,6 +22805,16 @@
             }
           ],
           "description": "Rincian biaya: array {description*, amount*, expenseAccountId, costCenterId, expenseDate, category (TRANSPORT|LODGING|PER_DIEM|MEALS|OTHER hanya jenis TRAVEL), quantity, unitAmount}. Maks 100 baris."
+        },
+        {
+          "name": "currency",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400)."
         }
       ],
       "output": {
@@ -22823,7 +22838,8 @@
       "errors": [
         "400: jenis tidak aktif",
         "400: pilih vendor",
-        "400: akun biaya tidak valid"
+        "400: akun biaya tidak valid",
+        "400: Pengajuan hanya rupiah (currency selain IDR)"
       ],
       "related": [
         "payreqtype_list",
@@ -27929,7 +27945,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId/currency diabaikan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -27942,7 +27958,7 @@
         "rootType": "enum",
         "parentId": "string",
         "isGroup": "boolean",
-        "currency": "string",
+        "currency": "enum",
         "isActive": "boolean"
       },
       "params": [
@@ -28007,8 +28023,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
-          "required": false
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400."
         },
         {
           "name": "isActive",
@@ -28037,7 +28057,8 @@
       "errors": [
         "409: nomor akun dipakai akun lain",
         "400: akun sistem tidak boleh diganti nomor",
-        "404: akun tidak ditemukan"
+        "404: akun tidak ditemukan",
+        "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
         "coa_create",
@@ -31551,7 +31572,8 @@
         "travelStartDate": "date",
         "travelEndDate": "date",
         "travelParticipants": "string",
-        "lines": "array<object>"
+        "lines": "array<object>",
+        "currency": "enum"
       },
       "params": [
         {
@@ -31725,6 +31747,16 @@
             }
           ],
           "description": "Rincian biaya: array {description*, amount*, expenseAccountId, costCenterId, expenseDate, category (TRANSPORT|LODGING|PER_DIEM|MEALS|OTHER hanya jenis TRAVEL), quantity, unitAmount}. Maks 100 baris."
+        },
+        {
+          "name": "currency",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400)."
         }
       ],
       "output": {
@@ -31742,7 +31774,8 @@
       "accessNote": "Hanya pengaju, dan hanya saat status DRAFT atau REVISION.",
       "errors": [
         "400: hanya pengaju",
-        "400: hanya bisa diubah saat Draf/Perlu Revisi"
+        "400: hanya bisa diubah saat Draf/Perlu Revisi",
+        "400: Pengajuan hanya rupiah (currency selain IDR)"
       ],
       "related": [
         "payreq_create",
@@ -33629,7 +33662,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "settings",
-      "desc": "Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, currency, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1, mata uang IDR). Kirim ulang semua nilai yang ada.",
+      "desc": "Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1). Kirim ulang semua nilai yang ada. Mata uang selalu IDR (pembukuan hanya rupiah): currency boleh dikosongkan, selain 'IDR' ditolak 400.",
       "risk": "critical",
       "roles": [
         "Admin"
@@ -33642,7 +33675,7 @@
         "taxId": "string",
         "logoUrl": "string",
         "logoUrlDark": "string",
-        "currency": "string",
+        "currency": "enum",
         "dateFormat": "string",
         "fiscalYearStartMonth": "number",
         "invoiceSettings": "object"
@@ -33695,9 +33728,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
+          "type": "enum",
           "required": false,
-          "description": "Kode mata uang, mis. IDR"
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR' (pembukuan hanya rupiah); selalu disimpan IDR"
         },
         {
           "name": "dateFormat",
@@ -33791,10 +33827,10 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal. Mengubah konfigurasi global: mata uang, awal tahun fiskal, NPWP, rekening bank pada faktur, logo — berdampak ke dokumen/laporan berikutnya.",
-      "confirm_template": "Ubah profil perusahaan menjadi \"{companyName}\" (mata uang {currency}, awal tahun fiskal bulan {fiscalYearStartMonth}). Setujui?",
+      "postingEffect": "Tidak ada jurnal. Mengubah konfigurasi global: awal tahun fiskal, NPWP, rekening bank pada faktur, logo — berdampak ke dokumen/laporan berikutnya.",
+      "confirm_template": "Ubah profil perusahaan menjadi \"{companyName}\" (mata uang Rupiah, awal tahun fiskal bulan {fiscalYearStartMonth}). Setujui?",
       "errors": [
-        "400: validasi (email, bulan 1-12) atau logo > ~4MB"
+        "400: validasi (email, bulan 1-12, mata uang selain IDR) atau logo > ~4MB"
       ],
       "related": [
         "set_company_get"
