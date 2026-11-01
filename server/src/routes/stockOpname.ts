@@ -418,11 +418,17 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       if (so.status === 'Draft') throw new BusinessError('Stok opname Draft tidak perlu dibatalkan.');
       await assertPeriodsOpen(tx, [{ date: so.date }, { fiscalYearId: so.fiscalYearId, date: so.date }], 'stok opname');
 
-      // Reverse stock movements
+      // Reverse stock movements. A movement that is gone or was already cancelled per row (possible
+      // before E3-R2) has moved its stock back already, so its line is skipped, not reversed twice.
       const itemsWithMovement = so.items.filter((i: any) => i.movementId);
       for (const opItem of itemsWithMovement) {
         const diff = Number(opItem.difference);
         if (diff === 0) continue;
+        const mov = await tx.stockMovement.findUnique({
+          where: { id: opItem.movementId },
+          select: { warehouseId: true, isCancelled: true },
+        });
+        if (!mov || mov.isCancelled) continue;
 
         // Check stock sufficiency for surplus reversal (reducing stock)
         if (diff > 0 && Number(opItem.item.currentStock) < diff) {
@@ -436,17 +442,11 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
           where: { id: opItem.itemId },
           data: { currentStock: { increment: -diff } },
         });
-        if (opItem.movementId) {
-          const mov = await tx.stockMovement.findUnique({
-            where: { id: opItem.movementId },
-            select: { warehouseId: true },
-          });
-          await adjustWarehouseStock(tx, opItem.itemId, mov?.warehouseId ?? null, -diff);
-          await tx.stockMovement.update({
-            where: { id: opItem.movementId },
-            data: { isCancelled: true },
-          });
-        }
+        await adjustWarehouseStock(tx, opItem.itemId, mov.warehouseId ?? null, -diff);
+        await tx.stockMovement.update({
+          where: { id: opItem.movementId },
+          data: { isCancelled: true },
+        });
       }
 
       // Void the opname's journals (JV-<opnameNumber> and any satellites); balances are reversed per line.

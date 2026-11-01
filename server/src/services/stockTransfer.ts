@@ -13,6 +13,8 @@ type Tx = Prisma.TransactionClient;
 export const STOCK_TRANSFER_CANCEL_INSUFFICIENT_STOCK = 'TRANSFER_CANCEL_INSUFFICIENT_STOCK';
 /** Error code: an active movement picked a TransferIn batch of this transfer (sourceMovementId). */
 export const STOCK_TRANSFER_CANCEL_BATCH_USED = 'TRANSFER_CANCEL_BATCH_USED';
+/** Some of the transfer's movements were cancelled per row (before E3-R2); the route answers 409. */
+export const STOCK_TRANSFER_CANCEL_INCOMPLETE = 'TRANSFER_CANCEL_INCOMPLETE';
 
 export interface CancelStockTransferOptions {
   /** Let the destination go negative; the route requires inventory.negative_stock and a reason. */
@@ -204,12 +206,27 @@ export async function cancelStockTransferInTx(
   await claimCancel(tx.stockTransfer, transferId, { status: 'Cancelled', cancelledAt: new Date() });
   await assertPeriodsOpen(tx, [{ date: transfer.date }, { fiscalYearId: transfer.fiscalYearId, date: transfer.date }], 'transfer stok');
 
+  // The reversal works from the active movements, never from transfer.items: a movement that was
+  // cancelled per row (possible before E3-R2) has already moved stock. Each line owns one TransferOut
+  // and one TransferIn; when any is missing the result would be a guess, so the cancel is refused
+  // and the accountant corrects stock with an adjustment (e3-movement-reference-audit lists them).
+  const active = await tx.stockMovement.findMany({
+    where: { referenceType: 'StockTransfer', referenceId: transferId, isCancelled: false },
+    select: { id: true, itemId: true, warehouseId: true, movementType: true, quantity: true },
+  });
+  const transferOuts = active.filter((m) => m.movementType === 'TransferOut');
+  const transferIns = active.filter((m) => m.movementType === 'TransferIn');
+  const expected = transfer.items.length * 2;
+  if (transferOuts.length !== transfer.items.length || transferIns.length !== transfer.items.length) {
+    throw new BusinessError(
+      `Tidak dapat membatalkan transfer ${transfer.transferNumber}: hanya ${transferOuts.length + transferIns.length} dari ${expected} gerakan stok transfer ini yang masih aktif. ` +
+        'Sebagian pernah dibatalkan per baris; koreksi stok gudang lewat Penyesuaian Stok.',
+      STOCK_TRANSFER_CANCEL_INCOMPLETE,
+    );
+  }
+
   // Block when an outbound movement picked one of the TransferIn batches; cancelling would
   // orphan its cost basis. Same rule as STT cancel; not covered by the negative-stock bypass.
-  const transferIns = await tx.stockMovement.findMany({
-    where: { referenceType: 'StockTransfer', referenceId: transferId, movementType: 'TransferIn', isCancelled: false },
-    select: { id: true },
-  });
   if (transferIns.length > 0) {
     const consumers = await tx.stockMovement.findMany({
       where: { sourceMovementId: { in: transferIns.map((m) => m.id) }, isCancelled: false },
@@ -226,10 +243,10 @@ export async function cancelStockTransferInTx(
     }
   }
 
-  // The destination must still hold what it received (per item, lines summed).
+  // The destination must still hold what it received (per item, active TransferIn rows summed).
   const qtyByItem = new Map<string, Decimal>();
-  for (const ti of transfer.items) {
-    qtyByItem.set(ti.itemId, (qtyByItem.get(ti.itemId) ?? new Decimal(0)).plus(ti.quantity.toString()));
+  for (const m of transferIns) {
+    qtyByItem.set(m.itemId, (qtyByItem.get(m.itemId) ?? new Decimal(0)).plus(m.quantity.toString()));
   }
   for (const [itemId, qty] of qtyByItem) {
     // Lock the destination row first; the read below then sees any outbound movement that committed meanwhile.
@@ -254,22 +271,21 @@ export async function cancelStockTransferInTx(
     );
   }
 
-  for (const ti of transfer.items) {
-    const qty = Number(ti.quantity);
-    await tx.inventoryStock.update({
-      where: { itemId_warehouseId: { itemId: ti.itemId, warehouseId: transfer.fromWarehouseId } },
-      data: { currentStock: { increment: qty } },
-    });
-    // Upsert: with the bypass the destination row may be missing.
+  // TransferOut returns to the source, TransferIn leaves the destination. Upsert: with the bypass
+  // the destination row may be missing.
+  for (const m of active) {
+    const qty = Number(m.quantity);
+    const out = m.movementType === 'TransferOut';
+    const warehouseId = out ? transfer.fromWarehouseId : transfer.toWarehouseId;
     await tx.inventoryStock.upsert({
-      where: { itemId_warehouseId: { itemId: ti.itemId, warehouseId: transfer.toWarehouseId } },
-      create: { itemId: ti.itemId, warehouseId: transfer.toWarehouseId, currentStock: -qty },
-      update: { currentStock: { decrement: qty } },
+      where: { itemId_warehouseId: { itemId: m.itemId, warehouseId } },
+      create: { itemId: m.itemId, warehouseId, currentStock: out ? qty : -qty },
+      update: { currentStock: { increment: out ? qty : -qty } },
     });
   }
 
   await tx.stockMovement.updateMany({
-    where: { referenceType: 'StockTransfer', referenceId: transferId },
+    where: { id: { in: active.map((m) => m.id) }, isCancelled: false },
     data: { isCancelled: true },
   });
 
