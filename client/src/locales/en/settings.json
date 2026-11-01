@@ -389,11 +389,11 @@
   },
   "backup": {
     "title": "Database Backups",
-    "description": "Up to 5 backups are kept automatically. Restoring overwrites all current data.",
+    "description": "Kept automatically per kind: 5 routine backups, 3 pre-reset, 3 pre-restore, and 5 uploads. Restoring overwrites all current data.",
     "upload": "Upload Backup",
     "create": "Create Backup",
     "last": "Latest backup",
-    "warning": "Restoring will <strong>overwrite all existing data</strong>. Create a backup before you restore.",
+    "warning": "Restoring <strong>overwrites all current data</strong>. A safety backup is created automatically first; if the restore fails partway, it is rolled back completely and no data changes.",
     "loading": "Loading backups…",
     "empty": "No backup files yet",
     "table": {
@@ -450,19 +450,19 @@
     },
     "reset": {
       "title": "Reset All Data",
-      "description": "Delete all transactions, accounts, partners, and users; the database returns to its initial (seed) state. For development and testing only.",
+      "description": "Delete all transactions, accounts, partners, and users; the database returns to its initial (seed) state. Admin only. A safety backup is created automatically first; if it fails, the reset is cancelled.",
       "action": "Reset Data",
       "done": "Data reset. Sign in again.",
       "error": "Could not reset the data."
     },
     "restoreConfirm": {
       "title": "Restore backup?",
-      "description": "This cannot be undone. All current data will be overwritten with the data from this file.",
+      "description": "All current data will be overwritten with the data from the file below. A safety backup (pre-restore) is created automatically first. When it finishes, restart the application and sign in again.",
       "confirm": "Restore"
     },
     "resetConfirm": {
       "title": "Reset all data?",
-      "description": "This cannot be undone. All data will be deleted and returned to its initial state.",
+      "description": "All data will be deleted and returned to its initial state. A safety backup (pre-reset) is created automatically first; if it fails, the reset is cancelled.",
       "items": {
         "transactions": "All transactions (invoices, payments, journals)",
         "partners": "All partners (customers, suppliers)",
@@ -470,6 +470,12 @@
         "users": "All users (recreated from seed)",
         "stock": "All stock and inventory movements"
       }
+    },
+    "kind": {
+      "pre-reset": "Pre-reset",
+      "pre-restore": "Pre-restore",
+      "upload": "Upload",
+      "backup": "Routine"
     }
   },
   "fiscal": {

@@ -179,9 +179,12 @@ docker exec "$CONTAINER_ID" psql -U "$DB_USER" -d postgres -c "
 " > /dev/null
 
 # ─── Restore dump ─────────────────────────────────────────────────────────────
+# Destructive: the database was dropped and recreated above, so there is no rollback to the old
+# data here (take a backup first). ON_ERROR_STOP + --single-transaction make a broken dump fail
+# loudly (set -euo pipefail stops the script) and leave the new database empty, not half-restored.
 echo "📦 Restoring database from backup..."
 gunzip -c "$RESTORE_FILE" | docker exec -i "$CONTAINER_ID" \
-  psql -U "$DB_USER" -d "$DB_NAME" --quiet 2>/dev/null
+  psql -U "$DB_USER" -d "$DB_NAME" --quiet -v ON_ERROR_STOP=1 --single-transaction
 
 echo "✅ Database restored successfully."
 

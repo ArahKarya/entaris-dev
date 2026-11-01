@@ -172,3 +172,73 @@ export const DEMO_MASTER_TABLES = [
 ] as const;
 
 export type DemoMasterTable = (typeof DEMO_MASTER_TABLES)[number];
+
+// Data reset (POST /api/settings/reset-data) empties every DATA table plus the KEEP tables below,
+// then re-runs the seed. Every KEEP table is in exactly one of the two lists (unit test), and a
+// KEEP table with a foreign key to a reset table must be in RESET_EXTRA_TABLES: TRUNCATE ... CASCADE
+// would empty it anyway, so listing it as preserved would be a lie.
+
+/** KEEP tables the reset also empties: masters, users, settings and demo markers the seed recreates or that describe the old data. */
+export const RESET_EXTRA_TABLES = [
+  'accounts',
+  'audit_trail',
+  'chat_attachments',
+  'chat_messages',
+  'chat_sessions',
+  'company_settings',
+  'crm_activities',
+  'demo_data_batches',
+  'demo_data_records',
+  'fiscal_years',
+  'inventory_items',
+  'notifications',
+  'parties',
+  'party_contacts',
+  'payment_request_types',
+  'period_lock',
+  'period_lock_logs',
+  'production_cost_standards',
+  'service_items',
+  'system_account_mappings',
+  'tax_configs',
+  'token_blacklist',
+  'users',
+] as const;
+
+/**
+ * KEEP tables that survive a reset: migration ledgers, roles and rights, AIRA/MCP, Telegram, CRM and GA masters.
+ * data_fix_markers stays with roles and rights: its run-once markers stop capability backfills
+ * (rbacSeed, loose SQL) from granting again a right an Admin removed from a kept role.
+ */
+export const RESET_PRESERVED_TABLES = [
+  '_loose_sql_migrations',
+  '_prisma_migrations',
+  'ai_settings',
+  'ai_tool_configs',
+  'approval_rules',
+  'cash_book_learned_maps',
+  'crm_settings',
+  'data_fix_markers',
+  'ga_asset_categories',
+  'ga_branches',
+  'ga_cost_centers',
+  'ga_document_types',
+  'ga_inventory_categories',
+  'ga_locations',
+  'machines',
+  'mcp_call_logs',
+  'mcp_nonces',
+  'mcp_tokens',
+  'production_processes',
+  'role_capabilities',
+  'role_permissions',
+  'roles',
+  'telegram_config',
+  'telegram_pending_revise',
+  'warehouses',
+] as const;
+
+/** Every table the data reset truncates (names from the constants above, never from input). */
+export function resetTables(): string[] {
+  return [...DATA_TABLES, ...RESET_EXTRA_TABLES];
+}

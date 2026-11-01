@@ -7,12 +7,21 @@ import { Upload, HardDrive, Download, RotateCcw, AlertTriangle, ShieldCheck, Dat
 import api from '../../lib/api';
 import { can, cap } from '../../lib/permissions';
 import { EmptyState, LoadingState } from '@/components/shared';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SettingsCard } from '../../components/settings/SettingsCard';
 import { TypedConfirmDialog } from '../../components/settings/TypedConfirmDialog';
 import { DemoDataCard } from '../../components/settings/DemoDataCard';
 
-interface BackupFile { filename: string; size: number; date: string }
+type BackupKind = 'backup' | 'pre-reset' | 'pre-restore' | 'upload';
+interface BackupFile { filename: string; size: number; date: string; kind?: BackupKind | null }
+
+const KIND_VARIANT: Record<BackupKind, 'neutral' | 'info' | 'warning'> = {
+  backup: 'neutral',
+  upload: 'info',
+  'pre-reset': 'warning',
+  'pre-restore': 'warning',
+};
 
 const formatSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -27,8 +36,10 @@ export const BackupTab: React.FC = () => {
   const { t } = useTranslation('settings');
   const queryClient = useQueryClient();
   const canWriteBackup = can('audit', 'edit');
+  // Upload and restore need doc.cancel on the server; reset also needs rbac.manage (Admin by default).
   const canRestore = canWriteBackup && cap('doc.cancel');
   const canDevTools = can('settings', 'edit');
+  const canReset = canDevTools && cap('rbac.manage') && cap('doc.cancel');
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -37,12 +48,16 @@ export const BackupTab: React.FC = () => {
     mutationFn: async () => api.post('/settings/reset-data', { confirmation: 'RESET' }),
     onSuccess: () => {
       toast.success(t('backup.reset.done'));
+      queryClient.invalidateQueries({ queryKey: ['backups'] });
       localStorage.removeItem('user');
       localStorage.removeItem('onboardingDone');
       localStorage.removeItem('widgetPrefs');
       setTimeout(() => { window.location.href = '/login'; }, 1500);
     },
-    onError: (error: any) => toast.error(error.response?.data?.error || t('backup.reset.error')),
+    onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ['backups'] });
+      toast.error(error.response?.data?.error || t('backup.reset.error'));
+    },
   });
 
   const { data: backups, isLoading } = useQuery<BackupFile[]>({
@@ -61,11 +76,16 @@ export const BackupTab: React.FC = () => {
 
   const restoreMutation = useMutation({
     mutationFn: async (filename: string) => api.post('/backup/restore', { filename }),
-    onSuccess: () => {
-      toast.success(t('backup.toast.restored'));
+    // The server message names the safety backup and asks for a restart.
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['backups'] });
+      toast.success(res.data?.message || t('backup.toast.restored'), { duration: 15000 });
       setConfirmRestore(null);
     },
-    onError: (error: any) => toast.error(error.response?.data?.error || t('backup.toast.restoreError')),
+    onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ['backups'] });
+      toast.error(error.response?.data?.error || t('backup.toast.restoreError'), { duration: 15000 });
+    },
   });
 
   const uploadMutation = useMutation({
@@ -121,10 +141,14 @@ export const BackupTab: React.FC = () => {
         description={t('backup.description')}
         actions={canWriteBackup && (
           <>
-            <input ref={fileInputRef} type="file" accept=".sql.gz" onChange={handleFileUpload} className="sr-only" tabIndex={-1} aria-hidden />
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()} loading={uploadMutation.isPending}>
-              {!uploadMutation.isPending && <Upload aria-hidden />} {t('backup.upload')}
-            </Button>
+            {canRestore && (
+              <>
+                <input ref={fileInputRef} type="file" accept=".sql.gz" onChange={handleFileUpload} className="sr-only" tabIndex={-1} aria-hidden />
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()} loading={uploadMutation.isPending}>
+                  {!uploadMutation.isPending && <Upload aria-hidden />} {t('backup.upload')}
+                </Button>
+              </>
+            )}
             <Button onClick={() => createMutation.mutate()} loading={createMutation.isPending}>
               {!createMutation.isPending && <HardDrive aria-hidden />} {t('backup.create')}
             </Button>
@@ -169,7 +193,12 @@ export const BackupTab: React.FC = () => {
               <tbody>
                 {backups.map((backup) => (
                   <tr key={backup.filename} className="border-t border-border">
-                    <td className="px-5 py-2.5 font-mono text-xs font-medium text-foreground">{backup.filename}</td>
+                    <td className="px-5 py-2.5">
+                      <span className="font-mono text-xs font-medium text-foreground">{backup.filename}</span>
+                      {backup.kind && backup.kind !== 'backup' && (
+                        <Badge variant={KIND_VARIANT[backup.kind]} className="ml-2">{t(`backup.kind.${backup.kind}`)}</Badge>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{formatSize(backup.size)}</td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{formatDateTime(backup.date, 'short')}</td>
                     <td className="px-5 py-2.5">
@@ -194,7 +223,7 @@ export const BackupTab: React.FC = () => {
 
       {canDevTools && <DemoDataCard />}
 
-      {canDevTools && (
+      {canReset && (
         <SettingsCard
           tone="danger"
           title={t('backup.reset.title')}

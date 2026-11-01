@@ -79,8 +79,16 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "File {0} diunggah.": "File {0} uploaded.",
   "Gagal mengupload file backup.": "Failed to upload the backup file.",
   "Parameter filename wajib diisi.": "The filename parameter is required.",
-  "Backup dipulihkan dari {0}.": "Backup restored from {0}.",
   "Gagal restore backup. Silakan coba lagi atau hubungi administrator.": "Failed to restore the backup. Try again or contact an administrator.",
+  // backup (E7-R12): safety backups before restore/reset, all-or-nothing restore, upload limits
+  "Ukuran file backup melebihi 500 MB.": "The backup file is larger than 500 MB.",
+  "Backup dipulihkan dari {0}. Data sebelumnya disimpan sebagai {1}. Mulai ulang aplikasi agar pembaruan database diterapkan ulang, lalu masuk kembali.": "Backup restored from {0}. The previous data was saved as {1}. Restart the application so the database updates are applied again, then sign in again.",
+  "Cadangan pengaman gagal dibuat, jadi restore dibatalkan. Data tidak berubah.": "The safety backup could not be created, so the restore was cancelled. No data was changed.",
+  "Restore gagal dan dibatalkan seluruhnya; data tidak berubah. Kemungkinan penyebab: file bukan cadangan Entaris yang dibuat dengan --clean, file rusak, atau dibuat pg_dump yang lebih baru dari server database.": "The restore failed and was rolled back completely; no data was changed. Possible causes: the file is not an Entaris backup made with --clean, the file is damaged, or it was made by a newer pg_dump than the database server.",
+  "Cadangan pengaman gagal dibuat, jadi reset dibatalkan. Tidak ada data yang dihapus.": "The safety backup could not be created, so the reset was cancelled. No data was deleted.",
+  "File cadangan rusak atau terpotong (pemeriksaan gzip gagal), jadi restore dibatalkan. Data tidak berubah.": "The backup file is damaged or truncated (the gzip check failed), so the restore was cancelled. No data was changed.",
+  "Restore tidak selesai dengan bersih dan database mungkin sudah berubah. Pulihkan cadangan pengaman {0} untuk kembali ke data sebelum restore.": "The restore did not finish cleanly and the database may have changed. Restore the safety backup {0} to return to the data from before the restore.",
+  // end backup (E7-R12)
   "Gagal mengambil metrik dashboard.": "Failed to load dashboard metrics.",
   "Gagal mengambil data chart.": "Failed to load chart data.",
   "Gagal mengambil data customer teratas.": "Failed to load top customers.",
