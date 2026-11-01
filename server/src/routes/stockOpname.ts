@@ -15,6 +15,7 @@ import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
+import { INBOUND_TYPES } from '../services/stockMovementList';
 import {
   buildStockOpnameWhere,
   DEFAULT_STOCK_OPNAME_SORT,
@@ -420,18 +421,21 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
 
       // Reverse stock movements. A movement that is gone or was already cancelled per row (possible
       // before E3-R2) has moved its stock back already, so its line is skipped, not reversed twice.
+      // The amount comes from the movement itself, not opItem.difference: before E3-R2 the per-row
+      // edit could change an opname movement's type or quantity in place.
       const itemsWithMovement = so.items.filter((i: any) => i.movementId);
       for (const opItem of itemsWithMovement) {
-        const diff = Number(opItem.difference);
-        if (diff === 0) continue;
         const mov = await tx.stockMovement.findUnique({
           where: { id: opItem.movementId },
-          select: { warehouseId: true, isCancelled: true },
+          select: { warehouseId: true, isCancelled: true, movementType: true, quantity: true },
         });
         if (!mov || mov.isCancelled) continue;
+        const qty = Number(mov.quantity);
+        const reverse = INBOUND_TYPES.includes(mov.movementType) ? -qty : qty;
+        if (reverse === 0) continue;
 
-        // Check stock sufficiency for surplus reversal (reducing stock)
-        if (diff > 0 && Number(opItem.item.currentStock) < diff) {
+        // Check stock sufficiency when the reversal reduces stock
+        if (reverse < 0 && Number(opItem.item.currentStock) < -reverse) {
           throw new BusinessError(
             `Tidak dapat membatalkan: stok '${opItem.item.name}' tidak mencukupi untuk pembalikan.`
           );
@@ -440,9 +444,9 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
         // Reverse stock (item-level total + per-warehouse from the original movement)
         await tx.inventoryItem.update({
           where: { id: opItem.itemId },
-          data: { currentStock: { increment: -diff } },
+          data: { currentStock: { increment: reverse } },
         });
-        await adjustWarehouseStock(tx, opItem.itemId, mov.warehouseId ?? null, -diff);
+        await adjustWarehouseStock(tx, opItem.itemId, mov.warehouseId ?? null, reverse);
         await tx.stockMovement.update({
           where: { id: opItem.movementId },
           data: { isCancelled: true },

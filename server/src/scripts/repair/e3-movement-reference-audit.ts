@@ -1,7 +1,9 @@
 // Read-only report of stock movement references left by the paths the E3-R2 document lock closed:
 // (a) a reference type typed by a client without a document, (b) a document movement cancelled
 // per row while its document is still active (old transfer rows moved stock with the wrong sign),
-// (c) an invalid batch link, (d) a document id without a reference type, or naming no document.
+// (c) an invalid batch link, (d) a document id without a reference type, or naming no document,
+// (e) an active opname/transfer movement whose type or quantity no longer matches its document line,
+// (f) a cancelled transfer whose warehouse stock differs from that warehouse's active movements.
 // The lists are defined in services/inventory/movementReferenceAudit.ts. This script never writes
 // to the database; stock damage is corrected by the accountant with stock adjustments.
 //
@@ -33,6 +35,8 @@ const LIST_TITLES: Record<AuditList, string> = {
   b: 'document movement cancelled per row, document active',
   c: 'invalid batch link',
   d: 'document id without (matching) reference type',
+  e: 'opname/transfer movement differs from its document line',
+  f: 'cancelled transfer, warehouse stock differs from movements',
 };
 
 async function main() {

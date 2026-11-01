@@ -328,6 +328,31 @@ d('production, opname and opening balance movements', () => {
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).toBe('Cancelled');
     });
   });
+
+  it('old data: an opname movement edited in place to 30 kg is reversed by its own 30 kg, not the line difference of 100', async () => {
+    await inRollback(async (tx) => {
+      const wh = await warehouse(tx, 'Gudang');
+      const beras = await item(tx, 'Beras', wh.id, 500);
+      const so = await tx.stockOpname.create({
+        data: { opnameNumber: `IT-E3R2-SO-${tag()}`, date: DATE, status: 'Submitted', fiscalYearId: fy.id, createdById: actor.userId, submittedAt: DATE, warehouseId: wh.id },
+      });
+      // Opname +100 (500 -> 600), then the old per-row edit rewrote the movement to 30 kg in place
+      // (600 - 100 + 30 = 530), keeping referenceType StockOpname and the referenceId.
+      const mov = await movement(tx, { itemId: beras.id, warehouseId: wh.id, movementType: 'AdjustmentIn', quantity: 30, referenceType: 'StockOpname', referenceId: so.id });
+      await tx.stockOpnameItem.create({
+        data: { stockOpnameId: so.id, itemId: beras.id, warehouseId: wh.id, systemStock: 500, actualStock: 600, difference: 100, movementId: mov.id },
+      });
+      await tx.inventoryItem.update({ where: { id: beras.id }, data: { currentStock: 530 } });
+      await tx.inventoryStock.update({ where: { itemId_warehouseId: { itemId: beras.id, warehouseId: wh.id } }, data: { currentStock: 530 } });
+
+      const res = await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { ...actor, params: { id: so.id } });
+      expect(res.status).toBe(200);
+      // Not 430: undoing the opname returns the stock to 500.
+      expect(await stockAt(tx, beras.id, wh.id)).toBe(500);
+      expect(await itemStock(tx, beras.id)).toBe(500);
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: mov.id } })).isCancelled).toBe(true);
+    });
+  });
 });
 
 d('e3-movement-reference-audit', () => {
@@ -376,6 +401,67 @@ d('e3-movement-reference-audit', () => {
         [orphanId.id, expect.stringMatching(/without reference type/)],
         [missingDoc.id, 'no GoodsReceipt with this id'],
       ].sort((x, y) => String(x[0]).localeCompare(String(y[0]))));
+    });
+  });
+  it('lists opname and transfer movements edited away from their line, and a cancelled transfer that left stock short', async () => {
+    await inRollback(async (tx) => {
+      const a = await warehouse(tx, 'Gudang A');
+      const b = await warehouse(tx, 'Gudang B');
+      const beras = await item(tx, 'Beras', a.id, 5000);
+      const jagung = await item(tx, 'Jagung', a.id, 5000);
+      const gabah = await item(tx, 'Gabah', a.id, 500);
+      // Opening rows so each warehouse's stock matches its movements before the old damage.
+      for (const it of [beras, jagung]) await movement(tx, { itemId: it.id, warehouseId: a.id, movementType: 'In', quantity: 5000 });
+      await movement(tx, { itemId: gabah.id, warehouseId: a.id, movementType: 'In', quantity: 500 });
+
+      // (e) opname line +100 whose movement the old edit rewrote to 30 kg; a matching line is not listed.
+      const so = await tx.stockOpname.create({
+        data: { opnameNumber: `IT-E3R2-SO-${tag()}`, date: DATE, status: 'Submitted', fiscalYearId: fy.id, createdById: actor.userId, submittedAt: DATE, warehouseId: a.id },
+      });
+      const edited = await movement(tx, { itemId: gabah.id, warehouseId: a.id, movementType: 'AdjustmentIn', quantity: 30, referenceType: 'StockOpname', referenceId: so.id });
+      const intact = await movement(tx, { itemId: jagung.id, warehouseId: a.id, movementType: 'AdjustmentOut', quantity: 20, referenceType: 'StockOpname', referenceId: so.id });
+      await tx.stockOpnameItem.createMany({
+        data: [
+          { stockOpnameId: so.id, itemId: gabah.id, warehouseId: a.id, systemStock: 500, actualStock: 600, difference: 100, movementId: edited.id },
+          { stockOpnameId: so.id, itemId: jagung.id, warehouseId: a.id, systemStock: 5000, actualStock: 4980, difference: -20, movementId: intact.id },
+        ],
+      });
+
+      // (e) active transfer whose TransferOut the old edit turned into an Out of 300 kg.
+      const t1 = await submitStockTransferInTx(
+        tx, { date: DAY, fromWarehouseId: a.id, toWarehouseId: b.id, items: [{ itemId: jagung.id, quantity: 1000 }] }, actor.userId,
+      );
+      const t1Out = await tx.stockMovement.findFirstOrThrow({ where: { referenceId: t1.id, movementType: 'TransferOut' } });
+      const t1In = await tx.stockMovement.findFirstOrThrow({ where: { referenceId: t1.id, movementType: 'TransferIn' } });
+      await tx.stockMovement.update({ where: { id: t1Out.id }, data: { movementType: 'Out', quantity: 300 } });
+
+      // (f) transfer 1,000 kg A -> B; its TransferOut cancelled per row with the wrong sign (A -1,000),
+      // then the old transfer cancel reversed the whole transfer (A +1,000, B -1,000) and flagged every row.
+      const t2 = await submitStockTransferInTx(
+        tx, { date: DAY, fromWarehouseId: a.id, toWarehouseId: b.id, items: [{ itemId: beras.id, quantity: 1000 }] }, actor.userId,
+      );
+      const t2Out = await tx.stockMovement.findFirstOrThrow({ where: { referenceId: t2.id, movementType: 'TransferOut' } });
+      const t2In = await tx.stockMovement.findFirstOrThrow({ where: { referenceId: t2.id, movementType: 'TransferIn' } });
+      const shift = async (warehouseId: string, delta: number) => {
+        await tx.inventoryItem.update({ where: { id: beras.id }, data: { currentStock: { increment: delta } } });
+        await tx.inventoryStock.update({ where: { itemId_warehouseId: { itemId: beras.id, warehouseId } }, data: { currentStock: { increment: delta } } });
+      };
+      await shift(a.id, -1000);
+      await shift(a.id, 1000);
+      await shift(b.id, -1000);
+      await tx.stockMovement.updateMany({ where: { referenceId: t2.id }, data: { isCancelled: true } });
+      await tx.stockTransfer.update({ where: { id: t2.id }, data: { status: 'Cancelled', cancelledAt: DATE } });
+
+      const mine = new Set([edited.id, intact.id, t1Out.id, t1In.id, t2Out.id, t2In.id]);
+      const found = (await findMovementReferenceIssues(tx)).filter((r) => mine.has(r.id));
+      const byList = (l: string) => found.filter((r) => r.list === l).map((r) => [r.id, r.note]);
+      expect(byList('e').sort()).toEqual([
+        [edited.id, 'opname line difference 100.000'],
+        [t1Out.id, 'transfer line quantity 1000.000'],
+      ].sort());
+      // Only the source warehouse is short; B's stock still matches its (all cancelled) movements.
+      expect(byList('f')).toEqual([[t2Out.id, expect.stringMatching(/^review: .* -1000(\.0+)? off/)]]);
+      expect(found.filter((r) => r.list !== 'e' && r.list !== 'f')).toEqual([]);
     });
   });
 });

@@ -16,8 +16,13 @@ type Db = Pick<Prisma.TransactionClient, '$queryRaw'>;
  *     cancelled or not inbound, or an active inbound row that still links a batch.
  *  d. referenceId without referenceType (left by the old edit path, not caught by the new lock),
  *     or a document type whose referenceId names no such document.
+ *  e. active movement of an active opname or transfer whose type or quantity no longer matches its
+ *     document line (the old per-row edit changed them in place and kept the reference).
+ *  f. movement of a cancelled transfer whose warehouse stock differs from that warehouse's active
+ *     movements: typically a row cancelled per row (wrong sign) before the old transfer cancel
+ *     reversed the whole transfer again. `review`: any other drift in that warehouse also shows.
  */
-export type AuditList = 'a' | 'b' | 'c' | 'd';
+export type AuditList = 'a' | 'b' | 'c' | 'd' | 'e' | 'f';
 
 export interface MovementAuditRow {
   list: AuditList;
@@ -106,5 +111,43 @@ export async function findMovementReferenceIssues(db: Db): Promise<MovementAudit
         AND NOT EXISTS (SELECT 1 FROM ${Prisma.raw(table)} d WHERE d.id = m.reference_id)
       ORDER BY m.date, m.movement_number`, () => `no ${type} with this id`);
   }
+
+  push('e', await db.$queryRaw<Raw[]>`
+    SELECT ${COLUMNS}, 'opname line difference ' || oi.difference::text AS note
+    FROM stock_opname_items oi
+    JOIN stock_opnames so ON so.id = oi.stock_opname_id AND so.status::text <> 'Cancelled'
+    JOIN stock_movements m ON m.id = oi.movement_id
+    WHERE NOT m.is_cancelled AND (
+      m.quantity <> ABS(oi.difference)
+      OR (oi.difference <> 0 AND (oi.difference > 0) <> (m.movement_type::text IN ('In', 'AdjustmentIn', 'TransferIn'))))
+    ORDER BY m.date, m.movement_number`, (r) => r.note ?? '');
+  push('e', await db.$queryRaw<Raw[]>`
+    SELECT ${COLUMNS}, 'transfer line quantity ' || COALESCE(
+      (SELECT SUM(ti.quantity) FROM stock_transfer_items ti WHERE ti.transfer_id = t.id AND ti.item_id = m.item_id), 0)::text AS note
+    FROM stock_movements m
+    JOIN stock_transfers t ON t.id = m.reference_id AND t.status::text <> 'Cancelled'
+    WHERE m.reference_type = 'StockTransfer' AND NOT m.is_cancelled AND (
+      m.movement_type::text NOT IN ('TransferOut', 'TransferIn')
+      OR COALESCE((SELECT SUM(ti.quantity) FROM stock_transfer_items ti WHERE ti.transfer_id = t.id AND ti.item_id = m.item_id), 0)
+        <> (SELECT SUM(x.quantity) FROM stock_movements x
+            WHERE x.reference_type = 'StockTransfer' AND x.reference_id = t.id AND NOT x.is_cancelled
+              AND x.item_id = m.item_id AND x.movement_type = m.movement_type))
+    ORDER BY m.date, m.movement_number`, (r) => r.note ?? '');
+
+  push('f', await db.$queryRaw<Raw[]>`
+    WITH computed AS (
+      SELECT item_id, warehouse_id,
+        SUM(CASE WHEN movement_type::text IN ('In', 'AdjustmentIn', 'TransferIn') THEN quantity ELSE -quantity END) AS qty
+      FROM stock_movements WHERE NOT is_cancelled AND warehouse_id IS NOT NULL
+      GROUP BY item_id, warehouse_id)
+    SELECT ${COLUMNS}, (s.current_stock - COALESCE(c.qty, 0))::text AS note
+    FROM stock_movements m
+    JOIN stock_transfers t ON t.id = m.reference_id AND t.status::text = 'Cancelled'
+    JOIN inventory_stocks s ON s.item_id = m.item_id AND s.warehouse_id = m.warehouse_id
+    LEFT JOIN computed c ON c.item_id = m.item_id AND c.warehouse_id = m.warehouse_id
+    WHERE m.reference_type = 'StockTransfer' AND m.movement_type::text IN ('TransferOut', 'TransferIn')
+      AND ABS(s.current_stock - COALESCE(c.qty, 0)) > 0.001
+    ORDER BY m.date, m.movement_number`,
+  (r) => `review: transfer cancelled; warehouse stock is ${r.note} off its active movements`);
   return out;
 }
