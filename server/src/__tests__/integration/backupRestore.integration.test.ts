@@ -5,6 +5,8 @@
  * (a) A dump that fails halfway (creates a probe table, then selects from a missing table) through
  *     POST /api/backup/restore answers 500 RESTORE_FAILED; the probe table is not left behind, the
  *     journal count is unchanged and a pre-restore safety backup exists.
+ * (c) A truncated .sql.gz (valid prefix, cut before the gzip trailer) answers 400 BACKUP_FILE_INVALID
+ *     before any safety backup or psql run: psql would otherwise commit the decompressed prefix.
  * (b) A backup made by createBackup from the test database is restored into a scratch database
  *     (created here, dropped in afterAll) and has the same row counts.
  * Skipped with a message when psql or pg_dump 16+ is missing, or (b only) the role cannot create
@@ -143,6 +145,25 @@ d('backup restore against a real database', () => {
       expect(fs.existsSync(path.join(dir, r.body.safetyBackup))).toBe(true);
       expect(psql(DB_URL, `SELECT to_regclass('public.${probe}') IS NULL`)).toBe('t');
       expect(Number(psql(DB_URL, 'SELECT count(*) FROM journal_entries'))).toBe(journalsBefore);
+    });
+  }, 120_000);
+
+  it('(c) refuses a truncated archive before taking a safety backup or running psql', async () => {
+    const cut = `cut-${tag}.sql.gz`;
+    const whole = zlib.gzipSync(`CREATE TABLE ${probe} (x int);\nINSERT INTO ${probe} VALUES (1);\n${'SELECT 1;\n'.repeat(200)}`);
+    fs.writeFileSync(path.join(dir, cut), whole.subarray(0, whole.length - 12));
+    const safetyBefore = fs.readdirSync(dir).filter((f) => f.startsWith('pre-restore-')).length;
+
+    await inRollback(async (tx) => {
+      const actor = await createCapUser(tx, ['doc.cancel']);
+
+      const r = await callRoute(backupRouter, 'post', '/restore', { body: { filename: cut }, ...actor });
+
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('BACKUP_FILE_INVALID');
+      expect(r.body.error).toContain('Data tidak berubah');
+      expect(fs.readdirSync(dir).filter((f) => f.startsWith('pre-restore-'))).toHaveLength(safetyBefore);
+      expect(psql(DB_URL, `SELECT to_regclass('public.${probe}') IS NULL`)).toBe('t');
     });
   }, 120_000);
 

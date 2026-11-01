@@ -22,7 +22,8 @@ const h = vi.hoisted(() => ({
  */
 function fakeProcess(cmd: string, args: string[]) {
   h.calls.push({ cmd, args });
-  const b = h.behaviours.get(cmd) ?? {};
+  // `gunzip -t` (archive check) and `gunzip -c` (restore stream) can behave differently.
+  const b = h.behaviours.get(`${cmd} ${args[0]}`) ?? h.behaviours.get(cmd) ?? {};
   const proc = Object.assign(new EventEmitter(), {
     stdin: new PassThrough(),
     stdout: new PassThrough(),
@@ -58,9 +59,11 @@ vi.mock('../telegramService', () => ({ invalidateTelegramConfigCache: h.invalida
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
 
 import {
+  BACKUP_FILE_INVALID,
   BACKUP_RETENTION,
   BackupOperationError,
   RESTORE_FAILED,
+  RESTORE_UNCERTAIN,
   SAFETY_BACKUP_FAILED,
   backupDir,
   backupKindOf,
@@ -93,6 +96,15 @@ afterEach(() => {
 });
 
 const files = () => fs.readdirSync(dir).sort();
+
+/** Writes a file in BACKUP_DIR whose mtime is `ageMin` minutes ago. */
+const touch = (name: string, ageMin: number) => {
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, 'x');
+  const t = new Date(Date.now() - ageMin * 60_000);
+  fs.utimesSync(p, t, t);
+  return p;
+};
 
 describe('restore command', () => {
   it('stops at the first error and runs the dump as one transaction (local and docker exec)', () => {
@@ -156,11 +168,53 @@ describe('restoreBackup', () => {
   it('takes a pre-restore safety backup, restores with psql and drops the runtime caches', async () => {
     const result = await restoreBackup(source());
     expect(result.safetyBackup).toMatch(/^pre-restore-/);
-    expect(h.calls.map((c) => c.cmd)).toEqual(['pg_dump', 'gzip', 'gunzip', 'psql']);
-    expect(h.calls[3].args).toEqual(expect.arrayContaining(['ON_ERROR_STOP=1', '--single-transaction']));
+    expect(h.calls.map((c) => (c.cmd === 'gunzip' ? `gunzip ${c.args[0]}` : c.cmd))).toEqual(['gunzip -t', 'pg_dump', 'gzip', 'gunzip -c', 'psql']);
+    expect(h.calls[4].args).toEqual(expect.arrayContaining(['ON_ERROR_STOP=1', '--single-transaction']));
     expect(h.invalidateSystemAccounts).toHaveBeenCalledOnce();
     expect(h.invalidatePermissions).toHaveBeenCalledOnce();
     expect(h.invalidateTelegram).toHaveBeenCalledOnce();
+  });
+
+  it('checks the whole archive first and changes nothing when it is truncated or damaged', async () => {
+    h.behaviours.set('gunzip -t', { exitCode: 1, stderr: 'gzip: unexpected end of file' });
+    const err = (await restoreBackup(source()).catch((e: unknown) => e)) as BackupOperationError;
+    expect(err).toBeInstanceOf(BackupOperationError);
+    expect(err.code).toBe(BACKUP_FILE_INVALID);
+    expect(err.safetyBackup).toBeNull();
+    expect(h.calls.map((c) => c.cmd)).toEqual(['gunzip']);
+    expect(files().filter((f) => f.startsWith('pre-restore-'))).toEqual([]);
+  });
+
+  it('never rotates away the file being restored (oldest of the kept pre-restore backups)', async () => {
+    const oldest = touch('pre-restore-20261001000000.sql.gz', 30);
+    touch('pre-restore-20261001000001.sql.gz', 20);
+    touch('pre-restore-20261001000002.sql.gz', 10);
+    expect(BACKUP_RETENTION['pre-restore']).toBe(3);
+
+    const result = await restoreBackup(oldest);
+
+    expect(fs.existsSync(oldest)).toBe(true);
+    expect(h.calls.find((c) => c.cmd === 'gunzip' && c.args[0] === '-c')?.args).toEqual(['-c', oldest]);
+    expect(files()).toContain(result.safetyBackup);
+    // The spared file is the only one over the limit; the next rotation removes it.
+    expect(await rotateBackups()).toEqual([path.basename(oldest)]);
+  });
+
+  it('reports RESTORE_UNCERTAIN when psql committed a stream gunzip reported as broken', async () => {
+    h.behaviours.set('gunzip -c', { exitCode: 1, stderr: 'gzip: unexpected end of file' });
+    const err = (await restoreBackup(source()).catch((e: unknown) => e)) as BackupOperationError;
+    expect(err.code).toBe(RESTORE_UNCERTAIN);
+    expect(err.message).toContain('unexpected end of file');
+    expect(err.safetyBackup).toMatch(/^pre-restore-/);
+    expect(h.invalidatePermissions).toHaveBeenCalledOnce();
+  });
+
+  it('keeps RESTORE_FAILED when gunzip broke and psql rolled back', async () => {
+    h.behaviours.set('gunzip -c', { exitCode: 1, stderr: 'gzip: unexpected end of file' });
+    h.behaviours.set('psql', { exitCode: 3, stderr: 'ERROR: syntax error at end of input', exitAfterStdoutEndMs: 20 });
+    const err = (await restoreBackup(source()).catch((e: unknown) => e)) as BackupOperationError;
+    expect(err.code).toBe(RESTORE_FAILED);
+    expect(err.message).toContain('psql exited 3');
   });
 
   it('does not run psql when the safety backup fails', async () => {
@@ -199,12 +253,6 @@ describe('uploadFileName', () => {
 
 describe('rotateBackups', () => {
   it('keeps the newest files per kind and leaves files of no kind alone', async () => {
-    const touch = (name: string, ageMin: number) => {
-      const p = path.join(dir, name);
-      fs.writeFileSync(p, 'x');
-      const t = new Date(Date.now() - ageMin * 60_000);
-      fs.utimesSync(p, t, t);
-    };
     for (let i = 0; i < 6; i++) touch(`backup-2026100100000${i}.sql.gz`, 10 + i);
     for (let i = 0; i < 4; i++) touch(`pre-reset-2026100100000${i}.sql.gz`, 1 + i);
     for (let i = 0; i < 2; i++) touch(`upload-2026100100000${i}-aaaaaaaa.sql.gz`, i);
@@ -217,6 +265,12 @@ describe('rotateBackups', () => {
     expect(files().filter((f) => f.startsWith('pre-reset-'))).toHaveLength(BACKUP_RETENTION['pre-reset']);
     expect(files()).toContain('simple_erp_20261001.sql.gz');
     expect(BACKUP_RETENTION).toEqual({ backup: 5, 'pre-reset': 3, 'pre-restore': 3, upload: 5 });
+  });
+
+  it('spares the files named in keep', async () => {
+    for (let i = 0; i < 4; i++) touch(`pre-restore-2026100100000${i}.sql.gz`, 1 + i);
+    expect(await rotateBackups({ keep: ['pre-restore-20261001000003.sql.gz'] })).toEqual([]);
+    expect(files()).toHaveLength(4);
   });
 });
 

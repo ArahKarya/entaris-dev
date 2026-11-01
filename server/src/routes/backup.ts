@@ -8,7 +8,9 @@ import multer from 'multer';
 import { requireCap } from '../middleware/auth';
 import { logger } from '../lib/logger';
 import {
+  BACKUP_FILE_INVALID,
   BackupOperationError,
+  RESTORE_UNCERTAIN,
   SAFETY_BACKUP_FAILED,
   createBackup,
   ensureBackupDir,
@@ -146,6 +148,21 @@ router.post('/restore', requireCap('doc.cancel'), async (req, res) => {
       safetyBackup,
     });
   } catch (error: unknown) {
+    if (error instanceof BackupOperationError && error.code === BACKUP_FILE_INVALID) {
+      logger.warn({ error: error.message, restore: sanitized }, 'POST /backup/restore archive check failed');
+      return res.status(400).json({
+        error: 'File cadangan rusak atau terpotong (pemeriksaan gzip gagal), jadi restore dibatalkan. Data tidak berubah.',
+        code: error.code,
+      });
+    }
+    if (error instanceof BackupOperationError && error.code === RESTORE_UNCERTAIN) {
+      logger.error({ error: error.message, restore: sanitized, safetyBackup: error.safetyBackup }, 'POST /backup/restore may have been applied');
+      return res.status(500).json({
+        error: `Restore tidak selesai dengan bersih dan database mungkin sudah berubah. Pulihkan cadangan pengaman ${error.safetyBackup} untuk kembali ke data sebelum restore.`,
+        code: error.code,
+        safetyBackup: error.safetyBackup,
+      });
+    }
     if (error instanceof BackupOperationError && error.code === SAFETY_BACKUP_FAILED) {
       logger.error({ error: error.message, restore: sanitized }, 'POST /backup/restore safety backup failed');
       return res.status(500).json({

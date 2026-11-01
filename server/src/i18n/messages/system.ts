@@ -83,6 +83,8 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Cadangan pengaman gagal dibuat, jadi restore dibatalkan. Data tidak berubah.": "The safety backup could not be created, so the restore was cancelled. No data was changed.",
   "Restore gagal dan dibatalkan seluruhnya; data tidak berubah. Kemungkinan penyebab: file bukan cadangan Entaris yang dibuat dengan --clean, file rusak, atau dibuat pg_dump yang lebih baru dari server database.": "The restore failed and was rolled back completely; no data was changed. Possible causes: the file is not an Entaris backup made with --clean, the file is damaged, or it was made by a newer pg_dump than the database server.",
   "Cadangan pengaman gagal dibuat, jadi reset dibatalkan. Tidak ada data yang dihapus.": "The safety backup could not be created, so the reset was cancelled. No data was deleted.",
+  "File cadangan rusak atau terpotong (pemeriksaan gzip gagal), jadi restore dibatalkan. Data tidak berubah.": "The backup file is damaged or truncated (the gzip check failed), so the restore was cancelled. No data was changed.",
+  "Restore tidak selesai dengan bersih dan database mungkin sudah berubah. Pulihkan cadangan pengaman {0} untuk kembali ke data sebelum restore.": "The restore did not finish cleanly and the database may have changed. Restore the safety backup {0} to return to the data from before the restore.",
   // end backup (E7-R12)
   "Gagal mengambil metrik dashboard.": "Failed to load dashboard metrics.",
   "Gagal mengambil data chart.": "Failed to load chart data.",

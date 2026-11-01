@@ -7,8 +7,11 @@
 // - Files are named by kind (`backup-`, `pre-reset-`, `pre-restore-`, `upload-`) and each kind is
 //   rotated on its own (BACKUP_RETENTION), so safety backups and uploads never push out routine
 //   backups. Files with any other name (e.g. scripts/backup.sh output) are never rotated.
-// - A restore first takes a `pre-restore` safety backup of the target database, then replays the
+// - A restore first checks the whole archive (`gunzip -t`), then takes a `pre-restore` safety backup
+//   of the target database (its rotation never deletes the file being restored), then replays the
 //   dump with `psql -v ON_ERROR_STOP=1 --single-transaction`: one error rolls everything back.
+//   psql commits when its input ends, so a stream cut short after the check, or a timeout, may
+//   leave the restore applied; that is reported as RESTORE_UNCERTAIN, never as "unchanged".
 
 import { spawn, execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
@@ -220,7 +223,21 @@ export function spawnPipeline(
   });
 }
 
-/** `decompressCmd | restoreCmd`; resolves when both exited 0. */
+/**
+ * The restore may have been committed although the pipeline failed: psql exited 0 after reading a
+ * stream gunzip reported as broken, or the timeout fired while psql could already be committing.
+ */
+export class RestoreMayHaveAppliedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RestoreMayHaveAppliedError';
+  }
+}
+
+/**
+ * `decompressCmd | restoreCmd`; resolves when both exited 0. A psql failure means its transaction
+ * rolled back; psql exiting 0 while gunzip failed, or a timeout, rejects with RestoreMayHaveAppliedError.
+ */
 export function spawnRestorePipeline(
   decompressCmd: string,
   decompressArgs: readonly string[],
@@ -246,6 +263,7 @@ export function spawnRestorePipeline(
     let settled = false;
     let decompDone = false;
     let restoreDone = false;
+    let decompError: string | null = null;
 
     const finish = (err?: Error) => {
       if (settled) return;
@@ -258,18 +276,25 @@ export function spawnRestorePipeline(
       reject(err);
     };
 
-    const timer = setTimeout(() => finish(new Error(`restore timed out`)), timeoutMs);
+    const timer = setTimeout(() => finish(new RestoreMayHaveAppliedError('restore timed out')), timeoutMs);
 
     decompressor.on('error', (err) => finish(new Error(`${decompressCmd} error: ${err.message}`)));
     restorer.on('error', (err) => finish(new Error(`${restoreCmd} error: ${err.message}`)));
     // psql's own error wins over gunzip's broken pipe when psql stops first.
     restorer.on('close', (code) => {
       if (code !== 0) return finish(new Error(`${restoreCmd} exited ${code}: ${restoreStderr}`));
+      if (decompError) return finish(new RestoreMayHaveAppliedError(decompError));
       restoreDone = true;
       finish();
     });
+    // A gunzip failure does not stop psql, which commits whatever it read at EOF: wait for psql's
+    // exit code to know whether the transaction rolled back.
     decompressor.on('close', (code) => {
-      if (code !== 0) return finish(new Error(`${decompressCmd} exited ${code}: ${decompStderr}`));
+      if (code !== 0) {
+        decompError = `${decompressCmd} exited ${code}: ${decompStderr}`;
+        if (restoreDone) finish(new RestoreMayHaveAppliedError(decompError));
+        return;
+      }
       decompDone = true;
       finish();
     });
@@ -291,13 +316,23 @@ export async function listBackups(): Promise<BackupFile[]> {
   return readBackupFiles(await ensureBackupDir());
 }
 
-/** Keeps the newest BACKUP_RETENTION[kind] files of each kind; files of no kind are left alone. */
-export async function rotateBackups(): Promise<string[]> {
+export interface RotateOptions {
+  /** File names never deleted by this rotation (the file about to be restored). */
+  keep?: readonly string[];
+}
+
+/**
+ * Keeps the newest BACKUP_RETENTION[kind] files of each kind; files of no kind are left alone.
+ * A `keep` file is spared even when it is past the limit; the next rotation removes it.
+ */
+export async function rotateBackups(options: RotateOptions = {}): Promise<string[]> {
   const dir = await ensureBackupDir();
   const files = await readBackupFiles(dir);
+  const keep = new Set(options.keep ?? []);
   const removed: string[] = [];
   for (const kind of Object.keys(BACKUP_RETENTION) as BackupKind[]) {
-    for (const f of files.filter((x) => x.kind === kind).slice(BACKUP_RETENTION[kind])) {
+    const excess = files.filter((x) => x.kind === kind).slice(BACKUP_RETENTION[kind]);
+    for (const f of excess.filter((x) => !keep.has(x.filename))) {
       try {
         await fs.promises.unlink(path.join(dir, f.filename));
         removed.push(f.filename);
@@ -310,8 +345,8 @@ export async function rotateBackups(): Promise<string[]> {
   return removed;
 }
 
-/** Dumps the database into a new `<kind>-<timestamp>.sql.gz`, then rotates that kind. */
-export async function createBackup(kind: DumpKind, target: DbTarget = {}): Promise<BackupFile> {
+/** Dumps the database into a new `<kind>-<timestamp>.sql.gz`, then rotates (sparing `rotate.keep`). */
+export async function createBackup(kind: DumpKind, target: DbTarget = {}, rotate: RotateOptions = {}): Promise<BackupFile> {
   const dir = await ensureBackupDir();
   const conn = parseDatabaseUrl(target.databaseUrl);
   const filename = dumpFileName(kind, new Date(), dir);
@@ -321,7 +356,7 @@ export async function createBackup(kind: DumpKind, target: DbTarget = {}): Promi
   await spawnPipeline(cmd, args, 'gzip', [], filepath, { ...process.env, PGPASSWORD: conn.password }, dumpTimeoutMs());
 
   const stat = await fs.promises.stat(filepath);
-  await rotateBackups();
+  await rotateBackups(rotate);
   return { filename, size: stat.size, date: stat.mtime.toISOString(), kind };
 }
 
@@ -329,11 +364,17 @@ export async function createBackup(kind: DumpKind, target: DbTarget = {}): Promi
 export const SAFETY_BACKUP_FAILED = 'SAFETY_BACKUP_FAILED';
 /** Error code: psql rejected the dump; the single transaction rolled back, so nothing was changed. */
 export const RESTORE_FAILED = 'RESTORE_FAILED';
+/** Error code: `gunzip -t` rejected the file (truncated or damaged); nothing was run or changed. */
+export const BACKUP_FILE_INVALID = 'BACKUP_FILE_INVALID';
+/** Error code: the restore failed after psql may have committed; the safety backup undoes it. */
+export const RESTORE_UNCERTAIN = 'RESTORE_UNCERTAIN';
+
+type BackupErrorCode = typeof SAFETY_BACKUP_FAILED | typeof RESTORE_FAILED | typeof BACKUP_FILE_INVALID | typeof RESTORE_UNCERTAIN;
 
 /** A restore or safety-backup failure, with the safety backup name when one was made. */
 export class BackupOperationError extends Error {
   constructor(
-    readonly code: typeof SAFETY_BACKUP_FAILED | typeof RESTORE_FAILED,
+    readonly code: BackupErrorCode,
     readonly reason: unknown,
     readonly safetyBackup: string | null = null,
   ) {
@@ -352,15 +393,39 @@ export function invalidateRuntimeCaches(): void {
   invalidateTelegramConfigCache();
 }
 
+/** Resolves when `gunzip -t` reads the whole archive without error (complete gzip stream, CRC ok). */
+export function verifyArchive(filepath: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cmd = 'gunzip -t';
+    const proc = spawn('gunzip', ['-t', filepath], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    const timer = setTimeout(() => { proc.kill('SIGTERM'); reject(new Error(`${cmd} timed out`)); }, timeoutMs);
+    proc.on('error', (err) => { clearTimeout(timer); reject(new Error(`${cmd} error: ${err.message}`)); });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} exited ${code}: ${stderr}`));
+    });
+  });
+}
+
 /**
- * Restores `filepath` (an existing file in BACKUP_DIR) into the database: a `pre-restore` safety
- * backup first (no restore when it fails), then one all-or-nothing psql transaction. Runtime
- * caches are dropped afterwards either way.
+ * Restores `filepath` (an existing file in BACKUP_DIR) into the database: the archive is checked
+ * whole first, then a `pre-restore` safety backup (no restore when either fails; its rotation
+ * spares `filepath`), then one all-or-nothing psql transaction. Runtime caches are dropped
+ * afterwards either way.
  */
 export async function restoreBackup(filepath: string, target: DbTarget = {}): Promise<{ safetyBackup: string }> {
+  try {
+    await verifyArchive(filepath, restoreTimeoutMs());
+  } catch (err) {
+    throw new BackupOperationError(BACKUP_FILE_INVALID, err);
+  }
+
   let safety: BackupFile;
   try {
-    safety = await createBackup('pre-restore', target);
+    safety = await createBackup('pre-restore', target, { keep: [path.basename(filepath)] });
   } catch (err) {
     throw new BackupOperationError(SAFETY_BACKUP_FAILED, err);
   }
@@ -370,7 +435,8 @@ export async function restoreBackup(filepath: string, target: DbTarget = {}): Pr
   try {
     await spawnRestorePipeline('gunzip', ['-c', filepath], cmd, args, { ...process.env, PGPASSWORD: conn.password }, restoreTimeoutMs());
   } catch (err) {
-    throw new BackupOperationError(RESTORE_FAILED, err, safety.filename);
+    const code = err instanceof RestoreMayHaveAppliedError ? RESTORE_UNCERTAIN : RESTORE_FAILED;
+    throw new BackupOperationError(code, err, safety.filename);
   } finally {
     invalidateRuntimeCaches();
   }
