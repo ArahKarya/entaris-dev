@@ -121,6 +121,9 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Gagal membuat preview": "Failed to create the preview",
   "Check tidak dapat diperbaiki otomatis": "This check cannot be fixed automatically",
   "Gagal memperbaiki masalah": "Failed to fix the issue",
+  // health checks: schema guards (E7-R11)
+  "{0} trigger database hilang atau nonaktif; jejak audit bisa diubah. Mulai ulang aplikasi agar migrasi berjalan lagi.": "{0} database triggers are missing or disabled; the audit trail can be changed. Restart the app so the migrations run again.",
+  "Semua trigger database aktif": "All database triggers are active",
   "partyType \"{0}\" tidak valid. Gunakan: Customer, Supplier, atau Both.": "partyType \"{0}\" is invalid. Use: Customer, Supplier or Both.",
   "depositBalance \"{0}\" bukan angka valid.": "depositBalance \"{0}\" is not a valid number.",
   "customerDepositBalance \"{0}\" bukan angka valid.": "customerDepositBalance \"{0}\" is not a valid number.",

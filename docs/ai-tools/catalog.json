@@ -18148,7 +18148,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Jalankan 6 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang. Hanya membaca.",
+      "desc": "Jalankan 7 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, trigger database wajib (jejak audit hanya-tambah). Hanya membaca.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -18166,7 +18166,7 @@
       "related": [
         "hc_preview"
       ],
-      "doc": "### hc_run\n\n**Ringkasan:** Jalankan 6 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang. Hanya membaca.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin (modul `audit` / `view`)\n- **Catatan akses:** Izin modul audit (view) — default hanya Admin.\n- **Handler:** `GET /api/health-check` (src/routes/healthCheck.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"hc_run\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}>\"\n}\n```\n\n**Isi hasil:** {success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}}}.\n\n**Tool terkait:** [`hc_preview`](#hc_preview)\n",
+      "doc": "### hc_run\n\n**Ringkasan:** Jalankan 7 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, trigger database wajib (jejak audit hanya-tambah). Hanya membaca.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin (modul `audit` / `view`)\n- **Catatan akses:** Izin modul audit (view) — default hanya Admin.\n- **Handler:** `GET /api/health-check` (src/routes/healthCheck.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"hc_run\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}>\"\n}\n```\n\n**Isi hasil:** {success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}}}.\n\n**Tool terkait:** [`hc_preview`](#hc_preview)\n",
       "example": {
         "tool": "hc_run",
         "args": {}

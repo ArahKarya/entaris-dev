@@ -575,7 +575,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 ### hc_run
 
-**Ringkasan:** Jalankan 6 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang. Hanya membaca.
+**Ringkasan:** Jalankan 7 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, trigger database wajib (jejak audit hanya-tambah). Hanya membaca.
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin (modul `audit` / `view`)

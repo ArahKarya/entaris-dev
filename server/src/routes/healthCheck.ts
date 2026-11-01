@@ -14,6 +14,7 @@ import {
   checkStockMovementMismatch,
   checkWarehouseStockDrift,
 } from './health/checks';
+import { checkRequiredTriggers } from './health/schemaGuards';
 import {
   previewAleSync,
   previewAccountBalanceDrift,
@@ -38,6 +39,7 @@ router.get('/', async (_req, res) => {
       checkOrphanAle(),
       checkStockMovementMismatch(),
       checkWarehouseStockDrift(),
+      checkRequiredTriggers(),
     ]);
 
     const overallStatus = checks.some((c) => c.status === 'error')

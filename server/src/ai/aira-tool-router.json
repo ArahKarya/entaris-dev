@@ -6570,7 +6570,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Jalankan 6 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang. Hanya membaca.",
+      "desc": "Jalankan 7 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, trigger database wajib (jejak audit hanya-tambah). Hanya membaca.",
       "risk": "read",
       "roles": [
         "Admin"
