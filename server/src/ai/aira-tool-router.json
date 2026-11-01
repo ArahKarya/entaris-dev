@@ -16205,6 +16205,7 @@
       "errors": [
         "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
         "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi",
+        "400: Pengajuan sudah diproses (tanpa code; hanya pengajuan ai_tool:* yang kalah klaim dari persetujuan bersamaan, belum memakai STALE_STATUS); tidak ada efek, muat ulang pengajuan",
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
         "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
         "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending"
