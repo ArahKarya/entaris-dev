@@ -30826,7 +30826,7 @@
       "group": "Stok & Produksi",
       "toolset": "produksi",
       "module": "production",
-      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, semua jurnal berawalan JV-<runNo> (termasuk revisi) dibatalkan, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.",
+      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30878,7 +30878,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled + saldo akun dihitung ulang.",
+      "postingEffect": "Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal.",
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -30890,7 +30890,8 @@
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan",
+        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -33805,7 +33806,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "stock_opname",
-      "desc": "Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.",
+      "desc": "Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dan satelitnya dibatalkan dengan pembatal tercatat, saldo akun dibalik per baris jurnal. Opname Draft atau yang sudah batal tidak dapat dibatalkan.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -33834,7 +33835,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled + saldo akun dihitung ulang. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.",
+      "postingEffect": "Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.",
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -33845,7 +33846,8 @@
         "400: stok opname sudah dibatalkan",
         "400: stok item tidak mencukupi untuk pembalikan",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan",
+        "400 JOURNAL_ALREADY_REVERSED: jurnal opname sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
