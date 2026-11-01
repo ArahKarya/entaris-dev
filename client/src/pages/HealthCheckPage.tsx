@@ -46,7 +46,15 @@ interface CheckInfo {
   fixEffect?: string;
 }
 
-type CheckKey = 'aleSync' | 'balanceDrift' | 'unbalancedJournals' | 'orphanAle' | 'stockMismatch' | 'warehouseDrift';
+type CheckKey =
+  | 'aleSync'
+  | 'balanceDrift'
+  | 'unbalancedJournals'
+  | 'orphanAle'
+  | 'stockMismatch'
+  | 'warehouseDrift'
+  | 'arSubledger'
+  | 'customerDepositSubledger';
 
 /** Server check name → `auth:healthCheck.checks.<key>` and the fix endpoint key. */
 const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
@@ -56,6 +64,8 @@ const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
   'Orphan ALE Entries': { key: 'orphanAle', fixKey: 'orphan-ale' },
   'Stock vs Movement Mismatch': { key: 'stockMismatch' },
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
+  'AR vs Subledger': { key: 'arSubledger' },
+  'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
 };
 
 /** Translated title and fix text for a server check (unknown checks keep the server name). */
