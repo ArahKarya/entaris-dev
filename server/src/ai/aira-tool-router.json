@@ -2024,7 +2024,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Daftar STT sumber per baris + lampiran terkait.",
+      "outputSummary": "Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { subtotal, potonganItem, biayaLain, grandTotal, headerPotonganMismatch } dengan rumus posting (null untuk tipe lain atau payload tidak valid); headerPotonganMismatch=true berarti approve akan ditolak, minta revisi.",
       "handler": "GET /api/approvals/requests/:id/context",
       "permAction": "view",
       "enabled": true,
@@ -10978,7 +10978,7 @@
       "output": {
         "report": "object"
       },
-      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb.",
+      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb. vendorDeposits: uang muka Supplier dengan sisa = jumlah − alokasi aktif − refund (baris + summary totalDeposits/totalApplied/totalRefunded/totalRemaining).",
       "handler": "GET /api/reports/daily",
       "permAction": "view",
       "enabled": true,
@@ -16200,10 +16200,12 @@
       "confirm_template": "SETUJUI pengajuan {id} dan jalankan dokumennya? (efek posting sesuai tipe dokumen)",
       "prerequisites": [
         "Capability approval.decide.",
-        "Pengajuan berstatus Pending."
+        "Pengajuan berstatus Pending (diklaim atomik: dua keputusan bersamaan tidak pernah sama-sama dijalankan)."
       ],
       "errors": [
-        "400: Pengajuan sudah diproses",
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi",
+        "400: Pengajuan sudah diproses (tanpa code; hanya pengajuan ai_tool:* yang kalah klaim dari persetujuan bersamaan, belum memakai STALE_STATUS); tidak ada efek, muat ulang pengajuan",
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
         "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
         "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending",
@@ -16262,6 +16264,10 @@
         "Capability approval.decide.",
         "Pengajuan berstatus Pending."
       ],
+      "errors": [
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi"
+      ],
       "related": [
         "appr_approve",
         "appr_request_revision"
@@ -16311,7 +16317,9 @@
       "postingEffect": "Tidak ada efek GL/stok.",
       "confirm_template": "Minta revisi pengajuan {id}: {notes}",
       "errors": [
-        "400: Alasan revisi wajib diisi"
+        "400: Alasan revisi wajib diisi",
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi"
       ],
       "related": [
         "appr_resubmit",
@@ -24950,7 +24958,7 @@
           "in": "body",
           "type": "number",
           "required": false,
-          "description": "Diturunkan server dari potonganItem per baris; nilai header diabaikan."
+          "description": "Cache jumlah potonganItem per baris; sebaiknya tidak dikirim. Bila dikirim (> 0) wajib sama dengan jumlah potonganItem (toleransi 0,01), kalau tidak ditolak 400. Tidak pernah dikurangkan lagi dari total."
         }
       ],
       "output": {
@@ -24973,7 +24981,8 @@
       ],
       "errors": [
         "400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda",
-        "202: menunggu persetujuan (bukan error)",
+        "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
+        "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -27835,7 +27844,7 @@
       "output": {
         "status": "string"
       },
-      "outputSummary": "Pengajuan berstatus Pending.",
+      "outputSummary": "Pengajuan berstatus Pending. Invoice Pembelian: amount = grand total invoice (Σ harga akhir baris + biayaLain).",
       "handler": "PUT /api/approvals/requests/:id/resubmit",
       "permAction": "edit",
       "enabled": true,
@@ -27848,8 +27857,10 @@
       "errors": [
         "400: hanya status Perlu Revisi",
         "400: tipe dokumen tidak didukung",
+        "400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris",
         "403: bukan pengajuan Anda",
-        "403 NEGATIVE_STOCK_FORBIDDEN: payload ProductionRun meminta bypass stok minus (allowNegativeStock) tanpa capability inventory.negative_stock; status tetap Perlu Revisi"
+        "403 NEGATIVE_STOCK_FORBIDDEN: payload ProductionRun meminta bypass stok minus (allowNegativeStock) tanpa capability inventory.negative_stock; status tetap Perlu Revisi",
+        "409 STALE_STATUS: pengajuan berubah status sejak dibaca (diajukan ulang/diputuskan bersamaan); tidak ada perubahan"
       ],
       "related": [
         "appr_request_get",

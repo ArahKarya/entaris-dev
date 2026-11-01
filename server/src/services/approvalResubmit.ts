@@ -2,11 +2,15 @@
 // One function per concern so later fixes each change their own function: the PI total,
 // the production-run gate and the conditional status update.
 
-import type { Prisma } from '@prisma/client';
+import type { ApprovalRequest, Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import type { prisma } from '../lib/prisma';
 import { CreateProductionRunSchema, CreatePurchaseInvoiceSchema } from '../utils/schemas';
 import { negativeStockBypassDenied } from '../utils/negativeStockGate';
+import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
+import { BusinessError } from '../utils/errors';
+import { STALE_STATUS } from '../utils/cancelClaim';
+import { APPROVAL_ALREADY_DECIDED } from './approvalClaim';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -15,12 +19,10 @@ export type ProductionRunResubmitPayload = z.infer<typeof CreateProductionRunSch
 
 export type ResubmitAmountResult = { ok: true; amount: number } | { ok: false; error: string };
 
-// Approval amount of a resubmitted purchase invoice: Σ item.amount + biayaLain.
-// The item schema has no `amount` field, so Zod strips it and the sum is biayaLain alone.
-// Kept as is in this refactor; the PI approval total fix replaces this function.
+// Approval amount of a resubmitted purchase invoice: the invoice grand total, the same figure
+// POST /purchase/invoices queues and the approval posts.
 export function purchaseInvoiceResubmitAmount(payload: PurchaseInvoiceResubmitPayload): number {
-  const items: ReadonlyArray<Record<string, unknown>> = payload.items ?? [];
-  return items.reduce((s, it) => s + Number(it.amount ?? 0), 0) + Number(payload.biayaLain ?? 0);
+  return computePurchaseInvoiceTotals(payload).grandTotal.toNumber();
 }
 
 // Approval amount of a resubmitted production run: Σ input quantity.
@@ -58,10 +60,12 @@ export async function productionRunResubmitAllowed(role: string, documentType: s
 }
 
 // Stores the corrected payload (as sent, not the parsed copy) and sends the request back to Pending.
-// Unconditional update: the route checked the status beforehand.
-export function applyResubmit(db: Db, requestId: string, rawPayload: Prisma.InputJsonValue, amount: number) {
-  return db.approvalRequest.update({
-    where: { id: requestId },
+// Conditional on NeedsRevision: a request that moved on since the route read it (resubmitted twice
+// at once, or decided) gets STALE_STATUS instead of being overwritten. The row is read back after
+// the update because the route answers with it and the audit trail takes its id from that answer.
+export async function applyResubmit(db: Db, requestId: string, rawPayload: Prisma.InputJsonValue, amount: number): Promise<ApprovalRequest> {
+  const res = await db.approvalRequest.updateMany({
+    where: { id: requestId, status: 'NeedsRevision' },
     data: {
       payload: rawPayload,
       amount,
@@ -70,4 +74,6 @@ export function applyResubmit(db: Db, requestId: string, rawPayload: Prisma.Inpu
       decidedAt: null,
     },
   });
+  if (res.count !== 1) throw new BusinessError(APPROVAL_ALREADY_DECIDED, STALE_STATUS);
+  return db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } });
 }

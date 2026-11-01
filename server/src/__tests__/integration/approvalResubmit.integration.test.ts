@@ -4,9 +4,9 @@
  * - unknown request 404; someone else's request without approval.view_all 403;
  * - only NeedsRevision can be resubmitted; a missing payload, an unsupported document type and an
  *   invalid payload are 400 with the old messages, and leave the request untouched;
- * - a purchase invoice goes back to Pending with the raw payload stored and amount = biayaLain
- *   (the item schema strips `amount`); a production run with amount = Σ input quantity, also when
- *   resubmitted by a holder of approval.view_all.
+ * - a purchase invoice goes back to Pending with the raw payload stored and amount = the invoice
+ *   grand total (PR-3.5; it was biayaLain alone before); a production run with amount = Σ input
+ *   quantity, also when resubmitted by a holder of approval.view_all.
  *
  * No fiscal year: resubmit checks no period. Route handlers run through the route harness;
  * everything runs in a rollback transaction.
@@ -174,7 +174,7 @@ d('PUT /approvals/requests/:id/resubmit', () => {
     });
   });
 
-  it('puts a purchase invoice back to Pending with the raw payload; amount = biayaLain', async () => {
+  it('puts a purchase invoice back to Pending with the raw payload; amount = invoice grand total', async () => {
     await inRollback(async (tx) => {
       const owner = await createCapUser(tx, []);
       const approver = await createCapUser(tx, ['approval.decide']);
@@ -187,7 +187,7 @@ d('PUT /approvals/requests/:id/resubmit', () => {
 
       const row = await tx.approvalRequest.findUniqueOrThrow({ where: { id: req.id } });
       expect(row.status).toBe('Pending');
-      expect(Number(row.amount)).toBe(-25000);
+      expect(Number(row.amount)).toBe(6_625_000); // 6.500.000 + 150.000 - 25.000
       expect(row.payload).toEqual(payload);
       expect(row.rejectedBy).toBeNull();
       expect(row.decidedAt).toBeNull();

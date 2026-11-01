@@ -13,7 +13,10 @@ const { $transaction, findUnique, update, roleCaps } = vi.hoisted(() => {
   process.env.JWT_SECRET = 'unit-test-jwt-secret-value-0123456789';
   return { $transaction: vi.fn(), findUnique: vi.fn(), update: vi.fn(), roleCaps: {} as Record<string, string[]> };
 });
-vi.mock('../../lib/prisma', () => ({ prisma: { $transaction, approvalRequest: { findUnique, update } } }));
+// The resubmit claim is a conditional updateMany (PR-3.4); `update` stands in for it here.
+vi.mock('../../lib/prisma', () => ({
+  prisma: { $transaction, approvalRequest: { findUnique, findUniqueOrThrow: async () => ({ id: 'r1', status: 'Pending' }), updateMany: update } },
+}));
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock('../../services/permissionService', () => ({
   hasCap: async (role: string, cap: string) => (roleCaps[role] ?? []).includes(cap),
@@ -58,7 +61,7 @@ beforeEach(() => {
   findUnique.mockReset();
   findUnique.mockResolvedValue({ id: 'r1', documentType: 'ProductionRun', status: 'NeedsRevision', requestedBy: 'u1' });
   update.mockReset();
-  update.mockResolvedValue({ id: 'r1', status: 'Pending' });
+  update.mockResolvedValue({ count: 1 });
 });
 
 const ID = '3f2b8c1e-1234-4abc-9def-0123456789ab';

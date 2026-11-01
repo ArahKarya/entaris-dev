@@ -170,7 +170,8 @@
       "noSttAttachments": "This goods receipt has no attachments.",
       "noAttachments": "No attachments (the request is not linked to a goods receipt and no files were uploaded).",
       "subtotal": "Subtotal",
-      "discount": "Deduction",
+      "lineDiscountIncluded": "line deductions included",
+      "headerDiscountMismatch": "The header deduction differs from the sum of the line deductions. Approving will fail; request a revision and enter deductions on the item lines.",
       "otherCosts": "Other costs",
       "grandTotal": "Grand total",
       "estimate": "(estimate)"

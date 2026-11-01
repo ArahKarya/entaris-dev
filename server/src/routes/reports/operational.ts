@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma';
 import { logger } from '../../lib/logger';
 import { systemAccounts } from '../../services/systemAccounts';
 import { buildStockSnapshot } from '../../services/stockSnapshot';
+import { buildDailyVendorDeposits } from '../../services/vendorDepositList';
 import { translateMessage } from '../../i18n/translateMessage';
 import { requestLanguage } from '../../middleware/responseLanguage';
 import { asOfBound, businessDayRange, businessToday, reportRange } from '../../utils/businessDate';
@@ -440,11 +441,12 @@ router.get('/daily', async (req, res) => {
         include: { supplier: { select: { name: true } } },
         orderBy: { dueDate: 'asc' },
       }),
+      // Supplier deposits: cancelled applications no longer use the deposit; refunds do.
       prisma.payment.findMany({
         where: { paymentType: 'VendorDeposit', status: 'Submitted' },
         include: {
           party: { select: { name: true } },
-          depositApplications: { select: { appliedAmount: true } },
+          depositApplications: { where: { isCancelled: false }, select: { appliedAmount: true } },
         },
         orderBy: { date: 'desc' },
       }),
@@ -597,25 +599,7 @@ router.get('/daily', async (req, res) => {
       },
     };
 
-    const vendorDeposits = {
-      deposits: vendorDepositPayments.map((p) => {
-        const totalApplied = p.depositApplications.reduce((s, a) => s + Number(a.appliedAmount), 0);
-        return {
-          paymentNumber: p.paymentNumber,
-          supplierName: p.party?.name || '—',
-          amount: Number(p.amount),
-          totalApplied,
-          remaining: Number(p.amount) - totalApplied,
-          date: p.date,
-        };
-      }).filter((d) => d.remaining > 0),
-      summary: {
-        totalDeposits: vendorDepositPayments.reduce((s, p) => s + Number(p.amount), 0),
-        totalApplied: vendorDepositPayments.reduce((s, p) => s + p.depositApplications.reduce((ss, a) => ss + Number(a.appliedAmount), 0), 0),
-        totalRemaining: 0,
-      },
-    };
-    vendorDeposits.summary.totalRemaining = vendorDeposits.deposits.reduce((s, d) => s + d.remaining, 0);
+    const vendorDeposits = buildDailyVendorDeposits(vendorDepositPayments);
 
     // Stock snapshot per warehouse as of end of day.
     const snapshot = await buildStockSnapshot(dateStr);
