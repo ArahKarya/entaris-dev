@@ -34,6 +34,7 @@ export async function wipeDemoData(): Promise<WipeResult> {
       const fiscalYearIds = (await tx.demoDataRecord.findMany({ where: { model: 'fiscal_years' }, select: { recordId: true } })).map((r) => r.recordId);
       if (fiscalYearIds.length) masters.fiscal_years = (await tx.fiscalYear.deleteMany({ where: { id: { in: fiscalYearIds } } })).count;
 
+      // audit_trail is append-only; its trigger lets DELETE through only for via = 'demo' rows (E7-R11).
       const auditRows = (await tx.auditLog.deleteMany({ where: { via: 'demo' } })).count;
       const notifications = since ? (await tx.notification.deleteMany({ where: { createdAt: { gte: since } } })).count : 0;
 

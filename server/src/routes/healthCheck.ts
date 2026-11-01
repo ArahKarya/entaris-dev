@@ -14,6 +14,7 @@ import {
   checkStockMovementMismatch,
   checkWarehouseStockDrift,
 } from './health/checks';
+import { checkRequiredTriggers } from './health/schemaGuards';
 import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import {
   previewAleSync,
@@ -39,6 +40,7 @@ router.get('/', async (_req, res) => {
       checkOrphanAle(),
       checkStockMovementMismatch(),
       checkWarehouseStockDrift(),
+      checkRequiredTriggers(),
       checkArSubledgerVsGl(),
       checkCustomerDepositVsGl(),
     ]);

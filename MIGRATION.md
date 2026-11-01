@@ -101,6 +101,45 @@ Migration Prisma jalan otomatis di `docker-app-entrypoint.sh` via `npx prisma mi
 3. Kalau perlu rollback: **restore backup**, jangan edit `_prisma_migrations` manual
 4. Report issue dengan log error lengkap
 
+### Migrasi trigger jejak audit (`20261106000000_audit_trail_append_only`)
+
+Migrasi ini hanya DDL: membuat fungsi `entaris_audit_trail_append_only()` dan dua trigger di
+`audit_trail` agar baris audit tidak bisa diubah atau dihapus. Penyebab gagal yang paling mungkin:
+user database aplikasi bukan pemilik tabel `audit_trail` (`CREATE TRIGGER` butuh owner). Prisma lalu
+menandai migrasi gagal (P3009) dan container restart-loop.
+
+1. Baca galatnya: `docker compose logs app`.
+2. Perbaiki penyebabnya, mis. `ALTER TABLE audit_trail OWNER TO <user_aplikasi>;` sebagai superuser.
+3. Tandai migrasi gagal itu sebagai dibatalkan, lalu restart agar dijalankan ulang:
+   ```bash
+   docker compose run --rm app sh -c "cd /app/server && npx prisma migrate resolve --rolled-back 20261106000000_audit_trail_append_only"
+   docker compose restart app
+   ```
+4. Buka halaman Pemeriksaan Sistem: cek "Trigger database wajib (jejak audit)" harus OK.
+
+Kalau cek itu merah padahal migrasi sudah tercatat berhasil, restart tidak membantu
+(`prisma migrate deploy` melewati migrasi yang sudah tercatat). Ikuti pesan cek itu:
+
+- **Trigger nonaktif** (mis. setelah `ALTER TABLE audit_trail DISABLE TRIGGER ...` saat perawatan):
+  aktifkan lagi tiap trigger yang disebut, sebagai pemilik tabel:
+  ```sql
+  ALTER TABLE audit_trail ENABLE TRIGGER audit_trail_append_only_row;
+  ALTER TABLE audit_trail ENABLE TRIGGER audit_trail_append_only_truncate;
+  ```
+- **Trigger hilang** (di-drop manual): jalankan ulang SQL migrasinya. SQL itu aman diulang
+  (`CREATE OR REPLACE FUNCTION`, `DROP TRIGGER IF EXISTS` lalu `CREATE TRIGGER`), jadi juga
+  memulihkan trigger yang nonaktif:
+  ```bash
+  docker compose run --rm app sh -c "cd /app/server && npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106000000_audit_trail_append_only/migration.sql"
+  ```
+  Jangan pakai `migrate resolve --rolled-back` untuk kasus ini: perintah itu hanya untuk migrasi yang
+  gagal.
+
+Catatan: setelah restore cadangan lama (dibuat sebelum trigger ada), cek itu merah sampai aplikasi
+dimulai ulang, karena migrasi baru berjalan lagi saat boot. Migrasi SQL lepas yang mengubah
+`audit_trail` wajib menjalankan `SELECT set_config('entaris.audit_purge', 'on', true)` di awal
+transaksinya sendiri (`BEGIN; ... COMMIT;`), seperti `20261003000000_scrub_ai_service_token_audit.sql`.
+
 ## Backup rutin
 
 Script backup otomatis sudah disediakan:

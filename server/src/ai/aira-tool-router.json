@@ -6570,7 +6570,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Jalankan 8 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), dan Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger). Dua cek terakhir hanya deteksi (status warning, tanpa perbaikan otomatis) dan memakai saldo hari ini. Hanya membaca.",
+      "desc": "Jalankan 9 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), dan trigger database wajib (jejak audit hanya-tambah). Cek AR dan Uang Muka Customer hanya deteksi (status warning, tanpa perbaikan otomatis) dan memakai saldo hari ini. Hanya membaca.",
       "risk": "read",
       "roles": [
         "Admin"

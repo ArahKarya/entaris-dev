@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
 import { startMockAgent, type MockAgent, type MockAgentOptions } from './mockAgent';
+import { purgeAuditRows } from './auditPurge';
 
 export interface TestUser {
   id: string;
@@ -153,7 +154,7 @@ export async function createHarness(agentOpts: Partial<MockAgentOptions> = {}): 
       await prisma.mcpCallLog.deleteMany({ where: { tokenId: created.record.id } });
       await prisma.mcpToken.delete({ where: { id: created.record.id } }).catch(() => undefined);
       await prisma.chatSession.deleteMany({ where: { userId: { in: users } } });
-      await prisma.auditLog.deleteMany({ where: { userId: { in: users } } });
+      await purgeAuditRows(prisma, { userId: { in: users } });
       await prisma.user.deleteMany({ where: { id: { in: users } } });
       if (prevSetting) await prisma.aiSetting.update({ where: { id: prevSetting.id }, data: { agenticEnabled: prevSetting.agenticEnabled } });
       restore('PORT', prevPort);

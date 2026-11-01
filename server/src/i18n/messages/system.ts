@@ -129,6 +129,11 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Gagal membuat preview": "Failed to create the preview",
   "Check tidak dapat diperbaiki otomatis": "This check cannot be fixed automatically",
   "Gagal memperbaiki masalah": "Failed to fix the issue",
+  // health checks: schema guards (E7-R11)
+  "{0} trigger database hilang dan {1} nonaktif; jejak audit bisa diubah. Jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).": "{0} database triggers are missing and {1} are disabled; the audit trail can be changed. Re-run the trigger migration SQL as described in MIGRATION.md (Migrasi trigger jejak audit).",
+  "{0} trigger database hilang; jejak audit bisa diubah. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).": "{0} database triggers are missing; the audit trail can be changed. After restoring an older backup, restart the app; if the check stays red, re-run the trigger migration SQL as described in MIGRATION.md (Migrasi trigger jejak audit).",
+  "{0} trigger database nonaktif; jejak audit bisa diubah. Aktifkan lagi dengan ALTER TABLE audit_trail ENABLE TRIGGER <nama> untuk: {1}.": "{0} database triggers are disabled; the audit trail can be changed. Re-enable them with ALTER TABLE audit_trail ENABLE TRIGGER <name> for: {1}.",
+  "Semua trigger database aktif": "All database triggers are active",
   "partyType \"{0}\" tidak valid. Gunakan: Customer, Supplier, atau Both.": "partyType \"{0}\" is invalid. Use: Customer, Supplier or Both.",
   "depositBalance \"{0}\" bukan angka valid.": "depositBalance \"{0}\" is not a valid number.",
   "customerDepositBalance \"{0}\" bukan angka valid.": "customerDepositBalance \"{0}\" is not a valid number.",
