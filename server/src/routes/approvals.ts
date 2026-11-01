@@ -8,6 +8,8 @@ import { buildApprovalComparison, isEditDocumentType, findPendingForTarget } fro
 import { loadApprovalLookups } from '../services/approvalContextLookups';
 import { parseApprovalCheckQuery } from '../utils/approvalCheckQuery';
 import { applyResubmit, resubmitAmount } from '../services/approvalResubmit';
+import { purchaseInvoiceTotalsView } from '../services/purchaseInvoiceCalc';
+import { CreatePurchaseInvoiceBaseSchema } from '../utils/schemas';
 
 const router = Router();
 
@@ -200,9 +202,14 @@ router.get('/requests/:id/context', async (req: AuthRequest, res) => {
     }));
     // Party / item names for the dialog (payload stores ids only).
     const lookups = await loadApprovalLookups(prisma, payload);
+    // Invoice totals by the posting formula, so the dialog shows what approve will book. Parsed
+    // without the header-potongan rule: an old payload still gets totals plus the mismatch flag.
+    // null for other types and for a payload that no longer parses.
+    const piParsed = request.documentType === 'PurchaseInvoice' ? CreatePurchaseInvoiceBaseSchema.safeParse(payload) : null;
+    const piTotals = piParsed?.success ? purchaseInvoiceTotalsView(piParsed.data) : null;
     res.json({
       sttLines, stts, requestAttachments: requestAtt, supplier, priceHistory,
-      party: lookups.party, items: lookups.items,
+      party: lookups.party, items: lookups.items, piTotals,
       comparison: buildApprovalComparison(request),
     });
   } catch (error) {

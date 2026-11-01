@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LanguageSchema } from './language';
+import { headerPotonganMismatch } from '../services/purchaseInvoiceCalc';
 
 // Chart of Accounts
 const AccountTypeEnum = z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'], {
@@ -258,7 +259,8 @@ const PurchaseInvoiceItemSchema = InvoiceItemSchema.extend({
   goodsReceiptItemId: z.string().uuid().nullable().optional(),
 });
 
-export const CreatePurchaseInvoiceSchema = z.object({
+// Without the header-potongan rule: the repair script reads old queued payloads with it.
+export const CreatePurchaseInvoiceBaseSchema = z.object({
   date: z.string().min(1, 'Tanggal wajib diisi.'),
   partyId: z.string().min(1, 'Supplier wajib dipilih.'),
   items: z.array(PurchaseInvoiceItemSchema).min(1, 'Minimal satu item.'),
@@ -270,6 +272,18 @@ export const CreatePurchaseInvoiceSchema = z.object({
   // `potongan` at header level is a derived cache (SUM items.potonganItem).
   // Accept it for backward compat but the service layer recomputes from items.
   potongan: z.coerce.number().min(0).optional().default(0),
+});
+
+// A header potongan that disagrees with the lines is refused rather than silently dropped, so
+// the approval queue, the dialog and the posted invoice show the same total.
+export const CreatePurchaseInvoiceSchema = CreatePurchaseInvoiceBaseSchema.superRefine((data, ctx) => {
+  if (headerPotonganMismatch(data)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Potongan header harus sama dengan jumlah potongan per baris. Isi potongan di baris item.',
+      path: ['potongan'],
+    });
+  }
 });
 
 // Payment

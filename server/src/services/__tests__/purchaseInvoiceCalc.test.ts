@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  computePurchaseInvoiceTotals,
   computePurchaseItem,
   effectiveQuantity,
+  headerPotonganMismatch,
+  POTONGAN_TOLERANCE,
+  purchaseInvoiceTotalsView,
   sumPotonganItem,
 } from '../purchaseInvoiceCalc';
 
@@ -162,5 +166,80 @@ describe('end-to-end invoice simulation', () => {
 
     const totalPotongan = sumPotonganItem(items);
     expect(totalPotongan.toNumber()).toBe(80_000);
+  });
+});
+
+describe('computePurchaseInvoiceTotals', () => {
+  it('grand total = Σ hargaAkhir + biayaLain; potonganItem is already inside each line', () => {
+    const t = computePurchaseInvoiceTotals({
+      items: [
+        { quantity: 1000, rate: 6500, timbanganDiterima: 1000, potonganItem: 100_000 },
+        { quantity: 1, rate: 3_600_000 },
+      ],
+      biayaLain: 250_000,
+    });
+    expect(t.lines.map((l) => l.hargaAkhir.toNumber())).toEqual([6_400_000, 3_600_000]);
+    expect(t.itemsSubtotal.toNumber()).toBe(10_000_000);
+    expect(t.potonganItemTotal.toNumber()).toBe(100_000);
+    expect(t.biayaLain.toNumber()).toBe(250_000);
+    expect(t.grandTotal.toNumber()).toBe(10_250_000);
+  });
+
+  it('ignores the header potongan (it only caches Σ potonganItem)', () => {
+    const body = { items: [{ quantity: 10, rate: 1_000_000 }], potongan: 500_000 };
+    expect(computePurchaseInvoiceTotals(body).grandTotal.toNumber()).toBe(10_000_000);
+  });
+
+  it('a negative biayaLain lowers the total', () => {
+    const t = computePurchaseInvoiceTotals({ items: [{ quantity: 1, rate: 2_000_000 }], biayaLain: -150_000 });
+    expect(t.grandTotal.toNumber()).toBe(1_850_000);
+  });
+
+  it('PPN 11% on 100 million gives 111 million', () => {
+    const t = computePurchaseInvoiceTotals({ items: [{ quantity: 1, rate: 100_000_000, taxPct: 11 }] });
+    expect(t.grandTotal.toNumber()).toBe(111_000_000);
+  });
+
+  it('a missing biayaLain counts as zero and the total is rounded half-up to 2 decimals', () => {
+    const t = computePurchaseInvoiceTotals({ items: [{ quantity: 33.333, rate: 1.005 }], biayaLain: null });
+    expect(t.biayaLain.toNumber()).toBe(0);
+    expect(t.grandTotal.toNumber()).toBe(33.5);
+  });
+});
+
+describe('headerPotonganMismatch', () => {
+  const items = [{ potonganItem: 300_000 }, { potonganItem: 200_000 }];
+
+  it('passes a header of zero or none', () => {
+    expect(headerPotonganMismatch({ items })).toBe(false);
+    expect(headerPotonganMismatch({ items, potongan: 0 })).toBe(false);
+    expect(headerPotonganMismatch({ items, potongan: null })).toBe(false);
+  });
+
+  it('passes a header equal to Σ potonganItem, within the tolerance', () => {
+    expect(headerPotonganMismatch({ items, potongan: 500_000 })).toBe(false);
+    expect(headerPotonganMismatch({ items, potongan: 500_000 + POTONGAN_TOLERANCE })).toBe(false);
+  });
+
+  it('flags a header that differs from Σ potonganItem', () => {
+    expect(headerPotonganMismatch({ items: [{}], potongan: 500_000 })).toBe(true);
+    expect(headerPotonganMismatch({ items, potongan: 500_000.02 })).toBe(true);
+  });
+});
+
+describe('purchaseInvoiceTotalsView', () => {
+  it('returns plain numbers for the approval dialog, with the header mismatch flag', () => {
+    const view = purchaseInvoiceTotalsView({
+      items: [{ quantity: 1000, rate: 6500, potonganItem: 100_000 }],
+      biayaLain: -50_000,
+      potongan: 250_000,
+    });
+    expect(view).toEqual({
+      subtotal: 6_400_000,
+      potonganItem: 100_000,
+      biayaLain: -50_000,
+      grandTotal: 6_350_000,
+      headerPotonganMismatch: true,
+    });
   });
 });

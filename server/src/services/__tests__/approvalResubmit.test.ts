@@ -7,7 +7,8 @@ import {
 } from '../approvalResubmit';
 
 // Characterization tests: they pin the resubmit behaviour as it was in routes/approvals.ts
-// before the extraction. PR-3.4, PR-3.5 and PR-3.7 change these functions on purpose.
+// before the extraction. PR-3.4, PR-3.5 and PR-3.7 change these functions on purpose
+// (the purchase invoice amount is now the invoice grand total).
 
 const piItem = (over: Record<string, unknown> = {}) => ({ itemName: 'Gabah Kering Panen', quantity: 1000, rate: 6500, ...over });
 const piPayload = (over: Record<string, unknown> = {}) => ({ date: '2026-05-04', partyId: 'p-1', items: [piItem()], ...over });
@@ -19,13 +20,16 @@ const prodPayload = (inputs: Array<Record<string, unknown>>) => ({
 });
 
 describe('purchaseInvoiceResubmitAmount', () => {
-  it('sums the item amount field plus biayaLain', () => {
-    const payload = { biayaLain: 250, items: [{ amount: 1000 }, { amount: '500' }, {}] };
-    expect(purchaseInvoiceResubmitAmount(payload as never)).toBe(1750);
+  it('is the invoice grand total: Σ line totals (potongan per line deducted) + biayaLain', () => {
+    const payload = {
+      biayaLain: 250_000,
+      items: [piItem({ timbanganDiterima: 1000, potonganItem: 100_000 }), piItem({ quantity: 1, rate: 3_600_000 })],
+    };
+    expect(purchaseInvoiceResubmitAmount(payload as never)).toBe(10_250_000);
   });
 
-  it('treats a missing biayaLain as zero', () => {
-    expect(purchaseInvoiceResubmitAmount({ items: [{ amount: 40 }] } as never)).toBe(40);
+  it('treats a missing biayaLain as zero and ignores a stray item.amount', () => {
+    expect(purchaseInvoiceResubmitAmount({ items: [piItem({ amount: 40 })] } as never)).toBe(6_500_000);
   });
 });
 
@@ -41,13 +45,16 @@ describe('productionRunResubmitAmount', () => {
 });
 
 describe('resubmitAmount', () => {
-  it('PurchaseInvoice: the schema strips item.amount, so only biayaLain counts', () => {
-    const raw = piPayload({ items: [piItem({ amount: 6_500_000 }), piItem({ amount: 1_000_000 })], biayaLain: -15000 });
-    expect(resubmitAmount('PurchaseInvoice', raw)).toEqual({ ok: true, amount: -15000 });
+  it('PurchaseInvoice: the amount is the invoice grand total, not the stripped item.amount', () => {
+    const raw = piPayload({ items: [piItem({ amount: 1 }), piItem({ quantity: 10, rate: 350_000 })], biayaLain: -15000 });
+    expect(resubmitAmount('PurchaseInvoice', raw)).toEqual({ ok: true, amount: 9_985_000 });
   });
 
-  it('PurchaseInvoice: amount is zero without biayaLain', () => {
-    expect(resubmitAmount('PurchaseInvoice', piPayload())).toEqual({ ok: true, amount: 0 });
+  it('PurchaseInvoice: a header potongan the lines do not carry is refused', () => {
+    expect(resubmitAmount('PurchaseInvoice', piPayload({ potongan: 500_000 }))).toEqual({
+      ok: false,
+      error: 'Data invoice tidak valid: Potongan header harus sama dengan jumlah potongan per baris. Isi potongan di baris item.',
+    });
   });
 
   it('PurchaseInvoice: an invalid payload returns the first Zod issue', () => {

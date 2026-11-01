@@ -6,6 +6,7 @@ import type { Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import type { prisma } from '../lib/prisma';
 import { CreateProductionRunSchema, CreatePurchaseInvoiceSchema } from '../utils/schemas';
+import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -14,12 +15,10 @@ export type ProductionRunResubmitPayload = z.infer<typeof CreateProductionRunSch
 
 export type ResubmitAmountResult = { ok: true; amount: number } | { ok: false; error: string };
 
-// Approval amount of a resubmitted purchase invoice: Σ item.amount + biayaLain.
-// The item schema has no `amount` field, so Zod strips it and the sum is biayaLain alone.
-// Kept as is in this refactor; the PI approval total fix replaces this function.
+// Approval amount of a resubmitted purchase invoice: the invoice grand total, the same figure
+// POST /purchase/invoices queues and the approval posts.
 export function purchaseInvoiceResubmitAmount(payload: PurchaseInvoiceResubmitPayload): number {
-  const items: ReadonlyArray<Record<string, unknown>> = payload.items ?? [];
-  return items.reduce((s, it) => s + Number(it.amount ?? 0), 0) + Number(payload.biayaLain ?? 0);
+  return computePurchaseInvoiceTotals(payload).grandTotal.toNumber();
 }
 
 // Approval amount of a resubmitted production run: Σ input quantity.
