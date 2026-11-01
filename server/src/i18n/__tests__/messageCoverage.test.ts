@@ -30,8 +30,9 @@ const IGNORED = new Set<string>([
   '--allow-existing only goes with --check <id>',
   'The baseline already has rows for {0}; a check is captured once.',
   'The baseline already has {0} row(s); it is captured once. To capture a check added later, pass --check <id> --allow-existing.',
-  // Refusal of the rupiah-only currency repair (scripts/repair/e2-rupiah-only-check.ts), CLI only.
+  // Refusals of the rupiah-only currency repair (scripts/repair/e2-rupiah-only-check.ts), CLI only.
   '--apply needs --approved-by "<accountant name>"',
+  'No active Admin user to record the audit rows under.',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */
