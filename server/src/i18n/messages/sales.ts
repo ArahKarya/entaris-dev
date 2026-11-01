@@ -200,6 +200,7 @@ export const SALES_MESSAGES: MessageDictionary = {
   // invoice status (E4-R1)
   "Invoice {0} berstatus {1}, sisa tagihannya tidak bisa diubah.": "Invoice {0} is {1}; its outstanding amount cannot be changed.",
   "Sisa tagihan Invoice {0} akan menjadi Rp {1}, di luar rentang Rp 0 sampai Rp {2}. Periksa data Invoice ini.": "The outstanding amount of invoice {0} would become Rp {1}, outside the range Rp 0 to Rp {2}. Check this invoice's data.",
+  "Invoice memiliki retur aktif ({0}). Batalkan retur terlebih dahulu.": "The invoice has active returns ({0}). Cancel the returns first.",
   // Proforma Invoice
   "Proforma Invoice tidak ditemukan.": "Proforma invoice not found.",
   "Gagal mengambil data proforma invoice.": "Failed to load proforma invoices.",
