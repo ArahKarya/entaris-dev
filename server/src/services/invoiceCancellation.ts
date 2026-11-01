@@ -6,6 +6,7 @@ import { systemAccounts } from './systemAccounts';
 import { cancelDocumentJournals } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
+import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
 
 type Tx = Prisma.TransactionClient;
 
@@ -24,6 +25,9 @@ export async function cancelSalesInvoiceInTx(
   invoiceId: string,
   trail?: CancelTrail,
 ): Promise<{ id: string; status: 'Cancelled' }> {
+  // AR row, then the invoice row: the order a return submit and payment submit take, so a cancel
+  // racing either waits for it instead of deadlocking when its journals reverse AR.
+  await lockArThenSalesInvoiceInTx(tx, invoiceId);
   const invoice = await tx.salesInvoice.findUnique({
     where: { id: invoiceId },
     include: { customer: true },
@@ -32,8 +36,8 @@ export async function cancelSalesInvoiceInTx(
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan.');
   // First write; any rejection below rolls it back.
   await claimCancel(tx.salesInvoice, invoice.id, { status: 'Cancelled', outstanding: 0, cancelledAt: new Date() });
-  // Counted after the claim: a return being submitted holds the invoice row lock (FOR UPDATE in
-  // submitSalesReturnInTx), so the claim waits for it and this count sees it.
+  // Counted under the row locks: a return being submitted holds them (submitSalesReturnInTx takes
+  // the same ones), so this cancel waits for it and the count sees it.
   const activeReturns = await tx.salesReturn.count({
     where: { salesInvoiceId: invoice.id, status: { not: 'Cancelled' } },
   });

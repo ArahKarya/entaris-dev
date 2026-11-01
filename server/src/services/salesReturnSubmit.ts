@@ -6,7 +6,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
 import { logger } from '../lib/logger';
-import { setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
+import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 
 type Tx = Prisma.TransactionClient;
 
@@ -93,8 +93,8 @@ export async function submitSalesReturnInTx(
 
   // Row lock before reading: the AR split below uses the current outstanding, and a concurrent
   // invoice cancel either finishes first (this return then sees Cancelled) or waits for this one
-  // (and then sees an active return).
-  await tx.$queryRaw`SELECT id FROM sales_invoices WHERE id = ${body.salesInvoiceId} FOR UPDATE`;
+  // (and then sees an active return). AR row first, like payment submit, so the two cannot deadlock.
+  await lockArThenSalesInvoiceInTx(tx, body.salesInvoiceId);
   const invoice = await tx.salesInvoice.findUnique({
     where: { id: body.salesInvoiceId },
     include: {

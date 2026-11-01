@@ -8,6 +8,7 @@
 import Decimal from 'decimal.js';
 import type { InvoiceStatus, Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
+import { systemAccounts } from './systemAccounts';
 
 type Tx = Prisma.TransactionClient;
 
@@ -29,6 +30,18 @@ export function deriveSalesInvoiceStatus(outstanding: Decimal.Value, grandTotal:
   if (out.lte(OUTSTANDING_TOLERANCE)) return 'Paid';
   if (out.gte(new Decimal(grandTotal))) return 'Submitted';
   return 'PartiallyPaid';
+}
+
+/**
+ * Lock order for writers that move both the AR account balance and a sales invoice: the AR account
+ * row first, then the invoice row. Payment submit, refund, return cancel and deposit-apply cancel
+ * already update AR before they touch the invoice; a writer that locked the invoice first could
+ * deadlock against them (40P01, nothing retries it).
+ */
+export async function lockArThenSalesInvoiceInTx(tx: Tx, invoiceId: string): Promise<void> {
+  const ar = await systemAccounts.getAccount('AR');
+  await tx.$queryRaw`SELECT id FROM accounts WHERE id = ${ar.id} FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM sales_invoices WHERE id = ${invoiceId} FOR UPDATE`;
 }
 
 /**

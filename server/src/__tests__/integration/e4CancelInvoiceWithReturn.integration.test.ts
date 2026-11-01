@@ -10,6 +10,8 @@
  *   subledger agrees (findArSubledgerDiffs []).
  * - In a closed year the answer stays PERIOD_CLOSED.
  * - A paid invoice without a return still gets "sudah lunas".
+ * - Lock order: return submit, invoice cancel and payment submit all lock the AR account row
+ *   before the invoice row, so no two of them can deadlock.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -28,6 +30,7 @@ import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { submitSalesReturnInTx } from '../../services/salesReturnSubmit';
 import { cancelSalesReturnInTx } from '../../services/salesReturnCancel';
+import { cancelSalesInvoiceInTx } from '../../services/invoiceCancellation';
 import { submitPaymentInTx } from '../../services/paymentSubmit';
 import { INVOICE_HAS_ACTIVE_RETURNS } from '../../services/invoiceCancellation';
 import { findArSubledgerDiffs } from '../../services/ledger/arSubledgerCheck';
@@ -214,6 +217,86 @@ d('cancelling a sales invoice with returns (E4-R2)', () => {
       expect(r.status, JSON.stringify(r.body)).toBe(400);
       expect(r.body.code).toBeUndefined();
       expect(r.body.error).toBe('Invoice sudah lunas, tidak bisa dibatalkan.');
+    });
+  });
+});
+
+type LockEvent = 'AR' | 'invoice';
+
+/**
+ * Wraps `tx` and records, in order, the first time it locks the AR account row and the invoice row
+ * (by `invoiceId`, or by `partyId` for payment submit's lock of the customer's open invoices):
+ * a raw FOR UPDATE or an update of that row.
+ */
+function lockRecorder(tx: Tx, rows: { arId: string; invoiceId: string; partyId?: string }) {
+  const events: LockEvent[] = [];
+  const note = (e: LockEvent) => { if (!events.includes(e)) events.push(e); };
+  const invoiceKeys = [rows.invoiceId, rows.partyId].filter(Boolean);
+  // Called as a tagged template or with a Prisma.sql object.
+  const raw = (fn: (...a: unknown[]) => unknown) =>
+    (query: TemplateStringsArray | { strings: readonly string[]; values: unknown[] }, ...rest: unknown[]) => {
+      const [strings, values] = 'raw' in query ? [query as readonly string[], rest] : [query.strings, query.values];
+      const sql = strings.join('?');
+      if (/FOR UPDATE/.test(sql) && /FROM accounts\b/.test(sql) && values.includes(rows.arId)) note('AR');
+      if (/FOR UPDATE/.test(sql) && /FROM sales_invoices\b/.test(sql) && values.some((v) => invoiceKeys.includes(v as string))) note('invoice');
+      return fn(query, ...rest);
+    };
+  const delegate = (target: object, id: string, e: LockEvent) => new Proxy(target, {
+    get(t, k) {
+      const v = Reflect.get(t, k);
+      if ((k === 'update' || k === 'updateMany') && typeof v === 'function') {
+        return (args: { where?: { id?: unknown } }) => {
+          if (args?.where?.id === id) note(e);
+          return v.call(t, args);
+        };
+      }
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  const wrapped = new Proxy(tx, {
+    get(t, k) {
+      if (k === '$queryRaw' || k === '$executeRaw') return raw((Reflect.get(t, k) as (...a: unknown[]) => unknown).bind(t));
+      if (k === 'account') return delegate(t.account, rows.arId, 'AR');
+      if (k === 'salesInvoice') return delegate(t.salesInvoice, rows.invoiceId, 'invoice');
+      const v = Reflect.get(t, k);
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  }) as Tx;
+  return { tx: wrapped, events };
+}
+
+d('sales invoice writers: lock order (E4)', () => {
+  it('a return locks the AR account row before the invoice row, as payment submit does', async () => {
+    await inRollback(async (tx) => {
+      const s = await sale(tx);
+      const arId = (await systemAccounts.getAccount('AR')).id;
+
+      const ret = lockRecorder(tx, { arId, invoiceId: s.invoiceId });
+      await submitSalesReturnInTx(
+        ret.tx,
+        { salesInvoiceId: s.invoiceId, date: `${Y}-05-10`, items: [{ salesInvoiceItemId: s.lineId, quantity: 100, restock: true, warehouseId }] } as any,
+        actor.userId,
+      );
+      expect(ret.events).toEqual(['AR', 'invoice']);
+
+      const pay = lockRecorder(tx, { arId, invoiceId: s.invoiceId, partyId: s.customerId });
+      await submitPaymentInTx(
+        pay.tx,
+        { date: `${Y}-05-20`, partyId: s.customerId, paymentType: 'Receive', accountId: cashAccountId, amount: 1_000_000 },
+        actor.userId,
+      );
+      expect(pay.events).toEqual(['AR', 'invoice']);
+    });
+  });
+
+  it('an invoice cancel locks the AR account row before the invoice row', async () => {
+    await inRollback(async (tx) => {
+      const s = await sale(tx);
+      const arId = (await systemAccounts.getAccount('AR')).id;
+      const cancel = lockRecorder(tx, { arId, invoiceId: s.invoiceId });
+      await cancelSalesInvoiceInTx(cancel.tx, s.invoiceId);
+      expect(cancel.events).toEqual(['AR', 'invoice']);
+      expect((await tx.salesInvoice.findUniqueOrThrow({ where: { id: s.invoiceId } })).status).toBe('Cancelled');
     });
   });
 });
