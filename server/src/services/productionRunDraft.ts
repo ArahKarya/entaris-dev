@@ -132,7 +132,8 @@ function parsePayload(payload: unknown): Body {
   return parsed.data;
 }
 
-const NOT_POSTABLE = 'Draft sudah diproses atau tidak lagi berstatus Draft.';
+export const NOT_POSTABLE = 'Draft sudah diproses atau tidak lagi berstatus Draft.';
+export const NOT_POSTABLE_CODE = 'NOT_POSTABLE';
 
 /** Klaim atomik Draft → toStatus; gagal (count 0) = sudah diklaim proses lain. */
 async function claimDraft(tx: Tx, id: string, toStatus: 'Posted' | 'PendingApproval', userId: string) {
@@ -177,7 +178,11 @@ export async function postDraftForApproval(tx: Tx, id: string, userId: string) {
   return { request, amount };
 }
 
-/** Dipanggil di dalam tx approve: draft yang tertaut → Posted. No-op utk antrian lama. */
+/**
+ * Dipanggil di dalam tx approve: draft yang tertaut → Posted. No-op utk antrian lama (tanpa draft).
+ * Draft tertaut yang sudah tidak PendingApproval (sudah Posted) = approve kedua → NOT_POSTABLE,
+ * supaya run kedua tidak ikut di-commit.
+ */
 export async function markDraftPostedByApproval(
   tx: Tx, requestId: string, run: { id: string; number: string }, approverId: string,
 ) {
@@ -188,6 +193,9 @@ export async function markDraftPostedByApproval(
       postedAt: new Date(), postedById: approverId, lastError: null,
     },
   });
+  if (res.count === 0 && (await tx.productionRunDraft.count({ where: { approvalRequestId: requestId } })) > 0) {
+    throw new BusinessError(NOT_POSTABLE, NOT_POSTABLE_CODE);
+  }
   return res.count;
 }
 

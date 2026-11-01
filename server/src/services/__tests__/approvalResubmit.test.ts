@@ -5,9 +5,11 @@ import {
   purchaseInvoiceResubmitAmount,
   resubmitAmount,
 } from '../approvalResubmit';
+import { BusinessError } from '../../utils/errors';
 
 // Characterization tests: they pin the resubmit behaviour as it was in routes/approvals.ts
-// before the extraction. PR-3.4, PR-3.5 and PR-3.7 change these functions on purpose.
+// before the extraction. PR-3.4, PR-3.5 and PR-3.7 change these functions on purpose
+// (applyResubmit is conditional since PR-3.4).
 
 const piItem = (over: Record<string, unknown> = {}) => ({ itemName: 'Gabah Kering Panen', quantity: 1000, rate: 6500, ...over });
 const piPayload = (over: Record<string, unknown> = {}) => ({ date: '2026-05-04', partyId: 'p-1', items: [piItem()], ...over });
@@ -77,16 +79,31 @@ describe('resubmitAmount', () => {
 });
 
 describe('applyResubmit', () => {
-  it('stores the raw payload and amount and moves the request back to Pending', async () => {
-    const updated = { id: 'req-1', status: 'Pending' };
-    const update = vi.fn(async () => updated);
-    const db = { approvalRequest: { update } } as unknown as Parameters<typeof applyResubmit>[0];
+  const fakeDb = (count: number, row: unknown = { id: 'req-1', status: 'Pending' }) => {
+    const updateMany = vi.fn(async () => ({ count }));
+    const findUniqueOrThrow = vi.fn(async () => row);
+    const db = { approvalRequest: { updateMany, findUniqueOrThrow } } as unknown as Parameters<typeof applyResubmit>[0];
+    return { db, updateMany, findUniqueOrThrow };
+  };
+
+  it('stores the raw payload and amount, moves NeedsRevision back to Pending and returns the re-read row', async () => {
+    const row = { id: 'req-1', status: 'Pending', amount: 1200 };
+    const { db, updateMany, findUniqueOrThrow } = fakeDb(1, row);
     const rawPayload = { date: '2026-05-04', items: [{ amount: 9 }], extra: 'kept' };
 
-    await expect(applyResubmit(db, 'req-1', rawPayload, 1200)).resolves.toBe(updated);
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'req-1' },
+    await expect(applyResubmit(db, 'req-1', rawPayload, 1200)).resolves.toBe(row);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-1', status: 'NeedsRevision' },
       data: { payload: rawPayload, amount: 1200, status: 'Pending', rejectedBy: null, decidedAt: null },
     });
+    expect(findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'req-1' } });
+  });
+
+  it('throws STALE_STATUS when the request is no longer NeedsRevision, without reading it back', async () => {
+    const { db, findUniqueOrThrow } = fakeDb(0);
+    const err = await applyResubmit(db, 'req-1', { a: 1 }, 5).catch((e) => e);
+    expect(err).toBeInstanceOf(BusinessError);
+    expect(err).toMatchObject({ code: 'STALE_STATUS', message: 'Pengajuan sudah diproses.' });
+    expect(findUniqueOrThrow).not.toHaveBeenCalled();
   });
 });
