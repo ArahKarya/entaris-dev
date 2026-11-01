@@ -187,14 +187,12 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Gagal menyimpan status penyiapan awal.": "Failed to save the initial setup status.",
   "Gagal cek GitHub.": "Failed to check GitHub.",
   "Gagal mengecek update.": "Failed to check for updates.",
-  "User admin tidak ditemukan.": "Admin user not found.",
-  "Tidak ada tahun fiskal aktif.": "No active fiscal year.",
-  "Akun dasar (Kas, AR, AP, Sales) belum tersedia. Jalankan seed terlebih dahulu.": "Base accounts (Cash, AR, AP, Sales) are not available yet. Run the seed first.",
-  "Data dummy sudah ada. Hapus terlebih dahulu sebelum generate ulang.": "Dummy data already exists. Delete it before generating it again.",
+  // legacy dummy (E7-R13): the old generator is gone; "Data dummy dibuat." stays for audit rows it wrote
   "Data dummy dibuat.": "Dummy data created.",
-  "Gagal membuat data dummy.": "Failed to create dummy data.",
   "Data dummy dihapus.": "Dummy data deleted.",
   "Gagal menghapus data dummy.": "Failed to delete dummy data.",
+  "Data dummy lama ada di tahun buku {0} yang sudah ditutup. Buka kembali tahun buku itu, lalu hapus data dummy lama lagi.": "Old dummy data is in fiscal year {0}, which is closed. Reopen that fiscal year, then delete the old dummy data again.",
+  // end legacy dummy (E7-R13)
   "Data uji coba sudah ada. Hapus terlebih dahulu sebelum membuat ulang.": "Demo data already exists. Delete it before generating it again.",
   "Data dummy versi lama masih ada. Hapus data dummy lama terlebih dahulu.": "Old dummy data is still present. Delete the old dummy data first.",
   "Data uji coba hanya bisa dibuat saat belum ada transaksi.": "Demo data can only be generated while there are no transactions.",

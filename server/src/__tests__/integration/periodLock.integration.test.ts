@@ -4,8 +4,8 @@
  * Lock date 31 Mar, today 25 Apr: a 15 Mar invoice is rejected PERIOD_LOCKED, cancelling a March
  * invoice is rejected, a March quotation or purchase order is still accepted. PUT /period-lock
  * needs period.lock, a reason to move the lock back, and a past date; every change is logged.
- * Bulk depreciation checks a mid-month lock against the 1st-of-month dates it posts; generate-dummy
- * skips the lock; firstOpenBusinessDay skips a closed year.
+ * Bulk depreciation checks a mid-month lock against the 1st-of-month dates it posts;
+ * firstOpenBusinessDay skips a closed year.
  *
  * The lock row is global. Every case changes it only inside a rollback transaction (the route
  * harness makes the route's own transaction a savepoint), so nothing is committed; the cases stay
@@ -33,7 +33,6 @@ import { PERIOD_LOCK_NOT_PAST, PERIOD_LOCK_REASON_REQUIRED, setPeriodLockInTx } 
 import periodLockRouter from '../../routes/periodLock';
 import quotationsRouter from '../../routes/quotations';
 import fixedAssetsRouter from '../../routes/fixedAssets';
-import dummyDataRouter from '../../routes/settings/dummyData';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -237,25 +236,6 @@ d('period lock: postings and cancels', () => {
       expect(await tx.depreciationEntry.findUniqueOrThrow({ where: { id: entry.id } })).toMatchObject({ isPosted: true });
     });
   });
-
-  it('generate-dummy skips the lock: demo data dated in the locked months is still created', async () => {
-    await inRollback(async (tx) => {
-      // The route refuses to run while demo data exists; hide any (rolled back with the rest).
-      await tx.party.updateMany({ where: { isDummy: true }, data: { isDummy: false } });
-      const year = await createFiscalYear(tx, { year: Y });
-      clockAt(`${Y}-06-15T03:00:00Z`);
-      expect((await lockAt(tx, `${Y}-05-31`)).status).toBe(200);
-
-      // Own role with settings edit: CI has no built-in Admin role unless another file booted the RBAC seed first.
-      const actor = await createCapUser(tx, [], { perms: { settings: 'edit' } });
-      const r = await callRoute(dummyDataRouter, 'post', '/generate-dummy', actor);
-      expect(r.status, JSON.stringify(r.body)).toBe(200);
-      // Stock movements before June (opening stock on 1 April, April and May runs) are in the locked window.
-      const opening = await tx.stockMovement.count({ where: { fiscalYearId: year.id, date: { lt: new Date(`${Y}-06-01`) } } });
-      expect(opening).toBeGreaterThan(0);
-      expect(await lockRow(tx)).toBe(`${Y}-05-31`);
-    });
-  }, 60000);
 });
 
 d('period lock: PUT /period-lock', () => {
