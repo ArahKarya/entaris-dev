@@ -283,12 +283,12 @@ d('closed fiscal year: stock movements', () => {
 });
 
 d('closed fiscal year: stock opname', () => {
-  /** POST /stock-opname on 20 Dec of Y, counting `actualStock`; returns the opname and its journals. */
-  async function opname(tx: Tx, itemId: string, actualStock: number) {
+  /** POST /stock-opname on `date` (20 Dec of Y by default), counting `actualStock`; returns the opname and its journals. */
+  async function opname(tx: Tx, itemId: string, actualStock: number, date = `${Y}-12-20`) {
     // A Draft opname blocks a new one; set any leftover aside inside the rollback.
     await tx.stockOpname.updateMany({ where: { status: 'Draft' }, data: { status: 'Cancelled' } });
     const r = await callRoute(stockOpnameRouter, 'post', '/', {
-      body: { date: `${Y}-12-20`, warehouseId, items: [{ itemId, actualStock }] },
+      body: { date, warehouseId, items: [{ itemId, actualStock }] },
       userId, role,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
@@ -308,6 +308,25 @@ d('closed fiscal year: stock opname', () => {
       expectPeriodClosed(await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId, role }));
       expect(await snapshot(tx, [item.id], jeIds)).toEqual(before);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).not.toBe('Cancelled');
+    });
+  });
+
+  it('rejects cancelling an open-year opname whose journal is booked to a closed year, naming the opname', async () => {
+    await inRollback(async (tx) => {
+      const { old } = await years(tx);
+      const item = await stockItem(tx, 100, 5_000);
+      const { so, jeIds } = await opname(tx, item.id, 90, `${Y + 1}-01-05`);
+      expect(jeIds.length).toBeGreaterThan(0);
+      // The opname itself is in the open year; only its journal sits in the year that gets closed.
+      await tx.journalEntry.updateMany({ where: { id: { in: jeIds } }, data: { fiscalYearId: old.id } });
+      await close(tx, old);
+
+      const before = await snapshot(tx, [item.id], jeIds);
+      const r = await callRoute(stockOpnameRouter, 'put', '/:id/cancel', { params: { id: so.id }, userId, role });
+      expectPeriodClosed(r);
+      expect(r.body.error).toMatch(/; stok opname di periode ini/);
+      expect(await snapshot(tx, [item.id], jeIds)).toEqual(before);
+      expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).toBe('Submitted');
     });
   });
 
@@ -344,6 +363,26 @@ d('closed fiscal year: production runs', () => {
       const { pr, itemIds } = await run(tx, `${Y}-12-20`);
       const jeIds = await journalIdsOf(tx, pr.runNumber);
       expect(jeIds.length).toBeGreaterThan(0);
+      await close(tx, old);
+
+      const before = await snapshot(tx, itemIds, jeIds);
+      const e = await inRouteTx((t) => cancelProductionRunInTx(t, pr.id)).catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(BusinessError);
+      expect((e as BusinessError).code).toBe(PERIOD_CLOSED);
+      expect((e as BusinessError).message).toMatch(/; produksi di periode ini/);
+      expect(await snapshot(tx, itemIds, jeIds)).toEqual(before);
+      expect((await tx.productionRun.findUniqueOrThrow({ where: { id: pr.id } })).isCancelled).toBe(false);
+    });
+  });
+
+  it('rejects cancelling an open-year run whose journal is booked to a closed year, naming the run', async () => {
+    await inRollback(async (tx) => {
+      const { old } = await years(tx);
+      const { pr, itemIds } = await run(tx, `${Y + 1}-01-05`);
+      const jeIds = await journalIdsOf(tx, pr.runNumber);
+      expect(jeIds.length).toBeGreaterThan(0);
+      // The run passes its own period check; the journal void is what hits the closed year.
+      await tx.journalEntry.updateMany({ where: { id: { in: jeIds } }, data: { fiscalYearId: old.id } });
       await close(tx, old);
 
       const before = await snapshot(tx, itemIds, jeIds);
