@@ -22,6 +22,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 import { submitStockTransferInTx, STOCK_TRANSFER_CANCEL_INCOMPLETE } from '../../services/stockTransfer';
 import { MOVEMENT_DOCUMENT_LOCKED } from '../../services/documentMovementLock';
 import { MOVEMENT_SOURCE_BATCH_INVALID } from '../../services/inventory/batchSource';
+import { findMovementReferenceIssues } from '../../services/inventory/movementReferenceAudit';
 import movementsRouter from '../../routes/inventory/movements';
 import stockTransfersRouter from '../../routes/stockTransfers';
 import stockOpnameRouter from '../../routes/stockOpname';
@@ -325,6 +326,56 @@ d('production, opname and opening balance movements', () => {
       expect(await itemStock(tx, bekatul.id)).toBe(100);
       expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: surplus.id } })).isCancelled).toBe(true);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).toBe('Cancelled');
+    });
+  });
+});
+
+d('e3-movement-reference-audit', () => {
+  it('lists typed references, cancelled rows of active documents, bad batch links and orphan document ids', async () => {
+    await inRollback(async (tx) => {
+      const a = await warehouse(tx, 'Gudang A');
+      const b = await warehouse(tx, 'Gudang B');
+      const beras = await item(tx, 'Beras', a.id, 5000);
+      const bekatul = await item(tx, 'Bekatul', a.id, 100);
+      const transfer = await submitStockTransferInTx(
+        tx, { date: DAY, fromWarehouseId: a.id, toWarehouseId: b.id, items: [{ itemId: beras.id, quantity: 1000 }] }, actor.userId,
+      );
+      const out = await tx.stockMovement.findFirstOrThrow({ where: { referenceId: transfer.id, movementType: 'TransferOut' } });
+      await tx.stockMovement.update({ where: { id: out.id }, data: { isCancelled: true } });
+
+      const typed = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceType: 'SalesInvoice' });
+      const opening = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceType: 'OpeningBalance' });
+      const berasBatch = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 10 });
+      const wrongBatch = await tx.stockMovement.update({
+        where: { id: (await movement(tx, { itemId: bekatul.id, warehouseId: a.id, movementType: 'Out', quantity: 1 })).id },
+        data: { sourceMovementId: berasBatch.id },
+      });
+      const okBatch = await tx.stockMovement.update({
+        where: { id: (await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'Out', quantity: 1 })).id },
+        data: { sourceMovementId: berasBatch.id },
+      });
+      const inboundLinked = await tx.stockMovement.update({
+        where: { id: (await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1 })).id },
+        data: { sourceMovementId: berasBatch.id },
+      });
+      const orphanId = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceId: transfer.id });
+      const missingDoc = await movement(tx, {
+        itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceType: 'GoodsReceipt', referenceId: '00000000-0000-4000-8000-0000000000ff',
+      });
+
+      const mine = new Set([out.id, typed.id, opening.id, berasBatch.id, wrongBatch.id, okBatch.id, inboundLinked.id, orphanId.id, missingDoc.id]);
+      const found = (await findMovementReferenceIssues(tx)).filter((r) => mine.has(r.id));
+      const byList = (l: string) => found.filter((r) => r.list === l).map((r) => [r.id, r.note]);
+      expect(byList('a')).toEqual([[typed.id, expect.stringMatching(/client/)]]);
+      expect(byList('b')).toEqual([[out.id, expect.stringMatching(/^certain/)]]);
+      expect(byList('c').sort()).toEqual([
+        [wrongBatch.id, 'batch of another item'],
+        [inboundLinked.id, 'inbound row links a batch'],
+      ].sort());
+      expect(byList('d').sort()).toEqual([
+        [orphanId.id, expect.stringMatching(/without reference type/)],
+        [missingDoc.id, 'no GoodsReceipt with this id'],
+      ].sort((x, y) => String(x[0]).localeCompare(String(y[0]))));
     });
   });
 });
