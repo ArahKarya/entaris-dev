@@ -21,6 +21,7 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
+import { DUMMY_LEDGER_MARKERS } from '../../services/dummyJournalMatch';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -71,6 +72,12 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
         await tx.purchaseInvoice.updateMany({ where: { isDummy: true }, data: { isDummy: false } });
         await tx.inventoryItem.updateMany({ where: { isDummy: true }, data: { isDummy: false } });
         await tx.journalEntry.updateMany({ where: { isDummy: true }, data: { isDummy: false } });
+        // Old-generator ledger markers left in a dev DB would pull their rows and the matching
+        // untagged generic journals into the delete: rename them so nothing matches.
+        await tx.accountingLedgerEntry.updateMany({
+          where: { referenceId: { in: [...DUMMY_LEDGER_MARKERS] } },
+          data: { referenceId: 'it-hidden-dummy-marker' },
+        });
         await fn(tx);
       } finally {
         state.tx = null;
