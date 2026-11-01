@@ -46,9 +46,9 @@ Toolset **sistem** memuat fungsi pendukung yang aman diakses agen: Jejak Audit, 
 
 ### Profil perusahaan
 
-- `set_company_get` mengembalikan record tunggal (slug `default`): nama, alamat, kontak, NPWP, mata uang (selalu IDR), `fiscalYearStartMonth`, logo (base64, bisa berukuran MB), dan `invoiceSettings` (rekening bank/catatan kaki/tanda tangan pada cetak faktur).
-- `set_company_update` adalah UPSERT PENUH, bukan patch: field yang tidak dikirim di-reset (alamat, telepon, email, NPWP menjadi kosong; `fiscalYearStartMonth` menjadi 1; `companyName` menjadi "Perusahaan Anda" bila kosong). Selalu ambil nilai sekarang dengan `set_company_get` lalu kirim ulang seluruh nilai. `dateFormat` diterima skema tetapi tidak disimpan.
-- Pembukuan hanya rupiah: mata uang perusahaan selalu disimpan IDR. `currency` boleh dikosongkan; nilai selain `IDR` ditolak 400. Hal yang sama berlaku untuk mata uang akun (`coa_create`, `coa_update`) dan pengajuan pembayaran (`payreq_create`, `payreq_update`: "Pengajuan hanya rupiah").
+- `set_company_get` mengembalikan record tunggal (slug `default`): nama, alamat, kontak, NPWP, mata uang (`defaultCurrency`, selalu dikembalikan `IDR`), `fiscalYearStartMonth`, logo (base64, bisa berukuran MB), dan `invoiceSettings` (rekening bank/catatan kaki/tanda tangan pada cetak faktur).
+- `set_company_update` adalah UPSERT PENUH, bukan patch: field yang tidak dikirim di-reset (alamat, telepon, email, NPWP menjadi kosong; `fiscalYearStartMonth` menjadi 1; `companyName` menjadi "Perusahaan Anda" bila kosong). Selalu ambil nilai sekarang dengan `set_company_get` lalu kirim ulang seluruh nilai, kecuali mata uang: jangan kirim `currency`. `dateFormat` diterima skema tetapi tidak disimpan.
+- Pembukuan hanya rupiah: mata uang perusahaan selalu disimpan IDR. `currency` tidak perlu dikirim; nilai selain `IDR` ditolak 400. Hal yang sama berlaku untuk mata uang akun (`coa_create`, `coa_update`) dan pengajuan pembayaran (`payreq_create`, `payreq_update`: "Pengajuan hanya rupiah").
 - Diklasifikasikan critical karena memengaruhi dokumen berikutnya (awal tahun fiskal, NPWP, rekening bank yang tercetak di faktur) dan merupakan konfigurasi global.
 
 ### Health check (diagnostik integritas)
@@ -894,7 +894,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 ### set_company_update
 
-**Ringkasan:** Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1). Kirim ulang semua nilai yang ada. Mata uang selalu IDR (pembukuan hanya rupiah): currency boleh dikosongkan, selain 'IDR' ditolak 400.
+**Ringkasan:** Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1). Kirim ulang semua nilai yang ada kecuali mata uang: jangan kirim currency (server selalu menyimpan IDR, pembukuan hanya rupiah); nilai selain 'IDR' ditolak 400.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -913,7 +913,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 | `taxId` | body | `string` | tidak | NPWP perusahaan |
 | `logoUrl` | body | `string` | tidak |  |
 | `logoUrlDark` | body | `string` | tidak |  |
-| `currency` | body | enum: `IDR` | tidak | Hanya 'IDR' (pembukuan hanya rupiah); selalu disimpan IDR |
+| `currency` | body | enum: `IDR` | tidak | Jangan dikirim: server selalu menyimpan IDR (pembukuan hanya rupiah). Bila dikirim, hanya 'IDR'. |
 | `dateFormat` | body | `string` | tidak | Diterima skema tetapi TIDAK disimpan oleh endpoint |
 | `fiscalYearStartMonth` | body | `number` | tidak | Bulan awal tahun fiskal 1-12 |
 | `invoiceSettings` | body | `object` | tidak | Pengaturan cetak faktur {sales{bankAccounts,footerNote,showSignature,signatureLabels}, purchase{...}} |

@@ -76,7 +76,11 @@ router.get('/company', async (req, res) => {
       prisma.party.findFirst({ where: { isDummy: true }, select: { id: true } }),
       prisma.demoDataBatch.findFirst({ select: { id: true } }),
     ]);
-    return res.json(settings ? { ...settings, hasDummyData: Boolean(dummyParty || demoBatch) } : settings);
+    // Bookkeeping is rupiah only: an old non-IDR code (until the next save or the e2 repair) is a
+    // stale label, so it is never handed back for a client or AIRA to resend.
+    return res.json(
+      settings ? { ...settings, defaultCurrency: RUPIAH, hasDummyData: Boolean(dummyParty || demoBatch) } : settings,
+    );
   } catch (error) {
     logger.error({ error }, 'GET /settings/company error');
     return res.status(500).json({ error: 'Gagal mengambil pengaturan perusahaan.' });
