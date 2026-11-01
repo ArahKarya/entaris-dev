@@ -382,7 +382,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "penyusutan": "depreciation",
   "retur": "return",
   "mutasi stok": "stock movement",
-  "surat jalan": "delivery note",
+  "surat jalan": "delivery order",
   "produksi": "production run",
   "stok opname": "stock count",
   "transfer stok": "stock transfer",

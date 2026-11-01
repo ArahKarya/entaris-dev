@@ -61,7 +61,7 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "proses produksi": "production run",
   "invoice pembelian": "purchase invoice",
   "invoice penjualan": "sales invoice",
-  "Surat Jalan": "Delivery Note",
+  "Surat Jalan": "Delivery Order",
   "Retur Penjualan": "Sales Return",
   "Produksi": "Production",
   "Stok Opname": "Stock Count",

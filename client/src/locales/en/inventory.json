@@ -201,7 +201,7 @@
       "cancelled": "The movement is already cancelled.",
       "doc": {
         "GoodsReceipt": "goods receipt",
-        "DeliveryOrder": "delivery note",
+        "DeliveryOrder": "delivery order",
         "SalesReturn": "sales return",
         "ProductionRun": "production run",
         "StockOpname": "stock count",
@@ -213,7 +213,7 @@
       "openingBalance": "Opening balance movements cannot be changed per row. Correct opening stock with a stock adjustment.",
       "page": {
         "GoodsReceipt": "goods receipt",
-        "DeliveryOrder": "Delivery Note",
+        "DeliveryOrder": "Delivery Order",
         "SalesReturn": "Sales Return",
         "ProductionRun": "Production",
         "StockOpname": "Stock Count",
