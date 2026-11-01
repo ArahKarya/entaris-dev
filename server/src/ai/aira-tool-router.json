@@ -16200,10 +16200,11 @@
       "confirm_template": "SETUJUI pengajuan {id} dan jalankan dokumennya? (efek posting sesuai tipe dokumen)",
       "prerequisites": [
         "Capability approval.decide.",
-        "Pengajuan berstatus Pending."
+        "Pengajuan berstatus Pending (diklaim atomik: dua keputusan bersamaan tidak pernah sama-sama dijalankan)."
       ],
       "errors": [
-        "400: Pengajuan sudah diproses",
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi",
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
         "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
         "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending"
@@ -16261,6 +16262,10 @@
         "Capability approval.decide.",
         "Pengajuan berstatus Pending."
       ],
+      "errors": [
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi"
+      ],
       "related": [
         "appr_approve",
         "appr_request_revision"
@@ -16310,7 +16315,9 @@
       "postingEffect": "Tidak ada efek GL/stok.",
       "confirm_template": "Minta revisi pengajuan {id}: {notes}",
       "errors": [
-        "400: Alasan revisi wajib diisi"
+        "400: Alasan revisi wajib diisi",
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi"
       ],
       "related": [
         "appr_resubmit",
@@ -27846,7 +27853,8 @@
       "errors": [
         "400: hanya status Perlu Revisi",
         "400: tipe dokumen tidak didukung",
-        "403: bukan pengajuan Anda"
+        "403: bukan pengajuan Anda",
+        "409 STALE_STATUS: pengajuan berubah status sejak dibaca (diajukan ulang/diputuskan bersamaan); tidak ada perubahan"
       ],
       "related": [
         "appr_request_get",
