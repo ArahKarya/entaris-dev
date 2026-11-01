@@ -347,7 +347,10 @@ d('closed fiscal year: production runs', () => {
       await close(tx, old);
 
       const before = await snapshot(tx, itemIds, jeIds);
-      expect(await codeOf(inRouteTx((t) => cancelProductionRunInTx(t, pr.id)))).toBe(PERIOD_CLOSED);
+      const e = await inRouteTx((t) => cancelProductionRunInTx(t, pr.id)).catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(BusinessError);
+      expect((e as BusinessError).code).toBe(PERIOD_CLOSED);
+      expect((e as BusinessError).message).toMatch(/; produksi di periode ini/);
       expect(await snapshot(tx, itemIds, jeIds)).toEqual(before);
       expect((await tx.productionRun.findUniqueOrThrow({ where: { id: pr.id } })).isCancelled).toBe(false);
     });

@@ -2,9 +2,10 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { recalculateAccountBalances } from '../utils/accountBalance';
-import { cancelJournalsByPrefix } from '../utils/journalCancel';
+import { cancelTrail } from '../utils/cancelClaim';
 import { journalFamilyWhere } from '../utils/journalFamily';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
+import { cancelJournalsInTx, findDocumentJournals } from './ledger/cancelJournals';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { calcWeightedAverage } from '../utils/weightedAverage';
@@ -91,7 +92,10 @@ export async function editProductionRunInTx(
 
   // Cancel all active journals for this run, including earlier revisions.
   const oldJvNumber = `JV-${oldRun.runNumber}`;
-  await cancelJournalsByPrefix(tx, oldJvNumber);
+  await cancelJournalsInTx(tx, await findDocumentJournals(tx, oldJvNumber), {
+    label: 'produksi',
+    trail: cancelTrail(userId, 'Revisi produksi'),
+  });
   // Balik auto-settle COGS lama sebelum settle ulang dari data baru (hindari numpuk ganda)
   await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', runId);
 

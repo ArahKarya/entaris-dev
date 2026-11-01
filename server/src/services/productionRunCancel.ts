@@ -1,13 +1,12 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
-import { recalculateAccountBalances } from '../utils/accountBalance';
-import { cancelJournalsByPrefix } from '../utils/journalCancel';
-import { journalFamilyWhere } from '../utils/journalFamily';
+import { cancelTrail } from '../utils/cancelClaim';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
+import { cancelJournalsInTx, findDocumentJournals } from './ledger/cancelJournals';
 
 type Tx = Prisma.TransactionClient;
 
@@ -16,11 +15,15 @@ interface CancelOptions {
    *  override route — logs a warning instead of throwing. */
   allowNegativeStock?: boolean;
   negativeStockReason?: string | null;
+  /** The user cancelling the run, stored with `reason` on each voided journal. */
+  userId?: string;
+  reason?: string | null;
 }
 
 /**
  * Cancel a production run: reverse its stock movements, recompute output WAC from the remaining
- * In movements, cancel every JE sharing its JV- prefix (incl. revisions) and recalc balances from JE sums.
+ * In movements, and void the run's journals (JV-<runNumber> and its revisions) through the E1 cancel
+ * model, which reverses account balances per journal line.
  */
 export async function cancelProductionRunInTx(
   tx: Tx,
@@ -91,22 +94,11 @@ export async function cancelProductionRunInTx(
   // — kalau tidak, JV auto-settle tertinggal & persediaan/HPP salah.
   await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', runId);
 
-  // Cancel every related journal entry (including revisions sharing the prefix)
-  // and recompute account balances from authoritative JE sums.
-  const jvNumber = `JV-${run.runNumber}`;
-  const relatedJEItems = await tx.journalItem.findMany({
-    where: {
-      journalEntry: { ...journalFamilyWhere(jvNumber), status: { not: 'Cancelled' } },
-    },
-    select: { accountId: true },
+  // Void the run's journals (JV-<runNumber> and its -R<n> revisions); balances are reversed per line.
+  await cancelJournalsInTx(tx, await findDocumentJournals(tx, `JV-${run.runNumber}`), {
+    label: 'produksi',
+    trail: opts.userId ? cancelTrail(opts.userId, opts.reason) : undefined,
   });
-  const cancelAffectedAccountIds = [...new Set(relatedJEItems.map((ji) => ji.accountId))];
-
-  await cancelJournalsByPrefix(tx, jvNumber);
-
-  if (cancelAffectedAccountIds.length > 0) {
-    await recalculateAccountBalances(tx, cancelAffectedAccountIds);
-  }
 
   await tx.productionRun.update({
     where: { id: runId },
