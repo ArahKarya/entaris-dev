@@ -103,6 +103,11 @@ async function findFiscalYearForDate(tx: Tx, date: Date): Promise<FiscalYear | n
   });
 }
 
+/** Read-only lookup of the fiscal year (open or closed) holding the business day of `date`; no row lock. */
+export function fiscalYearOn(db: Tx, date: Date): Promise<FiscalYear | null> {
+  return findFiscalYearForDate(db, date);
+}
+
 /**
  * Postgres lock_not_available (55P03), raised when a lock wait outlasts lock_timeout. Through the
  * pg driver adapter a raw query fails with P2010 and the SQLSTATE in meta.driverAdapterError.

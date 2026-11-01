@@ -3,11 +3,17 @@ import { prisma } from '../lib/prisma';
 import { requireCap, AuthRequest } from '../middleware/auth';
 import { hasCap } from '../services/permissionService';
 import { logger } from '../lib/logger';
-import { CreatePurchaseInvoiceSchema, CreateProductionRunSchema } from '../utils/schemas';
 import { decideApproval } from '../services/approvalDecision';
 import { buildApprovalComparison, isEditDocumentType, findPendingForTarget } from '../services/approvalEditRequests';
 import { loadApprovalLookups } from '../services/approvalContextLookups';
 import { parseApprovalCheckQuery } from '../utils/approvalCheckQuery';
+import { applyResubmit, productionRunResubmitAllowed, resubmitAmount } from '../services/approvalResubmit';
+import { negativeStockForbiddenBody } from '../utils/negativeStockGate';
+import { purchaseInvoiceTotalsView } from '../services/purchaseInvoiceCalc';
+import { CreatePurchaseInvoiceBaseSchema } from '../utils/schemas';
+import { APPROVAL_BUSY } from '../services/approvalClaim';
+import { STALE_STATUS } from '../utils/cancelClaim';
+import { BusinessError } from '../utils/errors';
 
 const router = Router();
 
@@ -200,9 +206,14 @@ router.get('/requests/:id/context', async (req: AuthRequest, res) => {
     }));
     // Party / item names for the dialog (payload stores ids only).
     const lookups = await loadApprovalLookups(prisma, payload);
+    // Invoice totals by the posting formula, so the dialog shows what approve will book. Parsed
+    // without the header-potongan rule: an old payload still gets totals plus the mismatch flag.
+    // null for other types and for a payload that no longer parses.
+    const piParsed = request.documentType === 'PurchaseInvoice' ? CreatePurchaseInvoiceBaseSchema.safeParse(payload) : null;
+    const piTotals = piParsed?.success ? purchaseInvoiceTotalsView(piParsed.data) : null;
     res.json({
       sttLines, stts, requestAttachments: requestAtt, supplier, priceHistory,
-      party: lookups.party, items: lookups.items,
+      party: lookups.party, items: lookups.items, piTotals,
       comparison: buildApprovalComparison(request),
     });
   } catch (error) {
@@ -271,6 +282,12 @@ router.post('/requests', async (req: AuthRequest, res) => {
   }
 });
 
+// HTTP status of a failed decision: 409 when another decision got there first (STALE_STATUS) or
+// still holds the request (APPROVAL_BUSY); every other failure, PERIOD_LOCKED included, stays 400.
+function decisionStatus(code: string | undefined): 400 | 409 {
+  return code === STALE_STATUS || code === APPROVAL_BUSY ? 409 : 400;
+}
+
 // POST /requests/:id/approve — eksekusi dokumen dari payload, lalu tandai Approved.
 // Dokumen baru DIBUAT di sini (gate "approve-before-effect"). Submit asli
 // dijalankan dgn requester sbg pembuat dokumen (audit menunjuk si penginput).
@@ -281,7 +298,7 @@ router.post('/requests/:id/approve', requireCap('approval.decide'), async (req: 
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
+  if (!result.ok) return res.status(decisionStatus(result.code)).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -293,7 +310,7 @@ router.post('/requests/:id/reject', requireCap('approval.decide'), async (req: A
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
+  if (!result.ok) return res.status(decisionStatus(result.code)).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -306,7 +323,7 @@ router.post('/requests/:id/request-revision', requireCap('approval.decide'), asy
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
+  if (!result.ok) return res.status(decisionStatus(result.code)).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -329,32 +346,21 @@ router.put('/requests/:id/resubmit', async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Payload tidak valid.' });
     }
 
-    let amount = 0;
-    if (request.documentType === 'PurchaseInvoice') {
-      const parsed = CreatePurchaseInvoiceSchema.safeParse(rawPayload);
-      if (!parsed.success) return res.status(400).json({ error: 'Data invoice tidak valid: ' + parsed.error.issues[0]?.message });
-      amount = (parsed.data.items ?? []).reduce((s: number, it: any) => s + Number(it.amount ?? 0), 0) + Number((parsed.data as any).biayaLain ?? 0);
-    } else if (request.documentType === 'ProductionRun') {
-      const parsed = CreateProductionRunSchema.safeParse(rawPayload);
-      if (!parsed.success) return res.status(400).json({ error: 'Data produksi tidak valid: ' + parsed.error.issues[0]?.message });
-      amount = (parsed.data.inputs ?? []).reduce((s: number, it: any) => s + Number(it.quantity ?? 0), 0);
-    } else {
-      return res.status(400).json({ error: 'Tipe dokumen tidak didukung.' });
+    const priced = resubmitAmount(request.documentType, rawPayload);
+    if (!priced) return res.status(400).json({ error: 'Tipe dokumen tidak didukung.' });
+    if (!priced.ok) return res.status(400).json({ error: priced.error });
+    if (!(await productionRunResubmitAllowed(req.user!.role, request.documentType, rawPayload))) {
+      return res.status(403).json(negativeStockForbiddenBody());
     }
 
-    const updated = await prisma.approvalRequest.update({
-      where: { id: request.id },
-      data: {
-        payload: rawPayload,
-        amount,
-        status: 'Pending',
-        rejectedBy: null,
-        decidedAt: null,
-      },
-    });
+    const updated = await applyResubmit(prisma, request.id, rawPayload, priced.amount);
     logger.info({ requestId: request.id, by: req.user!.userId }, 'Approval resubmitted');
     res.json(updated);
   } catch (error) {
+    // Resubmitted or decided by someone else since the status check above.
+    if (error instanceof BusinessError && error.code === STALE_STATUS) {
+      return res.status(409).json({ error: error.message, code: error.code });
+    }
     logger.error(error, 'PUT /approvals/requests/:id/resubmit error');
     res.status(500).json({ error: 'Gagal mengajukan ulang.' });
   }

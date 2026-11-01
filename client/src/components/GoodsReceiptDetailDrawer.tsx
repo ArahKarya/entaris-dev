@@ -29,10 +29,12 @@ const GoodsReceiptDetailDrawer: React.FC<Props> = ({ sttId, onClose }) => {
   const company = useCompanyPDF();
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
-  // Set when the cancel failed for insufficient stock: cap doc.cancel may force it with a reason.
+  // Set when the cancel failed for insufficient stock: inventory.negative_stock may force it with a reason.
   const [overrideMessage, setOverrideMessage] = useState<string | null>(null);
 
-  const isAdmin = cap('doc.cancel');
+  const canCancel = cap('doc.cancel');
+  // The server refuses the forced cancel without this capability (Admin by default).
+  const canForceNegative = cap('inventory.negative_stock');
 
   const { data: doc, isLoading } = useQuery({
     queryKey: ['goods-receipt-detail', sttId],
@@ -60,7 +62,7 @@ const GoodsReceiptDetailDrawer: React.FC<Props> = ({ sttId, onClose }) => {
       const insufficient =
         err.response?.data?.code === 'GR_CANCEL_INSUFFICIENT_STOCK' ||
         (/tidak mencukupi|stok/i.test(msg) && /tidak dapat membatalkan/i.test(msg));
-      if (insufficient) {
+      if (insufficient && canForceNegative) {
         setOverrideMessage(msg);
         return;
       }
@@ -149,7 +151,7 @@ const GoodsReceiptDetailDrawer: React.FC<Props> = ({ sttId, onClose }) => {
                   )}
                 </PDFDownloadLink>
               )}
-              {status === 'Submitted' && isAdmin && !doc.isLegacyBackfill && (
+              {status === 'Submitted' && canCancel && !doc.isLegacyBackfill && (
                 <Button
                   variant="outline"
                   className="h-11 border-danger/40 text-danger-text sm:h-9"

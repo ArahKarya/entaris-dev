@@ -121,6 +121,7 @@ function depositColumns(t: T): DataColumn<DepositRow>[] {
     { key: 'supplier', header: t('dailyReport.cols.supplier'), render: (d) => d.supplierName },
     { key: 'amount', header: t('dailyReport.deposits.cols.amount'), numeric: true, className: 'whitespace-nowrap', render: (d) => rp(d.amount) },
     { key: 'applied', header: t('dailyReport.deposits.cols.applied'), numeric: true, className: 'whitespace-nowrap', render: (d) => rp(d.totalApplied) },
+    { key: 'refunded', header: t('dailyReport.deposits.cols.refunded'), numeric: true, className: 'whitespace-nowrap', render: (d) => rp(d.totalRefunded) },
     { key: 'remaining', header: t('dailyReport.deposits.cols.remaining'), numeric: true, className: 'whitespace-nowrap font-semibold', render: (d) => rp(d.remaining) },
   ];
 }
@@ -132,10 +133,11 @@ export function DepositsSection({ data }: { data: DailyData['vendorDeposits'] })
     <ReportSection title={t('dailyReport.deposits.title')} icon={Package} count={data.deposits.length}>
       <ReportMetricGrid
         label={t('dailyReport.deposits.summary')}
-        className="mb-4 sm:grid-cols-3"
+        className="mb-4 sm:grid-cols-2 lg:grid-cols-4"
         items={[
           { label: t('dailyReport.deposits.total'), value: rp(s.totalDeposits) },
           { label: t('dailyReport.deposits.applied'), value: rp(s.totalApplied) },
+          { label: t('dailyReport.deposits.refunded'), value: rp(s.totalRefunded) },
           { label: t('dailyReport.deposits.remaining'), value: rp(s.totalRemaining) },
         ]}
       />
