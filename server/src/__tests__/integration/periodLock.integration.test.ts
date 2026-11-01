@@ -246,7 +246,9 @@ d('period lock: postings and cancels', () => {
       clockAt(`${Y}-06-15T03:00:00Z`);
       expect((await lockAt(tx, `${Y}-05-31`)).status).toBe(200);
 
-      const r = await callRoute(dummyDataRouter, 'post', '/generate-dummy', { userId: adminId, role: 'Admin' });
+      // Own role with settings edit: CI has no built-in Admin role unless another file booted the RBAC seed first.
+      const actor = await createCapUser(tx, [], { perms: { settings: 'edit' } });
+      const r = await callRoute(dummyDataRouter, 'post', '/generate-dummy', actor);
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       // Stock movements before June (opening stock on 1 April, April and May runs) are in the locked window.
       const opening = await tx.stockMovement.count({ where: { fiscalYearId: year.id, date: { lt: new Date(`${Y}-06-01`) } } });
