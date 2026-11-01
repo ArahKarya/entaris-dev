@@ -8,10 +8,12 @@
 // Two kinds of candidates, for requests that create a document (PurchaseInvoice, ProductionRun,
 // SalesReturn, DeliveryOrder):
 // - duplicate: an Approved request's document has a twin of the same type with the same creator
-//   (the requester), party, business day and total quantity, created within ±10 minutes of the
+//   (the requester), party key, business day and total quantity, created within ±10 minutes of the
 //   decision and not the document of any approval request;
 // - pending_with_document: a Pending request whose payload (creator, party, day, total quantity)
 //   matches a document created after the request and not the document of any approval request.
+// The party key is the source invoice for a SalesReturn (its payload has no partyId) and the
+// party otherwise; a purchase invoice line counts its weighed quantity when one was typed.
 // Two genuine documents with equal values in the same window are reported too: candidates only.
 //
 // Usage (from server/, DATABASE_URL set):
@@ -43,7 +45,8 @@ export interface DocRow {
   id: string;
   number: string;
   createdBy: string;
-  partyId: string | null;
+  // Source sales invoice for a SalesReturn, party otherwise (null for a ProductionRun).
+  partyKey: string | null;
   day: string;
   qty: number;
   createdAt: Date;
@@ -62,14 +65,26 @@ export interface CandidateRow {
   candidateCancelled: boolean;
 }
 
-// Quantity that identifies a document: production inputs, line quantities otherwise.
+// Quantity that identifies a document: production inputs, line quantities otherwise. A purchase
+// invoice stores the weighed quantity when it is set (purchaseInvoiceCalc.effectiveQuantity).
 function payloadQty(type: CreatingType, payload: Record<string, unknown>): number {
-  const lines = (type === 'ProductionRun' ? payload.inputs : payload.items) as Array<{ quantity?: unknown }> | undefined;
-  return (lines ?? []).reduce((s, l) => s + Number(l.quantity ?? 0), 0);
+  const lines = (type === 'ProductionRun' ? payload.inputs : payload.items) as
+    | Array<{ quantity?: unknown; timbanganDiterima?: unknown }>
+    | undefined;
+  return (lines ?? []).reduce((s, l) => {
+    const weighed = type === 'PurchaseInvoice' ? Number(l.timbanganDiterima ?? 0) : 0;
+    return s + (weighed > 0 ? weighed : Number(l.quantity ?? 0));
+  }, 0);
 }
 
-const sameSignature = (a: Pick<DocRow, 'createdBy' | 'partyId' | 'day' | 'qty'>, b: DocRow) =>
-  a.createdBy === b.createdBy && a.partyId === b.partyId && a.day === b.day && Math.abs(a.qty - b.qty) < 1e-6;
+// Same key as loadDocs stores: the source invoice for a SalesReturn, the party otherwise.
+function payloadPartyKey(type: CreatingType, payload: Record<string, unknown>): string | null {
+  const key = type === 'SalesReturn' ? payload.salesInvoiceId : payload.partyId;
+  return typeof key === 'string' ? key : null;
+}
+
+const sameSignature = (a: Pick<DocRow, 'createdBy' | 'partyKey' | 'day' | 'qty'>, b: DocRow) =>
+  a.createdBy === b.createdBy && a.partyKey === b.partyKey && a.day === b.day && Math.abs(a.qty - b.qty) < 1e-6;
 
 /**
  * Pure matcher. `docs` holds the documents of each type; `linkedDocIds` every documentId of any
@@ -97,7 +112,7 @@ export function findCandidates(
       if (typeof p.date !== 'string') continue;
       const wanted = {
         createdBy: r.requestedBy,
-        partyId: typeof p.partyId === 'string' ? p.partyId : null,
+        partyKey: payloadPartyKey(r.documentType, p),
         day: p.date.slice(0, 10),
         qty: payloadQty(r.documentType, p),
       };
@@ -140,7 +155,7 @@ async function loadDocs(creators: string[]): Promise<Map<CreatingType, DocRow[]>
     }),
     prisma.salesReturn.findMany({
       where: { createdBy: { in: creators } },
-      select: { id: true, returnNumber: true, createdBy: true, partyId: true, date: true, createdAt: true, status: true, items: { select: { quantity: true } } },
+      select: { id: true, returnNumber: true, createdBy: true, salesInvoiceId: true, date: true, createdAt: true, status: true, items: { select: { quantity: true } } },
     }),
     prisma.deliveryOrder.findMany({
       where: { createdBy: { in: creators } },
@@ -148,10 +163,10 @@ async function loadDocs(creators: string[]): Promise<Map<CreatingType, DocRow[]>
     }),
   ]);
   return new Map<CreatingType, DocRow[]>([
-    ['PurchaseInvoice', pis.map((d) => ({ id: d.id, number: d.invoiceNumber, createdBy: d.createdBy, partyId: d.partyId, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.status === 'Cancelled' }))],
-    ['ProductionRun', runs.map((d) => ({ id: d.id, number: d.runNumber, createdBy: d.createdById, partyId: null, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.isCancelled }))],
-    ['SalesReturn', returns.map((d) => ({ id: d.id, number: d.returnNumber, createdBy: d.createdBy, partyId: d.partyId, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.status === 'Cancelled' }))],
-    ['DeliveryOrder', dos.map((d) => ({ id: d.id, number: d.doNumber, createdBy: d.createdBy, partyId: d.partyId, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.status === 'Cancelled' }))],
+    ['PurchaseInvoice', pis.map((d) => ({ id: d.id, number: d.invoiceNumber, createdBy: d.createdBy, partyKey: d.partyId, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.status === 'Cancelled' }))],
+    ['ProductionRun', runs.map((d) => ({ id: d.id, number: d.runNumber, createdBy: d.createdById, partyKey: null, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.isCancelled }))],
+    ['SalesReturn', returns.map((d) => ({ id: d.id, number: d.returnNumber, createdBy: d.createdBy, partyKey: d.salesInvoiceId, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.status === 'Cancelled' }))],
+    ['DeliveryOrder', dos.map((d) => ({ id: d.id, number: d.doNumber, createdBy: d.createdBy, partyKey: d.partyId, day: day(d.date), qty: sumQty(d.items), createdAt: d.createdAt, cancelled: d.status === 'Cancelled' }))],
   ]);
 }
 
