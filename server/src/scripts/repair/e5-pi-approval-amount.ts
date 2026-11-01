@@ -5,8 +5,10 @@
 //   potonganMismatch  header potongan differs from the line deductions: approve now refuses the
 //                     payload, so the approver asks the requester for a revision
 //   invalidPayload    the payload no longer parses
-// --apply needs --approved-by "<accountant name>"; the name goes into the CSV, which --apply
-// always writes (default file name when --out is not given), and into the console output.
+// --apply needs --approved-by "<accountant name>"; the name is recorded on one audit row per
+// corrected request (same transaction as the fix), in the CSV, which --apply always writes
+// (default file name when --out is not given), and in the console output. The CSV is written once
+// before the transaction (applied = no) so an unwritable path stops the run before anything commits.
 // Run the dry run before deploying the E5-R1 change.
 //
 // Usage (from server/, DATABASE_URL set):
@@ -70,8 +72,10 @@ async function main() {
     console.log(`  ${r.action} ${r.requestId} [${r.status}] ${r.requester}: stored ${r.storedAmount} -> computed ${r.computedAmount}${r.error ? ` (${r.error})` : ''}`);
   }
 
+  const out = opts.out ?? (opts.apply ? `e5-pi-approval-amount-${new Date().toISOString().replace(/[:.]/g, '-')}.csv` : null);
   let applied = new Set<string>();
   if (opts.apply && opts.approvedBy) {
+    if (out) writeCsv(out, plan, applied, opts.approvedBy);
     const result = await prisma.$transaction((tx) => applyPiApprovalAmountFixes(tx, plan, opts.approvedBy as string));
     applied = new Set(result.applied);
     console.log(`Applied ${result.applied.length} amount fix(es), approved by ${result.approvedBy}.`);
@@ -80,7 +84,6 @@ async function main() {
     console.log('Dry run: nothing written. Pass --apply --approved-by "<accountant name>" to correct the fix rows.');
   }
 
-  const out = opts.out ?? (opts.apply ? `e5-pi-approval-amount-${new Date().toISOString().replace(/[:.]/g, '-')}.csv` : null);
   if (out) writeCsv(out, plan, applied, opts.approvedBy);
 }
 

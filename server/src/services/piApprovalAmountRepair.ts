@@ -2,7 +2,8 @@
 // queue (Pending / NeedsRevision) whose stored amount is not the invoice grand total. Before E5-R1
 // the queue amount subtracted the header potongan a second time, and a resubmit stored biayaLain
 // alone. Only `amount` is ever written (a display value: approve recomputes the invoice from the
-// payload), never the payload, the status or a journal.
+// payload), never the payload, the status or a journal. Each corrected request also gets one
+// audit row (via 'repair') naming the accountant who approved the run, in the same transaction.
 
 import Decimal from 'decimal.js';
 import type { Prisma } from '@prisma/client';
@@ -27,6 +28,8 @@ export interface PiApprovalAmountRow {
   status: string;
   createdAt: Date;
   requester: string;
+  /** User id of the requester: the audit row of a fix hangs off it (a script has no user). */
+  requesterId: string;
   storedAmount: number | null;
   /** null when the payload does not parse. */
   computedAmount: number | null;
@@ -45,7 +48,10 @@ export async function planPiApprovalAmountFixes(db: Db): Promise<PiApprovalAmoun
   const requests = await db.approvalRequest.findMany({
     where: { documentType: 'PurchaseInvoice', status: { in: [...PI_APPROVAL_OPEN_STATUSES] } },
     orderBy: { createdAt: 'asc' },
-    select: { id: true, status: true, createdAt: true, amount: true, payload: true, requester: { select: { fullName: true } } },
+    select: {
+      id: true, status: true, createdAt: true, amount: true, payload: true, requestedBy: true,
+      requester: { select: { fullName: true } },
+    },
   });
 
   const rows: PiApprovalAmountRow[] = [];
@@ -55,6 +61,7 @@ export async function planPiApprovalAmountFixes(db: Db): Promise<PiApprovalAmoun
       status: r.status,
       createdAt: r.createdAt,
       requester: r.requester.fullName,
+      requesterId: r.requestedBy,
       storedAmount: r.amount === null ? null : Number(r.amount),
     };
     const parsed = CreatePurchaseInvoiceBaseSchema.safeParse(r.payload);
@@ -78,6 +85,8 @@ export async function planPiApprovalAmountFixes(db: Db): Promise<PiApprovalAmoun
   return rows;
 }
 
+export const PI_APPROVAL_AMOUNT_AUDIT_ACTION = 'e5-pi-approval-amount';
+
 export interface PiApprovalAmountApplyResult {
   approvedBy: string;
   /** Requests whose amount was corrected. */
@@ -88,7 +97,10 @@ export interface PiApprovalAmountApplyResult {
 
 /**
  * Writes the `fix` rows of `plan`: only `amount`, and only while the request still has the status
- * and amount the plan saw. `approvedBy` (the accountant who approved the run) is required.
+ * and amount the plan saw. `approvedBy` (the accountant who approved the run) is required and is
+ * recorded on one audit row per corrected request (old and new amount), so the approval survives
+ * in the database even if the CSV report is lost. The audit row's user is the requester, since a
+ * script has no user of its own; `via: 'repair'` and viaMeta mark it as written by this script.
  */
 export async function applyPiApprovalAmountFixes(
   db: Db,
@@ -105,7 +117,23 @@ export async function applyPiApprovalAmountFixes(
       where: { id: row.requestId, status: row.status, amount: row.storedAmount },
       data: { amount: row.computedAmount },
     });
-    (count === 1 ? applied : skipped).push(row.requestId);
+    if (count !== 1) {
+      skipped.push(row.requestId);
+      continue;
+    }
+    await db.auditLog.create({
+      data: {
+        userId: row.requesterId,
+        action: PI_APPROVAL_AMOUNT_AUDIT_ACTION,
+        entityType: 'ApprovalRequest',
+        entityId: row.requestId,
+        oldValues: { amount: row.storedAmount },
+        newValues: { amount: row.computedAmount, approvedBy: name },
+        via: 'repair',
+        viaMeta: { script: PI_APPROVAL_AMOUNT_AUDIT_ACTION, approvedBy: name },
+      },
+    });
+    applied.push(row.requestId);
   }
   return { approvedBy: name, applied, skipped };
 }

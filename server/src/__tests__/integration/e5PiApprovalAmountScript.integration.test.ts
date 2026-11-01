@@ -4,7 +4,9 @@
  *   header potongan disagrees with the lines (potonganMismatch) or whose payload no longer parses;
  *   correct requests, decided requests and other document types are not listed;
  * - apply refuses to run without an approver name; with one it changes only `amount` of the fix
- *   rows, leaves the mismatch and invalid rows untouched, and skips a request decided meanwhile.
+ *   rows, leaves the mismatch and invalid rows untouched, and skips a request decided meanwhile;
+ *   each corrected request gets one audit row (via 'repair') with the old and new amount and the
+ *   approver name, a skipped one gets none.
  *
  * No fiscal year: nothing here posts. Assertions only look at this file's fixture rows (the plan
  * is filtered by request id) since the database may hold other queued requests.
@@ -121,6 +123,20 @@ d('e5-pi-approval-amount core', () => {
       expect(Number(mismatch.amount)).toBe(9_500_000);
       expect(mismatch.payload).toEqual(piPayload({ potongan: 500_000 }));
       expect(Number((await tx.approvalRequest.findUniqueOrThrow({ where: { id: r.invalid.id } })).amount)).toBe(1);
+
+      // The approver is recorded in the database, one audit row per corrected request only.
+      const audits = await tx.auditLog.findMany({
+        where: { entityType: 'ApprovalRequest', entityId: { in: [r.doubleCut.id, r.resubmitted.id] }, via: 'repair' },
+      });
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        entityId: r.doubleCut.id,
+        userId: r.doubleCut.requestedBy,
+        action: 'e5-pi-approval-amount',
+        oldValues: { amount: 9_900_000 },
+        newValues: { amount: 10_000_000, approvedBy: 'Siti Akuntan' },
+        viaMeta: { script: 'e5-pi-approval-amount', approvedBy: 'Siti Akuntan' },
+      });
 
       // A second plan finds nothing left to fix among the fixture rows.
       const again = (await planPiApprovalAmountFixes(tx)).filter((row) => ids.has(row.requestId) && row.action === 'fix');
