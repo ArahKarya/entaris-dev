@@ -7,7 +7,8 @@ import { decideApproval } from '../services/approvalDecision';
 import { buildApprovalComparison, isEditDocumentType, findPendingForTarget } from '../services/approvalEditRequests';
 import { loadApprovalLookups } from '../services/approvalContextLookups';
 import { parseApprovalCheckQuery } from '../utils/approvalCheckQuery';
-import { applyResubmit, resubmitAmount } from '../services/approvalResubmit';
+import { applyResubmit, productionRunResubmitAllowed, resubmitAmount } from '../services/approvalResubmit';
+import { negativeStockForbiddenBody } from '../utils/negativeStockGate';
 
 const router = Router();
 
@@ -332,6 +333,9 @@ router.put('/requests/:id/resubmit', async (req: AuthRequest, res) => {
     const priced = resubmitAmount(request.documentType, rawPayload);
     if (!priced) return res.status(400).json({ error: 'Tipe dokumen tidak didukung.' });
     if (!priced.ok) return res.status(400).json({ error: priced.error });
+    if (!(await productionRunResubmitAllowed(req.user!.role, request.documentType, rawPayload))) {
+      return res.status(403).json(negativeStockForbiddenBody());
+    }
 
     const updated = await applyResubmit(prisma, request.id, rawPayload, priced.amount);
     logger.info({ requestId: request.id, by: req.user!.userId }, 'Approval resubmitted');

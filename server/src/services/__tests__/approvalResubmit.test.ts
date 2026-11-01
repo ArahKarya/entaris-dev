@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+
+const { roleCaps } = vi.hoisted(() => ({ roleCaps: {} as Record<string, string[]> }));
+vi.mock('../permissionService', () => ({
+  hasCap: async (role: string, cap: string) => (roleCaps[role] ?? []).includes(cap),
+}));
+
 import {
   applyResubmit,
+  productionRunResubmitAllowed,
   productionRunResubmitAmount,
   purchaseInvoiceResubmitAmount,
   resubmitAmount,
@@ -88,5 +95,28 @@ describe('applyResubmit', () => {
       where: { id: 'req-1' },
       data: { payload: rawPayload, amount: 1200, status: 'Pending', rejectedBy: null, decidedAt: null },
     });
+  });
+});
+
+describe('productionRunResubmitAllowed', () => {
+  roleCaps.Staff = [];
+  roleCaps.Admin = ['inventory.negative_stock'];
+  const bypass = { ...prodPayload([{ itemId: 'in-1', quantity: 10 }]), allowNegativeStock: true, negativeStockReason: 'Stok fisik sudah dihitung ulang' };
+
+  it('refuses the negative-stock bypass without inventory.negative_stock', async () => {
+    await expect(productionRunResubmitAllowed('Staff', 'ProductionRun', bypass)).resolves.toBe(false);
+  });
+
+  it('allows the bypass for a holder of inventory.negative_stock', async () => {
+    await expect(productionRunResubmitAllowed('Admin', 'ProductionRun', bypass)).resolves.toBe(true);
+  });
+
+  it('allows a run without the bypass, and a flag that is not strictly true', async () => {
+    await expect(productionRunResubmitAllowed('Staff', 'ProductionRun', prodPayload([]))).resolves.toBe(true);
+    await expect(productionRunResubmitAllowed('Staff', 'ProductionRun', { ...bypass, allowNegativeStock: false })).resolves.toBe(true);
+  });
+
+  it('does not gate other document types', async () => {
+    await expect(productionRunResubmitAllowed('Staff', 'PurchaseInvoice', bypass)).resolves.toBe(true);
   });
 });

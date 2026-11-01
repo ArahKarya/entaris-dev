@@ -6,6 +6,7 @@ import type { Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import type { prisma } from '../lib/prisma';
 import { CreateProductionRunSchema, CreatePurchaseInvoiceSchema } from '../utils/schemas';
+import { negativeStockBypassDenied } from '../utils/negativeStockGate';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -42,6 +43,18 @@ export function resubmitAmount(documentType: string, rawPayload: unknown): Resub
     return { ok: true, amount: productionRunResubmitAmount(parsed.data) };
   }
   return null;
+}
+
+// A resubmitted production run that asks for the negative-stock bypass needs the resubmitter to
+// hold inventory.negative_stock, like posting a draft does: the approver only needs approval.decide
+// and the approval runs the payload as is. false = the route answers 403 and leaves the request
+// in NeedsRevision. Call it after resubmitAmount accepted the payload; the schema's allowNegativeStock
+// is a strict boolean, so the raw value is the one the approval will use.
+// Delivery orders cannot be resubmitted yet (resubmitAmount returns null), so they need no gate here.
+export async function productionRunResubmitAllowed(role: string, documentType: string, rawPayload: unknown): Promise<boolean> {
+  if (documentType !== 'ProductionRun') return true;
+  const allowNegativeStock = (rawPayload as { allowNegativeStock?: unknown } | null)?.allowNegativeStock === true;
+  return !(await negativeStockBypassDenied(role, allowNegativeStock));
 }
 
 // Stores the corrected payload (as sent, not the parsed copy) and sends the request back to Pending.
