@@ -575,7 +575,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 ### hc_run
 
-**Ringkasan:** Jalankan 6 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang. Hanya membaca.
+**Ringkasan:** Jalankan 8 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), dan Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger). Dua cek terakhir hanya deteksi (status warning, tanpa perbaikan otomatis) dan memakai saldo hari ini. Hanya membaca.
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin (modul `audit` / `view`)
