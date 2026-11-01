@@ -182,6 +182,23 @@ describe('auditTrailMiddleware', () => {
     );
   });
 
+  it.each([
+    ['/api/settings/reset-data', { error: 'Data dihapus, tetapi data awal gagal diisi ulang.', safetyBackup: 'pre-reset-2.sql.gz' }],
+    ['/api/backup/restore', { error: 'Restore mungkin sudah diterapkan.', code: 'RESTORE_UNCERTAIN', safetyBackup: 'pre-restore-2.sql.gz' }],
+  ])('still logs who ran %s when it answers 500 (data may already be replaced)', async (url, body) => {
+    const { res, sent } = fakeRes();
+    await mount(fakeReq({ originalUrl: url, headers: { 'x-request-id': 'req-fail' } }), res);
+    res.status(500).json(body);
+    await flush();
+
+    expect(m.create).not.toHaveBeenCalled();
+    expect(sent).toEqual([{ status: 500, body }]);
+    expect(m.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'req-fail', userId: 'u1', route: `POST ${url}`, status: 500, safetyBackup: body.safetyBackup }),
+      expect.any(String),
+    );
+  });
+
   it('prefers res.locals.safetyBackup and ignores a query string when matching the log-only routes', async () => {
     const { res } = fakeRes();
     await mount(fakeReq({ originalUrl: '/api/backup/restore/?x=1' }), res);

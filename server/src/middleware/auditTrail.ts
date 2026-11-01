@@ -98,13 +98,16 @@ export const auditTrailMiddleware = async (req: AuthRequest, res: Response, next
     }
     sending = true;
     const status = res.statusCode;
-    if (status < 200 || status >= 300) return originalJson(body);
 
+    // Logged whatever the status: a 500 here can follow a committed TRUNCATE (which also empties
+    // audit_trail) or a restore that may have been applied, so this line is the only record of who ran it.
     if (LOG_ONLY_ROUTES.has(route)) {
       const safetyBackup = res.locals.safetyBackup ?? (body as { safetyBackup?: unknown } | null)?.safetyBackup;
       logger.warn({ requestId, userId: user.userId, route, status, safetyBackup }, 'Audited by log only: this route replaces the users table');
       return originalJson(body);
     }
+
+    if (status < 200 || status >= 300) return originalJson(body);
 
     const persist = async () => {
       try {
