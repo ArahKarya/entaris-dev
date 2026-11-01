@@ -38,6 +38,7 @@ function makeTx(initial: Record<string, any> = {}) {
     productionRunDraft: {
       create: vi.fn(async ({ data }: any) => { const d = { id: 'd1', ...data }; drafts.set('d1', d); return d; }),
       findUnique: vi.fn(async ({ where }: any) => drafts.get(where.id) ?? null),
+      count: vi.fn(async ({ where }: any) => [...drafts.values()].filter((d) => matches(d, where)).length),
       update: vi.fn(async ({ where, data }: any) => { Object.assign(drafts.get(where.id), data); return drafts.get(where.id); }),
       updateMany: vi.fn(async ({ where, data }: any) => {
         let count = 0;
@@ -140,6 +141,14 @@ describe('approval outcome', () => {
     expect(await markDraftPostedByApproval(tx, 'req-1', { id: 'run-9', number: 'PR-9' }, 'admin')).toBe(1);
     expect(tx.drafts.get('d1')).toMatchObject({ status: 'Posted', postedRunId: 'run-9' });
     expect(await markDraftPostedByApproval(tx, 'legacy-req', { id: 'r', number: 'n' }, 'admin')).toBe(0);
+  });
+  it('a second approve of a draft-linked request throws NOT_POSTABLE instead of posting another run', async () => {
+    const tx = makeTx({ d1: draftRow({ status: 'PendingApproval', approvalRequestId: 'req-1' }) });
+    await markDraftPostedByApproval(tx, 'req-1', { id: 'run-9', number: 'PR-9' }, 'admin');
+    const err = await markDraftPostedByApproval(tx, 'req-1', { id: 'run-10', number: 'PR-10' }, 'admin').catch((e) => e);
+    expect(err).toBeInstanceOf(BusinessError);
+    expect(err).toMatchObject({ code: 'NOT_POSTABLE', message: 'Draft sudah diproses atau tidak lagi berstatus Draft.' });
+    expect(tx.drafts.get('d1')).toMatchObject({ status: 'Posted', postedRunId: 'run-9' });
   });
   it('reject returns draft to Draft with note and detaches the request', async () => {
     const tx = makeTx({ d1: draftRow({ status: 'PendingApproval', approvalRequestId: 'req-1' }) });
