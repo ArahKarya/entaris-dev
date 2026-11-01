@@ -212,6 +212,16 @@ function DetailContent({
           </>
         ) : isProd ? (
           <>
+            {p.allowNegativeStock === true && (
+              <div className="rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-xs text-warning-text">
+                <p className="font-semibold">{t('detail.production.negativeStockBypass')}</p>
+                {p.negativeStockReason && (
+                  <p className="mt-0.5">
+                    <span className="font-semibold">{t('detail.production.negativeStockReason')}</span> {p.negativeStockReason}
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <p className="text-xs font-semibold text-foreground mb-1.5">{t('detail.production.inputs')}</p>
               <div className="border border-border rounded-lg divide-y divide-border">

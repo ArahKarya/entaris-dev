@@ -96,6 +96,8 @@
       "warehouseFallback": "warehouse"
     },
     "production": {
+      "negativeStockBypass": "Negative stock bypass: raw material stock may go negative when approved.",
+      "negativeStockReason": "Reason:",
       "inputs": "Raw materials (input)",
       "outputs": "Production output",
       "batchRate": "batch @{{rate}}",
