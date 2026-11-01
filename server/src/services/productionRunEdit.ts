@@ -21,6 +21,24 @@ import { buildProductionRunLineItems } from './productionRunLines';
 type Tx = Prisma.TransactionClient;
 
 /**
+ * Number of the next revision journal of `base`: `<base>-R<n>` with n one above the highest
+ * existing `-R<n>` in its family (cancelled ones included), starting at 1. Counting cancelled
+ * journals instead repeated -R1 for a run posted without an original journal (P2002).
+ */
+export async function nextRevisionNumber(tx: Tx, base: string): Promise<string> {
+  const family = await tx.journalEntry.findMany({
+    where: journalFamilyWhere(base),
+    select: { entryNumber: true },
+  });
+  const prefix = `${base}-R`;
+  const highest = family.reduce((max, { entryNumber }) => {
+    const rest = entryNumber.startsWith(prefix) ? entryNumber.slice(prefix.length) : '';
+    return /^\d+$/.test(rest) ? Math.max(max, Number(rest)) : max;
+  }, 0);
+  return `${prefix}${highest + 1}`;
+}
+
+/**
  * Edit a production run: reverse its movements and JEs (record kept), re-apply the
  * new data and post a revision JE JV-{runNumber}-R{n}. Cancelled runs are rejected;
  * affected balances are recalculated from JE sums afterwards to prevent drift.
@@ -455,15 +473,9 @@ export async function editProductionRunInTx(
   }
 
   if (journalItems.length > 0) {
-    // Revision suffix derived from how many cancelled JEs already share the
-    // prefix. -R1, -R2, ... predictable.
-    const cancelledCount = await tx.journalEntry.count({
-      where: { ...journalFamilyWhere(oldJvNumber), status: 'Cancelled' },
-    });
-    const revSuffix = `-R${cancelledCount > 0 ? cancelledCount : 1}`;
     const journalEntry = await tx.journalEntry.create({
       data: {
-        entryNumber: oldJvNumber + revSuffix,
+        entryNumber: await nextRevisionNumber(tx, oldJvNumber),
         date: txDate,
         narration: `Produksi (revisi): ${oldRun.runNumber} (${inputNames} → ${outputNames})`,
         status: 'Submitted',
