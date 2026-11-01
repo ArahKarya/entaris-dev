@@ -7,8 +7,7 @@ import { AuthRequest, requirePerm } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
 import { translateMessage } from '../../i18n/translateMessage';
 import { requestLanguage } from '../../middleware/responseLanguage';
-import { hasCap } from '../../services/permissionService';
-import { activeDemoBatch, countUserChangesSince, findNonEmptyDataTables, hasLegacyDummyData } from '../../services/demoData/guard';
+import { activeDemoBatch, canManageDemoData, countUserChangesSince, findNonEmptyDataTables, hasLegacyDummyData } from '../../services/demoData/guard';
 import { DemoStartBlocked, startDemoGeneration } from '../../services/demoData/runner';
 import { wipeDemoData } from '../../services/demoData/wipe';
 
@@ -16,7 +15,7 @@ const router = Router();
 
 /** Generating and deleting demo data both rewrite every transaction table: same gate for both. */
 async function canManageDemo(req: AuthRequest, res: Response): Promise<boolean> {
-  if (await hasCap(req.user!.role, 'approval.bypass')) return true;
+  if (await canManageDemoData(req.user!.role)) return true;
   res.status(403).json({ error: 'Hanya pengguna yang boleh melewati persetujuan yang dapat mengelola data uji coba.' });
   return false;
 }
