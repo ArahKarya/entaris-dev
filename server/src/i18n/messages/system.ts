@@ -105,6 +105,11 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Semua stok produk sesuai": "All product stock matches",
   "{0} item: total inventory_items ≠ SUM(inventory_stocks per gudang)": "{0} items: total inventory_items ≠ SUM(inventory_stocks per warehouse)",
   "Total stok per item konsisten dengan saldo per gudang": "Total stock per item matches the per-warehouse balances",
+  // health checks: AR and customer deposit vs subledger (E4-R3)
+  "{0} Customer: saldo Piutang di Buku Besar berbeda dengan sisa tagihan invoice": "{0} Customers: the Receivable balance in the General Ledger differs from the invoices' outstanding amount",
+  "Saldo Piutang di Buku Besar sama dengan sisa tagihan invoice per Customer": "The Receivable balance in the General Ledger matches the invoices' outstanding amount for every Customer",
+  "{0} Customer: saldo Uang Muka Customer di Buku Besar berbeda dengan sisa uang muka": "{0} Customers: the Customer Deposit balance in the General Ledger differs from the remaining deposits",
+  "Saldo Uang Muka Customer di Buku Besar sama dengan sisa uang muka per Customer": "The Customer Deposit balance in the General Ledger matches the remaining deposits for every Customer",
   "Dihapus {0} ALE lama, dibuat {1} ALE baru dari JournalItem": "Deleted {0} old ALE entries and created {1} new ALE entries from JournalItem",
   "Dihitung ulang saldo {0} akun dari jurnal": "Recalculated the balances of {0} accounts from journals",
   "{0} entri ALE orphan ditandai sebagai cancelled": "{0} orphan ALE entries marked as cancelled",
