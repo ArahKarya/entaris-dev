@@ -1,13 +1,15 @@
 // Report of legacy sales invoice data from before E4-R1 / E4-R2 (sections in
-// services/salesInvoiceAudit.ts): status-mismatch, outstanding-mismatch, cancelled-with-returns
-// and zero-allocations.
+// services/salesInvoiceAudit.ts): status-mismatch, outstanding-mismatch, cancelled-with-returns,
+// cancelled-with-settlements and zero-allocations.
 //
 // Dry run by default: prints a summary and, with --out, writes one CSV row per finding for the
 // accountant to review. --apply fixes only the status-mismatch rows (the status column, never the
 // outstanding or a journal), in one transaction, and needs --approved-by "<accountant name>",
 // which is recorded on one audit row per fixed invoice. The other sections are never written:
 // cancelled invoices with an active return are fixed by the accountant cancelling the return from
-// the menu (a return in a closed year needs a correcting journal instead).
+// the menu (a return in a closed year needs a correcting journal instead). Cancelled invoices
+// still settled by a live payment or deposit application cannot have that payment or application
+// cancelled any more (INVOICE_OUTSTANDING_RANGE); the accountant fixes them with a correcting journal.
 //
 // Usage (from server/, DATABASE_URL set):
 //   node dist/scripts/repair/e4-sales-invoice-audit.js [--out file.csv] [--apply --approved-by "<name>"]
@@ -43,7 +45,9 @@ function parseArgs(argv: readonly string[]): Options {
   return opts;
 }
 
-const SECTIONS: readonly SalesInvoiceAuditSection[] = ['status-mismatch', 'outstanding-mismatch', 'cancelled-with-returns', 'zero-allocations'];
+const SECTIONS: readonly SalesInvoiceAuditSection[] = [
+  'status-mismatch', 'outstanding-mismatch', 'cancelled-with-returns', 'cancelled-with-settlements', 'zero-allocations',
+];
 
 function writeCsv(path: string, rows: readonly SalesInvoiceAuditRow[], applied: ReadonlySet<string>) {
   const header = 'section,invoice_id,invoice_number,date,customer,status,grand_total,outstanding,expected,applied';

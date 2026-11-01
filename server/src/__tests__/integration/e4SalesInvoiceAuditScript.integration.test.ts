@@ -11,6 +11,8 @@
  * - The repair without an approver is refused; with one it changes only the status, writes one
  *   audit row naming the approver, and leaves the ledger and the outstanding as they were.
  * - An invoice changed after the report is skipped.
+ * - cancelled-with-settlements: a cancelled invoice still allocated from a live payment, or with an
+ *   active deposit application, is reported; a cancelled payment or application is not.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -196,6 +198,38 @@ d('legacy sales invoice report and status repair (E4)', () => {
       expect(result).toEqual({ approvedBy: 'Ibu Akuntan', applied: [], skipped: [si.id] });
       expect((await tx.salesInvoice.findUniqueOrThrow({ where: { id: si.id } })).status).toBe('Submitted');
       expect(await tx.auditLog.count({ where: { entityId: si.id, action: SALES_INVOICE_STATUS_AUDIT_ACTION } })).toBe(0);
+    });
+  });
+
+  it('reports cancelled invoices still settled by a live payment or deposit application', async () => {
+    await inRollback(async (tx) => {
+      const c = await customer(tx);
+      const paid = await invoice(tx, c, 2 * JT);
+      const applied = await invoice(tx, c, 1 * JT, `${Y}-07-02`);
+      const voided = await invoice(tx, c, 1 * JT, `${Y}-07-03`);
+      // Documents of another customer, unallocated, then linked by hand as pre-guard code left them.
+      const other = await customer(tx);
+      const receive = (amount: number, paymentType: 'Receive' | 'CustomerDeposit' = 'Receive') =>
+        submitPaymentInTx(tx, { date: `${Y}-07-20`, partyId: other, paymentType, accountId: cashAccountId, amount }, actor.userId);
+      const { payment: live } = await receive(2 * JT);
+      const { payment: dead } = await receive(1 * JT);
+      const { payment: deposit } = await receive(1 * JT, 'CustomerDeposit');
+      await tx.paymentAllocation.create({ data: { paymentId: live.id, invoiceType: 'SalesInvoice', invoiceId: paid.id, allocatedAmount: 2 * JT } });
+      await tx.paymentAllocation.create({ data: { paymentId: dead.id, invoiceType: 'SalesInvoice', invoiceId: voided.id, allocatedAmount: 1 * JT } });
+      await tx.payment.update({ where: { id: dead.id }, data: { status: 'Cancelled' } });
+      await tx.customerDepositApplication.create({ data: { depositPaymentId: deposit.id, salesInvoiceId: applied.id, appliedAmount: 1 * JT, createdBy: actor.userId } });
+      await tx.customerDepositApplication.create({
+        data: { depositPaymentId: deposit.id, salesInvoiceId: voided.id, appliedAmount: 1 * JT, createdBy: actor.userId, isCancelled: true },
+      });
+      await tx.salesInvoice.updateMany({ where: { id: { in: [paid.id, applied.id, voided.id] } }, data: { status: 'Cancelled', outstanding: 0 } });
+
+      const rows = await auditSalesInvoices(tx, { invoiceIds: [paid.id, applied.id, voided.id] });
+      expect(sections(rows)).toEqual([
+        ['cancelled-with-settlements', paid.id, live.paymentNumber],
+        ['cancelled-with-settlements', applied.id, deposit.paymentNumber],
+      ]);
+      // Report only: the repair writes nothing for this section.
+      expect(await applySalesInvoiceStatusFixes(tx, rows, 'Ibu Akuntan')).toEqual({ approvedBy: 'Ibu Akuntan', applied: [], skipped: [] });
     });
   });
 });

@@ -1,10 +1,15 @@
 // Core of scripts/repair/e4-sales-invoice-audit.ts: legacy sales invoice data from before E4-R1
-// (status follows outstanding) and E4-R2 (no cancel under an active return). Four sections:
+// (status follows outstanding) and E4-R2 (no cancel under an active return). Five sections:
 //   status-mismatch        status differs from the one its outstanding derives; --apply fixes it
 //   outstanding-mismatch   outstanding differs from grand total less live allocations, active
 //                          returns' AR part and active deposit applications; reported only
 //   cancelled-with-returns cancelled invoice that still has a return not cancelled; reported only,
 //                          the accountant cancels the return from the menu
+//   cancelled-with-settlements
+//                          cancelled invoice that still has an allocation from a live payment or
+//                          an active deposit application; reported only. Cancelling that payment or
+//                          application is refused (INVOICE_OUTSTANDING_RANGE), so the accountant
+//                          fixes it with a correcting journal
 //   zero-allocations       a Rp 0 payment allocation to a sales invoice; reported only
 // Only the status is ever written (no outstanding, no journal), and only with the name of the
 // accountant who approved the run, recorded on one audit row per fixed invoice.
@@ -22,6 +27,7 @@ export type SalesInvoiceAuditSection =
   | 'status-mismatch'
   | 'outstanding-mismatch'
   | 'cancelled-with-returns'
+  | 'cancelled-with-settlements'
   | 'zero-allocations';
 
 export interface SalesInvoiceAuditRow {
@@ -76,6 +82,9 @@ const sumBy = (rows: Array<{ key: string; amount: Prisma.Decimal | null }>) => {
   return out;
 };
 
+const byDate = (a: { date: Date; invoiceNumber: string }, b: { date: Date; invoiceNumber: string }) =>
+  a.date.getTime() - b.date.getTime() || a.invoiceNumber.localeCompare(b.invoiceNumber);
+
 /** Expected outstanding per invoice: grand total less live allocations, active returns' AR part and active deposit applications. */
 async function expectedOutstanding(db: Db, invoices: readonly InvoiceLite[]): Promise<Map<string, Decimal>> {
   const ids = invoices.map((i) => i.id);
@@ -108,6 +117,38 @@ async function expectedOutstanding(db: Db, invoices: readonly InvoiceLite[]): Pr
   );
 }
 
+/** Cancelled invoices still settled by a live payment allocation or an active deposit application; `expected` lists those documents. */
+async function cancelledWithSettlements(db: Db, invoiceIds?: string[]): Promise<SalesInvoiceAuditRow[]> {
+  const found: Array<{ inv: InvoiceLite; docs: string[] }> = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await db.salesInvoice.findMany({
+      where: { status: 'Cancelled', id: { ...(invoiceIds ? { in: invoiceIds } : {}), ...(cursor ? { gt: cursor } : {}) } },
+      select: {
+        ...INVOICE_SELECT,
+        depositApplications: { where: { isCancelled: false }, select: { depositPayment: { select: { paymentNumber: true } } } },
+      },
+      orderBy: { id: 'asc' },
+      take: PAGE,
+    });
+    if (page.length === 0) break;
+    cursor = page[page.length - 1]!.id;
+    const allocs = await db.paymentAllocation.findMany({
+      where: { invoiceType: 'SalesInvoice', invoiceId: { in: page.map((i) => i.id) }, payment: { status: { not: 'Cancelled' } } },
+      select: { invoiceId: true, payment: { select: { paymentNumber: true } } },
+    });
+    for (const inv of page) {
+      const docs = [
+        ...allocs.filter((a) => a.invoiceId === inv.id).map((a) => a.payment.paymentNumber),
+        ...inv.depositApplications.map((a) => a.depositPayment.paymentNumber),
+      ];
+      if (docs.length > 0) found.push({ inv, docs: [...new Set(docs)].sort() });
+    }
+  }
+  found.sort((a, b) => byDate(a.inv, b.inv));
+  return found.map(({ inv, docs }) => rowOf('cancelled-with-settlements', inv, docs.join(' ')));
+}
+
 /** Read-only. `invoiceIds` limits the scan (tests); omitted, every sales invoice is checked. */
 export async function auditSalesInvoices(db: Db, opts: { invoiceIds?: string[] } = {}): Promise<SalesInvoiceAuditRow[]> {
   const scope = opts.invoiceIds ? { id: { in: opts.invoiceIds } } : {};
@@ -135,12 +176,17 @@ export async function auditSalesInvoices(db: Db, opts: { invoiceIds?: string[] }
     }
   }
 
+  // Pages run in id order; the report reads by date.
+  statusRows.sort(byDate);
+  outstandingRows.sort(byDate);
+
   const cancelled = await db.salesInvoice.findMany({
     where: { ...scope, status: 'Cancelled', returns: { some: { status: { not: 'Cancelled' } } } },
     select: { ...INVOICE_SELECT, returns: { where: { status: { not: 'Cancelled' } }, select: { returnNumber: true }, orderBy: { returnNumber: 'asc' } } },
     orderBy: { date: 'asc' },
   });
   const cancelledRows = cancelled.map((inv) => rowOf('cancelled-with-returns', inv, inv.returns.map((x) => x.returnNumber).join(' ')));
+  const settledRows = await cancelledWithSettlements(db, opts.invoiceIds);
 
   const zeroAllocs = await db.paymentAllocation.findMany({
     where: { invoiceType: 'SalesInvoice', allocatedAmount: 0, ...(opts.invoiceIds ? { invoiceId: { in: opts.invoiceIds } } : {}) },
@@ -156,7 +202,7 @@ export async function auditSalesInvoices(db: Db, opts: { invoiceIds?: string[] }
     return inv ? [rowOf('zero-allocations', inv, z.payment.paymentNumber)] : [];
   });
 
-  return [...statusRows, ...outstandingRows, ...cancelledRows, ...zeroRows];
+  return [...statusRows, ...outstandingRows, ...cancelledRows, ...settledRows, ...zeroRows];
 }
 
 export const SALES_INVOICE_STATUS_AUDIT_ACTION = 'e4-sales-invoice-status';
