@@ -237,6 +237,14 @@ d('stock transfer cancel run twice at once', () => {
         items: { create: [{ itemId: item.id, quantity: 1_000 }] },
       },
     });
+    // Its paired movements: the cancel reverses from the active movements, not from the lines.
+    await prisma.stockMovement.createMany({
+      data: (['TransferOut', 'TransferIn'] as const).map((movementType) => ({
+        movementNumber: `SM-E1R3-${movementType}-${tag()}`, date: new Date('2089-03-10'), itemId: item.id,
+        warehouseId: movementType === 'TransferOut' ? a.id : b.id, movementType, quantity: 1_000,
+        referenceType: 'StockTransfer', referenceId: transfer.id, fiscalYearId: fy.id, createdById: actor.userId,
+      })),
+    });
     try {
       let release!: () => void;
       const held = new Promise<void>((r) => { release = r; });
@@ -266,6 +274,7 @@ d('stock transfer cancel run twice at once', () => {
       expect(at(b.id)).toBe(0);
       expect((await prisma.stockTransfer.findUniqueOrThrow({ where: { id: transfer.id } })).status).toBe('Cancelled');
     } finally {
+      await prisma.stockMovement.deleteMany({ where: { referenceId: transfer.id } });
       await prisma.stockTransfer.delete({ where: { id: transfer.id } });
       await prisma.inventoryStock.deleteMany({ where: { itemId: item.id } });
       await prisma.inventoryItem.delete({ where: { id: item.id } });
