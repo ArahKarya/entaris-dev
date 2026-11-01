@@ -54,7 +54,7 @@ export interface BalanceSheetMeta {
   currentProfitFrom: string;
   /** Fiscal year holding `asOf`; null when none exists (current-year profit then starts on 1 January). */
   fiscalYear: { id: string; name: string; isClosed: boolean } | null;
-  /** Equity system-account roles without a mapping; their rows are shown at the top of equity. */
+  /** Equity system-account roles without a mapping; their rows are shown at the end of equity. */
   equityMappingMissing: EquityRole[];
 }
 
