@@ -12632,7 +12632,6 @@
       "roles": [
         "Admin",
         "Accountant",
-        "StaffProduksi",
         "Viewer"
       ],
       "input": {
@@ -12644,14 +12643,14 @@
           "name": "startDate",
           "in": "query",
           "type": "date",
-          "required": false,
+          "required": true,
           "description": "Tanggal awal (YYYY-MM-DD)."
         },
         {
           "name": "endDate",
           "in": "query",
           "type": "date",
-          "required": false,
+          "required": true,
           "description": "Tanggal akhir (YYYY-MM-DD)."
         }
       ],
@@ -12664,9 +12663,10 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "accessNote": "Endpoint hanya memakai requireWrite(settings) sehingga GET terbuka bagi semua user login; modul reports dipilih sebagai batas semantik di sisi AIRA.",
+      "accessNote": "Butuh izin lihat modul Laporan (requirePerm reports), sama dengan laporan lain. Konfigurasi pajak (tax_get_config) tetap terbuka bagi semua user login.",
       "errors": [
-        "400: startDate dan endDate wajib diisi"
+        "400: startDate dan endDate wajib diisi",
+        "403: tanpa izin lihat Laporan"
       ],
       "related": [
         "tax_get_config"
