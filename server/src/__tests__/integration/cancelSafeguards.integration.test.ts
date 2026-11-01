@@ -496,7 +496,7 @@ d('delivery note full edit audit snapshot', () => {
       // The snapshot registry binds its models at import, so load it while the harness tx is set.
       const { auditTrailMiddleware } = await import('../../middleware/auditTrail');
       const req = { method: 'PUT', originalUrl: `/api/delivery-orders/${doc.id}`, user: { userId, role: 'Admin' }, headers: {}, ip: '127.0.0.1' };
-      const res = { statusCode: 200, status(code: number) { this.statusCode = code; return this; }, json(body: unknown) { return body; } };
+      const res = { statusCode: 200, headersSent: false, locals: {}, setHeader() {}, status(code: number) { this.statusCode = code; return this; }, json(body: unknown) { return body; } };
       await auditTrailMiddleware(req as any, res as any, () => undefined);
 
       const edited = await inRouteTx((t) => editDeliveryOrderInTx(t, doc.id, { date: `${Y}-05-03`, partyId: customer.id, items: lines(8_000) }, userId));

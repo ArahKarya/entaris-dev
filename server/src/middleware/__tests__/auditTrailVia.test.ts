@@ -8,7 +8,7 @@ import { auditTrailMiddleware } from '../auditTrail';
 import { redactSecrets } from '../../utils/redact';
 
 function run(user: Record<string, unknown>, body: unknown) {
-  const res: any = { json: (b: unknown) => b };
+  const res: any = { statusCode: 200, headersSent: false, locals: {}, setHeader: () => undefined, json: (b: unknown) => b };
   const req: any = { user, method: 'POST', originalUrl: '/api/parties', ip: '100.64.0.9', headers: { 'user-agent': 'entaris-mcp/1 (aira-dev)' } };
   return auditTrailMiddleware(req, res, () => undefined).then(() => res.json(body));
 }
