@@ -1,7 +1,8 @@
 // One-time capture of the year-close checklist baseline (E1-R8, PR-8b). Ledger mismatches that
 // already exist at release (checks ledger-balanced and ale-vs-journal, plus any later
 // baseline-aware check) are written to close_check_baselines, so they no longer block a year close;
-// a new mismatch, or a known one whose amount changes, still blocks. Run it once at release, after
+// a new mismatch, or a known one whose amount changes (beyond what the check's baselineCovers
+// accepts), still blocks. Run it once at release, after
 // the STT legacy-data fix (PR-6b) and after the accountant has reviewed the dry-run list.
 //
 // Dry run by default: it lists what would be captured and writes nothing. --apply writes the rows,
@@ -25,6 +26,8 @@ import {
   captureCloseBaseline,
   type BaselineCapture,
 } from '../../services/fiscalYearClose';
+// The checks other modules register (ar-subledger, customer-deposit-subledger), so --check knows them.
+import '../../services/closeCheckPlugins';
 
 interface Options {
   apply: boolean;
