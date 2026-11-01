@@ -13,6 +13,7 @@ import { editProductionRunInTx } from '../../services/productionRunEdit';
 import { needsApproval } from '../../services/approvalGate';
 import { queueEditApproval } from '../../services/approvalEditRequests';
 import { logger } from '../../lib/logger';
+import { negativeStockBypassDenied, negativeStockForbiddenBody } from '../../utils/negativeStockGate';
 import { parseListPaging, parseSort } from '../../utils/listQuery';
 import {
   DEFAULT_PRODUCTION_RUN_SORT,
@@ -244,10 +245,13 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
   if (allowNegativeStock && (!negativeStockReason || negativeStockReason.trim().length < 10)) {
     return res.status(400).json({ error: 'Alasan bypass stok minus wajib diisi (minimal 10 karakter).' });
   }
+  if (await negativeStockBypassDenied(req.user!.role, allowNegativeStock)) {
+    return res.status(403).json(negativeStockForbiddenBody());
+  }
 
   try {
     await prisma.$transaction(
-      (tx) => cancelProductionRunInTx(tx, id, { allowNegativeStock, negativeStockReason }),
+      (tx) => cancelProductionRunInTx(tx, id, { allowNegativeStock, negativeStockReason, userId: req.user!.userId }),
       { timeout: 15000 },
     );
     return res.json({ message: 'Proses produksi dibatalkan.' });

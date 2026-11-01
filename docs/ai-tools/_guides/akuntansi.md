@@ -49,7 +49,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
 - **`fa_dispose` tidak dapat dibatalkan lewat API** dan tidak menjurnal; sertakan jurnal manual untuk laba/rugi pelepasan dan penghapusan akumulasi penyusutan.
 - **`sysacct_update`** mengubah akun DR/CR semua posting otomatis berikutnya; salah petakan berarti pembukuan salah di seluruh modul.
-- **Hak akses GET**: beberapa GET (COA, tahun buku, pajak, akun sistem) terbuka bagi semua user login karena data referensi; tool tulisnya tetap dibatasi.
+- **Hak akses GET**: beberapa GET (COA, tahun buku, konfigurasi pajak, akun sistem) terbuka bagi semua user login karena data referensi; tool tulisnya tetap dibatasi. Laporan pajak (`tax_report`) butuh izin lihat Laporan.
 
 ### Peta istilah
 

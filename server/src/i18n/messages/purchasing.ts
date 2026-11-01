@@ -21,6 +21,8 @@ export const PURCHASING_MESSAGES: MessageDictionary = {
   "Gagal memperbarui invoice.": "Failed to update the invoice.",
   "Gagal merevisi harga invoice.": "Failed to revise the invoice price.",
   "Gagal membatalkan invoice.": "Failed to cancel the invoice.",
+  // purchase invoice approval total (E5-R1)
+  "Potongan header harus sama dengan jumlah potongan per baris. Isi potongan di baris item.": "The header deduction must equal the sum of the line deductions. Enter deductions on the item lines.",
   "Gagal mengambil daftar PO.": "Failed to load purchase orders.",
   "PO tidak ditemukan.": "Purchase order not found.",
   "Gagal mengambil detail PO.": "Failed to load purchase order details.",

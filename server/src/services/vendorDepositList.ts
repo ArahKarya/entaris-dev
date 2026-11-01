@@ -212,3 +212,54 @@ export function summarizeVendorDeposits(rows: readonly VendorDepositLightRow[]):
     byState,
   };
 }
+
+export type DailyVendorDepositSource = Pick<
+  VendorDepositLightSource,
+  'paymentNumber' | 'date' | 'amount' | 'refundedAmount' | 'party' | 'depositApplications'
+>;
+
+export interface DailyVendorDepositRow extends DepositFigures {
+  paymentNumber: string;
+  supplierName: string;
+  amount: number;
+  date: Date;
+}
+
+/**
+ * Supplier deposit block of the daily report. The caller passes submitted deposits with their
+ * active applications only. Rows with a usable remaining balance are listed; the summary sums
+ * every deposit passed, except totalRemaining, which is the sum of the listed rows.
+ */
+export function buildDailyVendorDeposits(sources: readonly DailyVendorDepositSource[]) {
+  let totalDeposits = new Decimal(0);
+  let totalApplied = new Decimal(0);
+  let totalRefunded = new Decimal(0);
+  let totalRemaining = new Decimal(0);
+  const deposits: DailyVendorDepositRow[] = [];
+
+  for (const src of sources) {
+    const figures = depositFigures(src.amount, src.refundedAmount, src.depositApplications);
+    totalDeposits = totalDeposits.plus(toDecimal(src.amount));
+    totalApplied = totalApplied.plus(figures.totalApplied);
+    totalRefunded = totalRefunded.plus(figures.totalRefunded);
+    if (figures.remaining <= REMAINING_EPSILON) continue;
+    totalRemaining = totalRemaining.plus(figures.remaining);
+    deposits.push({
+      paymentNumber: src.paymentNumber,
+      supplierName: src.party?.name || '—',
+      amount: toDecimal(src.amount).toNumber(),
+      ...figures,
+      date: src.date,
+    });
+  }
+
+  return {
+    deposits,
+    summary: {
+      totalDeposits: money(totalDeposits),
+      totalApplied: money(totalApplied),
+      totalRefunded: money(totalRefunded),
+      totalRemaining: money(totalRemaining),
+    },
+  };
+}

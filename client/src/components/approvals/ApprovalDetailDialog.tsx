@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StatusBadge } from '@/components/shared';
 import { pinnedDialogClass, PinnedBody, PinnedFooter, PinnedHeader } from '../overlays/dialog-parts';
 import type { ApprovalRequest } from '../ApprovalPanel';
-import { approvalTypeLabel, fmtDate, fmtNum, isAiToolApproval, isEditApprovalType, piLineTotal, piTotals, prodHppEstimate } from './approval-utils';
+import { approvalTypeLabel, fmtDate, fmtNum, isAiToolApproval, isEditApprovalType, piLineTotal, prodHppEstimate, resolvePiTotals } from './approval-utils';
 import { EditComparisonView } from './EditComparisonView';
 import { AiToolApprovalSummary } from './AiToolApprovalSummary';
 
@@ -78,7 +78,8 @@ function DetailContent({
   const basisLabel = (basis: unknown): string =>
     basis === 'InputQty' || basis === 'OutputQty' || basis === 'Fixed' ? t(`detail.basis.${basis}`) : String(basis ?? '');
   const fmtT = (v: any) => (v ? new Date(v).toLocaleString(LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
-  const pi = isProd || isDO || isEdit || isAiToolApproval(detailReq.documentType) ? null : piTotals(p);
+  const pi = isProd || isDO || isEdit || isAiToolApproval(detailReq.documentType) ? null : resolvePiTotals(detailCtx, p);
+  const piFromServer = !!detailCtx?.piTotals;
   const hppEst = isProd ? prodHppEstimate(p) : null;
   const docLabel = approvalTypeLabel(detailReq.documentType);
   const isAi = isAiToolApproval(detailReq.documentType);
@@ -212,6 +213,16 @@ function DetailContent({
           </>
         ) : isProd ? (
           <>
+            {p.allowNegativeStock === true && (
+              <div className="rounded-lg border border-warning/30 bg-warning-subtle px-3 py-2 text-xs text-warning-text">
+                <p className="font-semibold">{t('detail.production.negativeStockBypass')}</p>
+                {p.negativeStockReason && (
+                  <p className="mt-0.5">
+                    <span className="font-semibold">{t('detail.production.negativeStockReason')}</span> {p.negativeStockReason}
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <p className="text-xs font-semibold text-foreground mb-1.5">{t('detail.production.inputs')}</p>
               <div className="border border-border rounded-lg divide-y divide-border">
@@ -548,30 +559,34 @@ function DetailContent({
                 </div>
               )}
             </div>
-            {/* Totals (estimasi) */}
+            {/* Totals: server figures (posting formula), local estimate while the context loads */}
             <div className="bg-muted/50 border border-border rounded-lg p-3 space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t('detail.invoice.subtotal')}</span>
                 <span className="font-mono tabular-nums">{formatRupiah(pi?.subtotal ?? 0)}</span>
               </div>
-              {Number(p.potongan ?? 0) > 0 && (
+              {(pi?.potonganItem ?? 0) > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t('detail.invoice.discount')}</span>
-                  <span className="font-mono tabular-nums text-danger-text">− {formatRupiah(Number(p.potongan))}</span>
+                  <span className="text-muted-foreground">{t('detail.invoice.lineDiscountIncluded')}</span>
+                  <span className="font-mono tabular-nums text-muted-foreground">{formatRupiah(pi?.potonganItem ?? 0)}</span>
                 </div>
               )}
-              {Number(p.biayaLain ?? 0) > 0 && (
+              {(pi?.biayaLain ?? 0) !== 0 && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">{t('detail.invoice.otherCosts')}</span>
-                  <span className="font-mono tabular-nums">{formatRupiah(Number(p.biayaLain))}</span>
+                  <span className="font-mono tabular-nums">{formatRupiah(pi?.biayaLain ?? 0)}</span>
                 </div>
               )}
               <div className="flex justify-between pt-1 border-t border-border font-semibold text-foreground">
                 <span>
-                  {t('detail.invoice.grandTotal')} <span className="text-xs font-normal text-muted-foreground">{t('detail.invoice.estimate')}</span>
+                  {t('detail.invoice.grandTotal')}
+                  {!piFromServer && <> <span className="text-xs font-normal text-muted-foreground">{t('detail.invoice.estimate')}</span></>}
                 </span>
                 <span className="font-mono tabular-nums">{formatRupiah(pi?.grandTotal ?? 0)}</span>
               </div>
+              {pi?.headerPotonganMismatch && (
+                <p className="pt-1 text-warning-text">{t('detail.invoice.headerDiscountMismatch')}</p>
+              )}
             </div>
           </>
         )}

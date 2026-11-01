@@ -29,6 +29,9 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Gagal mengajukan ulang.": "Failed to resubmit.",
   "Gagal cek approval.": "Failed to check approval.",
   "Parameter documentType dan amount (angka) wajib diisi.": "The documentType and amount (a number) parameters are required.",
+  // approvals (E7-R1)
+  "Pengajuan sedang diproses, coba lagi.": "The request is being processed, try again.",
+  "Draft sudah diproses atau tidak lagi berstatus Draft.": "The draft has already been processed or is no longer a draft.",
   "Tipe file tidak didukung: {0}. Hanya JPG, PNG, WebP, dan PDF.": "File type not supported: {0}. Only JPG, PNG, WebP and PDF.",
   "referenceType dan referenceId wajib diisi.": "referenceType and referenceId are required.",
   "referenceType harus salah satu dari: {0}.": "referenceType must be one of: {0}.",

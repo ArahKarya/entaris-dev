@@ -30,7 +30,8 @@ const IGNORED = new Set<string>([
   '--allow-existing only goes with --check <id>',
   'The baseline already has rows for {0}; a check is captured once.',
   'The baseline already has {0} row(s); it is captured once. To capture a check added later, pass --check <id> --allow-existing.',
-  // Refusal of the sales invoice status repair (services/salesInvoiceAudit.ts), CLI only.
+  // Refusal of the --apply repairs without an approver (services/salesInvoiceAudit.ts,
+  // scripts/repair/e5-pi-approval-amount.ts), CLI only.
   '--apply needs --approved-by "<accountant name>"',
 ]);
 

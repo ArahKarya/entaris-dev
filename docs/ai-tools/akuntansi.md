@@ -59,7 +59,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
 - **`fa_dispose` tidak dapat dibatalkan lewat API** dan tidak menjurnal; sertakan jurnal manual untuk laba/rugi pelepasan dan penghapusan akumulasi penyusutan.
 - **`sysacct_update`** mengubah akun DR/CR semua posting otomatis berikutnya; salah petakan berarti pembukuan salah di seluruh modul.
-- **Hak akses GET**: beberapa GET (COA, tahun buku, pajak, akun sistem) terbuka bagi semua user login karena data referensi; tool tulisnya tetap dibatasi.
+- **Hak akses GET**: beberapa GET (COA, tahun buku, konfigurasi pajak, akun sistem) terbuka bagi semua user login karena data referensi; tool tulisnya tetap dibatasi. Laporan pajak (`tax_report`) butuh izin lihat Laporan.
 
 ### Peta istilah
 
@@ -1924,8 +1924,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Ringkasan:** Laporan pajak bulanan untuk rentang startDate-endDate (wajib): PPN keluaran dari faktur penjualan dan PPN masukan/PPh dari faktur pembelian berstatus Submitted/Paid/PartiallyPaid/Overdue, dikelompokkan per bulan.
 
 - **Risk / tier:** `read` / Auto
-- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `reports` / `view`)
-- **Catatan akses:** Endpoint hanya memakai requireWrite(settings) sehingga GET terbuka bagi semua user login; modul reports dipilih sebagai batas semantik di sisi AIRA.
+- **Roles & izin:** Admin, Accountant, Viewer (modul `reports` / `view`)
+- **Catatan akses:** Butuh izin lihat modul Laporan (requirePerm reports), sama dengan laporan lain. Konfigurasi pajak (tax_get_config) tetap terbuka bagi semua user login.
 - **Handler:** `GET /api/tax/report` (src/routes/tax.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -1933,8 +1933,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| `startDate` | query | `date` | tidak | Tanggal awal (YYYY-MM-DD). |
-| `endDate` | query | `date` | tidak | Tanggal akhir (YYYY-MM-DD). |
+| `startDate` | query | `date` | ya | Tanggal awal (YYYY-MM-DD). |
+| `endDate` | query | `date` | ya | Tanggal akhir (YYYY-MM-DD). |
 
 **Contoh pemanggilan**
 
@@ -1963,6 +1963,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Error umum**
 
 - 400: startDate dan endDate wajib diisi
+- 403: tanpa izin lihat Laporan
 
 **Tool terkait:** [`tax_get_config`](#tax_get_config)
 
