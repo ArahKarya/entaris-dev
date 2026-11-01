@@ -23,7 +23,10 @@ vi.mock('../../utils/accountBalance', () => ({
   updateAccountBalance: vi.fn(async () => undefined),
   recalculateAccountBalances: vi.fn(async () => undefined),
 }));
-vi.mock('../../utils/journalCancel', () => ({ cancelJournalsByPrefix: vi.fn(async () => undefined) }));
+vi.mock('../../services/ledger/cancelJournals', () => ({
+  findDocumentJournals: vi.fn(async () => []),
+  cancelJournalsInTx: vi.fn(async () => []),
+}));
 vi.mock('../../services/systemAccounts', () => ({
   systemAccounts: {
     getAccount: vi.fn(async (role: string) => ({ id: { INVENTORY: 'acc-inv', OPENING_EQUITY: 'acc-3.1', INVENTORY_VARIANCE: 'acc-var' }[role] })),

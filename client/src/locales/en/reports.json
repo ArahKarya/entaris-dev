@@ -182,7 +182,19 @@
     "unbalanced": "Total assets don't match total liabilities and equity. Check for unbalanced journals.",
     "assetsCaption": "Assets as of {{date}}",
     "passivaCaption": "Liabilities and equity as of {{date}}",
-    "passivaHeader": "Liabilities and Equity"
+    "passivaHeader": "Liabilities and Equity",
+    "noFiscalYear": "No fiscal year has been created for this date yet. Current-year profit is counted from {{date}}.",
+    "equityMappingMissing": "The Retained Earnings or Current-Year Profit system account is not mapped, so its row is shown at the end of Equity. Set it in Settings > System Accounts.",
+    "rows": {
+      "currentProfit": "Current-Year Profit",
+      "currentProfitSince": "Current-Year Profit (since {{date}})",
+      "retainedEarnings": "Retained Earnings",
+      "retainedAccount": "Retained earnings account balance",
+      "otherCurrentProfit": "Other postings to the current-year profit account",
+      "unclosedProfit": "Prior-year profit not yet closed",
+      "groupDirect": "Posted directly to the group",
+      "rootTypeMismatch": "{{name}} (account type differs from its group)"
+    }
   },
   "cashFlow": {
     "title": "Cash Flow",

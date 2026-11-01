@@ -27,7 +27,7 @@ Toolset Persetujuan memberi AIRA akses ke antrian approval Entaris: melihat peng
 Dokumen dibuat dengan pengaju sebagai pembuatnya (audit menunjuk si penginput), bukan penyetuju.
 
 **Status pengajuan (`ApprovalRequest.status`).**
-`Pending` → `Approved` (dokumen dieksekusi), `Rejected` (final), atau `NeedsRevision` (bisa kembali ke `Pending` lewat `appr_resubmit`). Hanya pengajuan `Pending` yang bisa diputuskan; yang sudah diproses ditolak dengan "Pengajuan sudah diproses".
+`Pending` → `Approved` (dokumen dieksekusi), `Rejected` (final), atau `NeedsRevision` (bisa kembali ke `Pending` lewat `appr_resubmit`). Hanya pengajuan `Pending` yang bisa diputuskan; yang sudah diproses ditolak dengan "Pengajuan sudah diproses" (409 `STALE_STATUS`). Keputusan diklaim atomik: dua keputusan bersamaan atas satu pengajuan (klik ganda, web dan Telegram) tidak pernah sama-sama dijalankan, yang kalah mendapat 409 `STALE_STATUS` tanpa efek apa pun. Pengecualian: persetujuan pengajuan agen (`ai_tool:*`) yang kalah klaim masih dijawab 400 "Pengajuan sudah diproses" tanpa code; artinya sama (sudah diputuskan, tanpa efek). 409 `APPROVAL_BUSY` berarti keputusan lain masih berjalan; coba lagi sebentar lagi, jangan ulangi berkali-kali. Eksekusi yang gagal (mis. `PERIOD_LOCKED`, 400) membuat pengajuan tetap `Pending`.
 
 **Jalur keputusan (butuh capability `approval.decide`).**
 1. `appr_requests_list` / `appr_request_get` untuk melihat antrian dan payload; `appr_request_context` untuk info pendukung (STT sumber, lampiran).
@@ -153,14 +153,17 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 **Prasyarat**
 
 - Capability approval.decide.
-- Pengajuan berstatus Pending.
+- Pengajuan berstatus Pending (diklaim atomik: dua keputusan bersamaan tidak pernah sama-sama dijalankan).
 
 **Error umum**
 
-- 400: Pengajuan sudah diproses
+- 409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan
+- 409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi
+- 400: Pengajuan sudah diproses (tanpa code; hanya pengajuan ai_tool:* yang kalah klaim dari persetujuan bersamaan, belum memakai STALE_STATUS); tidak ada efek, muat ulang pengajuan
 - 400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)
 - 400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending
 - 400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending
+- 400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get), [`appr_reject`](#appr_reject), [`appr_request_revision`](#appr_request_revision)
 
@@ -302,6 +305,11 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 
 - Capability approval.decide.
 - Pengajuan berstatus Pending.
+
+**Error umum**
+
+- 409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan
+- 409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi
 
 **Tool terkait:** [`appr_approve`](#appr_approve), [`appr_request_revision`](#appr_request_revision)
 
@@ -495,6 +503,8 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 **Error umum**
 
 - 400: Alasan revisi wajib diisi
+- 409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan
+- 409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi
 
 **Tool terkait:** [`appr_resubmit`](#appr_resubmit), [`appr_approve`](#appr_approve)
 
@@ -593,6 +603,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 - 400: tipe dokumen tidak didukung
 - 400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris
 - 403: bukan pengajuan Anda
+- 409 STALE_STATUS: pengajuan berubah status sejak dibaca (diajukan ulang/diputuskan bersamaan); tidak ada perubahan
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get), [`appr_request_revision`](#appr_request_revision)
 

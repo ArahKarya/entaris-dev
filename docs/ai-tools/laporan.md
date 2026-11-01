@@ -266,7 +266,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 
 ### rpt_balance_sheet
 
-**Ringkasan:** Neraca (balance sheet) per tanggal: aset, kewajiban, ekuitas berjenjang, ditambah baris sintetis "Laba Tahun Berjalan" dari saldo pendapatan-beban. Parameter date (default hari ini) = tanggal posisi.
+**Ringkasan:** Neraca (balance sheet) per tanggal: aset, kewajiban, ekuitas berjenjang. Di dalam grup ekuitas, baris "Laba Tahun Berjalan" (id current-profit) = laba rugi sejak awal tahun buku yang memuat tanggal itu (tanpa jurnal tutup buku; tanggal tanpa tahun buku dihitung sejak 1 Januari), dan baris "Laba Ditahan" (id retained-earnings) = laba tahun-tahun sebelumnya dengan rincian (saldo akun Laba Ditahan, posting lain ke akun Laba Tahun Berjalan selain jurnal tutup buku, laba tahun lalu yang belum dipindahkan jurnal tutup buku). Saldo grup = jumlah baris di bawahnya. Pada tanggal akhir tahun buku yang sudah ditutup, Laba Tahun Berjalan tetap laba setahun penuh dan jurnal tutup buku tahun itu tidak ikut dalam rincian (penyajian sebelum penutupan). Parameter date (default hari ini) = tanggal posisi.
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin, Accountant, Viewer (modul `reports` / `view`)
@@ -296,11 +296,11 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 {
   "ok": true,
   "kind": "read",
-  "data": "<{assets[], liabilities[], equity[] (termasuk Laba Tahun Berjalan), totalAssets, totalLiabi>"
+  "data": "<{assets[], liabilities[], equity[] (node {id, name, accountNumber, balance, children[], ki>"
 }
 ```
 
-**Isi hasil:** {assets[], liabilities[], equity[] (termasuk Laba Tahun Berjalan), totalAssets, totalLiabilities, totalEquity}.
+**Isi hasil:** {assets[], liabilities[], equity[] (node {id, name, accountNumber, balance, children[], kind: account|currentProfit|retainedEarnings|detail, detail, accountId}), totalAssets, totalLiabilities, totalEquity, meta {asOf, currentProfitFrom, fiscalYear {id,name,isClosed} | null, equityMappingMissing[]}}.
 
 **Error umum**
 

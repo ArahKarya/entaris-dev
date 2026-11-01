@@ -47,7 +47,8 @@ export interface RouteResult {
 
 /**
  * Invoke the handlers of `METHOD path` on an Express router with a minimal req/res. `role` is the
- * role key in req.user (default 'Admin'); requireCap gates resolve it against the roles table.
+ * role key in req.user (default 'Admin'); requireCap gates resolve it against the roles table, and
+ * requirePerm gates read req.method (GET needs view, other methods edit).
  * Like Express, the chain stops at a handler that ends the response or does not call next() (a
  * requireCap 403 never reaches the route body); next(err) is rethrown.
  */
@@ -69,6 +70,7 @@ export async function callRoute(
     setHeader() { return res; },
   };
   const req = {
+    method: method.toUpperCase(),
     query: opts.query ?? {},
     body: opts.body ?? {},
     params: opts.params ?? {},

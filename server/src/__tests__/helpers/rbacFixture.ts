@@ -3,17 +3,30 @@ import { invalidatePermissionCache } from '../../services/permissionService';
 
 const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
+export interface CapUserOptions {
+  /** Module rights for the role, for routes behind requirePerm: 'view' or 'edit' (edit implies view). */
+  perms?: Record<string, 'view' | 'edit'>;
+}
+
 /**
  * A role holding exactly `caps` (not super-admin) and an active user with that role, created in
  * `tx`. The built-in roles come from ensureRbacSeed at app boot, not from the seed, so a test that
- * passes a requireCap gate makes its own. Pass both to callRoute as `{ userId, role }`. Resets the
- * permission cache so the next check sees the new role.
+ * passes a requireCap gate makes its own. `opts.perms` adds module rights (RolePermission rows) for
+ * routes behind requirePerm; without it the role has none. Pass both to callRoute as
+ * `{ userId, role }`. Resets the permission cache so the next check sees the new role.
  */
-export async function createCapUser(tx: Tx, caps: readonly string[]): Promise<{ userId: string; role: string }> {
+export async function createCapUser(
+  tx: Tx,
+  caps: readonly string[],
+  opts: CapUserOptions = {},
+): Promise<{ userId: string; role: string }> {
   const key = `it-caps-${tag()}`;
   const role = await tx.role.create({
     data: { key, name: `Uji ${key}`, capabilities: { create: caps.map((capability) => ({ capability })) } },
   });
+  for (const [module, level] of Object.entries(opts.perms ?? {})) {
+    await tx.rolePermission.create({ data: { roleId: role.id, module, canView: true, canEdit: level === 'edit' } });
+  }
   const user = await tx.user.create({
     data: { username: key, fullName: `Uji ${key}`, email: `${key}@test.invalid`, passwordHash: '-', role: role.key },
   });
