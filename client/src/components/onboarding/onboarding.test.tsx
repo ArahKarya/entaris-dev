@@ -77,7 +77,7 @@ describe('onboarding-state', () => {
     expect(shouldShowWizard({ canManage: true, suppressed: false, company: {} })).toBe(false);
   });
 
-  it('keeps currency, fiscal start month and trims edits in the company payload', () => {
+  it('keeps the fiscal start month, sends IDR and trims edits in the company payload', () => {
     const payload = companyUpdatePayload(BASE_COMPANY, {
       companyName: '  PT Maju  ',
       address: ' ',
@@ -91,7 +91,8 @@ describe('onboarding-state', () => {
       phone: '021',
       email: '',
       taxId: '01.234',
-      defaultCurrency: 'USD',
+      // Rupiah only: the old USD value is not echoed back.
+      defaultCurrency: 'IDR',
       fiscalYearStartMonth: 4,
     });
   });
@@ -185,7 +186,7 @@ describe('OnboardingWizard', () => {
     await screen.findByRole('dialog', { name: 'Tahun buku' });
     expect(apiMock.put).toHaveBeenCalledWith(
       '/settings/company',
-      expect.objectContaining({ companyName: 'PT Maju', taxId: '01.234', defaultCurrency: 'USD', fiscalYearStartMonth: 4 }),
+      expect.objectContaining({ companyName: 'PT Maju', taxId: '01.234', defaultCurrency: 'IDR', fiscalYearStartMonth: 4 }),
     );
   });
 

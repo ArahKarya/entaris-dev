@@ -7,6 +7,7 @@ import { handleRouteError } from '../utils/errors';
 import { submitGoodsReceiptInTx } from '../services/goodsReceiptSubmit';
 import { cancelGoodsReceiptInTx } from '../services/goodsReceiptCancel';
 import { logger } from '../lib/logger';
+import { negativeStockBypassDenied, negativeStockForbiddenBody } from '../utils/negativeStockGate';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
   buildGoodsReceiptWhere,
@@ -133,6 +134,9 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
     const negativeStockReason = typeof req.body?.negativeStockReason === 'string' ? req.body.negativeStockReason : null;
     if (allowNegativeStock && (!negativeStockReason || negativeStockReason.trim().length < 10)) {
       return res.status(400).json({ error: 'Alasan bypass stok minus wajib diisi (minimal 10 karakter).' });
+    }
+    if (await negativeStockBypassDenied(req.user!.role, allowNegativeStock)) {
+      return res.status(403).json(negativeStockForbiddenBody());
     }
     const result = await prisma.$transaction(
       (tx) => cancelGoodsReceiptInTx(tx, req.params.id as string, req.user!.userId, { allowNegativeStock, negativeStockReason, reason: body.reason }),

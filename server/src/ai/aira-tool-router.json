@@ -2024,7 +2024,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Daftar STT sumber per baris + lampiran terkait.",
+      "outputSummary": "Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { subtotal, potonganItem, biayaLain, grandTotal, headerPotonganMismatch } dengan rumus posting (null untuk tipe lain atau payload tidak valid); headerPotonganMismatch=true berarti approve akan ditolak, minta revisi.",
       "handler": "GET /api/approvals/requests/:id/context",
       "permAction": "view",
       "enabled": true,
@@ -10978,7 +10978,7 @@
       "output": {
         "report": "object"
       },
-      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb.",
+      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb. vendorDeposits: uang muka Supplier dengan sisa = jumlah − alokasi aktif − refund (baris + summary totalDeposits/totalApplied/totalRefunded/totalRemaining).",
       "handler": "GET /api/reports/daily",
       "permAction": "view",
       "enabled": true,
@@ -16647,7 +16647,7 @@
         "rootType": "enum",
         "parentId": "string",
         "isGroup": "boolean",
-        "currency": "string"
+        "currency": "enum"
       },
       "params": [
         {
@@ -16709,9 +16709,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
+          "type": "enum",
           "required": false,
-          "description": "Kode mata uang (default IDR)."
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. Boleh dikosongkan (akun selalu IDR)."
         }
       ],
       "output": {
@@ -16731,7 +16734,8 @@
       ],
       "errors": [
         "409: Nomor akun sudah digunakan.",
-        "400: induk bukan akun grup / tidak ditemukan."
+        "400: induk bukan akun grup / tidak ditemukan.",
+        "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
         "coa_update",
@@ -21062,7 +21066,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "goods_receipt",
-      "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual STT dibatalkan (void, tanpa jurnal balik -CXL), dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila ada baris STT yang masih ditagih di PI yang belum dibatalkan (batalkan PI dulu).",
+      "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual STT dibatalkan (void, tanpa jurnal balik -CXL), dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter dan capability inventory.negative_stock), bila STT legacy, atau bila ada baris STT yang masih ditagih di PI yang belum dibatalkan (batalkan PI dulu).",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -21117,7 +21121,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant). Bypass stok minus (allowNegativeStock) juga butuh capability inventory.negative_stock (default hanya Admin).",
       "prerequisites": [
         "STT berstatus Submitted",
         "Semua PI yang menagih baris STT ini (bila ada) sudah dibatalkan",
@@ -21130,6 +21134,7 @@
         "400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu",
         "400: stok tidak cukup untuk dibalikkan",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
@@ -22633,7 +22638,8 @@
         "travelStartDate": "date",
         "travelEndDate": "date",
         "travelParticipants": "string",
-        "lines": "array<object>"
+        "lines": "array<object>",
+        "currency": "enum"
       },
       "params": [
         {
@@ -22809,6 +22815,16 @@
             }
           ],
           "description": "Rincian biaya: array {description*, amount*, expenseAccountId, costCenterId, expenseDate, category (TRANSPORT|LODGING|PER_DIEM|MEALS|OTHER hanya jenis TRAVEL), quantity, unitAmount}. Maks 100 baris."
+        },
+        {
+          "name": "currency",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400)."
         }
       ],
       "output": {
@@ -22832,7 +22848,8 @@
       "errors": [
         "400: jenis tidak aktif",
         "400: pilih vendor",
-        "400: akun biaya tidak valid"
+        "400: akun biaya tidak valid",
+        "400: Pengajuan hanya rupiah (currency selain IDR)"
       ],
       "related": [
         "payreqtype_list",
@@ -24957,7 +24974,7 @@
           "in": "body",
           "type": "number",
           "required": false,
-          "description": "Diturunkan server dari potonganItem per baris; nilai header diabaikan."
+          "description": "Cache jumlah potonganItem per baris; sebaiknya tidak dikirim. Bila dikirim (> 0) wajib sama dengan jumlah potonganItem (toleransi 0,01), kalau tidak ditolak 400. Tidak pernah dikurangkan lagi dari total."
         }
       ],
       "output": {
@@ -24980,7 +24997,8 @@
       ],
       "errors": [
         "400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda",
-        "202: menunggu persetujuan (bukan error)",
+        "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
+        "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -27812,7 +27830,7 @@
       "group": "Akuntansi",
       "toolset": "persetujuan",
       "module": "approvals",
-      "desc": "Pengaju memperbaiki payload lalu mengajukan ulang pengajuan berstatus NeedsRevision: status kembali Pending (dokumen baru dibuat hanya saat disetujui). Hanya tipe PurchaseInvoice dan ProductionRun; payload divalidasi dengan skema dokumennya.",
+      "desc": "Pengaju memperbaiki payload lalu mengajukan ulang pengajuan berstatus NeedsRevision: status kembali Pending (dokumen baru dibuat hanya saat disetujui). Hanya tipe PurchaseInvoice dan ProductionRun; payload divalidasi dengan skema dokumennya. ProductionRun dengan allowNegativeStock butuh capability inventory.negative_stock pada pengaju ulang.",
       "risk": "write",
       "roles": [
         "Admin",
@@ -27842,7 +27860,7 @@
       "output": {
         "status": "string"
       },
-      "outputSummary": "Pengajuan berstatus Pending.",
+      "outputSummary": "Pengajuan berstatus Pending. Invoice Pembelian: amount = grand total invoice (Σ harga akhir baris + biayaLain).",
       "handler": "PUT /api/approvals/requests/:id/resubmit",
       "permAction": "edit",
       "enabled": true,
@@ -27855,7 +27873,9 @@
       "errors": [
         "400: hanya status Perlu Revisi",
         "400: tipe dokumen tidak didukung",
+        "400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris",
         "403: bukan pengajuan Anda",
+        "403 NEGATIVE_STOCK_FORBIDDEN: payload ProductionRun meminta bypass stok minus (allowNegativeStock) tanpa capability inventory.negative_stock; status tetap Perlu Revisi",
         "409 STALE_STATUS: pengajuan berubah status sejak dibaca (diajukan ulang/diputuskan bersamaan); tidak ada perubahan"
       ],
       "related": [
@@ -27939,7 +27959,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId/currency diabaikan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -27952,7 +27972,7 @@
         "rootType": "enum",
         "parentId": "string",
         "isGroup": "boolean",
-        "currency": "string",
+        "currency": "enum",
         "isActive": "boolean"
       },
       "params": [
@@ -28017,8 +28037,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
-          "required": false
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400."
         },
         {
           "name": "isActive",
@@ -28047,7 +28071,8 @@
       "errors": [
         "409: nomor akun dipakai akun lain",
         "400: akun sistem tidak boleh diganti nomor",
-        "404: akun tidak ditemukan"
+        "404: akun tidak ditemukan",
+        "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
         "coa_create",
@@ -30837,7 +30862,7 @@
       "group": "Stok & Produksi",
       "toolset": "produksi",
       "module": "production",
-      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.",
+      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30901,6 +30926,7 @@
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
         "403: tanpa capability doc.cancel",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan",
         "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
@@ -31563,7 +31589,8 @@
         "travelStartDate": "date",
         "travelEndDate": "date",
         "travelParticipants": "string",
-        "lines": "array<object>"
+        "lines": "array<object>",
+        "currency": "enum"
       },
       "params": [
         {
@@ -31737,6 +31764,16 @@
             }
           ],
           "description": "Rincian biaya: array {description*, amount*, expenseAccountId, costCenterId, expenseDate, category (TRANSPORT|LODGING|PER_DIEM|MEALS|OTHER hanya jenis TRAVEL), quantity, unitAmount}. Maks 100 baris."
+        },
+        {
+          "name": "currency",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400)."
         }
       ],
       "output": {
@@ -31754,7 +31791,8 @@
       "accessNote": "Hanya pengaju, dan hanya saat status DRAFT atau REVISION.",
       "errors": [
         "400: hanya pengaju",
-        "400: hanya bisa diubah saat Draf/Perlu Revisi"
+        "400: hanya bisa diubah saat Draf/Perlu Revisi",
+        "400: Pengajuan hanya rupiah (currency selain IDR)"
       ],
       "related": [
         "payreq_create",
@@ -33641,7 +33679,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "settings",
-      "desc": "Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, currency, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1, mata uang IDR). Kirim ulang semua nilai yang ada.",
+      "desc": "Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1). Kirim ulang semua nilai yang ada kecuali mata uang: jangan kirim currency (server selalu menyimpan IDR, pembukuan hanya rupiah); nilai selain 'IDR' ditolak 400.",
       "risk": "critical",
       "roles": [
         "Admin"
@@ -33654,7 +33692,7 @@
         "taxId": "string",
         "logoUrl": "string",
         "logoUrlDark": "string",
-        "currency": "string",
+        "currency": "enum",
         "dateFormat": "string",
         "fiscalYearStartMonth": "number",
         "invoiceSettings": "object"
@@ -33707,9 +33745,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
+          "type": "enum",
           "required": false,
-          "description": "Kode mata uang, mis. IDR"
+          "enum": [
+            "IDR"
+          ],
+          "description": "Jangan dikirim: server selalu menyimpan IDR (pembukuan hanya rupiah). Bila dikirim, hanya 'IDR'."
         },
         {
           "name": "dateFormat",
@@ -33803,10 +33844,10 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal. Mengubah konfigurasi global: mata uang, awal tahun fiskal, NPWP, rekening bank pada faktur, logo — berdampak ke dokumen/laporan berikutnya.",
-      "confirm_template": "Ubah profil perusahaan menjadi \"{companyName}\" (mata uang {currency}, awal tahun fiskal bulan {fiscalYearStartMonth}). Setujui?",
+      "postingEffect": "Tidak ada jurnal. Mengubah konfigurasi global: awal tahun fiskal, NPWP, rekening bank pada faktur, logo — berdampak ke dokumen/laporan berikutnya.",
+      "confirm_template": "Ubah profil perusahaan menjadi \"{companyName}\" (mata uang Rupiah, awal tahun fiskal bulan {fiscalYearStartMonth}). Setujui?",
       "errors": [
-        "400: validasi (email, bulan 1-12) atau logo > ~4MB"
+        "400: validasi (email, bulan 1-12, mata uang selain IDR) atau logo > ~4MB"
       ],
       "related": [
         "set_company_get"

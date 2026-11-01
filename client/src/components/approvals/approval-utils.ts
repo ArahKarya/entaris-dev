@@ -32,25 +32,55 @@ export const isAiToolApproval = (t: string) => t.startsWith('ai_tool:');
 /** Label tampilan tipe pengajuan (mengenali ai_tool:*). */
 export const approvalTypeLabel = (t: string) => (isAiToolApproval(t) ? i18n.t('approvals:docTypes.aiTool') : docTypeLabel(t));
 
-// Total harga akhir satu baris PI dari payload pengajuan.
-// hargaAkhir = qty×rate×(1−disc%) + PPN − PPh − potonganItem.
-// Payload pengajuan TIDAK menyimpan it.amount → harus dihitung di sini,
-// jangan andalkan it.amount (selalu undefined → tampil Rp 0).
+/** 2 decimals, half-up (server: Decimal ROUND_HALF_UP). */
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+// Line total (hargaAkhir) of one PI line in an approval payload, mirroring server
+// purchaseInvoiceCalc.computePurchaseItem: qty = timbanganDiterima when > 0, else quantity;
+// subtotal = qty×rate×(1−disc%), then + PPN − PPh − potonganItem, each step rounded to 2 decimals.
+// The payload has no it.amount, so it is always computed.
 export function piLineTotal(it: any): number {
-  const qty = Number(it.timbanganDiterima ?? it.quantity ?? 0);
+  const received = Number(it.timbanganDiterima ?? 0);
+  const qty = received > 0 ? received : Number(it.quantity ?? 0);
   const base = qty * Number(it.rate ?? 0);
-  const afterDisc = base - base * (Number(it.discount ?? 0) / 100);
-  const ppn = afterDisc * (Number(it.taxPct ?? 0) / 100);
-  const pph = afterDisc * (Number(it.pphPct ?? 0) / 100);
-  return afterDisc + ppn - pph - Number(it.potonganItem ?? 0);
+  const subtotal = round2(base - base * (Number(it.discount ?? 0) / 100));
+  const ppn = round2(subtotal * (Number(it.taxPct ?? 0) / 100));
+  const pph = round2(subtotal * (Number(it.pphPct ?? 0) / 100));
+  return round2(subtotal + ppn - pph - Number(it.potonganItem ?? 0));
 }
 
-// Hitung estimasi total PI dari payload (mirror server purchaseInvoiceCalc).
-export function piTotals(payload: any): { subtotal: number; grandTotal: number } {
+export interface PiTotals {
+  /** Σ line totals; each line already has its potonganItem deducted. */
+  subtotal: number;
+  potonganItem: number;
+  biayaLain: number;
+  grandTotal: number;
+}
+
+/** Totals from GET /approvals/requests/:id/context; headerPotonganMismatch = approve will refuse. */
+export interface ServerPiTotals extends PiTotals {
+  headerPotonganMismatch: boolean;
+}
+
+// Local PI totals estimate (fallback while the context loads). grandTotal = subtotal + biayaLain;
+// the header potongan only caches Σ potonganItem and is never subtracted again.
+export function piTotals(payload: any): PiTotals {
   const items: any[] = payload?.items ?? [];
-  const subtotal = items.reduce((s, it) => s + piLineTotal(it), 0);
-  const grandTotal = subtotal - Number(payload?.potongan ?? 0) + Number(payload?.biayaLain ?? 0);
-  return { subtotal: Math.round(subtotal), grandTotal: Math.round(grandTotal) };
+  const subtotal = round2(items.reduce((s, it) => s + piLineTotal(it), 0));
+  const potonganItem = round2(items.reduce((s, it) => s + Number(it.potonganItem ?? 0), 0));
+  const biayaLain = Number(payload?.biayaLain ?? 0);
+  return { subtotal, potonganItem, biayaLain, grandTotal: round2(subtotal + biayaLain) };
+}
+
+/** Server totals when the context has them, else the local estimate. */
+export function resolvePiTotals(
+  ctx: { piTotals?: ServerPiTotals | null } | null | undefined,
+  payload: { potongan?: unknown; items?: unknown[]; biayaLain?: unknown } | null | undefined,
+): ServerPiTotals {
+  if (ctx?.piTotals) return ctx.piTotals;
+  const local = piTotals(payload);
+  const header = Number(payload?.potongan ?? 0);
+  return { ...local, headerPotonganMismatch: header > 0 && Math.abs(header - local.potonganItem) > 0.01 };
 }
 
 // Estimasi HPP/Kg produksi dari payload. Material hanya pasti bila batchUnitCost
@@ -83,6 +113,8 @@ export interface ApprovalLookupContext {
   party?: { id: string; name: string } | null;
   supplier?: { name?: string | null } | null;
   items?: Record<string, { name: string; unit: string }>;
+  /** Purchase invoice totals by the posting formula; null for other types or an invalid payload. */
+  piTotals?: ServerPiTotals | null;
 }
 
 export interface ApprovalLabels {

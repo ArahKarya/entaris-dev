@@ -6,6 +6,8 @@ import type { ApprovalRequest, Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import type { prisma } from '../lib/prisma';
 import { CreateProductionRunSchema, CreatePurchaseInvoiceSchema } from '../utils/schemas';
+import { negativeStockBypassDenied } from '../utils/negativeStockGate';
+import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 import { BusinessError } from '../utils/errors';
 import { STALE_STATUS } from '../utils/cancelClaim';
 import { APPROVAL_ALREADY_DECIDED } from './approvalClaim';
@@ -17,12 +19,10 @@ export type ProductionRunResubmitPayload = z.infer<typeof CreateProductionRunSch
 
 export type ResubmitAmountResult = { ok: true; amount: number } | { ok: false; error: string };
 
-// Approval amount of a resubmitted purchase invoice: Σ item.amount + biayaLain.
-// The item schema has no `amount` field, so Zod strips it and the sum is biayaLain alone.
-// Kept as is in this refactor; the PI approval total fix replaces this function.
+// Approval amount of a resubmitted purchase invoice: the invoice grand total, the same figure
+// POST /purchase/invoices queues and the approval posts.
 export function purchaseInvoiceResubmitAmount(payload: PurchaseInvoiceResubmitPayload): number {
-  const items: ReadonlyArray<Record<string, unknown>> = payload.items ?? [];
-  return items.reduce((s, it) => s + Number(it.amount ?? 0), 0) + Number(payload.biayaLain ?? 0);
+  return computePurchaseInvoiceTotals(payload).grandTotal.toNumber();
 }
 
 // Approval amount of a resubmitted production run: Σ input quantity.
@@ -45,6 +45,18 @@ export function resubmitAmount(documentType: string, rawPayload: unknown): Resub
     return { ok: true, amount: productionRunResubmitAmount(parsed.data) };
   }
   return null;
+}
+
+// A resubmitted production run that asks for the negative-stock bypass needs the resubmitter to
+// hold inventory.negative_stock, like posting a draft does: the approver only needs approval.decide
+// and the approval runs the payload as is. false = the route answers 403 and leaves the request
+// in NeedsRevision. Call it after resubmitAmount accepted the payload; the schema's allowNegativeStock
+// is a strict boolean, so the raw value is the one the approval will use.
+// Delivery orders cannot be resubmitted yet (resubmitAmount returns null), so they need no gate here.
+export async function productionRunResubmitAllowed(role: string, documentType: string, rawPayload: unknown): Promise<boolean> {
+  if (documentType !== 'ProductionRun') return true;
+  const allowNegativeStock = (rawPayload as { allowNegativeStock?: unknown } | null)?.allowNegativeStock === true;
+  return !(await negativeStockBypassDenied(role, allowNegativeStock));
 }
 
 // Stores the corrected payload (as sent, not the parsed copy) and sends the request back to Pending.

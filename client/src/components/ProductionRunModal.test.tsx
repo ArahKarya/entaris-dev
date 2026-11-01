@@ -11,6 +11,11 @@ const { get, post, put, toast } = vi.hoisted(() => ({
 }));
 vi.mock('../lib/api', () => ({ default: { get, post, put } }));
 vi.mock('sonner', () => ({ toast }));
+const perms = vi.hoisted(() => ({ caps: [] as string[] }));
+vi.mock('../lib/permissions', async (orig) => ({
+  ...(await orig<typeof import('../lib/permissions')>()),
+  cap: (name: string) => perms.caps.includes(name),
+}));
 
 import { ProductionRunModal } from './ProductionRunModal';
 
@@ -32,6 +37,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   for (const m of [get, post, put, toast.success, toast.error, toast.warning]) m.mockReset();
+  perms.caps = [];
   get.mockResolvedValue({ data: [] });
 });
 
@@ -82,5 +88,42 @@ describe('ProductionRunModal: Simpan & Posting', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^simpan draft$|^save draft$/i }));
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProductionRunModal: resubmit dengan bypass stok minus tersimpan', () => {
+  const bypassPayload = { ...payload, allowNegativeStock: true, negativeStockReason: 'Stok fisik sudah ada, belum diinput' };
+
+  function renderResubmit() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ProductionRunModal isOpen onClose={vi.fn()} items={items as never} prefillPayload={bypassPayload} resubmitRequestId="r1" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('tanpa capability, bypass dari payload lama dibuang agar resubmit tidak 403 terus', async () => {
+    put.mockResolvedValue({ data: {} });
+    renderResubmit();
+    fireEvent.click(await screen.findByRole('button', { name: /^kirim ulang$|^resubmit$/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const [url, body] = put.mock.calls[0];
+    expect(url).toBe('/approvals/requests/r1/resubmit');
+    expect(body.payload.allowNegativeStock).toBe(false);
+    expect(body.payload.negativeStockReason).toBeNull();
+  });
+
+  it('pemegang inventory.negative_stock tetap mengirim bypass beserta alasannya', async () => {
+    perms.caps = ['inventory.negative_stock'];
+    put.mockResolvedValue({ data: {} });
+    renderResubmit();
+    fireEvent.click(await screen.findByRole('button', { name: /^kirim ulang$|^resubmit$/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0][1];
+    expect(body.payload.allowNegativeStock).toBe(true);
+    expect(body.payload.negativeStockReason).toBe('Stok fisik sudah ada, belum diinput');
   });
 });

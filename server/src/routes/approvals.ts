@@ -7,7 +7,10 @@ import { decideApproval } from '../services/approvalDecision';
 import { buildApprovalComparison, isEditDocumentType, findPendingForTarget } from '../services/approvalEditRequests';
 import { loadApprovalLookups } from '../services/approvalContextLookups';
 import { parseApprovalCheckQuery } from '../utils/approvalCheckQuery';
-import { applyResubmit, resubmitAmount } from '../services/approvalResubmit';
+import { applyResubmit, productionRunResubmitAllowed, resubmitAmount } from '../services/approvalResubmit';
+import { negativeStockForbiddenBody } from '../utils/negativeStockGate';
+import { purchaseInvoiceTotalsView } from '../services/purchaseInvoiceCalc';
+import { CreatePurchaseInvoiceBaseSchema } from '../utils/schemas';
 import { APPROVAL_BUSY } from '../services/approvalClaim';
 import { STALE_STATUS } from '../utils/cancelClaim';
 import { BusinessError } from '../utils/errors';
@@ -203,9 +206,14 @@ router.get('/requests/:id/context', async (req: AuthRequest, res) => {
     }));
     // Party / item names for the dialog (payload stores ids only).
     const lookups = await loadApprovalLookups(prisma, payload);
+    // Invoice totals by the posting formula, so the dialog shows what approve will book. Parsed
+    // without the header-potongan rule: an old payload still gets totals plus the mismatch flag.
+    // null for other types and for a payload that no longer parses.
+    const piParsed = request.documentType === 'PurchaseInvoice' ? CreatePurchaseInvoiceBaseSchema.safeParse(payload) : null;
+    const piTotals = piParsed?.success ? purchaseInvoiceTotalsView(piParsed.data) : null;
     res.json({
       sttLines, stts, requestAttachments: requestAtt, supplier, priceHistory,
-      party: lookups.party, items: lookups.items,
+      party: lookups.party, items: lookups.items, piTotals,
       comparison: buildApprovalComparison(request),
     });
   } catch (error) {
@@ -341,6 +349,9 @@ router.put('/requests/:id/resubmit', async (req: AuthRequest, res) => {
     const priced = resubmitAmount(request.documentType, rawPayload);
     if (!priced) return res.status(400).json({ error: 'Tipe dokumen tidak didukung.' });
     if (!priced.ok) return res.status(400).json({ error: priced.error });
+    if (!(await productionRunResubmitAllowed(req.user!.role, request.documentType, rawPayload))) {
+      return res.status(403).json(negativeStockForbiddenBody());
+    }
 
     const updated = await applyResubmit(prisma, request.id, rawPayload, priced.amount);
     logger.info({ requestId: request.id, by: req.user!.userId }, 'Approval resubmitted');

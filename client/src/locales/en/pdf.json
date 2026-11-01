@@ -461,6 +461,8 @@
       "remaining": "Unapplied Balance",
       "amount": "Deposit Amount",
       "allocated": "Applied",
+      "refunded": "Refunded",
+      "totalRefunded": "Refunded",
       "empty": "No active supplier deposits"
     }
   },

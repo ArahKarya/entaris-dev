@@ -345,11 +345,11 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 {
   "ok": true,
   "kind": "read",
-  "data": "<Daftar STT sumber per baris + lampiran terkait.>"
+  "data": "<Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { su>"
 }
 ```
 
-**Isi hasil:** Daftar STT sumber per baris + lampiran terkait.
+**Isi hasil:** Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { subtotal, potonganItem, biayaLain, grandTotal, headerPotonganMismatch } dengan rumus posting (null untuk tipe lain atau payload tidak valid); headerPotonganMismatch=true berarti approve akan ditolak, minta revisi.
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get)
 
@@ -551,7 +551,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 
 ### appr_resubmit
 
-**Ringkasan:** Pengaju memperbaiki payload lalu mengajukan ulang pengajuan berstatus NeedsRevision: status kembali Pending (dokumen baru dibuat hanya saat disetujui). Hanya tipe PurchaseInvoice dan ProductionRun; payload divalidasi dengan skema dokumennya.
+**Ringkasan:** Pengaju memperbaiki payload lalu mengajukan ulang pengajuan berstatus NeedsRevision: status kembali Pending (dokumen baru dibuat hanya saat disetujui). Hanya tipe PurchaseInvoice dan ProductionRun; payload divalidasi dengan skema dokumennya. ProductionRun dengan allowNegativeStock butuh capability inventory.negative_stock pada pengaju ulang.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** ya (hanya membuat draft / pengajuan pending)
@@ -591,7 +591,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 }
 ```
 
-**Isi hasil:** Pengajuan berstatus Pending.
+**Isi hasil:** Pengajuan berstatus Pending. Invoice Pembelian: amount = grand total invoice (Σ harga akhir baris + biayaLain).
 
 **Efek pembukuan/stok:** Tidak ada efek GL/stok; hanya mengembalikan antrian ke Pending.
 
@@ -601,7 +601,9 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 
 - 400: hanya status Perlu Revisi
 - 400: tipe dokumen tidak didukung
+- 400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris
 - 403: bukan pengajuan Anda
+- 403 NEGATIVE_STOCK_FORBIDDEN: payload ProductionRun meminta bypass stok minus (allowNegativeStock) tanpa capability inventory.negative_stock; status tetap Perlu Revisi
 - 409 STALE_STATUS: pengajuan berubah status sejak dibaca (diajukan ulang/diputuskan bersamaan); tidak ada perubahan
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get), [`appr_request_revision`](#appr_request_revision)
