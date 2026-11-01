@@ -5,7 +5,8 @@ import { AuthRequest, requireCap } from '../../middleware/auth';
 import { validateBody } from '../../utils/validate';
 import { CreateStockMovementSchema, UpdateStockMovementSchema } from '../../utils/schemas';
 import { BusinessError, handleRouteError } from '../../utils/errors';
-import { documentMovementLockMessage } from '../../services/documentMovementLock';
+import { MOVEMENT_DOCUMENT_LOCKED, documentMovementLockMessage } from '../../services/documentMovementLock';
+import { assertBatchSource } from '../../services/inventory/batchSource';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { assertPeriodOpen } from '../../utils/periodGuard';
@@ -119,6 +120,11 @@ router.post('/', async (req: AuthRequest, res) => {
           `Stok di ${wh?.name ?? 'gudang'} tidak cukup. Tersedia: ${stockAtWarehouse.toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${item.unit}`,
         );
       }
+
+      // Outbound movements may link to an inbound batch so batch consumption stays accurate.
+      const sourceMovementId = isOut && body.sourceMovementId
+        ? (await assertBatchSource(tx, { sourceMovementId: body.sourceMovementId, inventoryItemId: item.id, itemName: item.name })).id
+        : null;
 
       const movementDate = new Date(body.date);
       const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
@@ -255,15 +261,13 @@ router.post('/', async (req: AuthRequest, res) => {
           unitCost,
           totalValue,
           notes: body.notes || null,
-          referenceType: body.referenceType || null,
-          referenceId: body.referenceId || null,
+          // Only documents set referenceType/referenceId (that is what locks a movement); a manual
+          // movement keeps the client's free-text referenceNumber and ignores the other two.
+          referenceType: null,
+          referenceId: null,
           referenceNumber: body.referenceNumber || null,
           offsetAccountId: resolvedOffsetAccountId || body.offsetAccountId || null,
-          // Outbound adjustments may link to an inbound batch so batch consumption stays accurate.
-          sourceMovementId:
-            (body.movementType === 'Out' || body.movementType === 'AdjustmentOut') && body.sourceMovementId
-              ? body.sourceMovementId
-              : null,
+          sourceMovementId,
           journalEntryId,
           fiscalYearId: fiscalYear.id,
           createdById: req.user!.userId,
@@ -328,14 +332,9 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
       if (!oldMov) throw new BusinessError('Gerakan stok tidak ditemukan.');
       if (oldMov.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan, tidak bisa diedit.');
 
-      // STT-linked movements must be edited from the STT page: a per-line edit would orphan the STT journal.
-      const editLock = documentMovementLockMessage(oldMov.referenceType, 'edit');
-      if (editLock) throw new BusinessError(editLock);
-
-      // Reject if movement is linked to ProductionRun
-      if (oldMov.referenceType === 'ProductionRun') {
-        throw new BusinessError('Gerakan stok dari proses produksi tidak dapat diedit secara langsung.');
-      }
+      // Document movements are changed from their document: a per-line edit would orphan its journal.
+      const editLock = documentMovementLockMessage(oldMov, 'edit');
+      if (editLock) throw new BusinessError(editLock, MOVEMENT_DOCUMENT_LOCKED);
 
       // The edit voids the old journal and auto-settle and re-posts on body.date, so the old and
       // the new period must both be open, also when no journal is posted (unit cost 0). The stored
@@ -493,10 +492,11 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
           unitCost: newUnitCost,
           totalValue: newTotalValue,
           notes: body.notes || null,
-          referenceType: body.referenceType || null,
+          // referenceType is never written from the body (see POST); an inbound row consumes no batch.
           referenceNumber: body.referenceNumber || null,
           offsetAccountId: resolvedEditOffsetAccountId || body.offsetAccountId || null,
           journalEntryId: newJournalEntryId,
+          ...(newIsIn ? { sourceMovementId: null } : {}),
         },
         include: {
           item: { select: { id: true, name: true, code: true, unit: true } },
@@ -541,8 +541,8 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       });
       if (!movement) throw new BusinessError('Gerakan stok tidak ditemukan.');
       if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
-      const cancelLock = documentMovementLockMessage(movement.referenceType, 'cancel');
-      if (cancelLock) throw new BusinessError(cancelLock);
+      const cancelLock = documentMovementLockMessage(movement, 'cancel');
+      if (cancelLock) throw new BusinessError(cancelLock, MOVEMENT_DOCUMENT_LOCKED);
       // By date only, as on edit: the journal and auto-settle journals check their own year below.
       await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
 
