@@ -2,12 +2,14 @@ import { Router } from 'express';
 import path from 'path';
 import Decimal from 'decimal.js';
 import { prisma } from '../../lib/prisma';
-import { requirePerm } from '../../middleware/auth';
+import { requireCap, requirePerm } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
 import { systemAccounts } from '../../services/systemAccounts';
 import { recalcPartyOutstanding } from '../../utils/accountBalance';
 import { adjustWarehouseStock, resolveWarehouseId } from '../../utils/warehouseStock';
 import { calcWeightedAverage } from '../../utils/weightedAverage';
+import { SAFETY_BACKUP_FAILED, createBackup, invalidateRuntimeCaches } from '../../services/backupService';
+import { resetTables } from '../../services/demoData/tables';
 import { DUMMY_LEDGER_MARKERS, matchGenericDummyJournals, specificDummyNarrations } from '../../services/dummyJournalMatch';
 
 const router = Router();
@@ -788,51 +790,36 @@ router.post('/delete-dummy', requirePerm('settings'), async (_req, res) => {
   }
 });
 
-// POST /api/settings/reset-data: wipes all data and re-seeds; requires settings edit permission.
-router.post('/reset-data', requirePerm('settings'), async (req, res) => {
+// POST /api/settings/reset-data: wipes all data and re-seeds. Admin only by default (settings edit
+// + rbac.manage + doc.cancel); stays available in production (owner decision), but never runs
+// without a pre-reset safety backup.
+router.post('/reset-data', requirePerm('settings'), requireCap('rbac.manage'), requireCap('doc.cancel'), async (req, res) => {
   const body = req.body;
   if (body?.confirmation !== 'RESET') {
     return res.status(400).json({ error: 'Ketik RESET untuk mengonfirmasi.' });
   }
 
+  let safetyBackup: string;
   try {
-    // Delete all data in correct order (respect FK constraints)
+    safetyBackup = (await createBackup('pre-reset')).filename;
+  } catch (error) {
+    logger.error({ error: error instanceof Error ? error.message : error }, 'POST /settings/reset-data safety backup failed');
+    return res.status(500).json({
+      error: 'Cadangan pengaman gagal dibuat, jadi reset dibatalkan. Tidak ada data yang dihapus.',
+      code: SAFETY_BACKUP_FAILED,
+    });
+  }
+
+  try {
+    // Table names come from services/demoData/tables.ts, never from input.
+    const tables = resetTables().map((t) => `"${t}"`).join(', ');
     await prisma.$transaction(async (tx) => {
-      // Use raw SQL TRUNCATE CASCADE — deletes all data respecting FKs in one shot
-      await tx.$executeRawUnsafe(`
-        TRUNCATE TABLE
-          transaction_attachments,
-          token_blacklist,
-          notifications,
-          audit_trail,
-          bank_reconciliation_items,
-          bank_reconciliations,
-          recurring_templates,
-          vendor_deposit_applications,
-          customer_deposit_applications,
-          payment_allocations,
-          payments,
-          sales_invoice_items,
-          sales_invoices,
-          purchase_invoice_items,
-          purchase_invoices,
-          production_run_items,
-          production_runs,
-          stock_movements,
-          inventory_items,
-          service_items,
-          accounting_ledger_entries,
-          journal_entry_accounts,
-          journal_entries,
-          parties,
-          system_account_mappings,
-          accounts,
-          tax_configs,
-          fiscal_years,
-          company_settings,
-          users
-        CASCADE
-      `);
+      // First statement: lets the reset purge audit_trail once it is append-only (E7-R11).
+      // Transaction-local; has no effect before that trigger exists.
+      await tx.$executeRawUnsafe(`SELECT set_config('entaris.audit_purge', 'on', true)`);
+      await tx.$executeRawUnsafe(`TRUNCATE TABLE ${tables} CASCADE`);
+      // The single period_lock row (no lock) that postings share-lock.
+      await tx.$executeRawUnsafe(`INSERT INTO period_lock (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
     }, { timeout: 60000 });
 
     // Re-seed by running the seed script
@@ -847,19 +834,19 @@ router.post('/reset-data', requirePerm('settings'), async (req, res) => {
         timeout: 120000,
       });
     } catch (seedError) {
-      logger.error({ error: seedError }, 'Seed failed after reset');
-      return res.status(500).json({ error: 'Data dihapus, tetapi data awal gagal diisi ulang. Silakan mulai ulang server.' });
+      logger.error({ error: seedError, safetyBackup }, 'Seed failed after reset');
+      return res.status(500).json({ error: 'Data dihapus, tetapi data awal gagal diisi ulang. Silakan mulai ulang server.', safetyBackup });
     } finally {
       // The seed recreates accounts and their system mappings with new ids; drop the cached
-      // mappings so postings stop pointing at the truncated accounts.
-      systemAccounts.invalidateCache();
+      // mappings (and roles, Telegram config) so nothing keeps pointing at truncated rows.
+      invalidateRuntimeCaches();
     }
 
-    logger.info('Database reset and re-seeded successfully');
-    return res.json({ message: 'Data direset. Silakan masuk ulang.' });
+    logger.info({ safetyBackup }, 'Database reset and re-seeded successfully');
+    return res.json({ message: 'Data direset. Silakan masuk ulang.', safetyBackup });
   } catch (error) {
-    logger.error({ error }, 'POST /settings/reset-data error');
-    return res.status(500).json({ error: 'Gagal mereset data.' });
+    logger.error({ error, safetyBackup }, 'POST /settings/reset-data error');
+    return res.status(500).json({ error: 'Gagal mereset data.', safetyBackup });
   }
 });
 
