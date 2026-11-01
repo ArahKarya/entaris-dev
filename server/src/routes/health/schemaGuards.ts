@@ -1,6 +1,6 @@
 // Schema guards for /api/health-check: database objects the app relies on for integrity but that
-// Prisma does not model (triggers today). Detection only, never fixable from the UI: the boot
-// migration recreates them. Later guards (constraints, other triggers) add entries here.
+// Prisma does not model (triggers today). Detection only, never fixable from the UI; the message
+// names the remedy for each problem. Later guards (constraints, other triggers) add entries here.
 import { prisma } from '../../lib/prisma';
 import type { CheckResult } from './checks';
 
@@ -42,12 +42,21 @@ export async function checkRequiredTriggers(): Promise<CheckResult> {
     return [];
   });
 
+  // The remedy depends on the problem: a restart re-applies the migration only when
+  // _prisma_migrations no longer lists it (restore of an older dump); a trigger disabled or dropped
+  // by hand stays broken after a restart (MIGRATION.md, "Migrasi trigger jejak audit").
+  const missing = problems.filter((p) => p.problem === 'missing').length;
+  const disabled = problems.filter((p) => p.problem === 'disabled').map((p) => p.name).join(', ');
   return {
     name: 'Required Database Triggers',
     status: problems.length > 0 ? 'error' : 'ok',
-    message: problems.length > 0
-      ? `${problems.length} trigger database hilang atau nonaktif; jejak audit bisa diubah. Mulai ulang aplikasi agar migrasi berjalan lagi.`
-      : 'Semua trigger database aktif',
+    message: problems.length === 0
+      ? 'Semua trigger database aktif'
+      : missing > 0 && disabled
+        ? `${missing} trigger database hilang dan ${problems.length - missing} nonaktif; jejak audit bisa diubah. Jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).`
+        : missing > 0
+          ? `${missing} trigger database hilang; jejak audit bisa diubah. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).`
+          : `${problems.length} trigger database nonaktif; jejak audit bisa diubah. Aktifkan lagi dengan ALTER TABLE audit_trail ENABLE TRIGGER <nama> untuk: ${disabled}.`,
     count: problems.length,
     details: problems,
     fixable: false,

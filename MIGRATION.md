@@ -117,6 +117,24 @@ menandai migrasi gagal (P3009) dan container restart-loop.
    ```
 4. Buka halaman Pemeriksaan Sistem: cek "Trigger database wajib (jejak audit)" harus OK.
 
+Kalau cek itu merah padahal migrasi sudah tercatat berhasil, restart tidak membantu
+(`prisma migrate deploy` melewati migrasi yang sudah tercatat). Ikuti pesan cek itu:
+
+- **Trigger nonaktif** (mis. setelah `ALTER TABLE audit_trail DISABLE TRIGGER ...` saat perawatan):
+  aktifkan lagi tiap trigger yang disebut, sebagai pemilik tabel:
+  ```sql
+  ALTER TABLE audit_trail ENABLE TRIGGER audit_trail_append_only_row;
+  ALTER TABLE audit_trail ENABLE TRIGGER audit_trail_append_only_truncate;
+  ```
+- **Trigger hilang** (di-drop manual): jalankan ulang SQL migrasinya. SQL itu aman diulang
+  (`CREATE OR REPLACE FUNCTION`, `DROP TRIGGER IF EXISTS` lalu `CREATE TRIGGER`), jadi juga
+  memulihkan trigger yang nonaktif:
+  ```bash
+  docker compose run --rm app sh -c "cd /app/server && npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261106000000_audit_trail_append_only/migration.sql"
+  ```
+  Jangan pakai `migrate resolve --rolled-back` untuk kasus ini: perintah itu hanya untuk migrasi yang
+  gagal.
+
 Catatan: setelah restore cadangan lama (dibuat sebelum trigger ada), cek itu merah sampai aplikasi
 dimulai ulang, karena migrasi baru berjalan lagi saat boot. Migrasi SQL lepas yang mengubah
 `audit_trail` wajib menjalankan `SELECT set_config('entaris.audit_purge', 'on', true)` di awal
