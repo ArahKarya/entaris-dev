@@ -2,8 +2,9 @@
  * Integration test: reports and the dashboard use WIB business days (E2-R1).
  *
  * A 10 jt rent journal stamped 1 Feb 02:00 WIB (31 Jan 19:00 UTC) belongs to February: it is in
- * February's P/L and not January's, P/L Jan + P/L Feb equals the change in current-year profit
- * on the 28 Feb balance sheet, and the dashboard monthly-profit chart shows it in February.
+ * February's P/L and not January's, P/L Jan + P/L Feb equals current-year profit on the 28 Feb
+ * balance sheet (counted from the fiscal-year start), and the dashboard monthly-profit chart shows
+ * it in February.
  * Route handlers run against a rollback transaction (lib/prisma is swapped for it), in a far
  * future year so existing rows cannot interfere.
  */
@@ -108,7 +109,16 @@ async function netProfit(startDate: string, endDate: string): Promise<number> {
 async function currentProfit(date: string): Promise<number> {
   const r = await callRoute(reportsRouter, 'get', '/balance-sheet', { query: { date } });
   expect(r.status).toBe(200);
-  return r.body.equity.find((e: { id: string }) => e.id === 'current-profit').balance;
+  // The row sits inside its equity group (in place of the current-profit account), so search the tree.
+  type Node = { id: string; balance: number; children?: Node[] };
+  const find = (nodes: Node[]): Node | undefined => {
+    for (const n of nodes) {
+      const hit = n.id === 'current-profit' ? n : find(n.children ?? []);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  return find(r.body.equity)!.balance;
 }
 
 d('reports use WIB business days', () => {
@@ -126,12 +136,10 @@ d('reports use WIB business days', () => {
       expect(jan - before.jan).toBe(0);
       expect(feb - before.feb).toBe(-RENT);
 
-      // Jan + Feb P/L = current-year profit at 28 Feb minus that at 31 Dec of the year before.
-      const opening = await currentProfit(`${YEAR - 1}-12-31`);
-      const feb28 = await currentProfit(`${YEAR}-02-28`);
-      expect(jan + feb).toBeCloseTo(feb28 - opening, 2);
-      // As of 31 Jan the journal is not yet on the balance sheet.
-      expect(await currentProfit(`${YEAR}-01-31`)).toBeCloseTo(opening + jan, 2);
+      // Current-year profit counts from the fiscal-year start (1 Jan): at 28 Feb it is Jan + Feb P/L,
+      // and as of 31 Jan the journal is not yet on the balance sheet.
+      expect(await currentProfit(`${YEAR}-02-28`)).toBeCloseTo(jan + feb, 2);
+      expect(await currentProfit(`${YEAR}-01-31`)).toBeCloseTo(jan, 2);
 
       const chart = await callRoute(dashboardRouter, 'get', '/monthly-profit', {
         query: { startDate: `${YEAR}-01-01`, endDate: `${YEAR}-02-28` },

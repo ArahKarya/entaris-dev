@@ -28,12 +28,14 @@ export interface AccountNode {
   isGroup?: boolean;
   balance: number;
   children?: AccountNode[];
+  /** false: no drill-down even on a non-group row (e.g. a computed line with no single account). */
+  selectable?: boolean;
 }
 
 /**
  * Flattens an account tree (chart-of-accounts style) into rows. Nodes with
- * children become collapsible 'group' rows; leaf accounts (not isGroup) get
- * `onSelect` when provided.
+ * children become collapsible 'group' rows; leaf accounts (not isGroup, not
+ * selectable: false) get `onSelect` when provided.
  */
 export function flattenAccountTree(
   nodes: ReadonlyArray<AccountNode> | null | undefined,
@@ -50,7 +52,7 @@ export function flattenAccountTree(
       code: node.accountNumber,
       level,
       values: [node.balance],
-      onSelect: !node.isGroup && onSelect ? () => onSelect(node) : undefined,
+      onSelect: !node.isGroup && node.selectable !== false && onSelect ? () => onSelect(node) : undefined,
       selectLabel: i18n.t('trialBalance.viewLedger', { ns: 'reports', name: node.name }),
     });
     if (hasChildren) out.push(...flattenAccountTree(node.children, { onSelect, level: level + 1 }));
