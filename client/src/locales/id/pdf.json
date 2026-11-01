@@ -453,6 +453,8 @@
       "remaining": "Sisa Belum Dialokasi",
       "amount": "Jumlah Deposit",
       "allocated": "Dialokasi",
+      "refunded": "Refund",
+      "totalRefunded": "Sudah Direfund",
       "empty": "Tidak ada deposit supplier aktif"
     }
   },

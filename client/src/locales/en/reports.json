@@ -327,6 +327,7 @@
       "summary": "Supplier deposit summary",
       "total": "Total Deposits",
       "applied": "Applied",
+      "refunded": "Refunded",
       "remaining": "Unapplied Balance",
       "caption": "Supplier deposits",
       "empty": "No supplier deposits",
@@ -334,6 +335,7 @@
         "paymentNo": "Payment No.",
         "amount": "Deposit Amount",
         "applied": "Applied",
+        "refunded": "Refunded",
         "remaining": "Remaining"
       }
     },

@@ -327,6 +327,7 @@
       "summary": "Ringkasan deposit supplier",
       "total": "Total Deposit",
       "applied": "Sudah Dialokasi",
+      "refunded": "Sudah Direfund",
       "remaining": "Sisa Belum Dialokasi",
       "caption": "Deposit supplier",
       "empty": "Tidak ada deposit supplier",
@@ -334,6 +335,7 @@
         "paymentNo": "No. Pembayaran",
         "amount": "Jumlah Deposit",
         "applied": "Dialokasi",
+        "refunded": "Refund",
         "remaining": "Sisa"
       }
     },
