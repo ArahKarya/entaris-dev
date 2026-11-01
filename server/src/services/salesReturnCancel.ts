@@ -4,6 +4,7 @@ import { recalcPartyOutstanding } from '../utils/accountBalance';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
+import { setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 
 type Tx = Prisma.TransactionClient;
 
@@ -73,13 +74,11 @@ export async function cancelSalesReturnInTx(
     await tx.stockMovement.update({ where: { id: sm.id }, data: { isCancelled: true } });
   }
 
-  // Restore invoice outstanding by the AR portion that was reduced.
+  // Restore invoice outstanding by the AR portion that was reduced. A Cancelled invoice keeps 0:
+  // cancelling the return is how legacy data (invoice cancelled while a return was active) is fixed.
   const arReduced = Number(ret.arReducedAmount);
   if (arReduced > 0 && ret.salesInvoice.status !== 'Cancelled') {
-    await tx.salesInvoice.update({
-      where: { id: ret.salesInvoiceId },
-      data: { outstanding: { increment: arReduced } },
-    });
+    await setSalesInvoiceOutstandingInTx(tx, ret.salesInvoiceId, { delta: ret.arReducedAmount.toString() });
   }
 
   // Cancel the customer-deposit Payment (liability already reversed via main JE).

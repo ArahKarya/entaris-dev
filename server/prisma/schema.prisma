@@ -1061,7 +1061,7 @@ model AuditLog {
   newValues  Json?    @map("new_values")
   ipAddress  String?  @map("ip_address")
   userAgent  String?  @map("user_agent")
-  /// 'mcp' bila aksi dijalankan agen lewat MCP (viaMeta = { token, channel, tool, approvalId? }); 'demo' bila dibuat generator data uji coba.
+  /// 'mcp' bila aksi dijalankan agen lewat MCP (viaMeta = { token, channel, tool, approvalId? }); 'demo' bila dibuat generator data uji coba; 'repair' bila ditulis skrip perbaikan data (viaMeta = { script, approvedBy }).
   via        String?
   viaMeta    Json?    @map("via_meta")
   createdAt  DateTime @default(now()) @map("created_at")

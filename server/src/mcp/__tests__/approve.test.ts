@@ -13,7 +13,8 @@ const m = vi.hoisted(() => {
     notifyAdmins: vi.fn().mockResolvedValue(1),
   };
 });
-vi.mock('../../lib/prisma', () => ({ prisma: m.db }));
+// decideApproval decides inside one transaction; here it runs on the same mock client.
+vi.mock('../../lib/prisma', () => ({ prisma: { ...m.db, $transaction: (fn: (t: unknown) => unknown) => fn(m.db) } }));
 vi.mock('../../services/notificationService', () => ({ notifyUsers: m.notifyUsers, notifyAdmins: m.notifyAdmins }));
 vi.mock('../execute', async () => ({ ...(await vi.importActual<typeof import('../execute')>('../execute')), callHandler: m.callHandler }));
 
@@ -152,6 +153,10 @@ describe('decideApproval integration', () => {
     const rej = await decideApproval({ requestId: 'apr-1', action: 'reject', actorUserId: 'admin-1', note: 'Tidak perlu' });
     expect(rej).toMatchObject({ ok: true, status: 'Rejected' });
     expect(m.callHandler).not.toHaveBeenCalled();
-    expect(m.db.approvalRequest.update.mock.calls.at(-1)![0].data).toMatchObject({ status: 'Rejected', rejectedBy: 'admin-1' });
+    // Conditional on Pending: a reject can no longer overwrite an Executing or Approved request.
+    expect(m.db.approvalRequest.updateMany.mock.calls.at(-1)![0]).toMatchObject({
+      where: { id: 'apr-1', status: 'Pending' },
+      data: { status: 'Rejected', rejectedBy: 'admin-1' },
+    });
   });
 });

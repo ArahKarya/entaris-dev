@@ -197,10 +197,30 @@
   },
   "inventoryRows": {
     "block": {
-      "cancelFromReceipt": "Gerakan dari STT hanya bisa dibatalkan lewat halaman STT.",
+      "cancelFromDocument": "Gerakan dari {{doc}} hanya bisa dibatalkan lewat halaman {{page}}.",
       "cancelled": "Gerakan sudah dibatalkan.",
-      "editFromProduction": "Gerakan dari proses produksi diubah lewat proses produksinya.",
-      "editFromReceipt": "Gerakan dari STT hanya bisa diubah lewat halaman STT."
+      "doc": {
+        "GoodsReceipt": "STT",
+        "DeliveryOrder": "surat jalan",
+        "SalesReturn": "retur penjualan",
+        "ProductionRun": "proses produksi",
+        "StockOpname": "stok opname",
+        "StockTransfer": "transfer stok",
+        "PurchaseInvoice": "invoice pembelian",
+        "SalesInvoice": "invoice penjualan"
+      },
+      "editFromDocument": "Gerakan dari {{doc}} hanya bisa diubah atau dibatalkan lewat halaman {{page}}.",
+      "openingBalance": "Gerakan saldo awal tidak bisa diubah per baris. Koreksi stok awal lewat Penyesuaian Stok.",
+      "page": {
+        "GoodsReceipt": "STT",
+        "DeliveryOrder": "Surat Jalan",
+        "SalesReturn": "Retur Penjualan",
+        "ProductionRun": "Produksi",
+        "StockOpname": "Stok Opname",
+        "StockTransfer": "Transfer Stok",
+        "PurchaseInvoice": "Invoice",
+        "SalesInvoice": "Invoice"
+      }
     },
     "movementType": {
       "AdjustmentIn": "Penyesuaian +",
@@ -404,7 +424,6 @@
       "offsetAccountOptional": "Akun Lawan (opsional)",
       "quantity": "Kuantitas",
       "referenceNumber": "Nomor Referensi",
-      "referenceType": "Tipe Referensi",
       "totalValue": "Total Nilai",
       "unitCost": "Harga Satuan",
       "warehouse": "Gudang"
@@ -423,11 +442,6 @@
       "referenceNumber": "Nomor dokumen referensi"
     },
     "productionLinked": "Gerakan stok dari proses produksi tidak dapat diedit langsung.",
-    "referenceTypes": {
-      "none": "Tidak Ada",
-      "purchaseInvoice": "Invoice Pembelian",
-      "salesInvoice": "Invoice Penjualan"
-    },
     "titleCreate": "Catat Gerakan Stok",
     "titleEdit": "Edit Gerakan Stok",
     "toast": {

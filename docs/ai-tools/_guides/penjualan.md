@@ -69,14 +69,15 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 1. **`inq_convert_payload` bermutasi walau GET**: bila inquiry berupa prospek tanpa pelanggan, endpoint membuat master Pelanggan baru dan mengisi `partyId` inquiry. Diklasifikasikan `write`. Sebaliknya `quot_convert_payload` murni baca.
 2. **Invoice tidak punya draft**: `si_create` = posting langsung (jurnal + stok + HPP). Jangan dipanggil untuk "simpan dulu". `si_update` hanya mengubah catatan/jatuh tempo/syarat; nilai tidak bisa diedit — koreksi = `si_cancel` lalu buat ulang.
-3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi atau aplikasi uang muka aktif; `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
+3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Retur -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi, aplikasi uang muka aktif, atau retur aktif (`INVOICE_HAS_ACTIVE_RETURNS`; batalkan returnya dulu dengan `sret_cancel`); `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
 4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.
-5. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.
-6. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.
-7. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
-8. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
-9. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.
-10. **Tarif pajak**: PPN (`taxPct`) bisa per baris dan per dokumen; PPh per baris (`pphPct`) didebit ke 1.5.4 bila akun itu ada di COA (jika tidak ada, baris PPh dilewati tanpa error).
+5. **Status invoice mengikuti sisa tagihan**: Paid bila sisa <= Rp 0,01, Submitted bila belum ada yang dilunasi, selain itu PartiallyPaid. Invoice yang diretur penuh berstatus Paid dan tidak menerima alokasi pembayaran. Status `Overdue` tidak pernah disimpan; jatuh tempo dibaca dari `dueDate`.
+6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.
+7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.
+8. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
+9. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
+10. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.
+11. **Tarif pajak**: PPN (`taxPct`) bisa per baris dan per dokumen; PPh per baris (`pphPct`) didebit ke 1.5.4 bila akun itu ada di COA (jika tidak ada, baris PPh dilewati tanpa error).
 
 ### Peta istilah
 

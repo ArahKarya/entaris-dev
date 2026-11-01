@@ -86,8 +86,10 @@ export function realCompanyName(name: string | null | undefined): string {
 }
 
 /**
- * PUT /settings/company replaces taxId/currency/fiscal start month when they are
- * omitted, so the wizard sends the whole profile with its edits merged in.
+ * PUT /settings/company replaces taxId and the fiscal start month when they are
+ * omitted, so the wizard sends the whole profile with its edits merged in. The
+ * currency is always IDR: bookkeeping is rupiah only, so an old non-IDR value is
+ * not sent back.
  */
 export function companyUpdatePayload(
   current: OnboardingCompany | null | undefined,
@@ -99,7 +101,7 @@ export function companyUpdatePayload(
     phone: edits.phone?.trim() || null,
     email: edits.email?.trim() || '',
     taxId: edits.taxId?.trim() || null,
-    defaultCurrency: current?.defaultCurrency || 'IDR',
+    defaultCurrency: 'IDR',
     fiscalYearStartMonth: current?.fiscalYearStartMonth ?? 1,
   };
 }

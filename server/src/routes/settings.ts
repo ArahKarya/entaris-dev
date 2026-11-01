@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { requirePerm } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
-import { UpdateCompanySettingsSchema } from '../utils/schemas';
+import { RUPIAH, UpdateCompanySettingsSchema } from '../utils/schemas';
 import { logger } from '../lib/logger';
 import dummyDataRouter from './settings/dummyData';
 import demoDataRouter from './settings/demoData';
@@ -13,9 +13,9 @@ import fs from 'fs';
 
 const router = Router();
 
-// Heavy admin tooling (generate-dummy, delete-dummy, reset-data) lives in
-// settings/dummyData.ts — kept off the main file because it was ~570 lines
-// of self-contained seed/teardown logic.
+// Destructive admin tooling lives in settings/dummyData.ts: reset-data, and delete-dummy for
+// what the old dummy generator left behind (the generator itself was removed in E7-R13).
+// Demo data (settings/demoData.ts) replaces it.
 router.use(dummyDataRouter);
 router.use(demoDataRouter);
 
@@ -76,7 +76,11 @@ router.get('/company', async (req, res) => {
       prisma.party.findFirst({ where: { isDummy: true }, select: { id: true } }),
       prisma.demoDataBatch.findFirst({ select: { id: true } }),
     ]);
-    return res.json(settings ? { ...settings, hasDummyData: Boolean(dummyParty || demoBatch) } : settings);
+    // Bookkeeping is rupiah only: an old non-IDR code (until the next save or the e2 repair) is a
+    // stale label, so it is never handed back for a client or AIRA to resend.
+    return res.json(
+      settings ? { ...settings, defaultCurrency: RUPIAH, hasDummyData: Boolean(dummyParty || demoBatch) } : settings,
+    );
   } catch (error) {
     logger.error({ error }, 'GET /settings/company error');
     return res.status(500).json({ error: 'Gagal mengambil pengaturan perusahaan.' });
@@ -110,7 +114,9 @@ router.put('/company', requirePerm('settings'), async (req, res) => {
       phone: body.phone || null,
       email: body.email || null,
       taxId: body.taxId || null,
-      defaultCurrency: body.currency || rawBody.defaultCurrency || 'IDR',
+      // Rupiah only: the validated currency may only be IDR, and an old non-IDR row is normalised
+      // on the next save.
+      defaultCurrency: RUPIAH,
       fiscalYearStartMonth: body.fiscalYearStartMonth ?? 1,
       ...(body.defaultLanguage !== undefined && { defaultLanguage: body.defaultLanguage }),
       ...(body.logoUrl !== undefined && { logoUrl: body.logoUrl || null }),

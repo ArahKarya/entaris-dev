@@ -81,6 +81,9 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
   const [runMachines, setRunMachines] = useState<MachineLine[]>([]);
   const [downtimes, setDowntimes] = useState<DowntimeLine[]>([]);
   const isAdmin = cap('inventory.negative_stock');
+  // A resubmitted payload may carry a bypass this user cannot see or untick;
+  // without the capability it is dropped instead of earning a 403 every retry.
+  const bypassStock = isAdmin && allowNegativeStock;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const errorsRef = useRef<HTMLDivElement>(null);
@@ -466,7 +469,7 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
         errs.push(t('productionRunModal.errors.byProductNrv', { n: i + 1 }));
       }
     });
-    if (allowNegativeStock && negativeStockReason.trim().length < 10) {
+    if (bypassStock && negativeStockReason.trim().length < 10) {
       errs.push(t('productionRunModal.errors.bypassReason'));
     }
     if (plannedStart && plannedEnd && new Date(plannedEnd).getTime() <= new Date(plannedStart).getTime()) {
@@ -498,8 +501,8 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
           unitPrice: o.unitPrice ? parseFloat(o.unitPrice) : null,
           isByProduct: o.isByProduct,
         })),
-        allowNegativeStock,
-        negativeStockReason: allowNegativeStock ? negativeStockReason.trim() : null,
+        allowNegativeStock: bypassStock,
+        negativeStockReason: bypassStock ? negativeStockReason.trim() : null,
       };
 
       const fullPayload: any = {

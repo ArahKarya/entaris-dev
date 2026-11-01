@@ -347,6 +347,7 @@ export const DailyReportPDF: React.FC<DailyReportPDFProps> = ({ company, date, d
         <SummaryRow items={[
           { label: t('daily.deposits.total'), value: idr(data.vendorDeposits.summary.totalDeposits) },
           { label: t('daily.deposits.applied'), value: idr(data.vendorDeposits.summary.totalApplied) },
+          { label: t('daily.deposits.totalRefunded'), value: idr(data.vendorDeposits.summary.totalRefunded ?? 0) },
           { label: t('daily.deposits.remaining'), value: idr(data.vendorDeposits.summary.totalRemaining) },
         ]} />
         {data.vendorDeposits.deposits.length > 0 ? (
@@ -355,7 +356,8 @@ export const DailyReportPDF: React.FC<DailyReportPDFProps> = ({ company, date, d
               <Text style={[S.th, { width: 110 }]}>{t('daily.finance.paymentNo')}</Text>
               <Text style={[S.th, { flex: 1 }]}>{t('common.supplier')}</Text>
               <Text style={[S.th, { width: 110, textAlign: 'right' }]}>{t('daily.deposits.amount')}</Text>
-              <Text style={[S.th, { width: 110, textAlign: 'right' }]}>{t('daily.deposits.allocated')}</Text>
+              <Text style={[S.th, { width: 90, textAlign: 'right' }]}>{t('daily.deposits.allocated')}</Text>
+              <Text style={[S.th, { width: 90, textAlign: 'right' }]}>{t('daily.deposits.refunded')}</Text>
               <Text style={[S.th, { width: 110, textAlign: 'right' }]}>{t('common.remaining')}</Text>
             </View>
             {data.vendorDeposits.deposits.map((d: any, i: number) => (
@@ -363,7 +365,8 @@ export const DailyReportPDF: React.FC<DailyReportPDFProps> = ({ company, date, d
                 <Text style={[S.cell, { width: 110 }]}>{d.paymentNumber}</Text>
                 <Text style={[S.cell, { flex: 1 }]}>{d.supplierName}</Text>
                 <Text style={[S.cellRight, { width: 110 }]}>{idr(d.amount)}</Text>
-                <Text style={[S.cellRight, { width: 110 }]}>{idr(d.totalApplied)}</Text>
+                <Text style={[S.cellRight, { width: 90 }]}>{idr(d.totalApplied)}</Text>
+                <Text style={[S.cellRight, { width: 90 }]}>{idr(d.totalRefunded ?? 0)}</Text>
                 <Text style={[S.cellRightBold, { width: 110 }]}>{idr(d.remaining)}</Text>
               </View>
             ))}

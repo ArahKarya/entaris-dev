@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Prisma } from '@prisma/client';
 import {
+  buildDailyVendorDeposits,
   buildVendorDepositWhere,
   DEFAULT_VENDOR_DEPOSIT_SORT,
   filterVendorByUsage,
@@ -175,5 +176,45 @@ describe('summarizeVendorDeposits', () => {
       activeCount: 0,
       byState: { Active: 0, PartiallyUsed: 0, FullyUsed: 0, Cancelled: 0 },
     });
+  });
+});
+
+describe('buildDailyVendorDeposits', () => {
+  const dep = (over: Partial<VendorDepositLightSource> & { applied?: Array<string | number> } = {}) => src(over);
+
+  it('remaining = amount − applied − refunded (UM 100 jt, refund 20 jt → 80 jt)', () => {
+    const r = buildDailyVendorDeposits([dep({ amount: '100000000', refundedAmount: '20000000' })]);
+    expect(r.deposits).toEqual([
+      {
+        paymentNumber: 'PAY-202610-0001',
+        supplierName: 'KUD A',
+        amount: 100_000_000,
+        totalApplied: 0,
+        totalRefunded: 20_000_000,
+        remaining: 80_000_000,
+        date: new Date('2026-10-01T00:00:00.000Z'),
+      },
+    ]);
+    expect(r.summary).toEqual({ totalDeposits: 100_000_000, totalApplied: 0, totalRefunded: 20_000_000, totalRemaining: 80_000_000 });
+  });
+
+  it('hides a fully refunded deposit and a dust remainder, but keeps them in the totals', () => {
+    const r = buildDailyVendorDeposits([
+      dep({ paymentNumber: 'PAY-A', amount: '5000000', refundedAmount: '5000000' }),
+      dep({ paymentNumber: 'PAY-B', amount: '1000', applied: ['999.995'] }),
+      dep({ paymentNumber: 'PAY-C', amount: '3000000', applied: ['1000000'] }),
+    ]);
+    expect(r.deposits.map((d) => d.paymentNumber)).toEqual(['PAY-C']);
+    expect(r.summary).toEqual({
+      totalDeposits: 8_001_000,
+      totalApplied: 1_001_000,
+      totalRefunded: 5_000_000,
+      totalRemaining: 2_000_000,
+    });
+  });
+
+  it('a supplier without a party shows a dash', () => {
+    const r = buildDailyVendorDeposits([dep({ party: null })]);
+    expect(r.deposits[0].supplierName).toBe('—');
   });
 });

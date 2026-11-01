@@ -14,6 +14,7 @@ import { voidDepositApplicationJournalInTx } from '../services/depositApplicatio
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
+import { setSalesInvoiceOutstandingInTx } from '../services/salesInvoiceStatus';
 import {
   assertDepositNotRefunded,
   assertDepositNotFromSalesReturn,
@@ -339,12 +340,7 @@ router.post('/apply', async (req: AuthRequest, res) => {
       await updateAccountBalance(tx, arAccount.id, 0, applyAmountNum);       // CR AR (reduce)
 
       // Update invoice outstanding
-      const newOutstanding = invoiceOutstanding.minus(applyAmount);
-      const newStatus = newOutstanding.lte(new Decimal('0.01')) ? 'Paid' : 'PartiallyPaid';
-      await tx.salesInvoice.update({
-        where: { id: invoice.id },
-        data: { outstanding: newOutstanding.toNumber(), status: newStatus },
-      });
+      await setSalesInvoiceOutstandingInTx(tx, invoice.id, { delta: applyAmount.neg() });
 
       // Update party balances
       await tx.party.update({
@@ -406,14 +402,9 @@ router.post('/apply/:id/cancel', requireCap('doc.cancel'), async (req: AuthReque
         await assertPeriodOpen(tx, { date: application.appliedAt }, 'uang muka');
       }
 
-      // Restore invoice outstanding
+      // Restore invoice outstanding (read again under its row lock, not from the include above)
       const invoice = application.salesInvoice;
-      const newOutstanding = new Decimal(invoice.outstanding.toString()).plus(applyAmount);
-      const newStatus = newOutstanding.gte(new Decimal(invoice.grandTotal.toString())) ? 'Submitted' : 'PartiallyPaid';
-      await tx.salesInvoice.update({
-        where: { id: invoice.id },
-        data: { outstanding: newOutstanding.toNumber(), status: newStatus },
-      });
+      await setSalesInvoiceOutstandingInTx(tx, invoice.id, { delta: applyAmount });
 
       // Restore party balances
       await tx.party.update({
@@ -527,14 +518,7 @@ router.post('/:id/refund', async (req: AuthRequest, res) => {
           await updateAccountBalance(tx, depositAccount.id, applyNum, 0);
           await updateAccountBalance(tx, arAccount.id, 0, applyNum);
 
-          const newOut = invOut.minus(apply);
-          await tx.salesInvoice.update({
-            where: { id: inv.id },
-            data: {
-              outstanding: newOut.toNumber(),
-              status: newOut.lte(new Decimal('0.01')) ? 'Paid' : 'PartiallyPaid',
-            },
-          });
+          await setSalesInvoiceOutstandingInTx(tx, inv.id, { delta: apply.neg() });
 
           const app = await tx.customerDepositApplication.create({
             data: {

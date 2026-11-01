@@ -732,6 +732,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 | `lines[].category` | body | enum: `TRANSPORT`, `LODGING`, `PER_DIEM`, `MEALS`, `OTHER` | tidak | Perjalanan dinas: kategori + tarif × jumlah (amount = quantity × unitAmount). |
 | `lines[].quantity` | body | `number` | tidak |  |
 | `lines[].unitAmount` | body | `number` | tidak |  |
+| `currency` | body | enum: `IDR` | tidak | Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400). |
 
 **Contoh pemanggilan**
 
@@ -782,6 +783,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: jenis tidak aktif
 - 400: pilih vendor
 - 400: akun biaya tidak valid
+- 400: Pengajuan hanya rupiah (currency selain IDR)
 
 **Tool terkait:** [`payreqtype_list`](#payreqtype_list), [`payreq_submit`](#payreq_submit), [`coa_flat`](akuntansi.md#coa_flat)
 
@@ -1701,6 +1703,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 | `lines[].category` | body | enum: `TRANSPORT`, `LODGING`, `PER_DIEM`, `MEALS`, `OTHER` | tidak | Perjalanan dinas: kategori + tarif × jumlah (amount = quantity × unitAmount). |
 | `lines[].quantity` | body | `number` | tidak |  |
 | `lines[].unitAmount` | body | `number` | tidak |  |
+| `currency` | body | enum: `IDR` | tidak | Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400). |
 
 **Contoh pemanggilan**
 
@@ -1745,6 +1748,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 
 - 400: hanya pengaju
 - 400: hanya bisa diubah saat Draf/Perlu Revisi
+- 400: Pengajuan hanya rupiah (currency selain IDR)
 
 **Tool terkait:** [`payreq_create`](#payreq_create), [`payreq_submit`](#payreq_submit)
 

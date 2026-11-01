@@ -675,7 +675,7 @@ Aturan wajib:
 
 ### inv_mov_cancel
 
-**Ringkasan:** Membatalkan pergerakan stok: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Pergerakan dari STT harus dibatalkan lewat STT.
+**Ringkasan:** Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -721,13 +721,14 @@ Aturan wajib:
 **Prasyarat**
 
 - User memiliki capability doc.cancel.
+- Bukan mutasi milik dokumen, bukan saldo awal, dan bukan TransferIn/TransferOut.
 - Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.
 - Tahun buku tanggal pergerakan dan jurnalnya masih terbuka.
 
 **Error umum**
 
 - 400: gerakan sudah dibatalkan
-- 400: dari STT tidak dapat dibatalkan per baris
+- 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok
 - 400: stok tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
@@ -737,7 +738,7 @@ Aturan wajib:
 
 ### inv_mov_create
 
-**Ringkasan:** Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong.
+**Ringkasan:** Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -756,11 +757,11 @@ Aturan wajib:
 | `unitCost` | body | `number` | tidak | Biaya satuan; jika 0/kosong tidak ada jurnal dan WAC tidak berubah. |
 | `date` | body | `date` | ya | Tanggal transaksi (YYYY-MM-DD) - harus berada di tahun fiskal aktif. |
 | `offsetAccountId` | body | `string` | tidak | UUID akun lawan jurnal (default Ekuitas Saldo Awal 3.1). |
-| `referenceType` | body | `string` | tidak |  |
-| `referenceId` | body | `string` | tidak |  |
-| `referenceNumber` | body | `string` | tidak |  |
+| `referenceType` | body | `string` | tidak | Diabaikan: referensi dokumen hanya diisi sistem oleh dokumen pemiliknya. |
+| `referenceId` | body | `string` | tidak | Diabaikan: referensi dokumen hanya diisi sistem oleh dokumen pemiliknya. |
+| `referenceNumber` | body | `string` | tidak | Nomor referensi teks bebas (mis. nomor nota). |
 | `notes` | body | `string` | tidak | Catatan bebas. |
-| `sourceMovementId` | body | `uuid` | tidak | Opsional UUID batch sumber. |
+| `sourceMovementId` | body | `uuid` | tidak | Opsional UUID batch sumber untuk Out/AdjustmentOut: harus pergerakan masuk (In/AdjustmentIn/TransferIn) aktif untuk item yang sama; gudang boleh berbeda. Diabaikan untuk stok masuk. |
 
 **Contoh pemanggilan**
 
@@ -804,6 +805,7 @@ Aturan wajib:
 - 400: tidak ada tahun fiskal aktif untuk tanggal ini
 - 400: stok di gudang tidak cukup
 - 400: item tidak aktif / tidak ditemukan
+- 400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`inv_mov_cancel`](#inv_mov_cancel), [`inv_mov_list`](#inv_mov_list), [`opn_create`](#opn_create)
@@ -955,7 +957,7 @@ Aturan wajib:
 
 ### inv_mov_update
 
-**Ringkasan:** Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Pergerakan dari STT/GoodsReceipt atau produksi tidak dapat diedit per baris.
+**Ringkasan:** Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -973,8 +975,8 @@ Aturan wajib:
 | `unitCost` | body | `number` | tidak |  |
 | `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |
 | `offsetAccountId` | body | `string` | tidak |  |
-| `referenceType` | body | `string` | tidak |  |
-| `referenceNumber` | body | `string` | tidak |  |
+| `referenceType` | body | `string` | tidak | Diabaikan: kolom referenceType tidak diubah lewat edit. |
+| `referenceNumber` | body | `string` | tidak | Nomor referensi teks bebas. |
 | `notes` | body | `string` | tidak | Catatan bebas. |
 
 **Contoh pemanggilan**
@@ -1012,14 +1014,14 @@ Aturan wajib:
 **Prasyarat**
 
 - Pergerakan belum dibatalkan.
-- Bukan berasal dari STT/GoodsReceipt atau ProductionRun.
+- Bukan mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama), bukan saldo awal, dan bukan TransferIn/TransferOut.
 - User memiliki capability doc.cancel.
 - Tahun buku tanggal lama dan tanggal baru masih terbuka.
 
 **Error umum**
 
 - 400: gerakan sudah dibatalkan
-- 400: gerakan dari STT/produksi tidak dapat diedit per baris
+- 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok
 - 400: pembalikan stok lama membuat stok negatif
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
@@ -1030,7 +1032,7 @@ Aturan wajib:
 
 ### opn_cancel
 
-**Ringkasan:** Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.
+**Ringkasan:** Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dan satelitnya dibatalkan dengan pembatal tercatat, saldo akun dibalik per baris jurnal. Opname Draft atau yang sudah batal tidak dapat dibatalkan.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1069,7 +1071,7 @@ Aturan wajib:
 
 **Isi hasil:** Pesan sukses pembatalan.
 
-**Efek pembukuan/stok:** Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled + saldo akun dihitung ulang. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.
+**Efek pembukuan/stok:** Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.
 
 **Teks konfirmasi:** Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.
 
@@ -1084,7 +1086,8 @@ Aturan wajib:
 - 400: stok opname sudah dibatalkan
 - 400: stok item tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
-- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan
+- 400 JOURNAL_ALREADY_REVERSED: jurnal opname sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`opn_get`](#opn_get)
@@ -1297,7 +1300,7 @@ Aturan wajib:
 
 **Isi hasil:** Transfer dengan status Cancelled.
 
-**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).
+**Efek pembukuan/stok:** Stok: +qty gudang asal, -qty gudang tujuan, dihitung dari gerakan transfer yang masih aktif; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).
 
 **Teks konfirmasi:** Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.
 
@@ -1313,6 +1316,7 @@ Aturan wajib:
 - 404: transfer tidak ditemukan
 - 400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu
 - 400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu
+- 409 TRANSFER_CANCEL_INCOMPLETE: sebagian gerakan stok transfer ini pernah dibatalkan per baris (data lama); transfer tidak dibalik, koreksi stok gudang lewat Penyesuaian Stok
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock

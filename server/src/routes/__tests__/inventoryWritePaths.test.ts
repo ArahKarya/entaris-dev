@@ -23,7 +23,10 @@ vi.mock('../../utils/accountBalance', () => ({
   updateAccountBalance: vi.fn(async () => undefined),
   recalculateAccountBalances: vi.fn(async () => undefined),
 }));
-vi.mock('../../utils/journalCancel', () => ({ cancelJournalsByPrefix: vi.fn(async () => undefined) }));
+vi.mock('../../services/ledger/cancelJournals', () => ({
+  findDocumentJournals: vi.fn(async () => []),
+  cancelJournalsInTx: vi.fn(async () => []),
+}));
 vi.mock('../../services/systemAccounts', () => ({
   systemAccounts: {
     getAccount: vi.fn(async (role: string) => ({ id: { INVENTORY: 'acc-inv', OPENING_EQUITY: 'acc-3.1', INVENTORY_VARIANCE: 'acc-var' }[role] })),
@@ -235,5 +238,84 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe('PERIOD_CLOSED');
     expect(current.fn('stockOpname.update')).not.toHaveBeenCalled();
+  });
+});
+
+describe('document movement lock and references (E3-R2)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('POST ignores referenceType/referenceId from the body and keeps the referenceNumber', async () => {
+    current = makeAutoTx(journalHandlers);
+    const res = await send('POST', '/movements', {
+      itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: 10, unitCost: 0, date: '2026-10-10',
+      referenceType: 'SalesReturn', referenceId: 'sr-fake', referenceNumber: 'NOTA-7',
+    });
+    expect(res.status).toBe(201);
+    expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({
+      referenceType: null, referenceId: null, referenceNumber: 'NOTA-7',
+    });
+  });
+
+  it('POST rejects a source batch of another item before writing stock', async () => {
+    current = makeAutoTx({
+      ...journalHandlers,
+      'inventoryStock.findUnique': () => ({ currentStock: '50' }),
+      'stockMovement.findUnique': () => ({ id: 'b-1', itemId: 'other-item', isCancelled: false, movementType: 'In', unitCost: '1' }),
+    });
+    const res = await send('POST', '/movements', {
+      itemId: ITEM_ID, warehouseId: WH, movementType: 'Out', quantity: 5, date: '2026-10-10',
+      sourceMovementId: '0b8a3f0e-0000-4000-8000-0000000000b1',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('MOVEMENT_SOURCE_BATCH_INVALID');
+    expect(current.fn('inventoryStock.upsert')).not.toHaveBeenCalled();
+    expect(current.fn('stockMovement.create')).not.toHaveBeenCalled();
+  });
+
+  it('PUT never writes referenceType and clears the batch when the row becomes inbound', async () => {
+    current = makeAutoTx({ ...journalHandlers, 'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, movementType: 'Out' }) });
+    const res = await send('PUT', '/movements/sm-1', {
+      movementType: 'In', quantity: 4, unitCost: 0, date: '2026-10-10', referenceType: 'GoodsReceipt',
+    });
+    expect(res.status).toBe(200);
+    const data = current.fn('stockMovement.update').mock.calls[0]![0].data;
+    expect(data).not.toHaveProperty('referenceType');
+    expect(data.sourceMovementId).toBeNull();
+  });
+
+  it.each(['TransferOut', 'TransferIn'])('cancel and edit of a %s row are refused before any stock moves', async (movementType) => {
+    current = makeAutoTx({
+      ...journalHandlers,
+      'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, movementType, referenceType: 'StockTransfer', referenceId: 'st-1' }),
+    });
+    const cancel = await send('PUT', '/movements/sm-1/cancel', {});
+    expect(cancel.status).toBe(400);
+    expect((await cancel.json()).code).toBe('MOVEMENT_DOCUMENT_LOCKED');
+    const edit = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 1, date: '2026-10-10' });
+    expect(edit.status).toBe(400);
+    expect((await edit.json()).code).toBe('MOVEMENT_DOCUMENT_LOCKED');
+    expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
+    expect(current.fn('stockMovement.update')).not.toHaveBeenCalled();
+  });
+
+  it('opname cancel skips a line whose movement was already cancelled', async () => {
+    current = makeAutoTx({
+      ...fiscalYearHandlers(),
+      'stockOpname.findUnique': () => ({
+        id: 'so-1', opnameNumber: 'SO-1', status: 'Submitted', date: new Date('2026-10-10'), fiscalYearId: 'fy-2026',
+        items: [
+          { itemId: ITEM_ID, difference: '2', movementId: 'm-live', item: ITEM },
+          { itemId: ITEM_ID, difference: '-3', movementId: 'm-dead', item: ITEM },
+        ],
+      }),
+      'stockMovement.findUnique': ({ where }: any) =>
+        where.id === 'm-dead'
+          ? { warehouseId: WH, isCancelled: true, movementType: 'AdjustmentOut', quantity: '3' }
+          : { warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn', quantity: '2' },
+    });
+    const res = await send('PUT', '/stock-opname/so-1/cancel', {});
+    expect(res.status).toBe(200);
+    expect(current.fn('inventoryItem.update').mock.calls.map((c) => c[0].data.currentStock.increment)).toEqual([-2]);
+    expect(current.fn('stockMovement.update').mock.calls.map((c) => c[0].where.id)).toEqual(['m-live']);
   });
 });

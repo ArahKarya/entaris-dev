@@ -22,6 +22,7 @@ import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField
 import { useTranslation } from 'react-i18next';
 import { formatNumber } from '@/lib/format';
 import { todayLocal } from '@/lib/date';
+import { isProductionLinkedMovement } from '@/components/inventory/inventory-rows';
 
 interface StockMovementModalProps {
   isOpen: boolean;
@@ -39,7 +40,6 @@ const defaultForm = {
   quantity: '',
   unitCost: '',
   offsetAccountId: '',
-  referenceType: '',
   referenceNumber: '',
   notes: '',
 };
@@ -64,7 +64,6 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
           quantity: editMovement.quantity != null ? String(Number(editMovement.quantity)) : '',
           unitCost: editMovement.unitCost != null ? String(Number(editMovement.unitCost)) : '',
           offsetAccountId: editMovement.offsetAccountId || '',
-          referenceType: editMovement.referenceType || '',
           referenceNumber: editMovement.referenceNumber || '',
           notes: editMovement.notes || '',
         });
@@ -164,7 +163,6 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
       quantity: Number(form.quantity),
       unitCost: unitCost,
       offsetAccountId: form.offsetAccountId || undefined,
-      referenceType: form.referenceType || undefined,
       referenceNumber: form.referenceNumber || undefined,
       notes: form.notes || undefined,
     };
@@ -177,7 +175,7 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
     mutation.mutate(payload);
   };
 
-  const isProductionLinked = editMovement?.referenceType === 'ProductionRun';
+  const isProductionLinked = isProductionLinkedMovement(editMovement);
   const pending = mutation.isPending;
   const stockItem = selectedItem || editMovement?.item;
   const dateError = showErrors && !form.date ? t('stockMovementModal.errors.dateRequired') : undefined;
@@ -321,37 +319,15 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
               }
             />
 
-            <Field label={t('stockMovementModal.fields.referenceType')}>
-              {(control) => (
-                <Select
-                  value={form.referenceType || '__none'}
-                  onValueChange={(v) =>
-                    setForm(f => ({ ...f, referenceType: v === '__none' ? '' : v, referenceNumber: '' }))
-                  }
-                  disabled={isProductionLinked}
-                >
-                  <SelectTrigger {...control}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">{t('stockMovementModal.referenceTypes.none')}</SelectItem>
-                    <SelectItem value="PurchaseInvoice">{t('stockMovementModal.referenceTypes.purchaseInvoice')}</SelectItem>
-                    <SelectItem value="SalesInvoice">{t('stockMovementModal.referenceTypes.salesInvoice')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
+            {/* Free text only: the document reference (and its lock) is set by the documents themselves. */}
+            <Field label={t('stockMovementModal.fields.referenceNumber')}>
+              <Input
+                value={form.referenceNumber}
+                onChange={e => setForm(f => ({ ...f, referenceNumber: e.target.value }))}
+                disabled={isProductionLinked}
+                placeholder={t('stockMovementModal.placeholders.referenceNumber')}
+              />
             </Field>
-
-            {form.referenceType && (
-              <Field label={t('stockMovementModal.fields.referenceNumber')}>
-                <Input
-                  value={form.referenceNumber}
-                  onChange={e => setForm(f => ({ ...f, referenceNumber: e.target.value }))}
-                  disabled={isProductionLinked}
-                  placeholder={t('stockMovementModal.placeholders.referenceNumber')}
-                />
-              </Field>
-            )}
 
             <Field label={t('stockMovementModal.fields.notes')}>
               <Textarea

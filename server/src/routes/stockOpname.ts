@@ -9,12 +9,13 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { recalculateAccountBalances } from '../utils/accountBalance';
-import { cancelJournalsByPrefix } from '../utils/journalCancel';
-import { journalFamilyWhere } from '../utils/journalFamily';
+import { cancelTrail } from '../utils/cancelClaim';
+import { cancelJournalsInTx, findDocumentJournals } from '../services/ledger/cancelJournals';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
+import { INBOUND_TYPES } from '../services/stockMovementList';
 import {
   buildStockOpnameWhere,
   DEFAULT_STOCK_OPNAME_SORT,
@@ -418,14 +419,23 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       if (so.status === 'Draft') throw new BusinessError('Stok opname Draft tidak perlu dibatalkan.');
       await assertPeriodsOpen(tx, [{ date: so.date }, { fiscalYearId: so.fiscalYearId, date: so.date }], 'stok opname');
 
-      // Reverse stock movements
+      // Reverse stock movements. A movement that is gone or was already cancelled per row (possible
+      // before E3-R2) has moved its stock back already, so its line is skipped, not reversed twice.
+      // The amount comes from the movement itself, not opItem.difference: before E3-R2 the per-row
+      // edit could change an opname movement's type or quantity in place.
       const itemsWithMovement = so.items.filter((i: any) => i.movementId);
       for (const opItem of itemsWithMovement) {
-        const diff = Number(opItem.difference);
-        if (diff === 0) continue;
+        const mov = await tx.stockMovement.findUnique({
+          where: { id: opItem.movementId },
+          select: { warehouseId: true, isCancelled: true, movementType: true, quantity: true },
+        });
+        if (!mov || mov.isCancelled) continue;
+        const qty = Number(mov.quantity);
+        const reverse = INBOUND_TYPES.includes(mov.movementType) ? -qty : qty;
+        if (reverse === 0) continue;
 
-        // Check stock sufficiency for surplus reversal (reducing stock)
-        if (diff > 0 && Number(opItem.item.currentStock) < diff) {
+        // Check stock sufficiency when the reversal reduces stock
+        if (reverse < 0 && Number(opItem.item.currentStock) < -reverse) {
           throw new BusinessError(
             `Tidak dapat membatalkan: stok '${opItem.item.name}' tidak mencukupi untuk pembalikan.`
           );
@@ -434,39 +444,20 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
         // Reverse stock (item-level total + per-warehouse from the original movement)
         await tx.inventoryItem.update({
           where: { id: opItem.itemId },
-          data: { currentStock: { increment: -diff } },
+          data: { currentStock: { increment: reverse } },
         });
-        if (opItem.movementId) {
-          const mov = await tx.stockMovement.findUnique({
-            where: { id: opItem.movementId },
-            select: { warehouseId: true },
-          });
-          await adjustWarehouseStock(tx, opItem.itemId, mov?.warehouseId ?? null, -diff);
-          await tx.stockMovement.update({
-            where: { id: opItem.movementId },
-            data: { isCancelled: true },
-          });
-        }
+        await adjustWarehouseStock(tx, opItem.itemId, mov.warehouseId ?? null, reverse);
+        await tx.stockMovement.update({
+          where: { id: opItem.movementId },
+          data: { isCancelled: true },
+        });
       }
 
-      // Cancel ALL related journals + ledger entries (including any revisions)
-      const jvNumber = `JV-${so.opnameNumber}`;
-
-      // Collect affected account IDs BEFORE cancelling
-      const relatedJEItems = await tx.journalItem.findMany({
-        where: {
-          journalEntry: { ...journalFamilyWhere(jvNumber), status: { not: 'Cancelled' } },
-        },
-        select: { accountId: true },
+      // Void the opname's journals (JV-<opnameNumber> and any satellites); balances are reversed per line.
+      await cancelJournalsInTx(tx, await findDocumentJournals(tx, `JV-${so.opnameNumber}`), {
+        label: 'stok opname',
+        trail: cancelTrail(req.user!.userId),
       });
-      const cancelAffectedAccountIds = [...new Set(relatedJEItems.map(ji => ji.accountId))];
-
-      await cancelJournalsByPrefix(tx, jvNumber);
-
-      // Recalculate balances from JE sums (prevents drift)
-      if (cancelAffectedAccountIds.length > 0) {
-        await recalculateAccountBalances(tx, cancelAffectedAccountIds);
-      }
 
       await tx.stockOpname.update({
         where: { id },

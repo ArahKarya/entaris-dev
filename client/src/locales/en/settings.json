@@ -77,7 +77,8 @@
       },
       "defaultCurrency": {
         "label": "Currency",
-        "hint": "ISO code, e.g. IDR."
+        "hint": "Bookkeeping is in Rupiah only.",
+        "value": "IDR — Rupiah"
       }
     },
     "logo": {
@@ -435,7 +436,7 @@
       "deleted": "Demo data deleted.",
       "deleteError": "Could not delete demo data.",
       "legacyDeleted": "Old dummy data deleted.",
-      "legacyDeleteError": "Could not delete old dummy data.",
+      "legacyDeleteError": "Could not delete old dummy data. If some of it is in a closed fiscal year, reopen that fiscal year first.",
       "confirm": {
         "title": "Delete demo data?",
         "description": "Every transaction in every module will be emptied, including transactions you recorded after the demo data was created.",

@@ -36,6 +36,24 @@ describe('flattenAccountTree', () => {
     expect(picked).toEqual(['a1', 'a2', 'b']);
   });
 
+  it('gives no drill-down to rows marked selectable: false', () => {
+    const picked: string[] = [];
+    const rows = flattenAccountTree(
+      [
+        { id: 'cp', name: 'Laba Tahun Berjalan', balance: 5, selectable: false },
+        { id: 're', name: 'Laba Ditahan', balance: 9, selectable: false, children: [{ id: 're:a', name: 'Saldo', balance: 9, selectable: true }] },
+      ],
+      { onSelect: (n) => picked.push(n.id) },
+    );
+    rows.forEach((r) => r.onSelect?.());
+    expect(rows.map((r) => [r.key, r.kind, !!r.onSelect])).toEqual([
+      ['cp', 'item', false],
+      ['re', 'group', false],
+      ['re:a', 'item', true],
+    ]);
+    expect(picked).toEqual(['re:a']);
+  });
+
   it('handles empty input', () => {
     expect(flattenAccountTree(undefined)).toEqual([]);
   });

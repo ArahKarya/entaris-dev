@@ -49,6 +49,7 @@ export interface DepositRow {
   supplierName: string;
   amount: number;
   totalApplied: number;
+  totalRefunded: number;
   remaining: number;
 }
 
@@ -86,7 +87,7 @@ export interface DailyData {
     bySupplier: AgingRow[];
   };
   vendorDeposits: {
-    summary: { totalDeposits: number; totalApplied: number; totalRemaining: number };
+    summary: { totalDeposits: number; totalApplied: number; totalRefunded: number; totalRemaining: number };
     deposits: DepositRow[];
   };
 }

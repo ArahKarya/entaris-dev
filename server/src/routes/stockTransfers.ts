@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { hasCap } from '../services/permissionService';
-import { handleRouteError } from '../utils/errors';
+import { BusinessError, handleRouteError } from '../utils/errors';
 import { validateBody } from '../utils/validate';
-import { submitStockTransferInTx, cancelStockTransferInTx } from '../services/stockTransfer';
+import { submitStockTransferInTx, cancelStockTransferInTx, STOCK_TRANSFER_CANCEL_INCOMPLETE } from '../services/stockTransfer';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
 import {
   buildStockTransferWhere,
@@ -184,6 +184,10 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
     );
     return res.json(result);
   } catch (error) {
+    // The transfer's own movements no longer match it: a state conflict, not bad input.
+    if (error instanceof BusinessError && error.code === STOCK_TRANSFER_CANCEL_INCOMPLETE) {
+      return res.status(409).json({ error: error.message, code: error.code });
+    }
     return handleRouteError(res, error, 'PATCH /stock-transfers/:id/cancel', 'Gagal membatalkan transfer.');
   }
 });

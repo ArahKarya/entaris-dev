@@ -31,6 +31,12 @@ describe('translateMessage', () => {
     );
   });
 
+  it('names Surat Jalan "Delivery Order" in the movement lock, as the glossary does', () => {
+    expect(
+      translateMessage('Gerakan stok dari surat jalan tidak dapat diedit per baris. Ubah atau batalkan dokumennya dari halaman Surat Jalan.', 'en'),
+    ).toBe('Stock movements from a delivery order cannot be edited per row. Change or cancel the document on the Delivery Order page.');
+  });
+
   it('passes unknown messages through unchanged', () => {
     expect(translateMessage('Pesan yang belum terdaftar.', 'en')).toBe('Pesan yang belum terdaftar.');
     expect(translateMessage('', 'en')).toBe('');

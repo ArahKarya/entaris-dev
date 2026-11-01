@@ -5,7 +5,7 @@ import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBa
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
-import { computePurchaseItem, sumPotonganItem } from './purchaseInvoiceCalc';
+import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 import { resolvePurchaseLineType, resolvePurchaseOrderIdFromReceipts } from './purchaseInvoiceLinks';
 import { logger } from '../lib/logger';
 
@@ -132,22 +132,14 @@ export async function submitPurchaseInvoiceInTx(
     );
   }
 
-  const itemsWithAmount = body.items.map((item) => {
-    const calc = computePurchaseItem(item);
-    return {
-      ...item,
-      effectiveQty: calc.effectiveQuantity,
-      computedAmount: calc.hargaAkhir,
-    };
-  });
-  const itemsSubtotal = itemsWithAmount.reduce(
-    (sum, item) => sum.plus(item.computedAmount),
-    new Decimal(0),
-  );
-  const headerPotongan = sumPotonganItem(body.items);
-  const grandTotal = itemsSubtotal
-    .plus(new Decimal(body.biayaLain ?? 0))
-    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  const totals = computePurchaseInvoiceTotals(body);
+  const itemsWithAmount = body.items.map((item, i) => ({
+    ...item,
+    effectiveQty: totals.lines[i].effectiveQuantity,
+    computedAmount: totals.lines[i].hargaAkhir,
+  }));
+  const headerPotongan = totals.potonganItemTotal;
+  const grandTotal = totals.grandTotal;
   const grandTotalNum = grandTotal.toNumber();
   const invoiceNumber = await generateDocumentNumber(tx, 'PI', parsedDate, fiscalYear.id);
 

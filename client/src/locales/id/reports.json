@@ -182,7 +182,19 @@
     "unbalanced": "Terdapat selisih antara total Aktiva dan Pasiva. Periksa jurnal yang tidak seimbang.",
     "assetsCaption": "Aset per {{date}}",
     "passivaCaption": "Kewajiban dan ekuitas per {{date}}",
-    "passivaHeader": "Kewajiban dan Ekuitas"
+    "passivaHeader": "Kewajiban dan Ekuitas",
+    "noFiscalYear": "Tahun buku untuk tanggal ini belum dibuat. Laba Tahun Berjalan dihitung sejak {{date}}.",
+    "equityMappingMissing": "Akun sistem Laba Ditahan atau Laba Tahun Berjalan belum dipetakan, sehingga barisnya ditampilkan di akhir Ekuitas. Atur di Pengaturan > Akun Sistem.",
+    "rows": {
+      "currentProfit": "Laba Tahun Berjalan",
+      "currentProfitSince": "Laba Tahun Berjalan (sejak {{date}})",
+      "retainedEarnings": "Laba Ditahan",
+      "retainedAccount": "Saldo akun Laba Ditahan",
+      "otherCurrentProfit": "Posting lain ke akun Laba Tahun Berjalan",
+      "unclosedProfit": "Laba tahun lalu yang belum ditutup",
+      "groupDirect": "Saldo langsung grup",
+      "rootTypeMismatch": "{{name}} (jenis akun berbeda dari grupnya)"
+    }
   },
   "cashFlow": {
     "title": "Arus Kas",
@@ -327,6 +339,7 @@
       "summary": "Ringkasan deposit supplier",
       "total": "Total Deposit",
       "applied": "Sudah Dialokasi",
+      "refunded": "Sudah Direfund",
       "remaining": "Sisa Belum Dialokasi",
       "caption": "Deposit supplier",
       "empty": "Tidak ada deposit supplier",
@@ -334,6 +347,7 @@
         "paymentNo": "No. Pembayaran",
         "amount": "Jumlah Deposit",
         "applied": "Dialokasi",
+        "refunded": "Refund",
         "remaining": "Sisa"
       }
     },

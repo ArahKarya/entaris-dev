@@ -349,6 +349,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Jurnal ini adalah revisi harga invoice pembelian. Membatalkannya dari Buku Besar membuat nilai invoice dan persediaan tidak cocok; buat jurnal koreksi atau revisi harga baru.": "This journal is a purchase invoice price revision. Cancelling it from the General Ledger would leave the invoice and inventory values out of step; post a correcting journal or a new price revision.",
   "Jurnal ini terhubung ke dokumen modul lain (stok, uang muka, aset tetap, GA, atau pengajuan dana). Batalkan dari modul asalnya.": "This journal is linked to a document in another module (stock, deposits, fixed assets, GA, or payment requests). Cancel it from its source module.",
   "Jurnal ini milik modul Uang Jaminan. Batalkan dari modul Uang Jaminan.": "This journal belongs to the Project Guarantees module. Cancel it from the Project Guarantees module.",
+  // Rupiah only (utils/schemas.ts, E2-R7 / E8-R12)
+  "Pembukuan hanya rupiah: mata uang akun harus IDR.": "Bookkeeping is in rupiah only: the account currency must be IDR.",
+  "Pengajuan hanya rupiah": "Payment requests are in rupiah only",
   // Document journal void (services/ledger/cancelJournals.ts)
   "Jurnal {0} sudah dibalik dengan jurnal lain, jadi tidak dibatalkan lagi. Periksa jurnal pembaliknya di Buku Besar.": "Journal {0} has already been reversed by another journal, so it is not cancelled again. Check its reversing journal in the General Ledger.",
   "Perbaikan otomatis ini dinonaktifkan karena bisa mengubah buku besar tahun yang sudah ditutup. Koreksi selisih lewat jurnal di periode berjalan.": "This automatic fix is disabled because it can change the ledger of closed fiscal years. Correct differences with a journal in the current period.",
@@ -382,7 +385,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "penyusutan": "depreciation",
   "retur": "return",
   "mutasi stok": "stock movement",
-  "surat jalan": "delivery note",
+  "surat jalan": "delivery order",
   "produksi": "production run",
   "stok opname": "stock count",
   "transfer stok": "stock transfer",

@@ -2024,7 +2024,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Daftar STT sumber per baris + lampiran terkait.",
+      "outputSummary": "Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { subtotal, potonganItem, biayaLain, grandTotal, headerPotonganMismatch } dengan rumus posting (null untuk tipe lain atau payload tidak valid); headerPotonganMismatch=true berarti approve akan ditolak, minta revisi.",
       "handler": "GET /api/approvals/requests/:id/context",
       "permAction": "view",
       "enabled": true,
@@ -10866,7 +10866,7 @@
       "group": "Laporan",
       "toolset": "laporan",
       "module": "reports",
-      "desc": "Neraca (balance sheet) per tanggal: aset, kewajiban, ekuitas berjenjang, ditambah baris sintetis \"Laba Tahun Berjalan\" dari saldo pendapatan-beban. Parameter date (default hari ini) = tanggal posisi.",
+      "desc": "Neraca (balance sheet) per tanggal: aset, kewajiban, ekuitas berjenjang. Di dalam grup ekuitas, baris \"Laba Tahun Berjalan\" (id current-profit) = laba rugi sejak awal tahun buku yang memuat tanggal itu (tanpa jurnal tutup buku; tanggal tanpa tahun buku dihitung sejak 1 Januari), dan baris \"Laba Ditahan\" (id retained-earnings) = laba tahun-tahun sebelumnya dengan rincian (saldo akun Laba Ditahan, posting lain ke akun Laba Tahun Berjalan selain jurnal tutup buku, laba tahun lalu yang belum dipindahkan jurnal tutup buku). Saldo grup = jumlah baris di bawahnya. Pada tanggal akhir tahun buku yang sudah ditutup, Laba Tahun Berjalan tetap laba setahun penuh dan jurnal tutup buku tahun itu tidak ikut dalam rincian (penyajian sebelum penutupan). Parameter date (default hari ini) = tanggal posisi.",
       "risk": "read",
       "roles": [
         "Admin",
@@ -10888,7 +10888,7 @@
       "output": {
         "report": "object"
       },
-      "outputSummary": "{assets[], liabilities[], equity[] (termasuk Laba Tahun Berjalan), totalAssets, totalLiabilities, totalEquity}.",
+      "outputSummary": "{assets[], liabilities[], equity[] (node {id, name, accountNumber, balance, children[], kind: account|currentProfit|retainedEarnings|detail, detail, accountId}), totalAssets, totalLiabilities, totalEquity, meta {asOf, currentProfitFrom, fiscalYear {id,name,isClosed} | null, equityMappingMissing[]}}.",
       "handler": "GET /api/reports/balance-sheet",
       "permAction": "view",
       "enabled": true,
@@ -10978,7 +10978,7 @@
       "output": {
         "report": "object"
       },
-      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb.",
+      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb. vendorDeposits: uang muka Supplier dengan sisa = jumlah − alokasi aktif − refund (baris + summary totalDeposits/totalApplied/totalRefunded/totalRemaining).",
       "handler": "GET /api/reports/daily",
       "permAction": "view",
       "enabled": true,
@@ -16003,13 +16003,14 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: +qty gudang asal, -qty gudang tujuan; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).",
+      "postingEffect": "Stok: +qty gudang asal, -qty gudang tujuan, dihitung dari gerakan transfer yang masih aktif; SM transfer isCancelled. Tidak ada jurnal GL. Bypass stok minus gudang tujuan butuh capability inventory.negative_stock (tanpa itu 403).",
       "confirm_template": "Batalkan transfer stok {id}? Stok akan dikembalikan ke gudang asal.",
       "errors": [
         "400: transfer sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "404: transfer tidak ditemukan",
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
+        "409 TRANSFER_CANCEL_INCOMPLETE: sebagian gerakan stok transfer ini pernah dibatalkan per baris (data lama); transfer tidak dibalik, koreksi stok gudang lewat Penyesuaian Stok",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "403: tanpa capability doc.cancel, atau allowNegativeStock tanpa inventory.negative_stock"
@@ -16200,13 +16201,16 @@
       "confirm_template": "SETUJUI pengajuan {id} dan jalankan dokumennya? (efek posting sesuai tipe dokumen)",
       "prerequisites": [
         "Capability approval.decide.",
-        "Pengajuan berstatus Pending."
+        "Pengajuan berstatus Pending (diklaim atomik: dua keputusan bersamaan tidak pernah sama-sama dijalankan)."
       ],
       "errors": [
-        "400: Pengajuan sudah diproses",
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi",
+        "400: Pengajuan sudah diproses (tanpa code; hanya pengajuan ai_tool:* yang kalah klaim dari persetujuan bersamaan, belum memakai STALE_STATUS); tidak ada efek, muat ulang pengajuan",
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
         "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
-        "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending"
+        "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending",
+        "400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending"
       ],
       "related": [
         "appr_request_get",
@@ -16261,6 +16265,10 @@
         "Capability approval.decide.",
         "Pengajuan berstatus Pending."
       ],
+      "errors": [
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi"
+      ],
       "related": [
         "appr_approve",
         "appr_request_revision"
@@ -16310,7 +16318,9 @@
       "postingEffect": "Tidak ada efek GL/stok.",
       "confirm_template": "Minta revisi pengajuan {id}: {notes}",
       "errors": [
-        "400: Alasan revisi wajib diisi"
+        "400: Alasan revisi wajib diisi",
+        "409 STALE_STATUS: pengajuan sudah diproses orang lain (disetujui/ditolak/diminta revisi lebih dulu); tidak ada efek, muat ulang pengajuan",
+        "409 APPROVAL_BUSY: pengajuan sedang diproses keputusan lain; coba lagi sebentar lagi"
       ],
       "related": [
         "appr_resubmit",
@@ -16638,7 +16648,7 @@
         "rootType": "enum",
         "parentId": "string",
         "isGroup": "boolean",
-        "currency": "string"
+        "currency": "enum"
       },
       "params": [
         {
@@ -16700,9 +16710,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
+          "type": "enum",
           "required": false,
-          "description": "Kode mata uang (default IDR)."
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. Boleh dikosongkan (akun selalu IDR)."
         }
       ],
       "output": {
@@ -16722,7 +16735,8 @@
       ],
       "errors": [
         "409: Nomor akun sudah digunakan.",
-        "400: induk bukan akun grup / tidak ditemukan."
+        "400: induk bukan akun grup / tidak ditemukan.",
+        "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
         "coa_update",
@@ -16812,7 +16826,8 @@
         "400: total melebihi sisa uang muka.",
         "400: piutang pelanggan tidak cukup untuk offset.",
         "400: akun yang dipilih bukan kas/bank.",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
       ],
       "related": [
         "cdep_balance",
@@ -16992,7 +17007,8 @@
         "400: melebihi outstanding invoice.",
         "400: deposit dan invoice harus dari pelanggan yang sama.",
         "400: invoice sudah lunas/dibatalkan.",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
       ],
       "related": [
         "cdep_balance",
@@ -17051,6 +17067,7 @@
         "400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di luar modul Uang Muka (menu Jurnal lama): jurnal dan saldo uang muka mitra sudah dibalik, tetapi outstanding invoice dan aplikasinya tidak; aplikasi tidak dibatalkan lagi, akuntan mengoreksi outstanding invoice",
         "400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -21053,7 +21070,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "goods_receipt",
-      "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual STT dibatalkan (void, tanpa jurnal balik -CXL), dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter), bila STT legacy, atau bila ada baris STT yang masih ditagih di PI yang belum dibatalkan (batalkan PI dulu).",
+      "desc": "Membatalkan STT: stok dikembalikan (reverse stock movement), jurnal accrual STT dibatalkan (void, tanpa jurnal balik -CXL), dan qtyReceived PO dikurangi. Ditolak bila stok tidak cukup untuk dibalikkan (kecuali allowNegativeStock dengan alasan minimal 10 karakter dan capability inventory.negative_stock), bila STT legacy, atau bila ada baris STT yang masih ditagih di PI yang belum dibatalkan (batalkan PI dulu).",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -21108,7 +21125,7 @@
       "draftCapable": false,
       "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
-      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
+      "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant). Bypass stok minus (allowNegativeStock) juga butuh capability inventory.negative_stock (default hanya Admin).",
       "prerequisites": [
         "STT berstatus Submitted",
         "Semua PI yang menagih baris STT ini (bila ada) sudah dibatalkan",
@@ -21121,6 +21138,7 @@
         "400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu",
         "400: stok tidak cukup untuk dibalikkan",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
@@ -21544,7 +21562,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong.",
+      "desc": "Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -21625,19 +21643,22 @@
           "name": "referenceType",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "Diabaikan: referensi dokumen hanya diisi sistem oleh dokumen pemiliknya."
         },
         {
           "name": "referenceId",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "Diabaikan: referensi dokumen hanya diisi sistem oleh dokumen pemiliknya."
         },
         {
           "name": "referenceNumber",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "Nomor referensi teks bebas (mis. nomor nota)."
         },
         {
           "name": "notes",
@@ -21651,7 +21672,7 @@
           "in": "body",
           "type": "uuid",
           "required": false,
-          "description": "Opsional UUID batch sumber."
+          "description": "Opsional UUID batch sumber untuk Out/AdjustmentOut: harus pergerakan masuk (In/AdjustmentIn/TransferIn) aktif untuk item yang sama; gudang boleh berbeda. Diabaikan untuk stok masuk."
         }
       ],
       "output": {
@@ -21674,6 +21695,7 @@
         "400: tidak ada tahun fiskal aktif untuk tanggal ini",
         "400: stok di gudang tidak cukup",
         "400: item tidak aktif / tidak ditemukan",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -22624,7 +22646,8 @@
         "travelStartDate": "date",
         "travelEndDate": "date",
         "travelParticipants": "string",
-        "lines": "array<object>"
+        "lines": "array<object>",
+        "currency": "enum"
       },
       "params": [
         {
@@ -22800,6 +22823,16 @@
             }
           ],
           "description": "Rincian biaya: array {description*, amount*, expenseAccountId, costCenterId, expenseDate, category (TRANSPORT|LODGING|PER_DIEM|MEALS|OTHER hanya jenis TRAVEL), quantity, unitAmount}. Maks 100 baris."
+        },
+        {
+          "name": "currency",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400)."
         }
       ],
       "output": {
@@ -22823,7 +22856,8 @@
       "errors": [
         "400: jenis tidak aktif",
         "400: pilih vendor",
-        "400: akun biaya tidak valid"
+        "400: akun biaya tidak valid",
+        "400: Pengajuan hanya rupiah (currency selain IDR)"
       ],
       "related": [
         "payreqtype_list",
@@ -24035,7 +24069,8 @@
         "400: Akun yang dipilih bukan akun kas/bank",
         "400: Uang muka hanya dapat dibuat untuk Supplier",
         "400: Nilai refund melebihi alokasi pembayaran asal",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
       ],
       "related": [
         "pi_list",
@@ -24096,6 +24131,7 @@
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "related": [
@@ -24948,7 +24984,7 @@
           "in": "body",
           "type": "number",
           "required": false,
-          "description": "Diturunkan server dari potonganItem per baris; nilai header diabaikan."
+          "description": "Cache jumlah potonganItem per baris; sebaiknya tidak dikirim. Bila dikirim (> 0) wajib sama dengan jumlah potonganItem (toleransi 0,01), kalau tidak ditolak 400. Tidak pernah dikurangkan lagi dari total."
         }
       ],
       "output": {
@@ -24971,7 +25007,8 @@
       ],
       "errors": [
         "400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda",
-        "202: menunggu persetujuan (bukan error)",
+        "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
+        "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -26366,7 +26403,8 @@
         "400: qty retur melebihi sisa yang bisa diretur.",
         "400: invoice sudah dibatalkan.",
         "400: akun 4.3 tidak ditemukan.",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
       ],
       "related": [
         "sret_eligible",
@@ -26422,6 +26460,7 @@
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
       "prerequisites": [
@@ -26683,7 +26722,7 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "sales_invoice",
-      "desc": "Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.",
+      "desc": "Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila masih punya retur aktif (batalkan returnya dulu), sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -26727,6 +26766,7 @@
         "400: ada pembayaran teralokasi — batalkan pembayaran dulu.",
         "400: ada alokasi uang muka aktif — batalkan alokasi dulu.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 INVOICE_HAS_ACTIVE_RETURNS: Invoice masih punya retur yang belum dibatalkan (termasuk Invoice yang diretur penuh, yang berstatus Paid). Batalkan returnya dulu (sret_cancel), lalu ulangi si_cancel",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter"
@@ -27803,7 +27843,7 @@
       "group": "Akuntansi",
       "toolset": "persetujuan",
       "module": "approvals",
-      "desc": "Pengaju memperbaiki payload lalu mengajukan ulang pengajuan berstatus NeedsRevision: status kembali Pending (dokumen baru dibuat hanya saat disetujui). Hanya tipe PurchaseInvoice dan ProductionRun; payload divalidasi dengan skema dokumennya.",
+      "desc": "Pengaju memperbaiki payload lalu mengajukan ulang pengajuan berstatus NeedsRevision: status kembali Pending (dokumen baru dibuat hanya saat disetujui). Hanya tipe PurchaseInvoice dan ProductionRun; payload divalidasi dengan skema dokumennya. ProductionRun dengan allowNegativeStock butuh capability inventory.negative_stock pada pengaju ulang.",
       "risk": "write",
       "roles": [
         "Admin",
@@ -27833,7 +27873,7 @@
       "output": {
         "status": "string"
       },
-      "outputSummary": "Pengajuan berstatus Pending.",
+      "outputSummary": "Pengajuan berstatus Pending. Invoice Pembelian: amount = grand total invoice (Σ harga akhir baris + biayaLain).",
       "handler": "PUT /api/approvals/requests/:id/resubmit",
       "permAction": "edit",
       "enabled": true,
@@ -27846,7 +27886,10 @@
       "errors": [
         "400: hanya status Perlu Revisi",
         "400: tipe dokumen tidak didukung",
-        "403: bukan pengajuan Anda"
+        "400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris",
+        "403: bukan pengajuan Anda",
+        "403 NEGATIVE_STOCK_FORBIDDEN: payload ProductionRun meminta bypass stok minus (allowNegativeStock) tanpa capability inventory.negative_stock; status tetap Perlu Revisi",
+        "409 STALE_STATUS: pengajuan berubah status sejak dibaca (diajukan ulang/diputuskan bersamaan); tidak ada perubahan"
       ],
       "related": [
         "appr_request_get",
@@ -27929,7 +27972,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId/currency diabaikan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -27942,7 +27985,7 @@
         "rootType": "enum",
         "parentId": "string",
         "isGroup": "boolean",
-        "currency": "string",
+        "currency": "enum",
         "isActive": "boolean"
       },
       "params": [
@@ -28007,8 +28050,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
-          "required": false
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400."
         },
         {
           "name": "isActive",
@@ -28037,7 +28084,8 @@
       "errors": [
         "409: nomor akun dipakai akun lain",
         "400: akun sistem tidak boleh diganti nomor",
-        "404: akun tidak ditemukan"
+        "404: akun tidak ditemukan",
+        "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
         "coa_create",
@@ -30056,7 +30104,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Pergerakan dari STT/GoodsReceipt atau produksi tidak dapat diedit per baris.",
+      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30124,13 +30172,15 @@
           "name": "referenceType",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "Diabaikan: kolom referenceType tidak diubah lewat edit."
         },
         {
           "name": "referenceNumber",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "Nomor referensi teks bebas."
         },
         {
           "name": "notes",
@@ -30155,13 +30205,13 @@
       "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} biaya satuan {unitCost} tanggal {date}? Stok dan jurnal lama dibalik lalu dibuat ulang.",
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
-        "Bukan berasal dari STT/GoodsReceipt atau ProductionRun.",
+        "Bukan mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama), bukan saldo awal, dan bukan TransferIn/TransferOut.",
         "User memiliki capability doc.cancel.",
         "Tahun buku tanggal lama dan tanggal baru masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
-        "400: gerakan dari STT/produksi tidak dapat diedit per baris",
+        "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
         "400: pembalikan stok lama membuat stok negatif",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
@@ -30178,7 +30228,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Membatalkan pergerakan stok: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Pergerakan dari STT harus dibatalkan lewat STT.",
+      "desc": "Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30211,12 +30261,13 @@
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
+        "Bukan mutasi milik dokumen, bukan saldo awal, dan bukan TransferIn/TransferOut.",
         "Untuk pergerakan masuk: stok saat ini cukup untuk pembalikan.",
         "Tahun buku tanggal pergerakan dan jurnalnya masih terbuka."
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
-        "400: dari STT tidak dapat dibatalkan per baris",
+        "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok",
         "400: stok tidak mencukupi untuk pembalikan",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
@@ -30814,7 +30865,8 @@
         "403: tidak berwenang bypass validasi stok",
         "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)"
       ],
       "related": [
         "prod_run_get",
@@ -30826,7 +30878,7 @@
       "group": "Stok & Produksi",
       "toolset": "produksi",
       "module": "production",
-      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, semua jurnal berawalan JV-<runNo> (termasuk revisi) dibatalkan, run ditandai batal. Bypass stok minus butuh alasan minimal 10 karakter.",
+      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30878,7 +30930,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled + saldo akun dihitung ulang.",
+      "postingEffect": "Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal.",
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -30890,7 +30942,9 @@
         "400: stok output tidak cukup untuk dibalik",
         "400: alasan bypass < 10 karakter",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
+        "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan",
+        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -31551,7 +31605,8 @@
         "travelStartDate": "date",
         "travelEndDate": "date",
         "travelParticipants": "string",
-        "lines": "array<object>"
+        "lines": "array<object>",
+        "currency": "enum"
       },
       "params": [
         {
@@ -31725,6 +31780,16 @@
             }
           ],
           "description": "Rincian biaya: array {description*, amount*, expenseAccountId, costCenterId, expenseDate, category (TRANSPORT|LODGING|PER_DIEM|MEALS|OTHER hanya jenis TRAVEL), quantity, unitAmount}. Maks 100 baris."
+        },
+        {
+          "name": "currency",
+          "in": "body",
+          "type": "enum",
+          "required": false,
+          "enum": [
+            "IDR"
+          ],
+          "description": "Hanya 'IDR': pengajuan hanya rupiah, semua nominal dalam Rupiah. Pengajuan valas belum didukung (ditolak 400)."
         }
       ],
       "output": {
@@ -31742,7 +31807,8 @@
       "accessNote": "Hanya pengaju, dan hanya saat status DRAFT atau REVISION.",
       "errors": [
         "400: hanya pengaju",
-        "400: hanya bisa diubah saat Draf/Perlu Revisi"
+        "400: hanya bisa diubah saat Draf/Perlu Revisi",
+        "400: Pengajuan hanya rupiah (currency selain IDR)"
       ],
       "related": [
         "payreq_create",
@@ -33629,7 +33695,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "settings",
-      "desc": "Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, currency, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1, mata uang IDR). Kirim ulang semua nilai yang ada.",
+      "desc": "Simpan profil perusahaan (upsert penuh): companyName, alamat, kontak, NPWP, fiscalYearStartMonth (1-12), logo, dan invoiceSettings (rekening bank & catatan kaki faktur). PERHATIAN: bukan patch — field yang tidak dikirim di-reset (alamat/telepon/email/NPWP jadi kosong, fiscalYearStartMonth jadi 1). Kirim ulang semua nilai yang ada kecuali mata uang: jangan kirim currency (server selalu menyimpan IDR, pembukuan hanya rupiah); nilai selain 'IDR' ditolak 400.",
       "risk": "critical",
       "roles": [
         "Admin"
@@ -33642,7 +33708,7 @@
         "taxId": "string",
         "logoUrl": "string",
         "logoUrlDark": "string",
-        "currency": "string",
+        "currency": "enum",
         "dateFormat": "string",
         "fiscalYearStartMonth": "number",
         "invoiceSettings": "object"
@@ -33695,9 +33761,12 @@
         {
           "name": "currency",
           "in": "body",
-          "type": "string",
+          "type": "enum",
           "required": false,
-          "description": "Kode mata uang, mis. IDR"
+          "enum": [
+            "IDR"
+          ],
+          "description": "Jangan dikirim: server selalu menyimpan IDR (pembukuan hanya rupiah). Bila dikirim, hanya 'IDR'."
         },
         {
           "name": "dateFormat",
@@ -33791,10 +33860,10 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal. Mengubah konfigurasi global: mata uang, awal tahun fiskal, NPWP, rekening bank pada faktur, logo — berdampak ke dokumen/laporan berikutnya.",
-      "confirm_template": "Ubah profil perusahaan menjadi \"{companyName}\" (mata uang {currency}, awal tahun fiskal bulan {fiscalYearStartMonth}). Setujui?",
+      "postingEffect": "Tidak ada jurnal. Mengubah konfigurasi global: awal tahun fiskal, NPWP, rekening bank pada faktur, logo — berdampak ke dokumen/laporan berikutnya.",
+      "confirm_template": "Ubah profil perusahaan menjadi \"{companyName}\" (mata uang Rupiah, awal tahun fiskal bulan {fiscalYearStartMonth}). Setujui?",
       "errors": [
-        "400: validasi (email, bulan 1-12) atau logo > ~4MB"
+        "400: validasi (email, bulan 1-12, mata uang selain IDR) atau logo > ~4MB"
       ],
       "related": [
         "set_company_get"
@@ -33805,7 +33874,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "stock_opname",
-      "desc": "Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.",
+      "desc": "Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dan satelitnya dibatalkan dengan pembatal tercatat, saldo akun dibalik per baris jurnal. Opname Draft atau yang sudah batal tidak dapat dibatalkan.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -33834,7 +33903,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled + saldo akun dihitung ulang. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.",
+      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.",
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -33845,7 +33914,8 @@
         "400: stok opname sudah dibatalkan",
         "400: stok item tidak mencukupi untuk pembalikan",
         "403: tanpa capability doc.cancel",
-        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan",
+        "400 JOURNAL_ALREADY_REVERSED: jurnal opname sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [

@@ -79,14 +79,15 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 1. **`inq_convert_payload` bermutasi walau GET**: bila inquiry berupa prospek tanpa pelanggan, endpoint membuat master Pelanggan baru dan mengisi `partyId` inquiry. Diklasifikasikan `write`. Sebaliknya `quot_convert_payload` murni baca.
 2. **Invoice tidak punya draft**: `si_create` = posting langsung (jurnal + stok + HPP). Jangan dipanggil untuk "simpan dulu". `si_update` hanya mengubah catatan/jatuh tempo/syarat; nilai tidak bisa diedit — koreksi = `si_cancel` lalu buat ulang.
-3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi atau aplikasi uang muka aktif; `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
+3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Retur -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi, aplikasi uang muka aktif, atau retur aktif (`INVOICE_HAS_ACTIVE_RETURNS`; batalkan returnya dulu dengan `sret_cancel`); `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
 4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.
-5. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.
-6. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.
-7. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
-8. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
-9. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.
-10. **Tarif pajak**: PPN (`taxPct`) bisa per baris dan per dokumen; PPh per baris (`pphPct`) didebit ke 1.5.4 bila akun itu ada di COA (jika tidak ada, baris PPh dilewati tanpa error).
+5. **Status invoice mengikuti sisa tagihan**: Paid bila sisa <= Rp 0,01, Submitted bila belum ada yang dilunasi, selain itu PartiallyPaid. Invoice yang diretur penuh berstatus Paid dan tidak menerima alokasi pembayaran. Status `Overdue` tidak pernah disimpan; jatuh tempo dibaca dari `dueDate`.
+6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.
+7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.
+8. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
+9. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
+10. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.
+11. **Tarif pajak**: PPN (`taxPct`) bisa per baris dan per dokumen; PPh per baris (`pphPct`) didebit ke 1.5.4 bila akun itu ada di COA (jika tidak ada, baris PPh dilewati tanpa error).
 
 ### Peta istilah
 
@@ -277,6 +278,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: deposit dan invoice harus dari pelanggan yang sama.
 - 400: invoice sudah lunas/dibatalkan.
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 
 **Tool terkait:** [`cdep_balance`](#cdep_balance), [`cdep_apply_cancel`](#cdep_apply_cancel), [`si_get`](#si_get)
 
@@ -338,6 +340,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 DEPOSIT_APPLICATION_JOURNAL_CANCELLED: jurnal aplikasi sudah dibatalkan di luar modul Uang Muka (menu Jurnal lama): jurnal dan saldo uang muka mitra sudah dibalik, tetapi outstanding invoice dan aplikasinya tidak; aplikasi tidak dibatalkan lagi, akuntan mengoreksi outstanding invoice
 - 400 FISCAL_YEAR_MISSING: aplikasi lama tanpa jurnal yang tanggal aplikasinya tidak punya tahun buku
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
 
@@ -556,6 +559,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: piutang pelanggan tidak cukup untuk offset.
 - 400: akun yang dipilih bukan kas/bank.
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 
 **Tool terkait:** [`cdep_balance`](#cdep_balance), [`cdep_refund_list`](#cdep_refund_list), [`cdep_refund_cancel`](#cdep_refund_cancel)
 
@@ -3794,7 +3798,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### si_cancel
 
-**Ringkasan:** Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.
+**Ringkasan:** Membatalkan Invoice Penjualan: jurnal penjualan & HPP dibalik, stok dikembalikan, DO terkait dilepas. Ditolak bila masih punya retur aktif (batalkan returnya dulu), sudah lunas (kecuali Rp 0), punya alokasi pembayaran, atau alokasi uang muka aktif.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -3848,6 +3852,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: ada pembayaran teralokasi — batalkan pembayaran dulu.
 - 400: ada alokasi uang muka aktif — batalkan alokasi dulu.
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 INVOICE_HAS_ACTIVE_RETURNS: Invoice masih punya retur yang belum dibatalkan (termasuk Invoice yang diretur penuh, yang berstatus Paid). Batalkan returnya dulu (sret_cancel), lalu ulangi si_cancel
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
@@ -4670,6 +4675,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 - 400: alasan pembatalan maksimal 500 karakter
 
 ### sret_create
@@ -4745,6 +4751,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: invoice sudah dibatalkan.
 - 400: akun 4.3 tidak ditemukan.
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 
 **Tool terkait:** [`sret_eligible`](#sret_eligible), [`appr_requests_list`](persetujuan.md#appr_requests_list)
 

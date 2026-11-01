@@ -152,12 +152,25 @@ describe('queueEditApproval', () => {
 
 describe('decideApproval for edit types', () => {
   let stored: any;
+  // The decision's transaction: claim + edit + document id; `rolledBack` = it threw.
+  let tx: any;
+  let rolledBack: boolean;
   beforeEach(() => {
     vi.clearAllMocks();
+    rolledBack = false;
+    tx = { approvalRequest: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn().mockResolvedValue({}) } };
     db.approvalRequest.update = vi.fn().mockResolvedValue({});
-    db.$transaction = vi.fn(async (fn: any) => fn({ tx: true }));
+    db.$transaction = vi.fn(async (fn: any) => {
+      try { return await fn(tx); } catch (e) { rolledBack = true; throw e; }
+    });
     db.transactionAttachment.updateMany = vi.fn();
   });
+  /** Nothing committed: the claim rolled back with the failed edit, no write outside the tx. */
+  const expectStillPending = () => {
+    expect(rolledBack).toBe(true);
+    expect(tx.approvalRequest.update).not.toHaveBeenCalled();
+    expect(db.approvalRequest.update).not.toHaveBeenCalled();
+  };
   const req = (documentType: string, payload: any, documentId: string | null = 'tid') => ({
     id: 'r1', documentType, documentId, documentNumber: 'N-1', payload, status: 'Pending', requestedBy: 'requester',
   });
@@ -172,7 +185,11 @@ describe('decideApproval for edit types', () => {
     expect(id).toBe('tid'); expect(actor).toBe('requester');
     expect(body.inputs[0].quantity).toBe(1100);
     expect(body[BEFORE_KEY]).toBeUndefined();
-    expect(db.approvalRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'Approved', approvedBy: 'admin', documentId: 'tid', documentNumber: 'PR-0001' }) }));
+    expect(tx.approvalRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'r1', status: 'Pending' }, data: expect.objectContaining({ status: 'Approved', approvedBy: 'admin' }),
+    }));
+    expect(tx.approvalRequest.update).toHaveBeenCalledWith({ where: { id: 'r1' }, data: { documentId: 'tid', documentNumber: 'PR-0001' } });
+    expect(rolledBack).toBe(false);
   });
   it('PI revise: runs revise with stored lines/reason', async () => {
     db.approvalRequest.findUnique = vi.fn().mockResolvedValue(req('PurchaseInvoiceRevisePrice', { ...PI_BODY, [BEFORE_KEY]: buildInvoiceBefore(PI) }, 'inv1'));
@@ -188,7 +205,7 @@ describe('decideApproval for edit types', () => {
     editRun.mockRejectedValue(new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.'));
     const r = await decideApproval({ requestId: 'r1', action: 'approve', actorUserId: 'admin' });
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('dibatalkan') });
-    expect(db.approvalRequest.update).not.toHaveBeenCalled();
+    expectStillPending();
   });
   it('production edit in a closed year: PERIOD_CLOSED reaches the caller and the request stays Pending', async () => {
     db.approvalRequest.findUnique = vi.fn().mockResolvedValue(req('ProductionRunEdit', RUN_BODY));
@@ -196,7 +213,7 @@ describe('decideApproval for edit types', () => {
     editRun.mockRejectedValue(new BusinessError('Tahun buku 2025 sudah ditutup; produksi di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.', 'PERIOD_CLOSED'));
     const r = await decideApproval({ requestId: 'r1', action: 'approve', actorUserId: 'admin' });
     expect(r).toMatchObject({ ok: false, code: 'PERIOD_CLOSED' });
-    expect(db.approvalRequest.update).not.toHaveBeenCalled();
+    expectStillPending();
   });
   it('invalid stored payload fails with clear error', async () => {
     db.approvalRequest.findUnique = vi.fn().mockResolvedValue(req('PurchaseInvoiceRevisePrice', { lines: [], reason: 'x' }));
@@ -204,6 +221,7 @@ describe('decideApproval for edit types', () => {
     expect(r.ok).toBe(false);
     expect(r.error).toContain('Payload revisi harga tidak valid');
     expect(reviseInv).not.toHaveBeenCalled();
+    expectStillPending();
   });
   it('splitStoredPayload tolerates garbage', () => {
     expect(splitStoredPayload(null)).toEqual({ body: {}, before: null });
