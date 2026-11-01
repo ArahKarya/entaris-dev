@@ -105,6 +105,14 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: server/package-lock.json
+      # The restore integration test runs the real pg_dump/psql; they must match the server (16).
+      - name: Install PostgreSQL 16 client
+        working-directory: .
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16
+          pg_dump --version
+          psql --version
       - run: npm ci
       - run: npx prisma generate
       # Same order as docker-app-entrypoint.sh: migrations, loose SQL, then the seed.

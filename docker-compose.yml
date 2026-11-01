@@ -61,6 +61,11 @@ services:
       TZ: "${TZ:-Asia/Jakarta}"
       NODE_ENV: "production"
       UPLOADS_DIR: "/app/uploads"
+      # Backup (Pengaturan > Backup). BACKUP_DIR harus tetap di dalam volume `backups` agar
+      # cadangan pengaman sebelum restore/reset tidak hilang saat container dibuat ulang.
+      BACKUP_DIR: "${BACKUP_DIR:-/app/server/backups}"
+      BACKUP_DUMP_TIMEOUT_MS: "${BACKUP_DUMP_TIMEOUT_MS:-120000}"      # batas waktu pg_dump
+      BACKUP_RESTORE_TIMEOUT_MS: "${BACKUP_RESTORE_TIMEOUT_MS:-300000}" # batas waktu restore (psql)
       # ── AIRA MCP (/mcp) — kunci enkripsi signing secret token MCP (AES-256-GCM, HKDF). ──
       # OPSIONAL: kosong = diturunkan dari JWT_SECRET (memutar JWT_SECRET lalu butuh rotate-secret
       # semua token MCP). Disarankan diisi terpisah (>= 32 karakter acak).
