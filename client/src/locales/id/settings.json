@@ -388,11 +388,11 @@
   },
   "backup": {
     "title": "Cadangan Database",
-    "description": "Maksimal 5 cadangan disimpan otomatis. Pemulihan menimpa seluruh data saat ini.",
+    "description": "Disimpan otomatis per jenis: 5 cadangan rutin, 3 pra-reset, 3 pra-pemulihan, dan 5 unggahan. Pemulihan menimpa seluruh data saat ini.",
     "upload": "Unggah Cadangan",
     "create": "Buat Cadangan",
     "last": "Cadangan terakhir",
-    "warning": "Pemulihan akan <strong>menimpa seluruh data</strong> yang ada. Buat cadangan terlebih dahulu sebelum memulihkan.",
+    "warning": "Pemulihan akan <strong>menimpa seluruh data</strong> yang ada. Sistem otomatis membuat cadangan pengaman lebih dulu; bila pemulihan gagal di tengah jalan, seluruhnya dibatalkan dan data tidak berubah.",
     "loading": "Memuat daftar cadangan…",
     "empty": "Belum ada file cadangan",
     "table": {
@@ -449,19 +449,19 @@
     },
     "reset": {
       "title": "Reset Seluruh Data",
-      "description": "Hapus semua transaksi, akun, mitra, dan pengguna; database dikembalikan ke kondisi awal (seed). Hanya untuk development/pengujian.",
+      "description": "Hapus semua transaksi, akun, mitra, dan pengguna; database dikembalikan ke kondisi awal (seed). Cadangan pengaman dibuat otomatis lebih dulu. Hanya untuk development/pengujian.",
       "action": "Reset Data",
       "done": "Data direset. Silakan login ulang.",
       "error": "Gagal mereset data."
     },
     "restoreConfirm": {
       "title": "Pulihkan cadangan?",
-      "description": "Aksi ini tidak dapat dibatalkan. Seluruh data saat ini akan ditimpa dengan data dari file berikut.",
+      "description": "Seluruh data saat ini akan ditimpa dengan data dari file berikut. Cadangan pengaman (pre-restore) dibuat otomatis lebih dulu. Setelah selesai, mulai ulang aplikasi lalu masuk kembali.",
       "confirm": "Pulihkan"
     },
     "resetConfirm": {
       "title": "Reset seluruh data?",
-      "description": "Aksi ini tidak dapat dibatalkan. Semua data akan dihapus dan dikembalikan ke kondisi awal.",
+      "description": "Semua data akan dihapus dan dikembalikan ke kondisi awal. Cadangan pengaman (pre-reset) dibuat otomatis lebih dulu; bila gagal, reset dibatalkan.",
       "items": {
         "transactions": "Semua transaksi (invoice, pembayaran, jurnal)",
         "partners": "Semua mitra (customer, supplier)",
@@ -469,6 +469,12 @@
         "users": "Semua pengguna (dibuat ulang dari seed)",
         "stock": "Semua stok dan gerakan inventori"
       }
+    },
+    "kind": {
+      "pre-reset": "Pra-reset",
+      "pre-restore": "Pra-pemulihan",
+      "upload": "Unggahan",
+      "backup": "Rutin"
     }
   },
   "fiscal": {
