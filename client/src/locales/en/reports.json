@@ -190,7 +190,6 @@
       "currentProfitSince": "Current-Year Profit (since {{date}})",
       "retainedEarnings": "Retained Earnings",
       "retainedAccount": "Retained earnings account balance",
-      "closingEntries": "Year-end closing entries",
       "otherCurrentProfit": "Other postings to the current-year profit account",
       "unclosedProfit": "Prior-year profit not yet closed",
       "groupDirect": "Posted directly to the group",

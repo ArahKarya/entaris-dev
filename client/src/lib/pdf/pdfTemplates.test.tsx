@@ -25,8 +25,6 @@ const bsEquity: BSSection[] = [{
   name: 'Modal', balance: 600, kind: 'account', children: [
     { name: 'Laba Ditahan', balance: 500, kind: 'retainedEarnings', children: [
       { name: 'Saldo Akun Laba Ditahan', balance: 500, kind: 'detail', detail: 'retainedAccount' },
-      { name: 'Jurnal Penutup Laba Tahun Berjalan', balance: -500, kind: 'detail', detail: 'closingEntries' },
-      { name: 'Laba Tahun Lalu Belum Ditutup', balance: 500, kind: 'detail', detail: 'unclosedProfit' },
     ] },
     { name: 'Laba Tahun Berjalan', balance: 100, kind: 'currentProfit' },
   ],

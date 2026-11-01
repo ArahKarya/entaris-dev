@@ -4,8 +4,10 @@
 //   year that holds the day, without close-journal rows. It replaces the CURRENT_PROFIT account in
 //   its place inside its group. A day without a fiscal year counts from 1 January of its year.
 // - Retained earnings (Laba Ditahan) replaces the RETAINED_EARNINGS account and is a composite: the
-//   account's own balance, the close journals on CURRENT_PROFIT, any other posting to CURRENT_PROFIT,
-//   and the profit of earlier years not closed yet. Each part is a child row.
+//   account's own balance, any posting to CURRENT_PROFIT other than a close journal, and the profit
+//   of earlier years that no close journal has moved yet. Each part is a child row. On the last day
+//   of a closed year the report shows the books before that year's close (owner decision 1), so the
+//   close journals dated inside the report's own fiscal year are left out of the parts.
 // Group balances are summed bottom-up from the rows shown, so a header always equals its rows; a
 // posting made directly to a group account shows as its own row. Total equity is still all equity
 // ledger rows plus all-time profit, the same total as before the split.
@@ -24,7 +26,7 @@ const ZERO = new Prisma.Decimal(0);
 export type BsNodeKind = 'account' | 'retainedEarnings' | 'currentProfit' | 'detail';
 
 /** Which part a 'detail' row is. */
-export type BsDetail = 'retainedAccount' | 'closingEntries' | 'otherCurrentProfit' | 'unclosedProfit' | 'groupDirect';
+export type BsDetail = 'retainedAccount' | 'otherCurrentProfit' | 'unclosedProfit' | 'groupDirect';
 
 export interface BsNode {
   id: string;
@@ -86,6 +88,8 @@ export interface EquityInput {
   currentProfit: Decimal;
   /** Ledger rows of close journals on the CURRENT_PROFIT account (credit - debit). */
   closingOnCurrentProfit: Decimal;
+  /** The part of closingOnCurrentProfit dated inside the report's own fiscal year (its own close). */
+  closingInYear: Decimal;
   currentProfitAccountId: string | null;
   retainedEarningsAccountId: string | null;
 }
@@ -214,14 +218,18 @@ export function assembleEquity(input: EquityInput): BsNode[] {
   const cpId = input.currentProfitAccountId && inTree.has(input.currentProfitAccountId) ? input.currentProfitAccountId : null;
   const reId = input.retainedEarningsAccountId && inTree.has(input.retainedEarningsAccountId) ? input.retainedEarningsAccountId : null;
   const ownOf = (id: string | null) => (id ? (input.own.get(id) ?? ZERO) : ZERO);
-  // Close journals on CURRENT_PROFIT only move into retained earnings when that account is shown here.
+  // Close journals on CURRENT_PROFIT only count when that account is shown here. A close is negative
+  // for a profit: it nets the closed years out of the unclosed part. The report year's own close
+  // (pre-closing view) is taken back out of the 3.2 balance, measured on its 3.4 side so the parts
+  // still add up to the same total.
   const closing = cpId ? input.closingOnCurrentProfit : ZERO;
+  const ownClose = cpId ? input.closingInYear : ZERO;
+  const priorProfit = input.plAll.sub(input.currentProfit);
 
   const details = [
-    detailNode('retainedAccount', 'Saldo Akun Laba Ditahan', ownOf(reId), reId),
-    detailNode('closingEntries', 'Jurnal Penutup Laba Tahun Berjalan', closing, cpId),
+    detailNode('retainedAccount', 'Saldo Akun Laba Ditahan', ownOf(reId).add(ownClose), reId),
     detailNode('otherCurrentProfit', 'Posting Lain ke Laba Tahun Berjalan', ownOf(cpId).sub(closing), cpId),
-    detailNode('unclosedProfit', 'Laba Tahun Lalu Belum Ditutup', input.plAll.sub(input.currentProfit), null),
+    detailNode('unclosedProfit', 'Laba Tahun Lalu Belum Ditutup', priorProfit.add(closing).sub(ownClose), null),
   ].filter((n) => !n.balance.isZero());
 
   const retained = (account: BsAccount | null, children: Draft[]): Draft => {
@@ -285,7 +293,15 @@ export async function computeBalanceSheet(db: Tx, { day, lt }: { day: string; lt
   const reId = reMapped[0]?.id ?? null;
   const live = { isCancelled: false, date: { lt } };
 
-  const [accounts, perAccount, plAll, currentProfit, closing] = await Promise.all([
+  const closeOnCp = (date: Prisma.DateTimeFilter) =>
+    cpId && closeIds.length > 0
+      ? db.accountingLedgerEntry.aggregate({
+          where: { isCancelled: false, date, accountId: cpId, referenceId: { in: closeIds } },
+          _sum: { debit: true, credit: true },
+        })
+      : null;
+
+  const [accounts, perAccount, plAll, currentProfit, closing, closingInYear] = await Promise.all([
     db.account.findMany({
       where: { rootType: { in: BS_ROOTS } },
       select: { id: true, name: true, accountNumber: true, isGroup: true, parentId: true, rootType: true },
@@ -308,12 +324,8 @@ export async function computeBalanceSheet(db: Tx, { day, lt }: { day: string; lt
       },
       _sum: { debit: true, credit: true },
     }),
-    cpId && closeIds.length > 0
-      ? db.accountingLedgerEntry.aggregate({
-          where: { ...live, accountId: cpId, referenceId: { in: closeIds } },
-          _sum: { debit: true, credit: true },
-        })
-      : null,
+    closeOnCp({ lt }),
+    closeOnCp({ gte: from, lt }),
   ]);
 
   accounts.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
@@ -333,6 +345,7 @@ export async function computeBalanceSheet(db: Tx, { day, lt }: { day: string; lt
     plAll: profitOf(plAll),
     currentProfit: profitOf(currentProfit),
     closingOnCurrentProfit: closing ? profitOf(closing) : ZERO,
+    closingInYear: closingInYear ? profitOf(closingInYear) : ZERO,
     currentProfitAccountId: cpId,
     retainedEarningsAccountId: reId,
   });

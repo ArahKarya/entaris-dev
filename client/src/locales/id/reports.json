@@ -190,7 +190,6 @@
       "currentProfitSince": "Laba Tahun Berjalan (sejak {{date}})",
       "retainedEarnings": "Laba Ditahan",
       "retainedAccount": "Saldo akun Laba Ditahan",
-      "closingEntries": "Jurnal penutup Laba Tahun Berjalan",
       "otherCurrentProfit": "Posting lain ke akun Laba Tahun Berjalan",
       "unclosedProfit": "Laba tahun lalu yang belum ditutup",
       "groupDirect": "Saldo langsung grup",

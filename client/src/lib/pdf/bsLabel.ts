@@ -5,7 +5,7 @@ export interface BSSection {
   name: string; balance: number; children?: BSSection[];
   /** Row type from the balance-sheet API; synthetic rows are labelled from it, `name` is the fallback. */
   kind?: 'account' | 'retainedEarnings' | 'currentProfit' | 'detail';
-  detail?: 'retainedAccount' | 'closingEntries' | 'otherCurrentProfit' | 'unclosedProfit' | 'groupDirect';
+  detail?: 'retainedAccount' | 'otherCurrentProfit' | 'unclosedProfit' | 'groupDirect';
 }
 
 /** Row label: synthetic balance-sheet rows from `kind` in the printing language, accounts by name. */

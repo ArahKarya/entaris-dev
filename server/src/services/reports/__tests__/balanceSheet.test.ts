@@ -28,6 +28,7 @@ const base = (over: Partial<EquityInput> = {}): EquityInput => ({
   plAll: D(0),
   currentProfit: D(0),
   closingOnCurrentProfit: D(0),
+  closingInYear: D(0),
   currentProfitAccountId: 'e34',
   retainedEarningsAccountId: 'e32',
   ...over,
@@ -68,7 +69,7 @@ describe('assembleEquity', () => {
     expect(total(equity)).toBe(600);
   });
 
-  it('acceptance after the close: same split, details +500 / -500 / +500', () => {
+  it('acceptance after the close: same split, the closed profit sits in the 3.2 part and nothing is unclosed', () => {
     const own = new Map([['e32', D(500)], ['e34', D(-500)]]);
     const equity = assembleEquity(base({ own, plAll: D(600), currentProfit: D(100), closingOnCurrentProfit: D(-500) }));
     expect(equity[0].balance).toBe(600);
@@ -77,10 +78,30 @@ describe('assembleEquity', () => {
     expect(retained.balance).toBe(500);
     expect(retained.children.map((c) => [c.detail, c.balance, c.accountId, c.selectable])).toEqual([
       ['retainedAccount', 500, 'e32', true],
-      ['closingEntries', -500, 'e34', true],
-      ['unclosedProfit', 500, null, false],
     ]);
     expectHeadersSum(equity);
+  });
+
+  it('only the part of earlier profit that no close journal moved is unclosed', () => {
+    // Two earlier years made 500 and 200; only the 500 year is closed.
+    const own = new Map([['e32', D(500)], ['e34', D(-500)]]);
+    const equity = assembleEquity(base({ own, plAll: D(800), currentProfit: D(100), closingOnCurrentProfit: D(-500) }));
+    const retained = find(equity, 'retained-earnings')!;
+    expect(retained.children.map((c) => [c.detail, c.balance])).toEqual([
+      ['retainedAccount', 500],
+      ['unclosedProfit', 200],
+    ]);
+    expect(retained.balance).toBe(700);
+  });
+
+  it('on the last day of a closed year leaves that year\'s own close out of the parts (pre-closing view)', () => {
+    const own = new Map([['e32', D(500)], ['e34', D(-500)]]);
+    const equity = assembleEquity(base({ own, plAll: D(500), currentProfit: D(500), closingOnCurrentProfit: D(-500), closingInYear: D(-500) }));
+    expect(find(equity, 'current-profit')!.balance).toBe(500);
+    const retained = find(equity, 'retained-earnings')!;
+    expect(retained.balance).toBe(0);
+    expect(retained.children).toEqual([]);
+    expect(equity[0].balance).toBe(500);
   });
 
   it('keeps the retained-earnings composite when 3.2 and every part are zero', () => {
@@ -99,14 +120,14 @@ describe('assembleEquity', () => {
   });
 
   it('shows other postings to 3.4 as their own part of retained earnings', () => {
-    const own = new Map([['e34', D(-500 + 30)]]);
-    const equity = assembleEquity(base({ own, closingOnCurrentProfit: D(-500) }));
+    const own = new Map([['e32', D(500)], ['e34', D(-500 + 30)]]);
+    const equity = assembleEquity(base({ own, plAll: D(500), closingOnCurrentProfit: D(-500) }));
     const retained = find(equity, 'retained-earnings')!;
     expect(retained.children.map((c) => [c.detail, c.balance])).toEqual([
-      ['closingEntries', -500],
+      ['retainedAccount', 500],
       ['otherCurrentProfit', 30],
     ]);
-    expect(retained.balance).toBe(-470);
+    expect(retained.balance).toBe(530);
   });
 
   it('keeps a child of another root type, flagged, and counts it in the group', () => {
@@ -143,7 +164,7 @@ describe('assembleEquity', () => {
 
   it('total equity equals all equity postings plus all-time profit (the old total)', () => {
     const own = new Map([['e31', D(1000)], ['e32', D(321.45)], ['e34', D(-200.1)], ['e35', D(-0.35)], ['g3', D(3)]]);
-    const equity = assembleEquity(base({ own, plAll: D(987.65), currentProfit: D(-12.3), closingOnCurrentProfit: D(-200.1) }));
+    const equity = assembleEquity(base({ own, plAll: D(987.65), currentProfit: D(-12.3), closingOnCurrentProfit: D(-200.1), closingInYear: D(-50) }));
     expect(total(equity)).toBeCloseTo(1000 + 321.45 - 200.1 - 0.35 + 3 + 987.65, 2);
     expectHeadersSum(equity);
     // Details of retained earnings add up to the composite.

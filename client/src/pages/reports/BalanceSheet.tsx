@@ -24,7 +24,7 @@ import {
 /** A balance-sheet row as the server sends it (services/reports/balanceSheet.ts). */
 interface BsNode extends AccountNode {
   kind?: 'account' | 'retainedEarnings' | 'currentProfit' | 'detail';
-  detail?: 'retainedAccount' | 'closingEntries' | 'otherCurrentProfit' | 'unclosedProfit' | 'groupDirect';
+  detail?: 'retainedAccount' | 'otherCurrentProfit' | 'unclosedProfit' | 'groupDirect';
   accountId?: string | null;
   rootTypeMismatch?: boolean;
   children?: BsNode[];
