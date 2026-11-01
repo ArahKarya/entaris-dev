@@ -85,6 +85,8 @@ import { systemAccounts } from './services/systemAccounts';
 import { ensureRbacSeed } from './services/rbacSeed';
 import { ensureProjectGuaranteeAccount } from './services/projectGuaranteeSeed';
 import { failOrphanedDemoBatches } from './services/demoData/runner';
+// Year-close checks other modules plug into the E1 checklist (AR / customer deposit vs subledger).
+import './services/closeCheckPlugins';
 
 const app = express();
 const port = process.env.PORT || 3001;
