@@ -197,10 +197,30 @@
   },
   "inventoryRows": {
     "block": {
-      "cancelFromReceipt": "Movements from a goods receipt can only be cancelled on the goods receipt page.",
+      "cancelFromDocument": "Movements from a {{doc}} can only be cancelled on the {{page}} page.",
       "cancelled": "The movement is already cancelled.",
-      "editFromProduction": "Movements from a production run are changed through that production run.",
-      "editFromReceipt": "Movements from a goods receipt can only be changed on the goods receipt page."
+      "doc": {
+        "GoodsReceipt": "goods receipt",
+        "DeliveryOrder": "delivery note",
+        "SalesReturn": "sales return",
+        "ProductionRun": "production run",
+        "StockOpname": "stock count",
+        "StockTransfer": "stock transfer",
+        "PurchaseInvoice": "purchase invoice",
+        "SalesInvoice": "sales invoice"
+      },
+      "editFromDocument": "Movements from a {{doc}} can only be changed or cancelled on the {{page}} page.",
+      "openingBalance": "Opening balance movements cannot be changed per row. Correct opening stock with a stock adjustment.",
+      "page": {
+        "GoodsReceipt": "goods receipt",
+        "DeliveryOrder": "Delivery Note",
+        "SalesReturn": "Sales Return",
+        "ProductionRun": "Production",
+        "StockOpname": "Stock Count",
+        "StockTransfer": "Stock Transfer",
+        "PurchaseInvoice": "Invoice",
+        "SalesInvoice": "Invoice"
+      }
     },
     "movementType": {
       "AdjustmentIn": "Adjustment +",
@@ -404,7 +424,6 @@
       "offsetAccountOptional": "Offset account (optional)",
       "quantity": "Quantity",
       "referenceNumber": "Reference number",
-      "referenceType": "Reference type",
       "totalValue": "Total value",
       "unitCost": "Unit cost",
       "warehouse": "Warehouse"
@@ -423,11 +442,6 @@
       "referenceNumber": "Reference document number"
     },
     "productionLinked": "Stock movements from production runs cannot be edited directly.",
-    "referenceTypes": {
-      "none": "None",
-      "purchaseInvoice": "Purchase Invoice",
-      "salesInvoice": "Sales Invoice"
-    },
     "titleCreate": "Record stock movement",
     "titleEdit": "Edit stock movement",
     "toast": {

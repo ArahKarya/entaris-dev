@@ -149,23 +149,41 @@ export interface StockMovementSummary {
   outValue: number;
 }
 
+/** Documents that write their own movements (server: services/documentMovementLock.ts). */
+const LOCKING_DOCUMENTS = [
+  'GoodsReceipt', 'DeliveryOrder', 'SalesReturn', 'ProductionRun', 'StockOpname', 'StockTransfer', 'PurchaseInvoice', 'SalesInvoice',
+] as const;
+type LockingDocument = (typeof LOCKING_DOCUMENTS)[number];
+const isLockingDocument = (type: string): type is LockingDocument => (LOCKING_DOCUMENTS as readonly string[]).includes(type);
+
+type LockableRow = Pick<StockMovementRow, 'referenceType' | 'referenceId' | 'movementType' | 'isCancelled'>;
+
 /**
- * Mirrors the server's blocking rules (routes/inventory/movements.ts) so the
- * menu never offers an action that is always rejected:
- *  • STT (GoodsReceipt) movements: no edit, no cancel — revise/cancel the STT.
- *  • Production-run movements: no edit — edit the production run.
+ * Mirrors the server's document lock so the menu never offers an action that is always rejected:
+ * a movement of a document that names it (referenceId set) is changed through that document,
+ * OpeningBalance is corrected with a stock adjustment, and transfer rows only through the transfer.
  */
-export function movementEditBlock(m: Pick<StockMovementRow, 'referenceType' | 'isCancelled'>): string | null {
+function documentBlock(m: LockableRow, action: 'edit' | 'cancel'): string | null {
   if (m.isCancelled) return i18n.t('inventoryRows.block.cancelled', { ns: 'inventory' });
-  if (m.referenceType === 'GoodsReceipt') return i18n.t('inventoryRows.block.editFromReceipt', { ns: 'inventory' });
-  if (m.referenceType === 'ProductionRun') return i18n.t('inventoryRows.block.editFromProduction', { ns: 'inventory' });
-  return null;
+  if (m.referenceType === 'OpeningBalance') return i18n.t('inventoryRows.block.openingBalance', { ns: 'inventory' });
+  const isTransfer = m.movementType === 'TransferIn' || m.movementType === 'TransferOut';
+  const doc: LockingDocument | null = isTransfer
+    ? 'StockTransfer'
+    : m.referenceType && m.referenceId && isLockingDocument(m.referenceType) ? m.referenceType : null;
+  if (!doc) return null;
+  return i18n.t(action === 'edit' ? 'inventoryRows.block.editFromDocument' : 'inventoryRows.block.cancelFromDocument', {
+    ns: 'inventory',
+    doc: i18n.t(`inventoryRows.block.doc.${doc}`, { ns: 'inventory' }),
+    page: i18n.t(`inventoryRows.block.page.${doc}`, { ns: 'inventory' }),
+  });
 }
 
-export function movementCancelBlock(m: Pick<StockMovementRow, 'referenceType' | 'isCancelled'>): string | null {
-  if (m.isCancelled) return i18n.t('inventoryRows.block.cancelled', { ns: 'inventory' });
-  if (m.referenceType === 'GoodsReceipt') return i18n.t('inventoryRows.block.cancelFromReceipt', { ns: 'inventory' });
-  return null;
+export function movementEditBlock(m: LockableRow): string | null {
+  return documentBlock(m, 'edit');
+}
+
+export function movementCancelBlock(m: LockableRow): string | null {
+  return documentBlock(m, 'cancel');
 }
 
 // Production runs

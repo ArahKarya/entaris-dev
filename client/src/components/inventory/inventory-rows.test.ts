@@ -21,13 +21,30 @@ describe('itemStockStatus', () => {
 });
 
 describe('movement rules', () => {
-  it('blocks edit for STT and production movements, cancel only for STT', () => {
-    expect(movementEditBlock({ referenceType: 'GoodsReceipt', isCancelled: false })).toMatch(/STT/);
-    expect(movementCancelBlock({ referenceType: 'GoodsReceipt', isCancelled: false })).toMatch(/STT/);
-    expect(movementEditBlock({ referenceType: 'ProductionRun', isCancelled: false })).toMatch(/produksi/);
-    expect(movementCancelBlock({ referenceType: 'ProductionRun', isCancelled: false })).toBeNull();
-    expect(movementEditBlock({ referenceType: null, isCancelled: false })).toBeNull();
-    expect(movementCancelBlock({ referenceType: null, isCancelled: true })).not.toBeNull();
+  const row = (referenceType: string | null, referenceId: string | null, movementType = 'In', isCancelled = false) =>
+    ({ referenceType, referenceId, movementType, isCancelled });
+
+  it('blocks edit and cancel of a movement owned by a document, like the server', () => {
+    expect(movementEditBlock(row('GoodsReceipt', 'gr-1'))).toMatch(/STT/);
+    expect(movementCancelBlock(row('GoodsReceipt', 'gr-1'))).toMatch(/STT/);
+    expect(movementEditBlock(row('ProductionRun', 'pr-1'))).toMatch(/produksi/);
+    expect(movementCancelBlock(row('ProductionRun', 'pr-1'))).toMatch(/halaman Produksi/);
+    expect(movementCancelBlock(row('StockOpname', 'so-1'))).toMatch(/Stok Opname/);
+    expect(movementCancelBlock(row('SalesReturn', 'sr-1'))).toMatch(/retur penjualan/);
+    expect(movementCancelBlock(row('SalesInvoice', 'si-1'))).toMatch(/invoice penjualan/);
+  });
+
+  it('always blocks opening balance and transfer rows', () => {
+    expect(movementCancelBlock(row('OpeningBalance', null))).toMatch(/Penyesuaian Stok/);
+    expect(movementEditBlock(row('OpeningBalance', null))).toMatch(/saldo awal/);
+    expect(movementCancelBlock(row(null, null, 'TransferOut'))).toMatch(/Transfer Stok/);
+    expect(movementEditBlock(row('StockTransfer', 'st-1', 'TransferIn'))).toMatch(/transfer stok/);
+  });
+
+  it('leaves manual rows, also those with a typed reference and no document id, open', () => {
+    expect(movementEditBlock(row(null, null))).toBeNull();
+    expect(movementCancelBlock(row('PurchaseInvoice', null, 'Out'))).toBeNull();
+    expect(movementCancelBlock(row(null, null, 'In', true))).not.toBeNull();
   });
 
   it('labels types, directions and references in Indonesian', () => {
