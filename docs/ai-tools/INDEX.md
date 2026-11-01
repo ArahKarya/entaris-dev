@@ -514,7 +514,7 @@ Total **512** tool (read 236 · write 165 · critical 111); semuanya aktif secar
 | [`tax_create_config`](akuntansi.md#tax_create_config) | akuntansi | write | tidak | Admin | `POST /api/tax/config` |
 | [`tax_delete_config`](akuntansi.md#tax_delete_config) | akuntansi | critical | tidak | Admin | `DELETE /api/tax/config/:id` |
 | [`tax_get_config`](akuntansi.md#tax_get_config) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/tax/config` |
-| [`tax_report`](akuntansi.md#tax_report) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/tax/report` |
+| [`tax_report`](akuntansi.md#tax_report) | akuntansi | read | - | Admin, Accountant, Viewer | `GET /api/tax/report` |
 | [`tax_update_config`](akuntansi.md#tax_update_config) | akuntansi | write | tidak | Admin | `PUT /api/tax/config/:id` |
 | [`tdn_cancel`](penjualan.md#tdn_cancel) | penjualan | critical | tidak | Admin, Accountant | `POST /api/temporary-delivery-notes/:id/cancel` |
 | [`tdn_create`](penjualan.md#tdn_create) | penjualan | write | ya | Admin, Accountant, StaffProduksi | `POST /api/temporary-delivery-notes` |

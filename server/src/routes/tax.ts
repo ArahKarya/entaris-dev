@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import Decimal from 'decimal.js';
 import { prisma } from '../lib/prisma';
-import { requireCap } from '../middleware/auth';
+import { requireCap, requirePerm } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
 import { CreateTaxConfigSchema, UpdateTaxConfigSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
@@ -10,7 +10,8 @@ const router = Router();
 
 // Tax Config CRUD
 
-// GET /api/tax/config — list all tax configs
+// GET /api/tax/config — list all tax configs. Open to every signed-in user on purpose: the mount's
+// requireWrite('settings') only gates writes, and the settings tax tab and invoice forms read it.
 router.get('/config', async (_req, res) => {
   try {
     const configs = await prisma.taxConfig.findMany({
@@ -81,8 +82,9 @@ router.delete('/config/:id', requireCap('doc.cancel'), async (req, res) => {
 
 // Tax Report
 
-// GET /api/tax/report — tax summary grouped by month
-router.get('/report', async (req, res) => {
+// GET /api/tax/report — tax summary grouped by month. Needs the Reports view right: the mount only
+// gates writes, which left the report open to every signed-in user.
+router.get('/report', requirePerm('reports'), async (req, res) => {
   try {
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
