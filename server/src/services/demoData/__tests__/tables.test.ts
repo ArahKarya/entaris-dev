@@ -68,13 +68,21 @@ describe('data reset table lists', () => {
     expect([...extra, ...preserved].filter((t) => !keep.has(t))).toEqual([]);
   });
 
-  it('truncates every DATA table and the period lock, demo and repair markers', () => {
+  it('truncates every DATA table and the period lock and demo markers', () => {
     const reset = new Set(resetTables());
     expect(DATA_TABLES.filter((t) => !reset.has(t))).toEqual([]);
-    for (const t of ['period_lock', 'period_lock_logs', 'demo_data_batches', 'demo_data_records', 'data_fix_markers', 'close_check_baselines', 'users', 'audit_trail']) {
+    for (const t of ['period_lock', 'period_lock_logs', 'demo_data_batches', 'demo_data_records', 'close_check_baselines', 'users', 'audit_trail']) {
       expect(reset.has(t), t).toBe(true);
     }
     expect(resetTables().filter((t) => preserved.has(t))).toEqual([]);
+  });
+
+  it('keeps the run-once backfill markers while roles and rights are kept', () => {
+    // Emptying data_fix_markers would make the next boot grant again every capability backfill
+    // (rbacSeed BACKFILL_CAPS, marker-guarded loose SQL) to the kept roles, undoing Admin revokes.
+    for (const t of ['roles', 'role_permissions', 'role_capabilities']) expect(preserved.has(t), t).toBe(true);
+    expect(preserved.has('data_fix_markers')).toBe(true);
+    expect(resetTables()).not.toContain('data_fix_markers');
   });
 
   it('does not list as preserved a table that TRUNCATE ... CASCADE would empty', () => {

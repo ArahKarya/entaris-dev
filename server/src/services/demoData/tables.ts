@@ -178,7 +178,7 @@ export type DemoMasterTable = (typeof DEMO_MASTER_TABLES)[number];
 // KEEP table with a foreign key to a reset table must be in RESET_EXTRA_TABLES: TRUNCATE ... CASCADE
 // would empty it anyway, so listing it as preserved would be a lie.
 
-/** KEEP tables the reset also empties: masters, users, settings and markers the seed recreates or that describe the old data. */
+/** KEEP tables the reset also empties: masters, users, settings and demo markers the seed recreates or that describe the old data. */
 export const RESET_EXTRA_TABLES = [
   'accounts',
   'audit_trail',
@@ -187,7 +187,6 @@ export const RESET_EXTRA_TABLES = [
   'chat_sessions',
   'company_settings',
   'crm_activities',
-  'data_fix_markers',
   'demo_data_batches',
   'demo_data_records',
   'fiscal_years',
@@ -206,7 +205,11 @@ export const RESET_EXTRA_TABLES = [
   'users',
 ] as const;
 
-/** KEEP tables that survive a reset: migration ledgers, roles and rights, AIRA/MCP, Telegram, CRM and GA masters. */
+/**
+ * KEEP tables that survive a reset: migration ledgers, roles and rights, AIRA/MCP, Telegram, CRM and GA masters.
+ * data_fix_markers stays with roles and rights: its run-once markers stop capability backfills
+ * (rbacSeed, loose SQL) from granting again a right an Admin removed from a kept role.
+ */
 export const RESET_PRESERVED_TABLES = [
   '_loose_sql_migrations',
   '_prisma_migrations',
@@ -215,6 +218,7 @@ export const RESET_PRESERVED_TABLES = [
   'approval_rules',
   'cash_book_learned_maps',
   'crm_settings',
+  'data_fix_markers',
   'ga_asset_categories',
   'ga_branches',
   'ga_cost_centers',
