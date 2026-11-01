@@ -222,7 +222,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
   FX_GAIN_LOSS: {
     key: 'FX_GAIN_LOSS',
     label: 'Laba/Rugi Selisih Kurs',
-    description: 'Keuntungan atau kerugian dari selisih nilai tukar mata uang',
+    description: 'Dipakai lewat jurnal umum; tidak ada posting otomatis (pembukuan hanya rupiah)',
     multiAccount: false,
     required: false,
     expectedRootType: 'EXPENSE' as const,
@@ -230,7 +230,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
   FX_UNREALIZED: {
     key: 'FX_UNREALIZED',
     label: 'Laba/Rugi Kurs Belum Terealisasi',
-    description: 'Selisih kurs belum terealisasi dari revaluasi saldo akhir periode',
+    description: 'Dipakai lewat jurnal umum; revaluasi valas belum didukung (pembukuan hanya rupiah)',
     multiAccount: false,
     required: false,
     expectedRootType: 'EXPENSE' as const,

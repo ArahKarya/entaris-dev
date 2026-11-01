@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { LanguageSchema } from './language';
 import { headerPotonganMismatch } from '../services/purchaseInvoiceCalc';
 
+// Rupiah only (E2-R7, E8-R12 stage 1): the books, the company settings and payment requests hold
+// IDR only. A currency field accepts 'IDR' in any case (trimmed and upper-cased) or nothing; any
+// other code is rejected with the field's own message instead of being dropped silently.
+export const RUPIAH = 'IDR';
+const rupiahOnly = (message: string) =>
+  z.string({ message }).trim().toUpperCase().pipe(z.enum([RUPIAH], { message }));
+
 // Chart of Accounts
 const AccountTypeEnum = z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'], {
   message: "Tipe akun harus salah satu dari: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE",
@@ -14,7 +21,7 @@ export const CreateAccountSchema = z.object({
   rootType: AccountTypeEnum,
   parentId: z.string().nullable().optional(),
   isGroup: z.boolean().optional(),
-  currency: z.string().optional(),
+  currency: rupiahOnly('Pembukuan hanya rupiah: mata uang akun harus IDR.').optional(),
 });
 
 export const UpdateAccountSchema = CreateAccountSchema.partial().extend({
@@ -439,7 +446,7 @@ export const UpdateCompanySettingsSchema = z.object({
   taxId: z.string().nullable().optional(),
   logoUrl: z.string().nullable().optional(),
   logoUrlDark: z.string().nullable().optional(),
-  currency: z.string().optional(),
+  currency: rupiahOnly('Mata uang perusahaan hanya IDR (pembukuan hanya rupiah).').optional(),
   dateFormat: z.string().optional(),
   fiscalYearStartMonth: z.coerce.number().int().min(1, 'Bulan harus antara 1-12.').max(12, 'Bulan harus antara 1-12.').optional(),
   defaultLanguage: LanguageSchema.optional(),
@@ -1100,6 +1107,9 @@ export const PaymentRequestInputSchema = z.object({
   travelEndDate: IsoDay.nullable().optional(),
   travelParticipants: optText(500),
   lines: z.array(PaymentRequestLineSchema).max(100, 'Maksimal 100 baris rincian.'),
+  // Not stored: payment_requests.currency keeps its IDR default. Declared so a foreign currency is
+  // rejected instead of being stripped and booked as rupiah.
+  currency: rupiahOnly('Pengajuan hanya rupiah').optional(),
 });
 
 // Lampiran via JSON untuk tool MCP: isi berkas base64 ATAU rujukan lampiran panel chat (tanpa keduanya: lampiran chat terbaru).

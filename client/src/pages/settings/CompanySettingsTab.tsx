@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DEFAULT_LANGUAGE, LANGUAGE_OPTIONS, normalizeLanguage, type Language } from '@/i18n/language';
 import { SettingsCard } from '../../components/settings/SettingsCard';
 import { SaveBar } from '../../components/settings/SaveBar';
+import { companySettingsPayload } from './companySettingsPayload';
 
 interface InvoiceSectionSettings {
   bankAccounts?: string;
@@ -35,7 +36,6 @@ interface CompanyForm {
   phone: string;
   email: string;
   taxId: string;
-  defaultCurrency: string;
   logoUrl: string | null;
   logoUrlDark: string | null;
   defaultLanguage: Language;
@@ -46,7 +46,7 @@ type TextKey = Exclude<keyof CompanyForm, LogoKey | 'defaultLanguage'>;
 
 const DEFAULT_SIGNATURES = ['Disiapkan oleh', 'Disetujui oleh', 'Diterima oleh'];
 const EMPTY_FORM: CompanyForm = {
-  companyName: '', address: '', phone: '', email: '', taxId: '', defaultCurrency: 'IDR', logoUrl: null, logoUrlDark: null,
+  companyName: '', address: '', phone: '', email: '', taxId: '', logoUrl: null, logoUrlDark: null,
   defaultLanguage: DEFAULT_LANGUAGE,
 };
 const DEFAULT_INVOICE: InvoiceFormatSettings = {
@@ -58,13 +58,12 @@ const LOGO_ACCEPT = 'image/png,image/jpeg,image/jpg,image/svg+xml,image/webp';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Labels live in `settings:company.fields.<key>`; placeholders without a key are literal formats. */
-const TEXT_FIELDS: Array<{ key: TextKey; placeholder?: string; type: string; required?: boolean; hint?: boolean }> = [
+const TEXT_FIELDS: Array<{ key: TextKey; placeholder?: string; type: string; required?: boolean }> = [
   { key: 'companyName', type: 'text', required: true },
   { key: 'address', type: 'text' },
   { key: 'phone', placeholder: '+62 xxx', type: 'tel' },
   { key: 'email', placeholder: 'finance@company.com', type: 'email' },
   { key: 'taxId', placeholder: '00.000.000.0-000.000', type: 'text' },
-  { key: 'defaultCurrency', placeholder: 'IDR', type: 'text', hint: true },
 ];
 
 function validate(f: CompanyForm, t: TFunction<'settings'>): CompanyErrors {
@@ -82,7 +81,6 @@ function formFromSettings(settings: any, prev: CompanyForm): CompanyForm {
     phone: settings.phone || '',
     email: settings.email || '',
     taxId: settings.taxId || '',
-    defaultCurrency: settings.defaultCurrency || settings.currency || 'IDR',
     logoUrl: settings.logoUrl || null,
     logoUrlDark: settings.logoUrlDark || null,
     defaultLanguage: normalizeLanguage(settings.defaultLanguage),
@@ -162,7 +160,7 @@ export const CompanySettingsTab: React.FC = () => {
       requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-settings-form] [aria-invalid="true"]')?.focus());
       return;
     }
-    saveMutation.mutate({ ...formData, invoiceSettings });
+    saveMutation.mutate(companySettingsPayload(formData, invoiceSettings, settings));
   };
 
   const handleReset = () => {
@@ -236,7 +234,7 @@ export const CompanySettingsTab: React.FC = () => {
         <SettingsCard title={t('company.identity.title')} description={t('company.identity.description')}>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {TEXT_FIELDS.map((f) => (
-              <Field key={f.key} label={t(`company.fields.${f.key}.label`)} required={f.required} error={errors[f.key]} hint={f.hint ? t('company.fields.defaultCurrency.hint') : undefined}>
+              <Field key={f.key} label={t(`company.fields.${f.key}.label`)} required={f.required} error={errors[f.key]}>
                 <Input
                   type={f.type}
                   value={formData[f.key]}
@@ -246,6 +244,10 @@ export const CompanySettingsTab: React.FC = () => {
                 />
               </Field>
             ))}
+            {/* Bookkeeping is rupiah only: the currency is shown, never edited or sent. */}
+            <Field label={t('company.fields.defaultCurrency.label')} hint={t('company.fields.defaultCurrency.hint')}>
+              <Input value={t('company.fields.defaultCurrency.value')} readOnly aria-readonly="true" tabIndex={-1} className="bg-muted/40" />
+            </Field>
             <Field label={t('company.defaultLanguage.label')} hint={t('company.defaultLanguage.hint')}>
               <Select value={formData.defaultLanguage} onValueChange={(v) => handleChange('defaultLanguage', normalizeLanguage(v))}>
                 <SelectTrigger aria-label={t('company.defaultLanguage.label')}>

@@ -77,7 +77,8 @@
       },
       "defaultCurrency": {
         "label": "Mata uang",
-        "hint": "Kode ISO, mis. IDR."
+        "hint": "Pembukuan hanya dalam Rupiah.",
+        "value": "IDR — Rupiah"
       }
     },
     "logo": {

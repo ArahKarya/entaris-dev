@@ -174,6 +174,8 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Ukuran logo terlalu besar (maks. ~4MB setelah encoding).": "Logo is too large (max. ~4MB after encoding).",
   "Ukuran logo (dark mode) terlalu besar (maks. ~4MB setelah encoding).": "Logo (dark mode) is too large (max. ~4MB after encoding).",
   "Gagal menyimpan pengaturan perusahaan.": "Failed to save company settings.",
+  // settings: company currency (utils/schemas.ts, E2-R7)
+  "Mata uang perusahaan hanya IDR (pembukuan hanya rupiah).": "The company currency can only be IDR (bookkeeping is in rupiah only).",
   "Gagal menyimpan status penyiapan awal.": "Failed to save the initial setup status.",
   "Gagal cek GitHub.": "Failed to check GitHub.",
   "Gagal mengecek update.": "Failed to check for updates.",

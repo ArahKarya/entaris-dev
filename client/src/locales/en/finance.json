@@ -1447,8 +1447,8 @@
     "lines": {
       "travelTitle": "Planned travel costs",
       "title": "Cost details",
-      "travelHint": "Estimated cost per category, used for comparison at settlement. Finance chooses the expense accounts.",
-      "hint": "Finance chooses the expense accounts during verification."
+      "travelHint": "Estimated cost per category, used for comparison at settlement. All amounts are in Rupiah (IDR). Finance chooses the expense accounts.",
+      "hint": "All amounts are in Rupiah (IDR). Finance chooses the expense accounts during verification."
     },
     "attachments": {
       "title": "Attachments",
@@ -2351,7 +2351,7 @@
       },
       "fx": {
         "title": "Exchange Differences",
-        "description": "Realised and unrealised exchange gain/loss accounts"
+        "description": "Used through manual journals (no automatic posting; bookkeeping is in rupiah only)"
       },
       "other": {
         "title": "Other Income & Expenses",
