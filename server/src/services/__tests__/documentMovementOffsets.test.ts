@@ -152,6 +152,7 @@ describe('sales return restock movements', () => {
         partyId: 'cust',
         status: 'Submitted',
         outstanding: '100000',
+        grandTotal: '100000',
         customer: { name: 'Cust' },
         items: [
           {
