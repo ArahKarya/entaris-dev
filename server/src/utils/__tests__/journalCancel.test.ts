@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { BusinessError } from '../errors';
-import { cancelDocumentJournals, cancelJournalsByPrefix, voidJournalByIdInTx } from '../journalCancel';
+import { cancelDocumentJournals, voidJournalByIdInTx } from '../journalCancel';
 import { PERIOD_CLOSED } from '../periodGuard';
 import { cancelTrail } from '../cancelClaim';
 
@@ -51,111 +51,6 @@ async function caught(p: Promise<unknown>): Promise<BusinessError> {
   }
   throw new Error('expected a BusinessError');
 }
-
-describe('cancelJournalsByPrefix', () => {
-
-  it('cancels a single journal matching prefix', async () => {
-    const journal = makeJournal('j1', 'JV-PR0004', [
-      { accountId: 'a1', debit: 1000, credit: 0 },
-      { accountId: 'a2', debit: 0, credit: 1000 },
-    ]);
-    const tx = makeTx([journal]) as any;
-
-    const count = await cancelJournalsByPrefix(tx, 'JV-PR0004');
-
-    expect(count).toBe(1);
-    expect(tx.journalEntry.findMany).toHaveBeenCalledWith({
-      where: {
-        OR: [{ entryNumber: 'JV-PR0004' }, { entryNumber: { startsWith: 'JV-PR0004-' } }],
-        status: { not: 'Cancelled' },
-      },
-      include: { items: true },
-    });
-    expect(tx.journalEntry.updateMany).toHaveBeenCalledWith({
-      where: { id: 'j1', status: { not: 'Cancelled' } },
-      data: { status: 'Cancelled', cancelledAt: expect.any(Date) },
-    });
-    expect(tx.accountingLedgerEntry.updateMany).toHaveBeenCalledWith({
-      where: { referenceId: 'j1', isCancelled: false },
-      data: { isCancelled: true },
-    });
-  });
-
-  it('refuses a revision journal in a closed fiscal year', async () => {
-    const tx = makeTx([
-      makeJournal('j1', 'JV-PR0004', [{ accountId: 'a1', debit: 10, credit: 0 }]),
-      makeJournal('j2', 'JV-PR0004-R1', [{ accountId: 'a1', debit: 10, credit: 0 }], 'fy-closed'),
-    ]) as any;
-
-    const e = await caught(cancelJournalsByPrefix(tx, 'JV-PR0004'));
-
-    expect(e.code).toBe(PERIOD_CLOSED);
-    expect(tx.journalEntry.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'j2', status: { not: 'Cancelled' } } }));
-  });
-
-  it('cancels multiple journals including revisions (JV-PR0004, JV-PR0004-R, JV-PR0004-R2)', async () => {
-    const journals = [
-      makeJournal('j1', 'JV-PR0004', [
-        { accountId: 'inv', debit: 0, credit: 500 },
-        { accountId: 'hpp', debit: 500, credit: 0 },
-      ]),
-      makeJournal('j2', 'JV-PR0004-R', [
-        { accountId: 'inv', debit: 0, credit: 600 },
-        { accountId: 'hpp', debit: 600, credit: 0 },
-      ]),
-      makeJournal('j3', 'JV-PR0004-R2', [
-        { accountId: 'inv', debit: 0, credit: 700 },
-        { accountId: 'hpp', debit: 700, credit: 0 },
-      ]),
-    ];
-    const tx = makeTx(journals) as any;
-
-    const count = await cancelJournalsByPrefix(tx, 'JV-PR0004');
-
-    expect(count).toBe(3);
-    expect(tx.journalEntry.updateMany).toHaveBeenCalledTimes(3);
-    expect(tx.accountingLedgerEntry.updateMany).toHaveBeenCalledTimes(3);
-  });
-
-  it('reverses account balances (swaps debit/credit)', async () => {
-    const journal = makeJournal('j1', 'JV-SO0001', [
-      { accountId: 'inventory', debit: 1000, credit: 0 },
-      { accountId: 'variance', debit: 0, credit: 1000 },
-    ]);
-    const tx = makeTx([journal]) as any;
-
-    await cancelJournalsByPrefix(tx, 'JV-SO0001');
-
-    // Balance reversal: swap debit↔credit → call updateAccountBalance(credit, debit)
-    // For inventory (debit=1000, credit=0): reversed → updateAccountBalance(0, 1000)
-    // For variance (debit=0, credit=1000): reversed → updateAccountBalance(1000, 0)
-    expect(tx.account.update).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns 0 when no active journals match prefix', async () => {
-    const tx = makeTx([]) as any;
-
-    const count = await cancelJournalsByPrefix(tx, 'JV-NONEXISTENT');
-
-    expect(count).toBe(0);
-    expect(tx.journalEntry.updateMany).not.toHaveBeenCalled();
-    expect(tx.accountingLedgerEntry.updateMany).not.toHaveBeenCalled();
-  });
-
-  it('matches the exact number or a dash satellite, so JV-PR-202601-1000 never matches -10000', async () => {
-    const tx = makeTx([]) as any;
-
-    await cancelJournalsByPrefix(tx, 'JV-PR-202601-1000');
-
-    expect(tx.journalEntry.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          OR: [{ entryNumber: 'JV-PR-202601-1000' }, { entryNumber: { startsWith: 'JV-PR-202601-1000-' } }],
-        }),
-      })
-    );
-  });
-});
 
 describe('cancelDocumentJournals', () => {
   const lines: Line[] = [

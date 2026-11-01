@@ -81,10 +81,7 @@ export async function cancelDocumentJournals(
   const journals = await tx.journalEntry.findMany({
     where: {
       status: { not: 'Cancelled' },
-      OR: baseNumbers.flatMap((base) => [
-        { entryNumber: base },
-        { entryNumber: { startsWith: `${base}-` } },
-      ]),
+      OR: baseNumbers.flatMap((base) => journalFamilyWhere(base).OR ?? []),
     },
     include: { items: true },
     orderBy: [{ date: 'asc' }, { entryNumber: 'asc' }],
@@ -95,33 +92,4 @@ export async function cancelDocumentJournals(
   }
 
   return journals.map((j) => j.entryNumber);
-}
-
-/**
- * Cancel ALL active journals of one document: the exact `entryNumberPrefix` and its
- * `<prefix>-…` satellites, along with their ledger entries, and reverse account balances.
- * Each journal's own fiscal year must be open (see voidJournalInTx).
- *
- * This handles revision journals (e.g. JV-PR-202601-0004, -R1, -R2) that are created when a
- * production run or stock opname is edited, without touching JV-PR-202601-00040.
- *
- * @returns number of journals cancelled
- */
-export async function cancelJournalsByPrefix(
-  tx: Tx,
-  entryNumberPrefix: string
-): Promise<number> {
-  const activeJournals = await tx.journalEntry.findMany({
-    where: {
-      ...journalFamilyWhere(entryNumberPrefix),
-      status: { not: 'Cancelled' },
-    },
-    include: { items: true },
-  });
-
-  for (const journal of activeJournals) {
-    await voidJournalInTx(tx, journal);
-  }
-
-  return activeJournals.length;
 }

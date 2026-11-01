@@ -9,8 +9,8 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { recalculateAccountBalances } from '../utils/accountBalance';
-import { cancelJournalsByPrefix } from '../utils/journalCancel';
-import { journalFamilyWhere } from '../utils/journalFamily';
+import { cancelTrail } from '../utils/cancelClaim';
+import { cancelJournalsInTx, findDocumentJournals } from '../services/ledger/cancelJournals';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
@@ -449,24 +449,11 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
         }
       }
 
-      // Cancel ALL related journals + ledger entries (including any revisions)
-      const jvNumber = `JV-${so.opnameNumber}`;
-
-      // Collect affected account IDs BEFORE cancelling
-      const relatedJEItems = await tx.journalItem.findMany({
-        where: {
-          journalEntry: { ...journalFamilyWhere(jvNumber), status: { not: 'Cancelled' } },
-        },
-        select: { accountId: true },
+      // Void the opname's journals (JV-<opnameNumber> and any satellites); balances are reversed per line.
+      await cancelJournalsInTx(tx, await findDocumentJournals(tx, `JV-${so.opnameNumber}`), {
+        label: 'stok opname',
+        trail: cancelTrail(req.user!.userId),
       });
-      const cancelAffectedAccountIds = [...new Set(relatedJEItems.map(ji => ji.accountId))];
-
-      await cancelJournalsByPrefix(tx, jvNumber);
-
-      // Recalculate balances from JE sums (prevents drift)
-      if (cancelAffectedAccountIds.length > 0) {
-        await recalculateAccountBalances(tx, cancelAffectedAccountIds);
-      }
 
       await tx.stockOpname.update({
         where: { id },
