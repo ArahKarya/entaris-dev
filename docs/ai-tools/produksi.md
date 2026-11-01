@@ -1716,6 +1716,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)
 
