@@ -8,6 +8,9 @@ import { buildApprovalComparison, isEditDocumentType, findPendingForTarget } fro
 import { loadApprovalLookups } from '../services/approvalContextLookups';
 import { parseApprovalCheckQuery } from '../utils/approvalCheckQuery';
 import { applyResubmit, resubmitAmount } from '../services/approvalResubmit';
+import { APPROVAL_BUSY } from '../services/approvalClaim';
+import { STALE_STATUS } from '../utils/cancelClaim';
+import { BusinessError } from '../utils/errors';
 
 const router = Router();
 
@@ -271,6 +274,12 @@ router.post('/requests', async (req: AuthRequest, res) => {
   }
 });
 
+// HTTP status of a failed decision: 409 when another decision got there first (STALE_STATUS) or
+// still holds the request (APPROVAL_BUSY); every other failure, PERIOD_LOCKED included, stays 400.
+function decisionStatus(code: string | undefined): 400 | 409 {
+  return code === STALE_STATUS || code === APPROVAL_BUSY ? 409 : 400;
+}
+
 // POST /requests/:id/approve — eksekusi dokumen dari payload, lalu tandai Approved.
 // Dokumen baru DIBUAT di sini (gate "approve-before-effect"). Submit asli
 // dijalankan dgn requester sbg pembuat dokumen (audit menunjuk si penginput).
@@ -281,7 +290,7 @@ router.post('/requests/:id/approve', requireCap('approval.decide'), async (req: 
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
+  if (!result.ok) return res.status(decisionStatus(result.code)).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -293,7 +302,7 @@ router.post('/requests/:id/reject', requireCap('approval.decide'), async (req: A
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
+  if (!result.ok) return res.status(decisionStatus(result.code)).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -306,7 +315,7 @@ router.post('/requests/:id/request-revision', requireCap('approval.decide'), asy
     actorUserId: req.user!.userId,
     note: req.body?.notes,
   });
-  if (!result.ok) return res.status(400).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
+  if (!result.ok) return res.status(decisionStatus(result.code)).json({ error: result.error, ...(result.code ? { code: result.code } : {}) });
   res.json(result);
 });
 
@@ -337,6 +346,10 @@ router.put('/requests/:id/resubmit', async (req: AuthRequest, res) => {
     logger.info({ requestId: request.id, by: req.user!.userId }, 'Approval resubmitted');
     res.json(updated);
   } catch (error) {
+    // Resubmitted or decided by someone else since the status check above.
+    if (error instanceof BusinessError && error.code === STALE_STATUS) {
+      return res.status(409).json({ error: error.message, code: error.code });
+    }
     logger.error(error, 'PUT /approvals/requests/:id/resubmit error');
     res.status(500).json({ error: 'Gagal mengajukan ulang.' });
   }
