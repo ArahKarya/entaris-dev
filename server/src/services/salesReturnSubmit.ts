@@ -6,6 +6,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
 import { logger } from '../lib/logger';
+import { setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 
 type Tx = Prisma.TransactionClient;
 
@@ -90,6 +91,10 @@ export async function submitSalesReturnInTx(
   if (isNaN(parsedDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
   const fiscalYear = await getOpenFiscalYear(tx, parsedDate);
 
+  // Row lock before reading: the AR split below uses the current outstanding, and a concurrent
+  // invoice cancel either finishes first (this return then sees Cancelled) or waits for this one
+  // (and then sees an active return).
+  await tx.$queryRaw`SELECT id FROM sales_invoices WHERE id = ${body.salesInvoiceId} FOR UPDATE`;
   const invoice = await tx.salesInvoice.findUnique({
     where: { id: body.salesInvoiceId },
     include: {
@@ -293,12 +298,9 @@ export async function submitSalesReturnInTx(
     await updateAccountBalance(tx, j.accountId, j.debit, j.credit);
   }
 
-  // Reduce invoice outstanding by the AR portion.
+  // Reduce invoice outstanding by the AR portion; a full return leaves the invoice Paid.
   if (arReduceNum > 0) {
-    await tx.salesInvoice.update({
-      where: { id: invoice.id },
-      data: { outstanding: outstanding.minus(arReduce).toNumber() },
-    });
+    await setSalesInvoiceOutstandingInTx(tx, invoice.id, { delta: arReduce.neg() });
   }
   await recalcPartyOutstanding(tx, invoice.partyId);
 

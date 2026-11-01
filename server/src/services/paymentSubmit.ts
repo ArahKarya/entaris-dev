@@ -6,6 +6,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
 import { logger } from '../lib/logger';
+import { OUTSTANDING_TOLERANCE, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 
 type Tx = Prisma.TransactionClient;
 
@@ -333,17 +334,7 @@ export async function submitPaymentInTx(
             });
           }
         } else {
-          const inv = await tx.salesInvoice.findUnique({ where: { id: alloc.invoiceId } });
-          if (inv) {
-            const newOutstanding = new Decimal(inv.outstanding.toString()).plus(reverseAmt);
-            const newStatus = newOutstanding.gte(new Decimal(inv.grandTotal.toString()))
-              ? 'Submitted'
-              : 'PartiallyPaid';
-            await tx.salesInvoice.update({
-              where: { id: inv.id },
-              data: { outstanding: newOutstanding.toNumber(), status: newStatus },
-            });
-          }
+          await setSalesInvoiceOutstandingInTx(tx, alloc.invoiceId, { delta: reverseAmt });
         }
       }
 
@@ -513,23 +504,21 @@ async function autoAllocatePayment(
 
   if (paymentType === 'Receive') {
     await tx.$queryRaw`SELECT id FROM sales_invoices WHERE party_id = ${partyId} AND status IN ('Submitted', 'PartiallyPaid', 'Overdue') FOR UPDATE`;
+    // Nothing left to pay (e.g. a legacy Submitted invoice emptied by a full return) gets no
+    // allocation: a Rp 0 allocation would only flip its status.
     const invoices = await tx.salesInvoice.findMany({
-      where: { partyId, status: { in: ['Submitted', 'PartiallyPaid', 'Overdue'] } },
+      where: { partyId, status: { in: ['Submitted', 'PartiallyPaid', 'Overdue'] }, outstanding: { gt: OUTSTANDING_TOLERANCE.toNumber() } },
       orderBy: { date: 'asc' },
     });
 
     for (const inv of invoices) {
       if (remaining.lte(0)) break;
       const outstanding = new Decimal(inv.outstanding.toString());
+      if (outstanding.lte(OUTSTANDING_TOLERANCE)) continue;
       const allocate = Decimal.min(remaining, outstanding);
       remaining = remaining.minus(allocate);
-      const newOutstanding = outstanding.minus(allocate);
-      const newStatus = newOutstanding.lte(new Decimal('0.01')) ? 'Paid' : 'PartiallyPaid';
 
-      await tx.salesInvoice.update({
-        where: { id: inv.id },
-        data: { outstanding: newOutstanding.toNumber(), status: newStatus },
-      });
+      await setSalesInvoiceOutstandingInTx(tx, inv.id, { delta: allocate.neg() });
       await tx.paymentAllocation.create({
         data: {
           paymentId,
