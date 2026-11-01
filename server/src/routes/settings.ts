@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { requirePerm } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
-import { UpdateCompanySettingsSchema } from '../utils/schemas';
+import { RUPIAH, UpdateCompanySettingsSchema } from '../utils/schemas';
 import { logger } from '../lib/logger';
 import dummyDataRouter from './settings/dummyData';
 import demoDataRouter from './settings/demoData';
@@ -110,7 +110,9 @@ router.put('/company', requirePerm('settings'), async (req, res) => {
       phone: body.phone || null,
       email: body.email || null,
       taxId: body.taxId || null,
-      defaultCurrency: body.currency || rawBody.defaultCurrency || 'IDR',
+      // Rupiah only: the validated currency may only be IDR, and an old non-IDR row is normalised
+      // on the next save.
+      defaultCurrency: RUPIAH,
       fiscalYearStartMonth: body.fiscalYearStartMonth ?? 1,
       ...(body.defaultLanguage !== undefined && { defaultLanguage: body.defaultLanguage }),
       ...(body.logoUrl !== undefined && { logoUrl: body.logoUrl || null }),
