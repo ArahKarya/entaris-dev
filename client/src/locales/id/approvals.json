@@ -168,7 +168,8 @@
       "noSttAttachments": "Tidak ada lampiran di STT ini.",
       "noAttachments": "Tidak ada lampiran (pengajuan tidak terhubung ke STT & tidak ada file diunggah).",
       "subtotal": "Subtotal",
-      "discount": "Potongan",
+      "lineDiscountIncluded": "termasuk potongan baris",
+      "headerDiscountMismatch": "Potongan header tidak sama dengan jumlah potongan per baris. Pengajuan ini akan ditolak saat disetujui; minta revisi dan isi potongan di baris item.",
       "otherCosts": "Biaya Lain",
       "grandTotal": "Grand Total",
       "estimate": "(estimasi)"
