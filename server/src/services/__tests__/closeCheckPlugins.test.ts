@@ -2,7 +2,9 @@
 // the built-in ones, as blocking and baseline-aware, and the baseline script can name them.
 import { describe, expect, it } from 'vitest';
 import '../closeCheckPlugins';
+import { Prisma } from '@prisma/client';
 import { baselineCaptureChecks, closeChecks } from '../fiscalYearClose';
+import { subledgerBaselineCovers } from '../ledger/arSubledgerCloseChecks';
 
 describe('close check plug-ins', () => {
   it('registers ar-subledger and customer-deposit-subledger after the built-in checks', () => {
@@ -24,5 +26,16 @@ describe('close check plug-ins', () => {
       'ar-subledger',
       'customer-deposit-subledger',
     ]);
+  });
+
+  it('covers a difference of the same sign that is no larger than the baseline', () => {
+    const covers = (current: string, baseline: string) => subledgerBaselineCovers(new Prisma.Decimal(current), new Prisma.Decimal(baseline));
+    expect(closeChecks().filter((c) => c.id.endsWith('subledger')).every((c) => c.baselineCovers === subledgerBaselineCovers)).toBe(true);
+    expect(covers('1000000.00', '1000000.00')).toBe(true);
+    expect(covers('400000.00', '1000000.00')).toBe(true);
+    expect(covers('-400000.00', '-1000000.00')).toBe(true);
+    expect(covers('1000000.01', '1000000.00')).toBe(false);
+    expect(covers('-400000.00', '1000000.00')).toBe(false);
+    expect(covers('400000.00', '-1000000.00')).toBe(false);
   });
 });

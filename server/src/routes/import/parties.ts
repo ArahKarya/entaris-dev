@@ -123,9 +123,13 @@ router.post(
 
           const isCustomer = row.partyType === 'Customer' || row.partyType === 'Both';
           const isSupplier = row.partyType === 'Supplier' || row.partyType === 'Both';
+          // The opening balance is also the opening outstanding: payments draw it down
+          // (paymentSubmit.ts), recalcPartyOutstanding starts from it, and the AR subledger check
+          // counts it for a Customer against the opening journal posted below.
           const newPartyData = {
             ...partyData,
             outstandingAmount: openingBalance,
+            openingOutstanding: openingBalance,
             depositBalance,
             customerDepositBalance,
           };

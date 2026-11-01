@@ -6,8 +6,8 @@
 //
 // Baseline: ledger mismatches that already existed at release are captured once in
 // close_check_baselines (scripts/repair/e1-close-baseline.ts). A baseline-aware check skips an item
-// whose key is there with the same amount; a new item, or a known one whose amount changed, still
-// blocks.
+// whose key is there with the same amount (or, when the check defines baselineCovers, an amount it
+// accepts); a new item, or a known one whose amount is not covered, still blocks.
 import { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { fiscalYearRange } from '../utils/periodGuard';
@@ -34,7 +34,7 @@ export interface CloseCheckResult {
   status: 'ok' | 'fail';
   /** Items that count (not baselined). */
   count: number;
-  /** Items skipped because the baseline has them with the same amount. */
+  /** Items skipped because the baseline covers them (same amount, or the check's baselineCovers). */
   baselinedCount: number;
   /** Counted items first, then baselined ones, at most CLOSE_CHECK_ITEM_LIMIT. */
   items: CloseCheckItem[];
@@ -82,14 +82,15 @@ async function baselineAmounts(tx: Tx, checkId: string, keys: string[]): Promise
   return new Map(rows.map((r) => [r.itemKey, new Prisma.Decimal(r.amount)]));
 }
 
-/** Marks items found in the baseline with the same amount. */
+/** Marks items the baseline covers: the same amount, or what the check's baselineCovers accepts. */
 async function applyBaseline(tx: Tx, check: CloseCheck, items: CloseCheckItem[]): Promise<CloseCheckItem[]> {
   if (!check.baselineAware) return items;
   const known = await baselineAmounts(tx, check.id, items.map((i) => i.key));
+  const covers = check.baselineCovers ?? ((current: Prisma.Decimal, baseline: Prisma.Decimal) => current.equals(baseline));
   return items.map((item) => {
     const amount = known.get(item.key);
-    const same = amount !== undefined && item.amount !== undefined && amount.equals(new Prisma.Decimal(item.amount));
-    return same ? { ...item, baselined: true } : item;
+    const covered = amount !== undefined && item.amount !== undefined && covers(new Prisma.Decimal(item.amount), amount);
+    return covered ? { ...item, baselined: true } : item;
   });
 }
 

@@ -2,7 +2,8 @@
 // the AR / CUSTOMER_DEPOSIT accounts, by party_id) against the subledger the documents keep
 // (invoice outstanding plus opening outstanding; deposit amount less applications and refunds).
 // Used by the health check (routes/health/arChecks.ts, every party) and the year-close checklist
-// (services/ledger/arSubledgerCloseChecks.ts, parties active in the year). Takes the caller's
+// (services/ledger/arSubledgerCloseChecks.ts, parties active in the year: a ledger row or a document
+// dated in it, so a document whose ledger row is missing is still checked). Takes the caller's
 // transaction, like aleSyncCheck.ts.
 //
 // Limit: both sides are today's balances, not the position at a year end. The subledger has no
@@ -33,8 +34,9 @@ export interface SubledgerScope {
   /** Only these parties; the bucket without a party is left out. */
   partyIds?: readonly string[];
   /**
-   * Only parties with a ledger row on the account dated in this half-open range, and the bucket
-   * without a party counts only rows in it (the close checklist passes the year being closed).
+   * Only parties active in this half-open range: a ledger row on the account, or a document of the
+   * subledger (see each finder), dated in it. The bucket without a party counts only the range's
+   * rows (the close checklist passes the year being closed).
    */
   fiscalYear?: { gte: Date; lt: Date };
 }
@@ -48,7 +50,23 @@ interface DiffRow {
   opening_ignored: string | null;
 }
 
-/** Ledger sum per party on `accountIds`, signed by `sign` (debit - credit or credit - debit). */
+/**
+ * Parties active in `range`: a ledger row on `accountIds` dated in it, or one of `documents` (a
+ * query of party_id over the subledger's documents in the same range). Used as the `active` CTE.
+ */
+function activeCte(accountIds: string[], range: { gte: Date; lt: Date }, documents: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
+    SELECT a2.party_id FROM accounting_ledger_entries a2
+     WHERE a2.is_cancelled = false AND a2.account_id IN (${Prisma.join(accountIds)})
+       AND a2.party_id IS NOT NULL AND a2.date >= ${range.gte} AND a2.date < ${range.lt}
+    UNION
+    SELECT d.party_id FROM (${documents}) d WHERE d.party_id IS NOT NULL`;
+}
+
+/**
+ * Ledger sum per party on `accountIds`, signed by `sign` (debit - credit or credit - debit). In a
+ * year-scoped run it reads the `active` CTE.
+ */
 function glCte(accountIds: string[], sign: Prisma.Sql, scope: SubledgerScope): Prisma.Sql {
   const accounts = Prisma.join(accountIds);
   const filters: Prisma.Sql[] = [Prisma.sql`ale.is_cancelled = false`, Prisma.sql`ale.account_id IN (${accounts})`];
@@ -58,11 +76,7 @@ function glCte(accountIds: string[], sign: Prisma.Sql, scope: SubledgerScope): P
     // Parties active in the year: all their rows count. Rows without a party: only the year's.
     filters.push(Prisma.sql`(
       (ale.party_id IS NULL AND ale.date >= ${gte} AND ale.date < ${lt})
-      OR ale.party_id IN (
-        SELECT DISTINCT a2.party_id FROM accounting_ledger_entries a2
-         WHERE a2.is_cancelled = false AND a2.account_id IN (${accounts})
-           AND a2.party_id IS NOT NULL AND a2.date >= ${gte} AND a2.date < ${lt}
-      )
+      OR ale.party_id IN (SELECT party_id FROM active)
     )`);
   }
   return Prisma.sql`
@@ -72,16 +86,19 @@ function glCte(accountIds: string[], sign: Prisma.Sql, scope: SubledgerScope): P
      GROUP BY ale.party_id`;
 }
 
-/** Joins the gl and sub CTEs per party and keeps the rows that differ by more than the tolerance. */
-async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerScope): Promise<PartySubledgerDiff[]> {
-  // In a scoped run the subledger side only covers the parties the ledger side found active.
-  const subScope = scope.fiscalYear
-    ? Prisma.sql`WHERE s.party_id IN (SELECT party_id FROM gl WHERE party_id IS NOT NULL)`
-    : scope.partyIds
-      ? Prisma.sql`WHERE s.party_id IN (${Prisma.join(scope.partyIds)})`
-      : Prisma.empty;
+/**
+ * Joins the gl and sub CTEs per party and keeps the rows that differ by more than the tolerance.
+ * `active` (activeCte) is required in a year-scoped run.
+ */
+async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerScope, active: Prisma.Sql | null): Promise<PartySubledgerDiff[]> {
+  // In a year-scoped run both sides cover the parties active in the year.
+  const withActive = scope.fiscalYear && active ? Prisma.sql`active AS (${active}),` : Prisma.empty;
+  const subFilters: Prisma.Sql[] = [];
+  if (scope.fiscalYear) subFilters.push(Prisma.sql`s.party_id IN (SELECT party_id FROM active)`);
+  if (scope.partyIds) subFilters.push(Prisma.sql`s.party_id IN (${Prisma.join(scope.partyIds)})`);
+  const subScope = subFilters.length > 0 ? Prisma.sql`WHERE ${Prisma.join(subFilters, ' AND ')}` : Prisma.empty;
   const rows = await tx.$queryRaw<DiffRow[]>`
-    WITH gl AS (${gl}),
+    WITH ${withActive} gl AS (${gl}),
     sub AS (SELECT s.* FROM (${sub}) s ${subScope}),
     joined AS (
       SELECT COALESCE(g.party_id, s.party_id) AS party_id,
@@ -118,7 +135,8 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
  * Receivable per party: ledger debit - credit on the AR accounts against the outstanding of its
  * sales invoices (not Draft or Cancelled) plus its opening outstanding. Opening outstanding counts
  * for Customers only; a party typed Both shares it with payables, so it is left out and reported in
- * `openingIgnored`. [] while AR is not mapped. Largest difference first.
+ * `openingIgnored`. In a year-scoped run a party with such an invoice dated in the year is active.
+ * [] while AR is not mapped. Largest difference first.
  */
 export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
   const accountIds = await systemAccounts.getAccountIds('AR');
@@ -137,13 +155,20 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
          GROUP BY party_id
       ) inv ON inv.party_id = p.id
      WHERE inv.party_id IS NOT NULL OR (p."partyType" IN ('Customer', 'Both') AND p.opening_outstanding <> 0)`;
-  return diffs(tx, gl, sub, scope);
+  const active = scope.fiscalYear
+    ? activeCte(accountIds, scope.fiscalYear, Prisma.sql`
+        SELECT party_id FROM sales_invoices
+         WHERE status NOT IN ('Draft', 'Cancelled') AND date >= ${scope.fiscalYear.gte} AND date < ${scope.fiscalYear.lt}`)
+    : null;
+  return diffs(tx, gl, sub, scope, active);
 }
 
 /**
  * Customer deposit per party: ledger credit - debit on the CUSTOMER_DEPOSIT accounts against what
  * is left of its Submitted deposits (amount - active applications - refunded, as depositFigures in
- * services/customerDepositList.ts). [] while the account is not mapped. Largest difference first.
+ * services/customerDepositList.ts). In a year-scoped run a party with a Submitted deposit, or an
+ * active application, dated in the year is active. [] while the account is not mapped. Largest
+ * difference first.
  */
 export async function findCustomerDepositDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
   const accountIds = await systemAccounts.getAccountIds('CUSTOMER_DEPOSIT');
@@ -161,5 +186,15 @@ export async function findCustomerDepositDiffs(tx: Tx, scope: SubledgerScope = {
       ) app ON app.deposit_payment_id = pay.id
      WHERE pay.payment_type = 'CustomerDeposit' AND pay.status = 'Submitted'
      GROUP BY pay.party_id`;
-  return diffs(tx, gl, sub, scope);
+  const range = scope.fiscalYear;
+  const active = range
+    ? activeCte(accountIds, range, Prisma.sql`
+        SELECT party_id FROM payments
+         WHERE payment_type = 'CustomerDeposit' AND status = 'Submitted' AND date >= ${range.gte} AND date < ${range.lt}
+        UNION
+        SELECT pay.party_id FROM customer_deposit_applications cda
+          JOIN payments pay ON pay.id = cda.deposit_payment_id
+         WHERE cda.is_cancelled = false AND cda.applied_at >= ${range.gte} AND cda.applied_at < ${range.lt}`)
+    : null;
+  return diffs(tx, gl, sub, scope, active);
 }

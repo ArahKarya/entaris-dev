@@ -4,20 +4,26 @@
 //
 // Both block the close (owner decision #3) and are baseline-aware: differences that exist at
 // release are captured once with `e1-close-baseline --check <id> --apply --allow-existing`, and
-// only a new difference, or a known one whose amount changed, blocks. The balances compared are
-// today's (see arSubledgerCheck.ts), limited to the Customers with a ledger row in the year.
+// only a new difference, or a known one that grew or changed sign, blocks; one the accountant
+// reduced stays covered. The balances compared are today's (see arSubledgerCheck.ts), limited to
+// the Customers with a ledger row or a document in the year.
 import { Prisma } from '@prisma/client';
 import { registerCloseCheck, type CloseCheck, type CloseCheckOutcome, type CloseCheckYear } from '../fiscalYearClose';
 import { findArSubledgerDiffs, findCustomerDepositDiffs, type PartySubledgerDiff } from './arSubledgerCheck';
 
 type Tx = Prisma.TransactionClient;
 
-/** Every difference as an item keyed by party (no year suffix: one baseline row per Customer). */
-function outcome(rows: readonly PartySubledgerDiff[]): CloseCheckOutcome {
+/**
+ * Every difference as an item keyed by party. A Customer's amount is its full balance today, the
+ * same whichever year runs, so its key has no year (one baseline row per Customer). The bucket
+ * without a party only counts the year's rows, so its key carries the year: a capture over several
+ * years stores each year's amount.
+ */
+function outcome(rows: readonly PartySubledgerDiff[], fy: CloseCheckYear): CloseCheckOutcome {
   return {
     count: rows.length,
     items: rows.map((r) => ({
-      key: r.partyId ? `Party:${r.partyId}` : 'Party:none',
+      key: r.partyId ? `Party:${r.partyId}` : `Party:none:${fy.id}`,
       kind: 'Party',
       label: r.partyName ?? '(tanpa Customer)',
       amount: r.difference.toFixed(2),
@@ -25,13 +31,19 @@ function outcome(rows: readonly PartySubledgerDiff[]): CloseCheckOutcome {
   };
 }
 
+/** The baseline covers a difference of the same sign that is no larger: a partial fix does not block. */
+export function subledgerBaselineCovers(current: Prisma.Decimal, baseline: Prisma.Decimal): boolean {
+  return current.isNegative() === baseline.isNegative() && current.abs().lessThanOrEqualTo(baseline.abs());
+}
+
 function subledgerCheck(id: string, find: (tx: Tx, scope: { fiscalYear: CloseCheckYear }) => Promise<PartySubledgerDiff[]>): CloseCheck {
   return {
     id,
     severity: 'block',
     baselineAware: true,
+    baselineCovers: subledgerBaselineCovers,
     async run(tx, fy) {
-      return outcome(await find(tx, { fiscalYear: fy }));
+      return outcome(await find(tx, { fiscalYear: fy }), fy);
     },
   };
 }

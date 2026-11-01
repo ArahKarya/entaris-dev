@@ -10,8 +10,12 @@
  * - Opening outstanding counts for a Customer; for a party typed Both it is left out and reported.
  * - GET /health-check lists the two new checks.
  * - Close checklist: both checks block; a captured baseline stops the same difference from
- *   blocking; a larger difference, or a new Customer's, blocks again. The bucket without a party
- *   counts only the closed year's rows (half-open WIB range).
+ *   blocking, and a smaller one of the same sign; a larger difference, a flipped sign, or a new
+ *   Customer's blocks again. The bucket without a party counts only the closed year's rows
+ *   (half-open WIB range) and is keyed per year, so a capture over two years baselines both.
+ * - A Customer whose invoice or deposit in the year has no live ledger row is still checked.
+ * - A Customer imported with an opening receivable has no difference (opening outstanding is set).
+ * - The health check detail carries the ignored-opening column on every row once one row has it.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -34,6 +38,9 @@ import { submitPaymentInTx } from '../../services/paymentSubmit';
 import { businessDayOf } from '../../utils/businessDate';
 import customerDepositsRouter from '../../routes/customerDeposits';
 import healthCheckRouter from '../../routes/healthCheck';
+import importPartiesRouter from '../../routes/import/parties';
+import { detailRows } from '../../routes/health/arChecks';
+import { Prisma } from '@prisma/client';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -141,6 +148,17 @@ async function post(tx: Tx, b: Books, date: string, debitId: string, creditId: s
 const arJournal = (tx: Tx, b: Books, partyId: string | null, amount: number, date = `${Y}-06-10T03:00:00Z`) =>
   post(tx, b, date, b.arId, b.contraId, amount, partyId, b.arId);
 
+/** DR contra / CR AR (party). */
+const arCredit = (tx: Tx, b: Books, partyId: string, amount: number) =>
+  post(tx, b, `${Y}-06-12T03:00:00Z`, b.contraId, b.arId, amount, partyId, b.arId);
+
+/** A year open for today, which the deposit apply route and the party import post into. */
+async function ensureOpenToday(tx: Tx) {
+  const today = new Date();
+  const open = await tx.fiscalYear.findFirst({ where: { startDate: { lte: today }, endDate: { gte: today }, isClosed: false } });
+  if (!open) await createFiscalYear(tx, { year: Number(businessDayOf(today).slice(0, 4)) });
+}
+
 /** DR contra / CR customer deposit (party). */
 const depositJournal = (tx: Tx, b: Books, partyId: string, amount: number) =>
   post(tx, b, `${Y}-06-11T03:00:00Z`, b.contraId, b.depositId, amount, partyId, b.depositId);
@@ -194,9 +212,7 @@ d('AR and customer deposit vs subledger (E4-R3)', () => {
         actor.userId,
       );
       // The apply route dates its journal today, so a year must be open for today.
-      const today = new Date();
-      const open = await tx.fiscalYear.findFirst({ where: { startDate: { lte: today }, endDate: { gte: today }, isClosed: false } });
-      if (!open) await createFiscalYear(tx, { year: Number(businessDayOf(today).slice(0, 4)) });
+      await ensureOpenToday(tx);
       const applied = await callRoute(customerDepositsRouter, 'post', '/apply', {
         body: { depositPaymentId: deposit.id, salesInvoiceId: invoice.id, amount: 2 * JT },
         ...actor,
@@ -296,6 +312,102 @@ d('AR and customer deposit vs subledger (E4-R3)', () => {
     });
   });
 
+  it('keeps a reduced difference covered by its baseline, and blocks a flipped sign', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const c = await party(tx);
+      await arJournal(tx, b, c, 3 * JT);
+      await captureCloseBaseline(tx, b.fy, true, ['ar-subledger']);
+
+      // The accountant fixes part of it: 2 jt left, below the 3 jt baseline.
+      await arCredit(tx, b, c, 1 * JT);
+      let ar = check(await checklist(tx, b.fy), 'ar-subledger');
+      expect(ar.items.find((i) => i.key === `Party:${c}`)).toMatchObject({ amount: '2000000.00', baselined: true });
+      expect(ar).toMatchObject({ status: 'ok', count: 0 });
+
+      // Over-corrected to -3 jt: same size as the baseline, other sign, so it blocks.
+      await arCredit(tx, b, c, 5 * JT);
+      ar = check(await checklist(tx, b.fy), 'ar-subledger');
+      const item = ar.items.find((i) => i.key === `Party:${c}`)!;
+      expect(item.amount).toBe('-3000000.00');
+      expect(item.baselined).toBeUndefined();
+      expect(ar).toMatchObject({ status: 'fail', count: 1 });
+    });
+  });
+
+  it('baselines the bucket without a party for every year of a capture', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const next: Books = { ...b, fy: await createFiscalYear(tx, { year: Y + 1 }) };
+      await arJournal(tx, b, null, 5 * JT);
+      await arJournal(tx, next, null, 1_200_000, `${Y + 1}-06-10T03:00:00Z`);
+
+      // The deploy step runs the capture year by year, oldest first.
+      for (const fy of [b.fy, next.fy]) {
+        const captured = await captureCloseBaseline(tx, fy, true, ['ar-subledger']);
+        expect(captured.find((x) => x.item.key === `Party:none:${fy.id}`)).toMatchObject({ added: true });
+      }
+      for (const [fy, amount] of [[b.fy, '5000000.00'], [next.fy, '1200000.00']] as const) {
+        const ar = check(await checklist(tx, fy), 'ar-subledger');
+        expect(ar.items.filter((i) => i.key.startsWith('Party:none'))).toEqual([
+          { key: `Party:none:${fy.id}`, kind: 'Party', label: '(tanpa Customer)', amount, baselined: true },
+        ]);
+      }
+    });
+  });
+
+  it('checks a Customer whose invoice or deposit in the year has no live ledger row', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const c = await party(tx);
+      const invoice = await submitSalesInvoiceInTx(
+        tx,
+        { date: `${Y}-04-01`, partyId: c, items: [{ itemName: 'IT-E4 jasa', itemType: 'service', quantity: 1, rate: 10 * JT }] } as any,
+        actor.userId,
+      );
+      await submitPaymentInTx(
+        tx,
+        { date: `${Y}-04-02`, partyId: c, paymentType: 'CustomerDeposit', accountId: cashAccountId, amount: 3 * JT },
+        actor.userId,
+      );
+      // A lost posting: the Customer's AR and deposit ledger rows are gone from the books.
+      await tx.accountingLedgerEntry.updateMany({
+        where: { partyId: c, accountId: { in: [b.arId, b.depositId] } },
+        data: { isCancelled: true },
+      });
+
+      const list = await checklist(tx, b.fy);
+      const outstanding = new Prisma.Decimal(invoice.outstanding).negated().toFixed(2);
+      expect(check(list, 'ar-subledger').items.find((i) => i.key === `Party:${c}`)).toMatchObject({ amount: outstanding });
+      expect(check(list, 'customer-deposit-subledger').items.find((i) => i.key === `Party:${c}`)).toMatchObject({ amount: '-3000000.00' });
+      expect(failingBlocks(list)).toEqual(expect.arrayContaining(['ar-subledger', 'customer-deposit-subledger']));
+    });
+  });
+
+  it('finds no difference for a Customer imported with an opening receivable', async () => {
+    await inRollback(async (tx) => {
+      await ensureOpenToday(tx);
+      const name = `IT-E4 Import ${tag()}`;
+      type Layer = { route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: (...a: unknown[]) => unknown }> } };
+      const layer = (importPartiesRouter.stack as Layer[]).find((l) => l.route?.path === '/parties' && l.route.methods.post)!;
+      // The last handler, after multer: the file is handed over as multer would.
+      const handler = layer.route!.stack.at(-1)!.handle;
+      const result: { status: number; body: any } = { status: 200, body: undefined };
+      const res = { status(code: number) { result.status = code; return res; }, json(body: unknown) { result.body = body; return res; } };
+      const csv = `name,partyType,openingBalance\n${name},Customer,10000000\n`;
+      await handler(
+        { file: { buffer: Buffer.from(csv), originalname: 'parties.csv' }, query: {}, body: {}, headers: {}, user: { userId: actor.userId, role: 'Admin' } },
+        res,
+        () => undefined,
+      );
+      expect(result.status, JSON.stringify(result.body)).toBeLessThan(300);
+
+      const imported = await tx.party.findFirstOrThrow({ where: { name } });
+      expect(Number(imported.openingOutstanding)).toBe(10 * JT);
+      expect(await findArSubledgerDiffs(tx, { partyIds: [imported.id] })).toEqual([]);
+    });
+  });
+
   it('counts only the closed year in the bucket without a party', async () => {
     await inRollback(async (tx) => {
       const b = await books(tx);
@@ -305,8 +417,24 @@ d('AR and customer deposit vs subledger (E4-R3)', () => {
       await arJournal(tx, b, null, 50_000, `${Y + 1}-02-01T03:00:00Z`);
 
       const ar = check(await checklist(tx, b.fy), 'ar-subledger');
-      const none = ar.items.filter((i) => i.key === 'Party:none');
-      expect(none).toEqual([{ key: 'Party:none', kind: 'Party', label: '(tanpa Customer)', amount: '700000.00' }]);
+      const none = ar.items.filter((i) => i.key.startsWith('Party:none'));
+      expect(none).toEqual([{ key: `Party:none:${b.fy.id}`, kind: 'Party', label: '(tanpa Customer)', amount: '700000.00' }]);
     });
+  });
+
+  it('puts the ignored-opening column on every detail row once one row has it', () => {
+    const row = (partyName: string, difference: number, openingIgnored?: number) => ({
+      partyId: partyName,
+      partyName,
+      partyType: openingIgnored === undefined ? 'Customer' : 'Both',
+      gl: new Prisma.Decimal(difference),
+      subledger: new Prisma.Decimal(0),
+      difference: new Prisma.Decimal(difference),
+      ...(openingIgnored === undefined ? {} : { openingIgnored: new Prisma.Decimal(openingIgnored) }),
+    });
+    const rows = detailRows([row('A', 10 * JT), row('B', 250_000, 400_000)]);
+    expect(rows[0]).toHaveProperty('opening_outstanding_ignored', null);
+    expect(rows[1]).toHaveProperty('opening_outstanding_ignored', 400_000);
+    expect(detailRows([row('A', 10 * JT)])[0]).not.toHaveProperty('opening_outstanding_ignored');
   });
 });
