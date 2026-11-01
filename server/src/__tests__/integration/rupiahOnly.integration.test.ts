@@ -20,7 +20,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import { invalidatePermissionCache } from '../../services/permissionService';
 import settingsRouter from '../../routes/settings';
-import { applyRupiahOnlyFixes, planRupiahOnlyFixes } from '../../services/rupiahOnlyRepair';
+import { applyRupiahOnlyFixes, planRupiahOnlyFixes, RUPIAH_ONLY_AUDIT_ACTION } from '../../services/rupiahOnlyRepair';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -105,6 +105,19 @@ d('PUT /settings/company is rupiah only', () => {
     });
   });
 
+  it('GET returns IDR for an old USD row, so a read-then-resend never sends USD', async () => {
+    await inRollback(async (tx) => {
+      const actor = await createCapUser(tx, []);
+      await seedSettings(tx, { defaultCurrency: 'USD' });
+
+      const r = await callRoute(settingsRouter, 'get', '/company', actor);
+      expect(r.status).toBe(200);
+      expect(r.body.defaultCurrency).toBe('IDR');
+      // Only the response is normalised; the stored row waits for the next save or the repair.
+      expect((await tx.companySettings.findUniqueOrThrow({ where: { slug: 'default' } })).defaultCurrency).toBe('USD');
+    });
+  });
+
   it('accepts IDR in any case', async () => {
     await inRollback(async (tx) => {
       const actor = await createCapUser(tx, [], { perms: { settings: 'edit' } });
@@ -145,6 +158,10 @@ d('PUT /settings/company is rupiah only', () => {
 d('e2-rupiah-only-check core', () => {
   it('lists non-IDR rows on a dry run and sets them to IDR with the accountant name', async () => {
     await inRollback(async (tx) => {
+      // Audit rows for accounts and settings go under the oldest active Admin; make sure one exists.
+      await tx.user.create({
+        data: { username: `adm_${tag()}`, fullName: 'Admin Uji', email: `adm_${tag()}@uji.local`, passwordHash: 'x', role: 'Admin' },
+      });
       const usd = await tx.account.create({
         data: { accountNumber: `9.99.${tag()}`, name: 'Kas Valas Uji', accountType: 'ASSET', rootType: 'ASSET', currency: 'USD' },
       });
@@ -174,9 +191,26 @@ d('e2-rupiah-only-check core', () => {
       expect((await tx.account.findUniqueOrThrow({ where: { id: usd.id } })).currency).toBe('IDR');
       expect((await tx.companySettings.findUniqueOrThrow({ where: { id: settings.id } })).defaultCurrency).toBe('SGD');
 
+      // The approval is recorded in the database, one audit row per rewritten row, none for a skipped one.
+      const audits = await tx.auditLog.findMany({ where: { action: RUPIAH_ONLY_AUDIT_ACTION, entityId: { in: [usd.id, settings.id] } } });
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        entityType: 'Account',
+        entityId: usd.id,
+        oldValues: { currency: 'USD' },
+        newValues: { currency: 'IDR', approvedBy: 'Siti Akuntan' },
+        via: 'repair',
+        viaMeta: { script: RUPIAH_ONLY_AUDIT_ACTION, approvedBy: 'Siti Akuntan' },
+      });
+      const auditUser = await tx.user.findUniqueOrThrow({ where: { id: audits[0].userId } });
+      expect(auditUser).toMatchObject({ role: 'Admin', isActive: true });
+
       const after = await applyRupiahOnlyFixes(tx, await planRupiahOnlyFixes(tx), 'Siti Akuntan');
       expect(after.applied).toContain(settings.id);
       expect(await planRupiahOnlyFixes(tx)).toEqual([]);
+      expect(await tx.auditLog.count({
+        where: { action: RUPIAH_ONLY_AUDIT_ACTION, entityType: 'CompanySettings', entityId: settings.id },
+      })).toBe(1);
     });
   });
 });

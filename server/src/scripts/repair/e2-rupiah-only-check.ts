@@ -3,8 +3,10 @@
 // never stored a foreign account or payment request currency, and only the company settings form
 // accepted one. Dry run by default: prints every row and, with --out, writes them as CSV.
 // --apply sets the code to IDR (nothing else is written: no amount, no journal) and needs
-// --approved-by "<accountant name>"; the name goes into the CSV, which --apply always writes
-// (default file name when --out is not given), and into the console output.
+// --approved-by "<accountant name>"; the name is recorded on one audit row per rewritten row
+// (action E2_RUPIAH_ONLY_REPAIR, in the same transaction) and goes into the CSV, which --apply
+// always writes (default file name when --out is not given) BEFORE the transaction, so a path
+// that cannot be written stops the run before anything is committed.
 // Run the dry run before deploying the rupiah-only change.
 //
 // Usage (from server/, DATABASE_URL set):
@@ -38,12 +40,11 @@ function parseArgs(argv: readonly string[]): Options {
   return opts;
 }
 
-function writeCsv(file: string, rows: readonly RupiahOnlyRow[], applied: ReadonlySet<string>, approvedBy: string | null) {
-  const header = 'table,id,label,currency,applied,approved_by';
+/** action is 'set IDR' on an --apply run (rows changed since the plan are skipped, see console), else 'report'. */
+function writeCsv(file: string, rows: readonly RupiahOnlyRow[], approvedBy: string | null) {
+  const header = 'table,id,label,currency,action,approved_by';
   const lines = rows.map((r) =>
-    [r.table, r.id, r.label, r.currency, applied.has(r.id) ? 'yes' : 'no', applied.has(r.id) ? approvedBy : null]
-      .map(csvCell)
-      .join(','),
+    [r.table, r.id, r.label, r.currency, approvedBy ? 'set IDR' : 'report', approvedBy].map(csvCell).join(','),
   );
   writeFileSync(file, `${[header, ...lines].join('\n')}\n`, 'utf8');
   console.log(`CSV: ${file}`);
@@ -59,18 +60,16 @@ async function main() {
   );
   for (const r of plan) console.log(`  ${r.table} ${r.label}: ${r.currency}`);
 
-  let applied = new Set<string>();
+  const out = opts.out ?? (opts.apply ? `e2-rupiah-only-check-${new Date().toISOString().replace(/[:.]/g, '-')}.csv` : null);
+  if (out) writeCsv(out, plan, opts.apply ? opts.approvedBy : null);
+
   if (opts.apply && opts.approvedBy) {
     const result = await prisma.$transaction((tx) => applyRupiahOnlyFixes(tx, plan, opts.approvedBy as string));
-    applied = new Set(result.applied);
     console.log(`Set ${result.applied.length} currency code(s) to IDR, approved by ${result.approvedBy}.`);
     if (result.skipped.length > 0) console.log(`Skipped (changed since the plan): ${result.skipped.join(', ')}`);
   } else {
     console.log('Dry run: nothing written. Pass --apply --approved-by "<accountant name>" to set them to IDR.');
   }
-
-  const out = opts.out ?? (opts.apply ? `e2-rupiah-only-check-${new Date().toISOString().replace(/[:.]/g, '-')}.csv` : null);
-  if (out) writeCsv(out, plan, applied, opts.approvedBy);
 }
 
 main()
