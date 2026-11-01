@@ -348,7 +348,15 @@
       "totalEquity": "Total Ekuitas",
       "totalLiabilitiesEquity": "Total Liabilitas + Ekuitas",
       "balanced": "Neraca Seimbang",
-      "unbalanced": "Neraca Tidak Seimbang"
+      "unbalanced": "Neraca Tidak Seimbang",
+      "rows": {
+        "currentProfit": "Laba Tahun Berjalan",
+        "retainedEarnings": "Laba Ditahan",
+        "retainedAccount": "Saldo akun Laba Ditahan",
+        "otherCurrentProfit": "Posting lain ke akun Laba Tahun Berjalan",
+        "unclosedProfit": "Laba tahun lalu yang belum ditutup",
+        "groupDirect": "Saldo langsung grup"
+      }
     },
     "cashFlow": {
       "title": "LAPORAN ARUS KAS",

@@ -10,7 +10,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { generateDocumentNumber } from '../../utils/documentNumber';
-import { cancelJournalsByPrefix } from '../../utils/journalCancel';
+import { cancelJournalsInTx, findDocumentJournals } from '../../services/ledger/cancelJournals';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -118,7 +118,7 @@ d('generateDocumentNumber numeric suffix', () => {
   });
 });
 
-d('cancelJournalsByPrefix dash boundary', () => {
+d('document journal cancel dash boundary', () => {
   it('cancels JV-PR-209901-1000 and its revisions but not JV-PR-209901-10000', async () => {
     await inRollback(async (tx) => {
       const fy = await openFiscalYear(tx);
@@ -126,7 +126,11 @@ d('cancelJournalsByPrefix dash boundary', () => {
       await journal(tx, fy.id, 'JV-PR-209901-1000-R1');
       const other = await journal(tx, fy.id, 'JV-PR-209901-10000');
 
-      expect(await cancelJournalsByPrefix(tx, 'JV-PR-209901-1000')).toBe(2);
+      const family = await findDocumentJournals(tx, 'JV-PR-209901-1000');
+      expect(await cancelJournalsInTx(tx, family, { label: 'produksi' })).toEqual([
+        'JV-PR-209901-1000',
+        'JV-PR-209901-1000-R1',
+      ]);
 
       const after = await tx.journalEntry.findMany({
         where: { entryNumber: { startsWith: 'JV-PR-209901-1000' } },

@@ -13,12 +13,22 @@ import StockOpnamePDF from './StockOpnamePDF';
 import ProductionRunPDF from './ProductionRunPDF';
 import { DailyReportPDF } from './DailyReportPDF';
 import { TrialBalancePDF, ProfitLossPDF, BalanceSheetPDF, CashFlowPDF, AgingPDF } from './ReportPDF';
+import { bsLabel, type BSSection } from './bsLabel';
 import VehicleReportPDF from './VehicleReportPDF';
 import InspectionDetailPDF from './InspectionDetailPDF';
 import { PaymentRequestPDF, PaymentRequestSettlementPDF, type PaymentRequestPDFData } from './PaymentRequestPDF';
 import { amountInWords } from './amountInWords';
 import i18n from '@/i18n';
 import { pdfDate, pdfMoneyAuto, pdfMonthShort, pdfNum, pdfRp, pdfRpAuto, pdfT } from './pdfFormat';
+
+const bsEquity: BSSection[] = [{
+  name: 'Modal', balance: 600, kind: 'account', children: [
+    { name: 'Laba Ditahan', balance: 500, kind: 'retainedEarnings', children: [
+      { name: 'Saldo Akun Laba Ditahan', balance: 500, kind: 'detail', detail: 'retainedAccount' },
+    ] },
+    { name: 'Laba Tahun Berjalan', balance: 100, kind: 'currentProfit' },
+  ],
+}];
 
 const company = { name: 'PT Contoh Pangan', address: 'Bandar Lampung', phone: null, email: null, taxId: null, logoUrl: null };
 const co = { ...company, invoiceSettings: null };
@@ -93,6 +103,9 @@ const cases: Array<[string, () => ReactElement]> = [
   ['BalanceSheetPDF', () => (
     <BalanceSheetPDF company={company} asOf="2026-10-31" assets={[]} totalAssets={0} liabilities={[]} equity={[]} totalLiabilities={0} totalEquity={0} />
   )],
+  ['BalanceSheetPDF (rincian ekuitas)', () => (
+    <BalanceSheetPDF company={company} asOf="2026-03-31" assets={[{ name: 'Kas', balance: 600 }]} totalAssets={600} liabilities={[]} equity={bsEquity} totalLiabilities={0} totalEquity={600} />
+  )],
   ['CashFlowPDF', () => (
     <CashFlowPDF company={company} period="2026-01-01 s/d 2026-10-31" operating={-500} investing={0} financing={1000} netChange={500}
       operatingItems={[{ description: 'Beban Listrik', amount: -500 }]} financingItems={[{ description: 'Setoran Modal', amount: 1000 }]} />
@@ -166,6 +179,16 @@ describe('PDF language follows the printing user', () => {
     expect(pdfT()('common.pageOf', { page: 1, total: 3 })).toBe('Page 1 of 3');
     expect(pdfT()('common.itemCount', { count: 2 })).toBe('2 items');
     expect(pdfMonthShort('2026-10')).toBe('Oct 26');
+  });
+
+  it('labels synthetic balance-sheet rows from their kind, accounts by name', async () => {
+    await i18n.changeLanguage('id');
+    expect(bsLabel({ name: 'x', balance: 0, kind: 'currentProfit' })).toBe('Laba Tahun Berjalan');
+    await i18n.changeLanguage('en');
+    expect(bsLabel({ name: 'x', balance: 0, kind: 'retainedEarnings' })).toBe('Retained Earnings');
+    expect(bsLabel({ name: 'x', balance: 0, kind: 'detail', detail: 'unclosedProfit' })).toBe('Prior-year profit not yet closed');
+    expect(bsLabel({ name: 'Kas Besar', balance: 0, kind: 'account' })).toBe('Kas Besar');
+    expect(bsLabel({ name: 'Laba Ditahan', balance: 0 })).toBe('Laba Ditahan');
   });
 
   it.each(cases)('%s renders in English', async (_name, build) => {
