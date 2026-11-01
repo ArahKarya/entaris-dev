@@ -2,6 +2,7 @@ import React from 'react';
 import { Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
 import { C, FOOTER_SPACE } from './theme';
 import { pdfDate, pdfDateShort, pdfRp, pdfT } from './pdfFormat';
+import { bsLabel, type BSSection } from './bsLabel';
 import { PdfFooter, PdfHeader } from './kit';
 
 // Palette
@@ -191,7 +192,7 @@ function PLRow({ item, depth, alt }: { item: PLSection; depth: number; alt: bool
 }
 
 // Balance Sheet
-export interface BSSection { name: string; balance: number; children?: BSSection[]; }
+export type { BSSection } from './bsLabel';
 interface BSPDFProps {
   company: CompanyInfo; asOf: string;
   assets: BSSection[]; totalAssets: number;
@@ -257,11 +258,13 @@ export const BalanceSheetPDF: React.FC<BSPDFProps> = ({ company, asOf, assets, t
 function BSRow({ item, depth, alt }: { item: BSSection; depth: number; alt: boolean }) {
   const indent = depth === 0 ? S.colLabelBold : depth === 1 ? S.colLabelIndent : S.colLabelIndent2;
   const hasChildren = item.children && item.children.length > 0;
+  // Retained earnings is one figure with its parts beneath it: print its total too.
+  const showBalance = !hasChildren || item.kind === 'retainedEarnings';
   return (
     <>
       <View style={hasChildren ? S.rowGroup : [S.row, alt ? S.rowAlt : {}]} wrap={false} minPresenceAhead={hasChildren ? 40 : 0}>
-        <Text style={indent}>{item.name}</Text>
-        {!hasChildren && <Text style={S.colBalance}>{idr(Number(item.balance))}</Text>}
+        <Text style={indent}>{bsLabel(item)}</Text>
+        {showBalance && <Text style={S.colBalance}>{idr(Number(item.balance))}</Text>}
       </View>
       {hasChildren && item.children!.map((c, ci) => (
         <BSRow key={ci} item={c} depth={depth + 1} alt={ci % 2 === 1} />

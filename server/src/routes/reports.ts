@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
 import { systemAccounts } from '../services/systemAccounts';
+import { computeBalanceSheet } from '../services/reports/balanceSheet';
 import { logger } from '../lib/logger';
 import { compareAccountNumber } from '../utils/accountSort';
 import { buildTrialBalance } from '../utils/trialBalance';
@@ -155,107 +156,14 @@ router.get('/profit-loss', async (req, res) => {
 });
 
 // GET /api/reports/balance-sheet
+// Equity split into current-year profit and retained earnings: services/reports/balanceSheet.ts.
 router.get('/balance-sheet', async (req, res) => {
   // As of the end of the business day (default today): everything before the next day's 00:00 WIB.
   const asOf = asOfBound(req.query.date);
   if (!asOf.ok) return res.status(400).json({ error: asOf.error });
-  const before = asOf.lt;
 
   try {
-    const [allAccounts, entries, revAgg, expAgg] = await Promise.all([
-      prisma.account.findMany({
-        where: { OR: [{ rootType: 'ASSET' as any }, { rootType: 'LIABILITY' as any }, { rootType: 'EQUITY' as any }] },
-      }),
-      prisma.accountingLedgerEntry.groupBy({
-        by: ['accountId'],
-        where: { date: { lt: before }, isCancelled: false },
-        _sum: { debit: true, credit: true },
-      }),
-      prisma.accountingLedgerEntry.aggregate({
-        where: { date: { lt: before }, isCancelled: false, account: { rootType: 'REVENUE' as any } },
-        _sum: { debit: true, credit: true },
-      }),
-      prisma.accountingLedgerEntry.aggregate({
-        where: { date: { lt: before }, isCancelled: false, account: { rootType: 'EXPENSE' as any } },
-        _sum: { debit: true, credit: true },
-      }),
-    ]);
-
-    allAccounts.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
-    const summaryMap = new Map(
-      entries.map((e) => [e.accountId, { debit: Number(e._sum.debit || 0), credit: Number(e._sum.credit || 0) }])
-    );
-
-    // O(n) with pre-built Maps
-    const accountById = new Map(allAccounts.map((a) => [a.id, a]));
-    const childrenOf = new Map<string | null, typeof allAccounts>();
-    for (const a of allAccounts) {
-      if (!childrenOf.has(a.parentId)) childrenOf.set(a.parentId, []);
-      childrenOf.get(a.parentId)!.push(a);
-    }
-
-    const getBalance = (accountId: string): number => {
-      const summ = summaryMap.get(accountId);
-      const account = accountById.get(accountId);
-      let balance = 0;
-      if (summ && account) {
-        balance = account.rootType === 'ASSET' ? summ.debit - summ.credit : summ.credit - summ.debit;
-      }
-      for (const child of childrenOf.get(accountId) ?? []) {
-        balance += getBalance(child.id);
-      }
-      return balance;
-    };
-
-    const buildHierarchy = (parentId: string | null, type: string): any[] =>
-      (childrenOf.get(parentId) ?? [])
-        .filter((a) => a.rootType === type)
-        .map((a) => ({
-          id: a.id,
-          name: a.name,
-          accountNumber: a.accountNumber,
-          isGroup: a.isGroup,
-          balance: getBalance(a.id),
-          children: a.isGroup ? buildHierarchy(a.id, type) : [],
-        }))
-        .filter((a) => a.balance !== 0 || a.isGroup);
-
-    const assets = buildHierarchy(null, 'ASSET');
-    const liabilities = buildHierarchy(null, 'LIABILITY');
-    const equity = buildHierarchy(null, 'EQUITY');
-
-    const currentProfit =
-      (Number(revAgg._sum?.credit || 0) - Number(revAgg._sum?.debit || 0)) -
-      (Number(expAgg._sum?.debit || 0) - Number(expAgg._sum?.credit || 0));
-
-    // Remove real 3.3.1 account from hierarchy to avoid double-counting with synthetic entry
-    const currentProfitAccount = await systemAccounts.getAccount('CURRENT_PROFIT');
-    const filterOutCurrentProfit = (items: any[]): any[] =>
-      items
-        .map((item) => ({
-          ...item,
-          children: item.children ? filterOutCurrentProfit(item.children) : [],
-        }))
-        .filter((item) => item.accountNumber !== currentProfitAccount.accountNumber);
-    const filteredEquity = filterOutCurrentProfit(equity);
-
-    filteredEquity.push({
-      id: 'current-profit',
-      name: 'Laba Tahun Berjalan',
-      accountNumber: currentProfitAccount.accountNumber,
-      isGroup: false,
-      balance: currentProfit,
-      children: [],
-    });
-
-    return res.json({
-      assets,
-      liabilities,
-      equity: filteredEquity,
-      totalAssets: assets.reduce((s: number, a: any) => s + a.balance, 0),
-      totalLiabilities: liabilities.reduce((s: number, a: any) => s + a.balance, 0),
-      totalEquity: filteredEquity.reduce((s: number, a: any) => s + a.balance, 0),
-    });
+    return res.json(await computeBalanceSheet(prisma, { day: asOf.day, lt: asOf.lt }));
   } catch (error) {
     logger.error({ error }, 'GET /reports/balance-sheet error');
     return res.status(500).json({ error: 'Gagal membuat laporan neraca.' });

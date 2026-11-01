@@ -251,7 +251,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
 
   try {
     await prisma.$transaction(
-      (tx) => cancelProductionRunInTx(tx, id, { allowNegativeStock, negativeStockReason }),
+      (tx) => cancelProductionRunInTx(tx, id, { allowNegativeStock, negativeStockReason, userId: req.user!.userId }),
       { timeout: 15000 },
     );
     return res.json({ message: 'Proses produksi dibatalkan.' });

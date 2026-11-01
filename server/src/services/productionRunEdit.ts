@@ -2,9 +2,10 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { recalculateAccountBalances } from '../utils/accountBalance';
-import { cancelJournalsByPrefix } from '../utils/journalCancel';
+import { cancelTrail } from '../utils/cancelClaim';
 import { journalFamilyWhere } from '../utils/journalFamily';
 import { reverseCogsSettlementsByTrigger } from './cogsBackfillReverse';
+import { cancelJournalsInTx, findDocumentJournals } from './ledger/cancelJournals';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { calcWeightedAverage } from '../utils/weightedAverage';
@@ -18,6 +19,24 @@ import { logger } from '../lib/logger';
 import { buildProductionRunLineItems } from './productionRunLines';
 
 type Tx = Prisma.TransactionClient;
+
+/**
+ * Number of the next revision journal of `base`: `<base>-R<n>` with n one above the highest
+ * existing `-R<n>` in its family (cancelled ones included), starting at 1. Counting cancelled
+ * journals instead repeated -R1 for a run posted without an original journal (P2002).
+ */
+export async function nextRevisionNumber(tx: Tx, base: string): Promise<string> {
+  const family = await tx.journalEntry.findMany({
+    where: journalFamilyWhere(base),
+    select: { entryNumber: true },
+  });
+  const prefix = `${base}-R`;
+  const highest = family.reduce((max, { entryNumber }) => {
+    const rest = entryNumber.startsWith(prefix) ? entryNumber.slice(prefix.length) : '';
+    return /^\d+$/.test(rest) ? Math.max(max, Number(rest)) : max;
+  }, 0);
+  return `${prefix}${highest + 1}`;
+}
 
 /**
  * Edit a production run: reverse its movements and JEs (record kept), re-apply the
@@ -91,7 +110,10 @@ export async function editProductionRunInTx(
 
   // Cancel all active journals for this run, including earlier revisions.
   const oldJvNumber = `JV-${oldRun.runNumber}`;
-  await cancelJournalsByPrefix(tx, oldJvNumber);
+  await cancelJournalsInTx(tx, await findDocumentJournals(tx, oldJvNumber), {
+    label: 'produksi',
+    trail: cancelTrail(userId, 'Revisi produksi'),
+  });
   // Balik auto-settle COGS lama sebelum settle ulang dari data baru (hindari numpuk ganda)
   await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', runId);
 
@@ -451,15 +473,9 @@ export async function editProductionRunInTx(
   }
 
   if (journalItems.length > 0) {
-    // Revision suffix derived from how many cancelled JEs already share the
-    // prefix. -R1, -R2, ... predictable.
-    const cancelledCount = await tx.journalEntry.count({
-      where: { ...journalFamilyWhere(oldJvNumber), status: 'Cancelled' },
-    });
-    const revSuffix = `-R${cancelledCount > 0 ? cancelledCount : 1}`;
     const journalEntry = await tx.journalEntry.create({
       data: {
-        entryNumber: oldJvNumber + revSuffix,
+        entryNumber: await nextRevisionNumber(tx, oldJvNumber),
         date: txDate,
         narration: `Produksi (revisi): ${oldRun.runNumber} (${inputNames} → ${outputNames})`,
         status: 'Submitted',

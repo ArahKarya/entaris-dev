@@ -1030,7 +1030,7 @@ Aturan wajib:
 
 ### opn_cancel
 
-**Ringkasan:** Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dibatalkan dan saldo akun dihitung ulang. Opname Draft atau yang sudah batal tidak dapat dibatalkan.
+**Ringkasan:** Membatalkan Stok Opname yang sudah final: penyesuaian stok dibalik (pergerakan penyesuaian dibatalkan), jurnal JV-<nomor opname> dan satelitnya dibatalkan dengan pembatal tercatat, saldo akun dibalik per baris jurnal. Opname Draft atau yang sudah batal tidak dapat dibatalkan.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1069,7 +1069,7 @@ Aturan wajib:
 
 **Isi hasil:** Pesan sukses pembatalan.
 
-**Efek pembukuan/stok:** Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled + saldo akun dihitung ulang. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.
+**Efek pembukuan/stok:** Stok dibalik sebesar -selisih; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.
 
 **Teks konfirmasi:** Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.
 
@@ -1084,7 +1084,8 @@ Aturan wajib:
 - 400: stok opname sudah dibatalkan
 - 400: stok item tidak mencukupi untuk pembalikan
 - 403: tanpa capability doc.cancel
-- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan
+- 400 JOURNAL_ALREADY_REVERSED: jurnal opname sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`opn_get`](#opn_get)
