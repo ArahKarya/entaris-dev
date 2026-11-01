@@ -1,5 +1,5 @@
 // Diagnostic dashboard endpoints (mounted behind the audit permission). Check SQL and
-// preview/fix transactions live in routes/health/{checks,fixes}.ts; this file only
+// preview/fix transactions live in routes/health/{checks,arChecks,fixes}.ts; this file only
 // dispatches and writes the audit log.
 import { Router } from 'express';
 import { AuthRequest } from '../middleware/auth';
@@ -14,6 +14,7 @@ import {
   checkStockMovementMismatch,
   checkWarehouseStockDrift,
 } from './health/checks';
+import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import {
   previewAleSync,
   previewAccountBalanceDrift,
@@ -38,6 +39,8 @@ router.get('/', async (_req, res) => {
       checkOrphanAle(),
       checkStockMovementMismatch(),
       checkWarehouseStockDrift(),
+      checkArSubledgerVsGl(),
+      checkCustomerDepositVsGl(),
     ]);
 
     const overallStatus = checks.some((c) => c.status === 'error')

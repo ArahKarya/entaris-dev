@@ -35,7 +35,7 @@ export interface CloseCheckItem {
   date?: string;
   /** Amount involved, two decimals; baseline-aware checks always set it. */
   amount?: string;
-  /** Set by the runner: the item is in the baseline with the same amount and does not block. */
+  /** Set by the runner: the baseline covers the item (same amount, or see baselineCovers) and it does not block. */
   baselined?: boolean;
 }
 
@@ -54,5 +54,10 @@ export interface CloseCheck {
    * items.length), each with a key and an amount.
    */
   baselineAware?: boolean;
+  /**
+   * Whether the baseline amount still covers an item's current amount. Without it only the same
+   * amount is covered; a check whose amounts can shrink as the accountant fixes them may accept less.
+   */
+  baselineCovers?(current: Prisma.Decimal, baseline: Prisma.Decimal): boolean;
   run(tx: Tx, fy: CloseCheckYear): Promise<CloseCheckOutcome>;
 }

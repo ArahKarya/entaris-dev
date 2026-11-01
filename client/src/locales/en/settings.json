@@ -549,6 +549,14 @@
         "do-uninvoiced": {
           "title": "Uninvoiced delivery notes",
           "hint": "Delivery notes up to this year end have no invoice yet."
+        },
+        "ar-subledger": {
+          "title": "Receivables match invoices",
+          "hint": "The Receivable balance of this Customer in the General Ledger differs from its invoices' outstanding amount (today's balances). Correct it with a document or a journal; old differences are in the baseline."
+        },
+        "customer-deposit-subledger": {
+          "title": "Customer deposits match",
+          "hint": "The Customer Deposit balance of this Customer in the General Ledger differs from its remaining deposits (today's balances). Correct it with a document or a journal; old differences are in the baseline."
         }
       },
       "roles": {

@@ -549,6 +549,14 @@
         "do-uninvoiced": {
           "title": "Surat jalan belum ditagih",
           "hint": "Surat jalan sampai akhir tahun ini belum dibuatkan invoice."
+        },
+        "ar-subledger": {
+          "title": "Piutang sesuai invoice",
+          "hint": "Saldo Piutang Customer ini di Buku Besar berbeda dengan sisa tagihan invoice-nya (saldo hari ini). Koreksi lewat dokumen atau jurnal; selisih lama sudah tercatat di baseline."
+        },
+        "customer-deposit-subledger": {
+          "title": "Uang Muka Customer sesuai",
+          "hint": "Saldo Uang Muka Customer ini di Buku Besar berbeda dengan sisa uang mukanya (saldo hari ini). Koreksi lewat dokumen atau jurnal; selisih lama sudah tercatat di baseline."
         }
       },
       "roles": {
