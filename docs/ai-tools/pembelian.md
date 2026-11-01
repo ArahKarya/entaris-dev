@@ -554,7 +554,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | `terms` | body | `string` | tidak | Termin/syarat pembayaran (opsional). |
 | `taxPct` | body | `number` | tidak | PPN % tingkat header. |
 | `biayaLain` | body | `number` | tidak | Biaya lain tingkat header (boleh negatif = potongan tagihan). |
-| `potongan` | body | `number` | tidak | Diturunkan server dari potonganItem per baris; nilai header diabaikan. |
+| `potongan` | body | `number` | tidak | Cache jumlah potonganItem per baris; sebaiknya tidak dikirim. Bila dikirim (> 0) wajib sama dengan jumlah potonganItem (toleransi 0,01), kalau tidak ditolak 400. Tidak pernah dikurangkan lagi dari total. |
 
 **Contoh pemanggilan**
 
@@ -602,7 +602,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 **Error umum**
 
 - 400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda
-- 202: menunggu persetujuan (bukan error)
+- 400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)
+- 202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`gr_pending`](#gr_pending), [`pi_match_preview`](#pi_match_preview), [`pay_record`](kas-bank.md#pay_record), [`pi_cancel`](#pi_cancel)

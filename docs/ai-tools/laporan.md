@@ -390,7 +390,7 @@ Ringkasan angka cepat (kas, piutang, hutang, rasio) ada di toolset **dashboard**
 }
 ```
 
-**Isi hasil:** {date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb.
+**Isi hasil:** {date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb. vendorDeposits: uang muka Supplier dengan sisa = jumlah − alokasi aktif − refund (baris + summary totalDeposits/totalApplied/totalRefunded/totalRemaining).
 
 **Error umum**
 

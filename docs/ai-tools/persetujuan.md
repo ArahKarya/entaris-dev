@@ -337,11 +337,11 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 {
   "ok": true,
   "kind": "read",
-  "data": "<Daftar STT sumber per baris + lampiran terkait.>"
+  "data": "<Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { su>"
 }
 ```
 
-**Isi hasil:** Daftar STT sumber per baris + lampiran terkait.
+**Isi hasil:** Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { subtotal, potonganItem, biayaLain, grandTotal, headerPotonganMismatch } dengan rumus posting (null untuk tipe lain atau payload tidak valid); headerPotonganMismatch=true berarti approve akan ditolak, minta revisi.
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get)
 
@@ -581,7 +581,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 }
 ```
 
-**Isi hasil:** Pengajuan berstatus Pending.
+**Isi hasil:** Pengajuan berstatus Pending. Invoice Pembelian: amount = grand total invoice (Σ harga akhir baris + biayaLain).
 
 **Efek pembukuan/stok:** Tidak ada efek GL/stok; hanya mengembalikan antrian ke Pending.
 
@@ -591,6 +591,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 
 - 400: hanya status Perlu Revisi
 - 400: tipe dokumen tidak didukung
+- 400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris
 - 403: bukan pengajuan Anda
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get), [`appr_request_revision`](#appr_request_revision)

@@ -2024,7 +2024,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Daftar STT sumber per baris + lampiran terkait.",
+      "outputSummary": "Daftar STT sumber per baris + lampiran terkait. Untuk Invoice Pembelian juga piTotals { subtotal, potonganItem, biayaLain, grandTotal, headerPotonganMismatch } dengan rumus posting (null untuk tipe lain atau payload tidak valid); headerPotonganMismatch=true berarti approve akan ditolak, minta revisi.",
       "handler": "GET /api/approvals/requests/:id/context",
       "permAction": "view",
       "enabled": true,
@@ -10978,7 +10978,7 @@
       "output": {
         "report": "object"
       },
-      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb.",
+      "outputSummary": "{date, sales, purchases, production, finance, receivables, payables, vendorDeposits, stock} — stock = snapshot nilai persediaan per gudang pada akhir tanggal tsb. vendorDeposits: uang muka Supplier dengan sisa = jumlah − alokasi aktif − refund (baris + summary totalDeposits/totalApplied/totalRefunded/totalRemaining).",
       "handler": "GET /api/reports/daily",
       "permAction": "view",
       "enabled": true,
@@ -24948,7 +24948,7 @@
           "in": "body",
           "type": "number",
           "required": false,
-          "description": "Diturunkan server dari potonganItem per baris; nilai header diabaikan."
+          "description": "Cache jumlah potonganItem per baris; sebaiknya tidak dikirim. Bila dikirim (> 0) wajib sama dengan jumlah potonganItem (toleransi 0,01), kalau tidak ditolak 400. Tidak pernah dikurangkan lagi dari total."
         }
       ],
       "output": {
@@ -24971,7 +24971,8 @@
       ],
       "errors": [
         "400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda",
-        "202: menunggu persetujuan (bukan error)",
+        "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
+        "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -27833,7 +27834,7 @@
       "output": {
         "status": "string"
       },
-      "outputSummary": "Pengajuan berstatus Pending.",
+      "outputSummary": "Pengajuan berstatus Pending. Invoice Pembelian: amount = grand total invoice (Σ harga akhir baris + biayaLain).",
       "handler": "PUT /api/approvals/requests/:id/resubmit",
       "permAction": "edit",
       "enabled": true,
@@ -27846,6 +27847,7 @@
       "errors": [
         "400: hanya status Perlu Revisi",
         "400: tipe dokumen tidak didukung",
+        "400: data invoice tidak valid, termasuk potongan header yang tidak sama dengan jumlah potonganItem per baris",
         "403: bukan pengajuan Anda"
       ],
       "related": [
