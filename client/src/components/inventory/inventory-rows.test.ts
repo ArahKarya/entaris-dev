@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatQty,
   isInbound,
+  isProductionLinkedMovement,
   itemStockStatus,
   movementCancelBlock,
   movementEditBlock,
@@ -32,6 +33,14 @@ describe('movement rules', () => {
     expect(movementCancelBlock(row('StockOpname', 'so-1'))).toMatch(/Stok Opname/);
     expect(movementCancelBlock(row('SalesReturn', 'sr-1'))).toMatch(/retur penjualan/);
     expect(movementCancelBlock(row('SalesInvoice', 'si-1'))).toMatch(/invoice penjualan/);
+  });
+
+  it('opens the edit form read-only only for a production row that names its run', () => {
+    expect(isProductionLinkedMovement(row('ProductionRun', 'pr-1'))).toBe(true);
+    // No referenceId (demo generator, old manual data): the server accepts the edit, so the form is editable.
+    expect(movementEditBlock(row('ProductionRun', null))).toBeNull();
+    expect(isProductionLinkedMovement(row('ProductionRun', null))).toBe(false);
+    expect(isProductionLinkedMovement(null)).toBe(false);
   });
 
   it('always blocks opening balance and transfer rows', () => {

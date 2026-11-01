@@ -22,6 +22,7 @@ import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField
 import { useTranslation } from 'react-i18next';
 import { formatNumber } from '@/lib/format';
 import { todayLocal } from '@/lib/date';
+import { isProductionLinkedMovement } from '@/components/inventory/inventory-rows';
 
 interface StockMovementModalProps {
   isOpen: boolean;
@@ -174,7 +175,7 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
     mutation.mutate(payload);
   };
 
-  const isProductionLinked = editMovement?.referenceType === 'ProductionRun';
+  const isProductionLinked = isProductionLinkedMovement(editMovement);
   const pending = mutation.isPending;
   const stockItem = selectedItem || editMovement?.item;
   const dateError = showErrors && !form.date ? t('stockMovementModal.errors.dateRequired') : undefined;

@@ -186,6 +186,11 @@ export function movementCancelBlock(m: LockableRow): string | null {
   return documentBlock(m, 'cancel');
 }
 
+/** A production movement locked to its run; one without referenceId (old or demo data) stays editable. */
+export function isProductionLinkedMovement(m: Pick<StockMovementRow, 'referenceType' | 'referenceId'> | null | undefined): boolean {
+  return m?.referenceType === 'ProductionRun' && !!m.referenceId;
+}
+
 // Production runs
 
 export interface ProductionRunLine {
