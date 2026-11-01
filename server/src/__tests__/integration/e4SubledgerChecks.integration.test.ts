@@ -180,7 +180,7 @@ d('AR and customer deposit vs subledger (E4-R3)', () => {
 
   it('finds no difference after invoice, part payment, deposit and apply', async () => {
     await inRollback(async (tx) => {
-      const b = await books(tx);
+      await books(tx); // the 2194 year the invoice and payments post into
       const c = await party(tx);
       const invoice = await submitSalesInvoiceInTx(
         tx,
