@@ -89,14 +89,24 @@ function makeTx(pr: ReturnType<typeof makeRequest>, opts: { lines?: Row[]; fisca
       })),
       findMany: vi.fn(async (): Promise<Array<{ id: string; accountNumber: string; name: string }>> => []),
     },
-    systemAccountMapping: { count: vi.fn(async () => 1), findFirst: vi.fn(async () => ({ accountId: 'acc-adv' })) },
+    systemAccountMapping: {
+      count: vi.fn(async () => 1),
+      findFirst: vi.fn(async () => ({ accountId: 'acc-adv' })),
+      // loadControlAccountMap (expense account check): no control mappings unless a test sets them.
+      findMany: vi.fn(async (): Promise<Array<{ role: string; accountId: string }>> => []),
+    },
+    inventoryItem: { findMany: vi.fn(async () => []) },
     fiscalYear,
     // assertPeriodOpen's FOR SHARE row read: the committed isClosed of whatever findUnique returns.
     $queryRaw: vi.fn(async () => {
       const fy = await fiscalYear.findUnique();
       return fy ? [{ is_closed: fy.isClosed }] : [];
     }),
-    journalEntry: { create: journalCreate, findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026', date: new Date('2026-03-10T00:00:00Z') })) },
+    journalEntry: {
+      create: journalCreate,
+      findUnique: vi.fn(async () => ({ fiscalYearId: 'fy-2026', date: new Date('2026-03-10T00:00:00Z') })),
+      findMany: vi.fn(async () => []),
+    },
     accountingLedgerEntry: { createMany: vi.fn(async () => ({ count: 2 })) },
   };
 }
@@ -227,6 +237,19 @@ describe('postSettlementInTx', () => {
     await postSettlementInTx(asTx(tx), 'pr-1', finance, { settlementDate: '2026-10-10', lineAccounts: [{ id: 's1', expenseAccountId: 'acc-6.10' }] });
     expect(tx.paymentRequestSettlementLine.update).toHaveBeenCalledWith({ where: { id: 's1' }, data: { expenseAccountId: 'acc-6.10' } });
     expect(journalItems(tx)[0]).toMatchObject({ accountId: 'acc-6.10', debit: 1_000_000 });
+  });
+
+  it('refuses a control account picked as expense account (ACCOUNT_CONTROL) — nothing is posted', async () => {
+    const tx = makeTx(pending(), { lines: [{ id: 's1', description: 'Tiket', amount: '1000000', expenseAccountId: null }] });
+    tx.systemAccountMapping.findMany = vi.fn(async () => [{ role: 'CUSTOMER_DEPOSIT', accountId: 'acc-cdep' }]);
+    tx.account.findMany = vi.fn(async () => [
+      { id: 'acc-cdep', accountNumber: '2.1.2', name: 'Uang Muka Customer', rootType: 'LIABILITY', isGroup: false, isActive: true },
+    ] as never);
+    await expect(
+      postSettlementInTx(asTx(tx), 'pr-1', finance, { settlementDate: '2026-10-10', lineAccounts: [{ id: 's1', expenseAccountId: 'acc-cdep' }] }),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_CONTROL', message: expect.stringContaining('Uang Muka Customer') });
+    expect(tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(tx.paymentRequest.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects a settlement dated in a closed fiscal period — nothing is posted', async () => {

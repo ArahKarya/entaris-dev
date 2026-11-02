@@ -537,9 +537,9 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Error umum**
 
-- 400: baris bermasalah (rowErrors) - tidak ada yang diposting
-- 400 ACCOUNT_CONTROL (per baris): akun lawan adalah akun kontrol dan pemosting tidak punya journal.control, atau akun uang muka (selalu ditolak); mode partial: baris itu gagal dengan failed[].code = ACCOUNT_CONTROL, baris lain tetap diposting
-- 400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE (per baris): akun lawan tidak ada, akun grup, atau tidak aktif
+- 400: baris bermasalah - tidak ada yang diposting; body { error, rowErrors[], failed[{idx, error, code?}], code? }. code hanya diisi bila semua baris gagal dengan kode yang sama (mis. ACCOUNT_CONTROL)
+- 400 ACCOUNT_CONTROL (per baris): akun lawan adalah akun kontrol dan pemosting tidak punya journal.control, atau akun uang muka (selalu ditolak). Tanpa partial: tidak ada yang diposting, kode ada di failed[].code (dan di code bila semua baris gagal karena ini). Mode partial: baris itu gagal dengan failed[].code = ACCOUNT_CONTROL di respons 200, baris lain tetap diposting
+- 400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE (per baris): akun lawan tidak ada, akun grup, atau tidak aktif; kode di failed[].code seperti ACCOUNT_CONTROL
 - 400: draft sudah diposting
 - 400: tahun buku ditutup untuk tanggal baris
 - 400 PERIOD_LOCKED: tanggal baris pada atau sebelum tanggal kunci periode bulanan (mode partial: baris itu gagal, baris lain tetap diposting)

@@ -42,7 +42,14 @@ const router = Router();
 const TX_OPTS = { timeout: 60_000, maxWait: 10_000 } as const;
 
 function fail(res: Response, error: unknown, context: string, fallback: string) {
-  if (error instanceof RowErrorsError) return res.status(400).json({ error: error.message, rowErrors: error.rowErrors });
+  if (error instanceof RowErrorsError) {
+    return res.status(400).json({
+      error: error.message,
+      rowErrors: error.rowErrors,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.failed ? { failed: error.failed } : {}),
+    });
+  }
   return handleRouteError(res, error, context, fallback);
 }
 

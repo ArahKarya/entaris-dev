@@ -411,6 +411,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   " Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.": " Requires the Journal to control accounts right (journal.control); deposit accounts only through the Deposits module.",
   " Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.": " Deposit accounts can only be corrected through the Deposits module.",
   " Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.": " Recurring journal templates cannot use control or tax accounts.",
+  // PAYMENT_REQUEST_RULE (payment request and settlement expense lines)
+  "Akun biaya": "Expense account",
+  " Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.": " Payment requests cannot use control or tax accounts; use the Payments or Deposits module.",
   // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
   "Baris {0}: {1}": "Line {0}: {1}",
   "kredit": "credit",

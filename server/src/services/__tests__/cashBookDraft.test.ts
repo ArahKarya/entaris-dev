@@ -501,6 +501,8 @@ describe('postCashBookDraft', () => {
       const err = await postCashBookDraft(db, id, 'u1').catch((e) => e);
       expect(err).toBeInstanceOf(RowErrorsError);
       expect(err.rowErrors).toEqual([expect.stringMatching(/^Baris 1: Akun jurnal: akun 1\.4\.1 PPN Masukan adalah akun kontrol PPN Masukan/)]);
+      expect(err.code).toBe('ACCOUNT_CONTROL');
+      expect(err.failed).toEqual([expect.objectContaining({ idx: 1, code: 'ACCOUNT_CONTROL' })]);
       expect(postJournal).not.toHaveBeenCalled();
     });
 
@@ -533,7 +535,10 @@ describe('postCashBookDraft', () => {
   it('partial with nothing valid is an error, not a silent no-op', async () => {
     const { db, tx, id } = await seeded([{ description: 'x', keluar: 1 }]);
     tx.rows.get(draftRows(tx)[0].id).accountId = null;
-    await expect(postCashBookDraft(db, id, 'u1', { partial: true })).rejects.toBeInstanceOf(RowErrorsError);
+    const err = await postCashBookDraft(db, id, 'u1', { partial: true }).catch((e) => e);
+    expect(err).toBeInstanceOf(RowErrorsError);
+    // A row without an account has no code, so the error carries none.
+    expect(err.code).toBeUndefined();
     expect(postJournal).not.toHaveBeenCalled();
   });
 

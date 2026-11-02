@@ -8,10 +8,13 @@
  * Route handlers through the route harness.
  * - postJournalInTx: one journal (Submitted, SYSTEM_DOC) with items carrying the party, ledger rows
  *   without it, Decimal balances; the passed fiscal year is only verified (JOURNAL_FY_MISMATCH);
- *   group accounts are refused (ACCOUNT_GROUP); control accounts are allowed by default
- *   (DOCUMENT_RULE) and refused under manualJournalRule(false).
+ *   group accounts are refused (ACCOUNT_GROUP); by default (PAYMENT_REQUEST_RULE, the payment
+ *   request and settlement journals whose expense accounts people pick) AR and customer deposit
+ *   accounts are refused, also by the check made when the expense account is chosen; an explicit
+ *   DOCUMENT_RULE still allows them.
  * - Cash book post without journal.control: a Cr Piutang row fails ACCOUNT_CONTROL on its own, the
- *   other row is posted (partial); without partial nothing is posted.
+ *   other row is posted (partial); without partial nothing is posted and the 400 carries
+ *   code ACCOUNT_CONTROL plus the per-row failures.
  * - With journal.control the Cr Piutang row is posted; a customer deposit row is refused even then.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -27,8 +30,8 @@ const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import cashBookDraftsRouter from '../../routes/cashBookDrafts';
-import { postJournalInTx } from '../../services/paymentRequestService';
-import { manualJournalRule } from '../../services/ledger/accountGuard';
+import { assertExpenseAccount, postJournalInTx } from '../../services/paymentRequestService';
+import { DOCUMENT_RULE } from '../../services/ledger/accountGuard';
 import { JOURNAL_FY_MISMATCH } from '../../services/ledger/postJournal';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -167,15 +170,21 @@ d('postJournalInTx wraps postJournal', () => {
     });
   });
 
-  it('allows a control account by default (document journals) and refuses it under manualJournalRule(false)', async () => {
+  it('refuses AR and customer deposit accounts by default (payment request lines) and allows them under DOCUMENT_RULE', async () => {
     await inRollback(async (tx) => {
       const b = await books(tx);
       const user = await createCapUser(tx, []);
       const base = { date: DAY, narration: 'IT-CB', fiscalYearId: b.fy.id, actorId: user.userId, now: new Date() };
-      await expect(
-        postJournalInTx(tx, { ...base, lines: lineFixture(b, b.cashId, b.arId), accountRule: manualJournalRule(false) }),
-      ).rejects.toMatchObject({ code: 'ACCOUNT_CONTROL' });
-      const je = await postJournalInTx(tx, { ...base, lines: lineFixture(b, b.cashId, b.arId) });
+      await expect(postJournalInTx(tx, { ...base, lines: lineFixture(b, b.arId, b.cashId) }))
+        .rejects.toMatchObject({ code: 'ACCOUNT_CONTROL', message: expect.stringContaining('Pengajuan dana') });
+      await expect(postJournalInTx(tx, { ...base, lines: lineFixture(b, b.depositId, b.cashId) }))
+        .rejects.toMatchObject({ code: 'ACCOUNT_CONTROL' });
+      // The same rule when the requester or finance picks the expense account.
+      await expect(assertExpenseAccount(tx, b.depositId, 'Akun biaya baris 1')).rejects.toMatchObject({ code: 'ACCOUNT_CONTROL' });
+      await expect(assertExpenseAccount(tx, b.expenseId, 'Akun biaya baris 1')).resolves.toBeUndefined();
+      expect(await tx.journalEntry.count({ where: { fiscalYearId: b.fy.id } })).toBe(0);
+
+      const je = await postJournalInTx(tx, { ...base, lines: lineFixture(b, b.cashId, b.arId), accountRule: DOCUMENT_RULE });
       expect(je.items).toHaveLength(2);
       expect(await balance(tx, b.arId)).toBe('-1000.1');
     });
@@ -211,6 +220,9 @@ d('cash book post follows the control-account rule (journal.control)', () => {
       const id = await draft(tx, b, user.userId, b.arId);
       const res = await post(id, user);
       expect(res.status).toBe(400);
+      // The code reaches the client (and an approved AIRA call) in all-or-nothing mode too.
+      expect(res.body).toMatchObject({ code: 'ACCOUNT_CONTROL', rowErrors: [expect.stringMatching(/^Baris 2: .*akun kontrol Piutang Usaha/)] });
+      expect(res.body.failed).toEqual([{ idx: 2, code: 'ACCOUNT_CONTROL', error: expect.stringContaining('journal.control') }]);
       expect(await tx.journalEntry.count({ where: { fiscalYearId: b.fy.id } })).toBe(0);
       const rows = await tx.cashBookDraftRow.findMany({ where: { draftId: id }, orderBy: { idx: 'asc' } });
       expect(rows.map((r) => r.journalEntryId)).toEqual([null, null]);

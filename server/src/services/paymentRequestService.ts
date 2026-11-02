@@ -13,7 +13,7 @@ import { assertPeriodOpen } from '../utils/periodGuard';
 import { BusinessError } from '../utils/errors';
 import { PaymentRequestInputSchema } from '../utils/schemas';
 import { cancelJournalInTx } from './gaFinance';
-import { DOCUMENT_RULE, type PostableRule } from './ledger/accountGuard';
+import { PAYMENT_REQUEST_RULE, assertPostableAccounts, loadControlAccountMap, type PostableRule } from './ledger/accountGuard';
 import { postJournal } from './ledger/postJournal';
 import { checkLineRate, validateTravel } from './paymentRequestTravel';
 import { initialSettlementStatus } from './paymentRequestSettlementRules';
@@ -138,6 +138,17 @@ export async function assertDetailAccount(tx: Tx, accountId: string, label: stri
   return acc;
 }
 
+/**
+ * Expense line account picked by the requester or finance: an active detail account that is not a
+ * control or tax account (PAYMENT_REQUEST_RULE), checked when chosen so the error does not wait
+ * for Bayar / settlement posting, where postJournal applies the same rule again.
+ */
+export async function assertExpenseAccount(tx: Tx, accountId: string, label: string) {
+  await assertDetailAccount(tx, accountId, label);
+  const control = await loadControlAccountMap(tx, PAYMENT_REQUEST_RULE.alsoRestrict);
+  if (control.has(accountId)) await assertPostableAccounts(tx, [accountId], PAYMENT_REQUEST_RULE);
+}
+
 // Draft create / update
 
 async function normalizeInput(tx: Tx, input: PaymentRequestInput) {
@@ -155,7 +166,7 @@ async function normalizeInput(tx: Tx, input: PaymentRequestInput) {
     if (!cc) throw new BusinessError('Cost center tidak ditemukan.');
   }
   for (const [i, l] of input.lines.entries()) {
-    if (l.expenseAccountId) await assertDetailAccount(tx, l.expenseAccountId, `Akun biaya baris ${i + 1}`);
+    if (l.expenseAccountId) await assertExpenseAccount(tx, l.expenseAccountId, `Akun biaya baris ${i + 1}`);
     assertCheck(checkLineRate(l, `Baris ${i + 1}`));
   }
   assertCheck(validateTravel(type.kind, input, false));
@@ -265,7 +276,7 @@ async function applyLineAccounts(
   lineAccounts: ReadonlyArray<{ id: string; expenseAccountId: string | null }>,
 ) {
   for (const la of lineAccounts) {
-    if (la.expenseAccountId) await assertDetailAccount(tx, la.expenseAccountId, 'Akun biaya');
+    if (la.expenseAccountId) await assertExpenseAccount(tx, la.expenseAccountId, 'Akun biaya');
     const res = await tx.paymentRequestLine.updateMany({
       where: { id: la.id, paymentRequestId: requestId },
       data: { expenseAccountId: la.expenseAccountId },
@@ -392,7 +403,10 @@ export async function postJournalInTx(
     partyId?: string | null;
     /** Journal origin; document-backed postings (payment request, settlement) by default. */
     sourceType?: JournalSourceType;
-    /** Default DOCUMENT_RULE (accounts chosen by code); the cash book passes manualJournalRule. */
+    /**
+     * Default PAYMENT_REQUEST_RULE: payment request and settlement lines carry expense accounts that
+     * people pick, so no control or tax accounts. The cash book passes manualJournalRule.
+     */
     accountRule?: PostableRule;
   },
 ) {
@@ -404,7 +418,7 @@ export async function postJournalInTx(
     sourceType: input.sourceType ?? 'SYSTEM_DOC',
     createdBy: input.actorId,
     now: input.now,
-    accountRule: input.accountRule ?? DOCUMENT_RULE,
+    accountRule: input.accountRule ?? PAYMENT_REQUEST_RULE,
     partyRule: 'off',
     ledgerPartyless: true,
     expectFiscalYearId: input.fiscalYearId,

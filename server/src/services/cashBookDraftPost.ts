@@ -189,7 +189,9 @@ export async function postCashBookDraft(
   } catch (err) {
     if (err instanceof PostBlockedError) {
       await recordPostErrors(db, id, err.failed);
-      throw new RowErrorsError(err.failed.map(fmt));
+      const codes = new Set(err.failed.map((f) => f.code));
+      const shared = codes.size === 1 ? [...codes][0] : undefined;
+      throw new RowErrorsError(err.failed.map(fmt), shared, err.failed);
     }
     throw err;
   }

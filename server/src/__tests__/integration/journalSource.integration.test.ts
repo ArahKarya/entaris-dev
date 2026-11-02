@@ -20,7 +20,6 @@ const MIGRATION = join(__dirname, '../../../prisma/migrations/2026102700000_jour
 let prisma: PrismaClient;
 let pool: Pool;
 let userId: string;
-let accounts: { id: string }[];
 
 beforeAll(async () => {
   if (!hasDb) return;
@@ -29,8 +28,6 @@ beforeAll(async () => {
   const user = await prisma.user.findFirst({ where: { role: 'Admin', isActive: true } });
   if (!user) throw new Error('No admin user.');
   userId = user.id;
-  accounts = await prisma.account.findMany({ where: { isGroup: false, isActive: true }, select: { id: true }, take: 2 });
-  if (accounts.length < 2) throw new Error('Need two detail accounts.');
 });
 
 afterAll(async () => {
@@ -96,6 +93,12 @@ d('journal source tagging', () => {
         data: { name: `IT-${Math.random().toString(36).slice(2, 8)}`, startDate: new Date('2099-01-01'), endDate: new Date('2099-12-31') },
       }));
     const now = new Date('2099-03-01T03:00:00Z');
+    // Own expense and cash accounts: the default rule refuses control accounts, and any existing
+    // detail account could be one.
+    const account = (rootType: 'EXPENSE' | 'ASSET') => tx.account.create({
+      data: { name: `IT-SRC ${rootType}`, accountNumber: `IT-SRC-${Math.random().toString(36).slice(2, 10)}`, accountType: rootType, rootType },
+    });
+    const accounts = [await account('EXPENSE'), await account('ASSET')];
     return postJournalInTx(tx, {
       date: now, narration: 'Uji asal jurnal', fiscalYearId: fy.id, actorId: userId, now,
       lines: [
