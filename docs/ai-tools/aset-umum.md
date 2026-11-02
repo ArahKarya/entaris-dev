@@ -1787,7 +1787,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 
 **Isi hasil:** Log servis yang dibuat (termasuk journalEntry bila postJournal).
 
-**Efek pembukuan/stok:** Default: tidak ada GL (menunggu antrian Tagihan EAM). Bila postJournal=true: DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan atau accountId) / CR Kas-Bank (default 1.1.1 Petty Cash atau creditAccountId).
+**Efek pembukuan/stok:** Default: tidak ada GL (menunggu antrian Tagihan EAM). Bila postJournal=true: DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan atau accountId) / CR Kas-Bank (default akun Kas terpetakan di Akun Sistem atau creditAccountId).
 
 **Teks konfirmasi:** Catat servis {jenisService} kendaraan {id} tgl {tanggal}, biaya Rp {biaya}, posting jurnal: {postJournal}. Setujui?
 
@@ -2012,7 +2012,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 
 **Isi hasil:** {id, status:"APPROVED", taxId}.
 
-**Efek pembukuan/stok:** Tidak ada jurnal langsung. Membuat GaVehicleTax IN_PROCESS → tagihan VEHICLE_TAX; posting nanti: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha 2.1.1).
+**Efek pembukuan/stok:** Tidak ada jurnal langsung. Membuat GaVehicleTax IN_PROCESS → tagihan VEHICLE_TAX; posting nanti: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau akun Hutang Usaha terpetakan).
 
 **Teks konfirmasi:** SETUJUI pengajuan pajak {id} (masuk antrian Tagihan EAM). Setujui?
 
@@ -3250,7 +3250,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 
 **Isi hasil:** {message, journalEntry} — nomor jurnal yang dibuat.
 
-**Efek pembukuan/stok:** DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan) / CR Kas-Bank (default 1.1.1 Petty Cash) senilai biaya log. Jalur resmi pembayaran tetap lewat Pengajuan Pembayaran > Tagihan EAM.
+**Efek pembukuan/stok:** DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan) / CR Kas-Bank (default akun Kas terpetakan di Akun Sistem) senilai biaya log. Jalur resmi pembayaran tetap lewat Pengajuan Pembayaran > Tagihan EAM.
 
 **Teks konfirmasi:** Posting jurnal biaya servis {sid} kendaraan {id}. Setujui?
 
@@ -7277,7 +7277,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 
 **Isi hasil:** Objek {itemId, inventoryItemId, fulfilled}.
 
-**Efek pembukuan/stok:** Tidak ada jurnal GL langsung; menambah stok GA (GaStockByLocation) + mutasi IN. MR berstatus APPROVED/FULFILLED yang belum dijurnal tampil di antrian Tagihan EAM (MATERIAL_REQUEST) di Pengajuan Pembayaran; pembukuan (DR beban / CR Kas atau Hutang 2.1.1) terjadi di sana, bukan di tool ini.
+**Efek pembukuan/stok:** Tidak ada jurnal GL langsung; menambah stok GA (GaStockByLocation) + mutasi IN. MR berstatus APPROVED/FULFILLED yang belum dijurnal tampil di antrian Tagihan EAM (MATERIAL_REQUEST) di Pengajuan Pembayaran; pembukuan (DR beban / CR Kas atau Hutang Usaha, akun terpetakan di Akun Sistem) terjadi di sana, bukan di tool ini.
 
 **Teks konfirmasi:** Terima {receivedQty} barang item {itemId} MR {id} ke lokasi {locationId}. Setujui?
 

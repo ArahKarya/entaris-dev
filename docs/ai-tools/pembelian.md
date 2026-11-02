@@ -809,7 +809,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** Bypass: hasil revisi (jurnal/penyesuaian). Non-bypass: permintaan persetujuan (HTTP 202).
 
-**Efek pembukuan/stok:** Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (2.1.1) / DR Persediaan (porsi stok) + DR 5.11 (porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).
+**Efek pembukuan/stok:** Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).
 
 **Teks konfirmasi:** Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?
 
@@ -826,6 +826,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan
 
 **Tool terkait:** [`pi_get`](#pi_get), [`pi_cancel`](#pi_cancel)
 

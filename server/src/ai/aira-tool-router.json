@@ -14251,7 +14251,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal GL langsung; menambah stok GA (GaStockByLocation) + mutasi IN. MR berstatus APPROVED/FULFILLED yang belum dijurnal tampil di antrian Tagihan EAM (MATERIAL_REQUEST) di Pengajuan Pembayaran; pembukuan (DR beban / CR Kas atau Hutang 2.1.1) terjadi di sana, bukan di tool ini.",
+      "postingEffect": "Tidak ada jurnal GL langsung; menambah stok GA (GaStockByLocation) + mutasi IN. MR berstatus APPROVED/FULFILLED yang belum dijurnal tampil di antrian Tagihan EAM (MATERIAL_REQUEST) di Pengajuan Pembayaran; pembukuan (DR beban / CR Kas atau Hutang Usaha, akun terpetakan di Akun Sistem) terjadi di sana, bukan di tool ini.",
       "confirm_template": "Terima {receivedQty} barang item {itemId} MR {id} ke lokasi {locationId}. Setujui?",
       "prerequisites": [
         "MR berstatus APPROVED.",
@@ -15152,7 +15152,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal langsung. Membuat GaVehicleTax IN_PROCESS → tagihan VEHICLE_TAX; posting nanti: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha 2.1.1).",
+      "postingEffect": "Tidak ada jurnal langsung. Membuat GaVehicleTax IN_PROCESS → tagihan VEHICLE_TAX; posting nanti: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau akun Hutang Usaha terpetakan).",
       "confirm_template": "SETUJUI pengajuan pajak {id} (masuk antrian Tagihan EAM). Setujui?",
       "accessNote": "Siapa pun dengan izin edit modul ga_vehicle; pembayaran/posting tetap butuh izin payment_request edit (fork D).",
       "errors": [
@@ -20524,7 +20524,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Default: tidak ada GL (menunggu antrian Tagihan EAM). Bila postJournal=true: DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan atau accountId) / CR Kas-Bank (default 1.1.1 Petty Cash atau creditAccountId).",
+      "postingEffect": "Default: tidak ada GL (menunggu antrian Tagihan EAM). Bila postJournal=true: DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan atau accountId) / CR Kas-Bank (default akun Kas terpetakan di Akun Sistem atau creditAccountId).",
       "confirm_template": "Catat servis {jenisService} kendaraan {id} tgl {tanggal}, biaya Rp {biaya}, posting jurnal: {postJournal}. Setujui?",
       "errors": [
         "400: Biaya harus > 0 untuk diposting ke jurnal",
@@ -20590,7 +20590,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan) / CR Kas-Bank (default 1.1.1 Petty Cash) senilai biaya log. Jalur resmi pembayaran tetap lewat Pengajuan Pembayaran > Tagihan EAM.",
+      "postingEffect": "DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan) / CR Kas-Bank (default akun Kas terpetakan di Akun Sistem) senilai biaya log. Jalur resmi pembayaran tetap lewat Pengajuan Pembayaran > Tagihan EAM.",
       "confirm_template": "Posting jurnal biaya servis {sid} kendaraan {id}. Setujui?",
       "errors": [
         "400: Service log sudah memiliki jurnal",
@@ -25146,7 +25146,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (2.1.1) / DR Persediaan (porsi stok) + DR 5.11 (porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
+      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
       "confirm_template": "Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?",
       "prerequisites": [
         "PI berstatus Submitted/Paid (belum dibatalkan)",
@@ -25158,7 +25158,8 @@
         "400: alasan minimal 10 karakter",
         "400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup",
         "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan"
       ],
       "related": [
         "pi_get",
