@@ -8,7 +8,9 @@
     },
     "errors": {
       "accountNumber": "Account number is required.",
-      "name": "Account name is required."
+      "name": "Account name is required.",
+      "accountNumberFormat": "Invalid account number. Use dotted digits starting with 1-8, e.g. 1.1.6.",
+      "prefixLocked": "This account already has transactions; the first digit of the number cannot change."
     },
     "title": {
       "edit": "Edit account",
@@ -27,7 +29,8 @@
     "rootTypeHint": {
       "edit": "Follows the first digit of the account number.",
       "parent": "Follows the parent account.",
-      "auto": "Set automatically from the first digit."
+      "auto": "Set automatically from the first digit.",
+      "locked": "Locked: the account already has transactions."
     },
     "name": "Account name",
     "namePlaceholder": "E.g. Bank BNI",
@@ -37,7 +40,8 @@
     "isActiveHint": "Inactive accounts do not appear in account choices on transactions.",
     "cancel": "Cancel",
     "saveChanges": "Save changes",
-    "save": "Save account"
+    "save": "Save account",
+    "lockedHint": "This account already has transactions, so its group status is locked."
   },
   "accountPicker": {
     "placeholder": "Choose account…",

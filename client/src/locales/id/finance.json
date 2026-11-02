@@ -8,7 +8,9 @@
     },
     "errors": {
       "accountNumber": "Nomor akun wajib diisi.",
-      "name": "Nama akun wajib diisi."
+      "name": "Nama akun wajib diisi.",
+      "accountNumberFormat": "Nomor akun tidak valid. Gunakan angka bertitik dengan digit pertama 1-8, mis. 1.1.6.",
+      "prefixLocked": "Akun ini sudah punya transaksi; digit pertama nomor tidak dapat diubah."
     },
     "title": {
       "edit": "Edit Akun",
@@ -27,7 +29,8 @@
     "rootTypeHint": {
       "edit": "Mengikuti digit pertama nomor akun.",
       "parent": "Mengikuti akun induk.",
-      "auto": "Otomatis dari digit pertama."
+      "auto": "Otomatis dari digit pertama.",
+      "locked": "Terkunci: akun sudah punya transaksi."
     },
     "name": "Nama akun",
     "namePlaceholder": "Mis: Bank BNI",
@@ -37,7 +40,8 @@
     "isActiveHint": "Akun nonaktif tidak muncul di pilihan akun pada transaksi.",
     "cancel": "Batal",
     "saveChanges": "Simpan perubahan",
-    "save": "Simpan akun"
+    "save": "Simpan akun",
+    "lockedHint": "Akun ini sudah punya transaksi, jadi status grupnya terkunci."
   },
   "accountPicker": {
     "placeholder": "Pilih akun…",
