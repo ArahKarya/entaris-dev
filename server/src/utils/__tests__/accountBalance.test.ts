@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { computeImpact, updateAccountBalance, updateBalancesForItems } from '../accountBalance';
+import { Prisma } from '@prisma/client';
+import {
+  applyAccountImpacts,
+  computeImpact,
+  computeImpactDecimal,
+  updateAccountBalance,
+  updateBalancesForItems,
+} from '../accountBalance';
 
 // computeImpact
 
@@ -124,5 +131,59 @@ describe('updateBalancesForItems', () => {
     const tx = { account: { findUnique: vi.fn(), update: vi.fn() } } as any;
     await expect(updateBalancesForItems(tx, [])).resolves.toBeUndefined();
     expect(tx.account.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+// computeImpactDecimal / applyAccountImpacts
+
+describe('computeImpactDecimal', () => {
+  it('is exact where float drifts: 0.1 + 0.2 debit against 0.3 credit is 0', () => {
+    expect(computeImpactDecimal('ASSET', new Prisma.Decimal('0.1').plus('0.2'), '0.3').isZero()).toBe(true);
+    expect(computeImpactDecimal('LIABILITY', '100000.00', '100000.01').toFixed(2)).toBe('0.01');
+    expect(computeImpactDecimal('EXPENSE', 0, '2.5').toFixed(2)).toBe('-2.50');
+  });
+});
+
+describe('applyAccountImpacts', () => {
+  const makeTx = (accounts: { id: string; rootType: string }[] = []) => ({
+    account: {
+      findMany: vi.fn().mockResolvedValue(accounts),
+      update: vi.fn().mockResolvedValue({}),
+    },
+  });
+
+  it('nets lines per account in Decimal and updates once per account in accountId order', async () => {
+    const tx = makeTx();
+    const roots = new Map([['c', 'ASSET'], ['a', 'REVENUE'], ['b', 'ASSET']]);
+    await applyAccountImpacts(tx as any, [
+      { accountId: 'c', debit: '0.1', credit: 0 },
+      { accountId: 'a', debit: 0, credit: '100000.01' },
+      { accountId: 'c', debit: '0.2', credit: 0 },
+      { accountId: 'b', debit: '0', credit: '100000.31' },
+    ], roots);
+    expect(tx.account.findMany).not.toHaveBeenCalled();
+    const calls = tx.account.update.mock.calls.map(([arg]) => [arg.where.id, arg.data.balance.increment.toFixed(2)]);
+    expect(calls).toEqual([['a', '100000.01'], ['b', '-100000.31'], ['c', '0.30']]);
+    expect(tx.account.update.mock.calls[2][0].data.balance.increment).toBeInstanceOf(Prisma.Decimal);
+  });
+
+  it('skips an account whose impact nets to zero', async () => {
+    const tx = makeTx();
+    await applyAccountImpacts(tx as any, [
+      { accountId: 'a', debit: '5', credit: 0 },
+      { accountId: 'a', debit: 0, credit: '5' },
+    ], new Map([['a', 'ASSET']]));
+    expect(tx.account.update).not.toHaveBeenCalled();
+  });
+
+  it('loads missing root types and skips an unknown account', async () => {
+    const tx = makeTx([{ id: 'x', rootType: 'EQUITY' }]);
+    await applyAccountImpacts(tx as any, [
+      { accountId: 'x', debit: 0, credit: '10' },
+      { accountId: 'gone', debit: '10', credit: 0 },
+    ]);
+    expect(tx.account.findMany).toHaveBeenCalledWith({ where: { id: { in: ['gone', 'x'] } }, select: { id: true, rootType: true } });
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(tx.account.update.mock.calls[0][0].where.id).toBe('x');
   });
 });

@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type RootType } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { logger } from '../lib/logger';
 
@@ -16,6 +16,58 @@ export function computeImpact(rootType: string, debit: number | Decimal, credit:
     return d.minus(c).toNumber();
   }
   return c.minus(d).toNumber();
+}
+
+/** computeImpact in Decimal: debit − credit for ASSET/EXPENSE, credit − debit otherwise. */
+export function computeImpactDecimal(
+  rootType: string,
+  debit: Prisma.Decimal.Value,
+  credit: Prisma.Decimal.Value,
+): Prisma.Decimal {
+  const d = new Prisma.Decimal(debit);
+  const c = new Prisma.Decimal(credit);
+  return rootType === 'ASSET' || rootType === 'EXPENSE' ? d.minus(c) : c.minus(d);
+}
+
+export interface AccountImpactLine {
+  accountId: string;
+  debit: Prisma.Decimal.Value;
+  credit: Prisma.Decimal.Value;
+}
+
+/**
+ * Applies the balance impact of journal lines: netted per account in Decimal, one UPDATE per
+ * account, in accountId order so concurrent postings take the account row locks in the same order.
+ * `rootTypes` (account id -> root type) saves the lookup when the caller already read the accounts;
+ * missing ones are loaded. An unknown account is skipped with a warning, like updateAccountBalance.
+ */
+export async function applyAccountImpacts(
+  tx: Prisma.TransactionClient,
+  lines: readonly AccountImpactLine[],
+  rootTypes: ReadonlyMap<string, RootType | string> = new Map(),
+): Promise<void> {
+  const totals = new Map<string, { debit: Prisma.Decimal; credit: Prisma.Decimal }>();
+  for (const l of lines) {
+    const t = totals.get(l.accountId) ?? { debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(0) };
+    totals.set(l.accountId, { debit: t.debit.plus(l.debit), credit: t.credit.plus(l.credit) });
+  }
+  const ids = [...totals.keys()].sort();
+  const missing = ids.filter((id) => !rootTypes.has(id));
+  const loaded = missing.length > 0
+    ? await tx.account.findMany({ where: { id: { in: missing } }, select: { id: true, rootType: true } })
+    : [];
+  const rootOf = new Map<string, string>([...rootTypes, ...loaded.map((a) => [a.id, a.rootType] as const)]);
+  for (const id of ids) {
+    const rootType = rootOf.get(id);
+    if (!rootType) {
+      logger.warn({ accountId: id }, 'applyAccountImpacts: account not found, balance not updated');
+      continue;
+    }
+    const t = totals.get(id)!;
+    const impact = computeImpactDecimal(rootType, t.debit, t.credit);
+    if (impact.isZero()) continue;
+    await tx.account.update({ where: { id }, data: { balance: { increment: impact } } });
+  }
 }
 
 /**
