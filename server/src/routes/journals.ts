@@ -145,17 +145,11 @@ router.post('/', async (req: AuthRequest, res) => {
         })),
       );
 
-      // Update party denorm balances — account-aware so UM (2.1.2/1.3) lines
-      // hit customerDepositBalance/depositBalance instead of outstandingAmount.
+      // Update party denorm balances by the account's party role, so deposit lines hit
+      // customerDepositBalance/depositBalance instead of outstandingAmount.
       await applyPartyImpact(
         tx,
-        journalEntry.items.map((i) => ({
-          partyId: i.partyId,
-          debit: Number(i.debit),
-          credit: Number(i.credit),
-          accountNumber: i.account.accountNumber,
-          rootType: i.account.rootType,
-        })),
+        journalEntry.items.map((i) => ({ partyId: i.partyId, accountId: i.accountId, debit: i.debit, credit: i.credit })),
         'apply',
       );
 
@@ -244,13 +238,7 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       // Reverse party denorm balances — symmetric with POST classification.
       await applyPartyImpact(
         tx,
-        entry.items.map((i) => ({
-          partyId: i.partyId,
-          debit: Number(i.debit),
-          credit: Number(i.credit),
-          accountNumber: i.account.accountNumber,
-          rootType: i.account.rootType,
-        })),
+        entry.items.map((i) => ({ partyId: i.partyId, accountId: i.accountId, debit: i.debit, credit: i.credit })),
         'reverse',
       );
 

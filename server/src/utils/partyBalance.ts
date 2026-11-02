@@ -1,54 +1,59 @@
 import { Prisma } from '@prisma/client';
-import { ACCOUNT_NUMBERS } from '../constants/accountNumbers';
+import { logger } from '../lib/logger';
+import { loadPartyRoleMap, type PartyRole } from '../services/ledger/partyRules';
 
 type PartyImpactItem = {
   partyId: string | null;
-  debit: number;
-  credit: number;
-  accountNumber: string;
-  rootType: string;
+  accountId: string;
+  debit: Prisma.Decimal.Value;
+  credit: Prisma.Decimal.Value;
+};
+
+type PartyField = 'customerDepositBalance' | 'depositBalance' | 'outstandingAmount';
+
+/** Denormalized party field and normal side of each party role. */
+const ROLE_FIELD: Readonly<Record<PartyRole, { field: PartyField; debitNormal: boolean }>> = {
+  AR: { field: 'outstandingAmount', debitNormal: true },
+  AP: { field: 'outstandingAmount', debitNormal: false },
+  CUSTOMER_DEPOSIT: { field: 'customerDepositBalance', debitNormal: false },
+  VENDOR_DEPOSIT: { field: 'depositBalance', debitNormal: true },
 };
 
 /**
- * Classify a party-tagged JE line and update the correct denormalized party field.
+ * Update the denormalized party field of party-tagged lines of a hand-made journal, by the line
+ * account's party role (loadPartyRoleMap, accounts that held a role before a remap included):
  *
- *   2.1.2 (Uang Muka Penjualan)   → customerDepositBalance   (credit-normal)
- *   1.3   (Uang Muka Pembelian)   → depositBalance           (debit-normal)
- *   otherwise (1.2.1, 2.1.1, ...) → outstandingAmount        (rootType-driven)
+ *   AR               → outstandingAmount        (debit − credit)
+ *   AP               → outstandingAmount        (credit − debit)
+ *   CUSTOMER_DEPOSIT → customerDepositBalance   (credit − debit)
+ *   VENDOR_DEPOSIT   → depositBalance           (debit − credit)
  *
- * Both post (apply) and cancel (reverse) must use this helper, or a cancelled JV
- * leaks balance into the wrong denormalized field.
+ * A party on any other account (an expense line from the old expense forms) moves nothing and is
+ * logged. Post (apply) and cancel (reverse) must both use this helper.
+ * Transitional (E2-R4): once the manual journal posts through postJournal with a recalculation, only
+ * the reverse of old manual deposit lines stays here.
  */
 export async function applyPartyImpact(
   tx: Prisma.TransactionClient,
-  items: PartyImpactItem[],
+  items: readonly PartyImpactItem[],
   direction: 'apply' | 'reverse',
 ): Promise<void> {
+  if (!items.some((it) => it.partyId)) return;
+  const roles = await loadPartyRoleMap(tx);
   for (const it of items) {
     if (!it.partyId) continue;
 
-    const debit = direction === 'apply' ? it.debit : it.credit;
-    const credit = direction === 'apply' ? it.credit : it.debit;
-    if (debit === 0 && credit === 0) continue;
-
-    let field: 'customerDepositBalance' | 'depositBalance' | 'outstandingAmount';
-    let impact: number;
-
-    if (it.accountNumber === ACCOUNT_NUMBERS.CUSTOMER_DEPOSIT) {
-      field = 'customerDepositBalance';
-      impact = credit - debit;
-    } else if (it.accountNumber === ACCOUNT_NUMBERS.VENDOR_DEPOSIT) {
-      field = 'depositBalance';
-      impact = debit - credit;
-    } else {
-      field = 'outstandingAmount';
-      impact =
-        it.rootType === 'ASSET' || it.rootType === 'EXPENSE'
-          ? debit - credit
-          : credit - debit;
+    const role = roles.get(it.accountId);
+    if (!role) {
+      logger.warn({ partyId: it.partyId, accountId: it.accountId, direction }, 'applyPartyImpact: party on a non-party account, skipped');
+      continue;
     }
 
-    if (impact === 0) continue;
+    const debit = new Prisma.Decimal(direction === 'apply' ? it.debit : it.credit);
+    const credit = new Prisma.Decimal(direction === 'apply' ? it.credit : it.debit);
+    const { field, debitNormal } = ROLE_FIELD[role];
+    const impact = debitNormal ? debit.minus(credit) : credit.minus(debit);
+    if (impact.isZero()) continue;
 
     await tx.party.update({
       where: { id: it.partyId },
