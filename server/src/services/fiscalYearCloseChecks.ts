@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { businessDayOf } from '../utils/businessDate';
 import { systemAccounts } from './systemAccounts';
 import { findAleJournalMismatches } from './ledger/aleSyncCheck';
+import { findUnbalancedAleGroups } from './ledger/ledgerAudit/sections/aleGroups';
 import { SYSTEM_ACCOUNT_ROLES } from '../types/systemAccounts';
 import { CLOSE_CHECK_ITEM_LIMIT, type CloseCheck, type CloseCheckItem, type CloseCheckOutcome, type CloseCheckYear } from './fiscalYearCloseTypes';
 
@@ -124,46 +125,24 @@ const depreciationUnposted: CloseCheck = {
   },
 };
 
-interface UnbalancedRow {
-  reference_type: string;
-  reference_id: string;
-  label: string | null;
-  date: Date | null;
-  difference: string;
-}
-
 /**
  * The year's active ledger rows balance: debit = credit for every source document (and so for the
  * year). Items are the unbalanced documents, keyed `<type>:<id>@<fiscal year id>`; baseline-aware.
+ * The definition is the ledger audit's (findUnbalancedAleGroups); a balanced group split over
+ * several years is the audit's and the trigger's concern, not this check's.
  */
 const ledgerBalanced: CloseCheck = {
   id: 'ledger-balanced',
   severity: 'block',
   baselineAware: true,
   async run(tx, fy) {
-    const rows = await tx.$queryRaw<UnbalancedRow[]>`
-      WITH groups AS (
-        SELECT reference_type, reference_id, MIN(date) AS date, SUM(debit) - SUM(credit) AS diff
-          FROM accounting_ledger_entries
-         WHERE fiscal_year_id = ${fy.id} AND is_cancelled = false
-         GROUP BY reference_type, reference_id
-        HAVING SUM(debit) <> SUM(credit)
-      )
-      SELECT g.reference_type, g.reference_id, g.date, ABS(g.diff)::text AS difference,
-             COALESCE(je.entry_number, si.invoice_number, pi.invoice_number, p.payment_number) AS label
-        FROM groups g
-        LEFT JOIN journal_entries je ON g.reference_type = 'JournalEntry' AND je.id = g.reference_id
-        LEFT JOIN sales_invoices si ON g.reference_type = 'SalesInvoice' AND si.id = g.reference_id
-        LEFT JOIN purchase_invoices pi ON g.reference_type = 'PurchaseInvoice' AND pi.id = g.reference_id
-        LEFT JOIN payments p ON g.reference_type = 'Payment' AND p.id = g.reference_id
-       ORDER BY ABS(g.diff) DESC, g.reference_id
-    `;
+    const rows = await findUnbalancedAleGroups(tx, { fiscalYearId: fy.id, includeFySplit: false });
     return {
       count: rows.length,
       items: rows.map((r) => ({
-        key: `${r.reference_type}:${r.reference_id}@${fy.id}`,
-        kind: r.reference_type,
-        label: r.label ?? r.reference_id,
+        key: `${r.referenceType}:${r.referenceId}@${fy.id}`,
+        kind: r.referenceType,
+        label: r.label,
         ...(r.date ? { date: day(r.date) } : {}),
         amount: money(r.difference),
       })),
