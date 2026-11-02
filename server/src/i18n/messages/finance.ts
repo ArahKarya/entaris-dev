@@ -204,7 +204,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Role \"{0}\" tidak valid.": "Role \"{0}\" is invalid.",
   "Role \"{0}\" wajib dan tidak dapat dilepas. Ganti ke akun lain, bukan dikosongkan.": "Role \"{0}\" is required and cannot be removed. Switch it to another account instead of leaving it empty.",
   "Akun dengan ID \"{0}\" tidak ditemukan.": "Account with ID \"{0}\" not found.",
-  "Akun \"{0} - {1}\" tidak aktif.": "Account \"{0} - {1}\" is inactive.",
+  // System accounts (E2-R8): mapping validation in routes/systemAccounts.ts
+  "Peran {0}": "Role {0}",
+  "Peran {0} dan peran {1} tidak boleh memakai akun yang sama ({2} {3}).": "Role {0} and role {1} cannot use the same account ({2} {3}).",
   "Role \"{0}\" hanya boleh memiliki 1 akun, tapi diberikan {1}.": "Role \"{0}\" can have only 1 account, but {1} were given.",
   "Konfigurasi akun sistem diperbarui.": "System account configuration updated.",
   "Gagal mengambil data konfigurasi pajak.": "Failed to load tax configurations.",

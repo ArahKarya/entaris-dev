@@ -1777,13 +1777,15 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Prasyarat**
 
-- Akun tujuan aktif dan bukan akun grup.
+- Akun tujuan aktif, bukan akun grup, dan bertipe akar sesuai role (hanya pasangan role-akun yang berubah diperiksa).
 - Role wajib tidak boleh dikosongkan.
 
 **Error umum**
 
 - 403: hanya Admin
-- 400: role tidak valid / akun tidak aktif / role wajib dilepas
+- 400: role tidak valid / role wajib dilepas
+- 400 ACCOUNT_GROUP / ACCOUNT_INACTIVE / ACCOUNT_ROOT_TYPE: akun baru untuk sebuah role adalah akun grup, nonaktif, atau bertipe akar berbeda dari yang diharapkan role
+- 400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun
 
 **Tool terkait:** [`sysacct_get`](#sysacct_get), [`coa_flat`](#coa_flat)
 

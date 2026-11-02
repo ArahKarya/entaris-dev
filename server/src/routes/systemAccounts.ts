@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { systemAccounts } from '../services/systemAccounts';
+import { postableAccountProblem } from '../services/ledger/accountGuard';
+import { changedMappings, findRoleConflict, resultingMappings } from '../services/systemAccountMappingRules';
 import {
   SYSTEM_ACCOUNT_ROLES,
   ALL_SYSTEM_ROLES,
@@ -109,23 +111,44 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     }
   }
 
-  // Validate all accountIds exist, are active, and are not group accounts
+  // Every account must exist. Only (role, account) pairs that differ from the stored mappings are
+  // checked further, so re-sending an unchanged legacy mapping (e.g. COGS on a group account)
+  // alongside a real change is not rejected; the mapping audit reports those.
   const accountIds = [...new Set(inputMappings.map((m) => m.accountId))];
-  const accounts = await prisma.account.findMany({
-    where: { id: { in: accountIds } },
-    select: { id: true, accountNumber: true, name: true, isGroup: true, isActive: true, rootType: true },
-  });
+  const [accounts, stored] = await Promise.all([
+    prisma.account.findMany({
+      where: { id: { in: accountIds } },
+      select: { id: true, accountNumber: true, name: true, isGroup: true, isActive: true, rootType: true },
+    }),
+    prisma.systemAccountMapping.findMany({ select: { role: true, accountId: true } }),
+  ]);
   const accountMap = new Map(accounts.map((a) => [a.id, a]));
 
   for (const m of inputMappings) {
-    const account = accountMap.get(m.accountId);
-    if (!account) {
+    if (!accountMap.has(m.accountId)) {
       return res.status(400).json({ error: `Akun dengan ID "${m.accountId}" tidak ditemukan.` });
     }
-    if (!account.isActive) {
-      return res.status(400).json({ error: `Akun "${account.accountNumber} - ${account.name}" tidak aktif.` });
-    }
+  }
 
+  const changed = changedMappings(inputMappings, stored);
+  for (const m of changed) {
+    const meta = SYSTEM_ACCOUNT_ROLES[m.role as SystemAccountRole];
+    const problem = postableAccountProblem(
+      accountMap.get(m.accountId) ?? null,
+      { label: `Peran ${meta.label}`, rootTypes: [meta.expectedRootType], allowControl: true },
+      null,
+    );
+    if (problem) return res.status(400).json({ error: problem.message, code: problem.code });
+  }
+
+  const touchedRoles = new Set([...inputMappings.map((m) => m.role), ...clearRoles]);
+  const conflict = findRoleConflict(changed, resultingMappings(inputMappings, stored, touchedRoles));
+  if (conflict) {
+    const account = accountMap.get(conflict.accountId);
+    return res.status(400).json({
+      error: `Peran ${SYSTEM_ACCOUNT_ROLES[conflict.role].label} dan peran ${SYSTEM_ACCOUNT_ROLES[conflict.otherRole].label} tidak boleh memakai akun yang sama (${account?.accountNumber} ${account?.name}).`,
+      code: conflict.code,
+    });
   }
 
   // Validate single-account roles don't have multiple entries
