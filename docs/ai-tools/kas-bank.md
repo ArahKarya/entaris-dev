@@ -83,6 +83,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - Modul kas-bank **tidak** melewati antrian `needsApproval`: `pay_record`, `pg_create`, `pg_settle`, dan `rec_execute` langsung memposting bagi pemanggil yang punya izin edit modulnya. Kontrol keamanannya berada di tier AIRA (kritis = wajib persetujuan) dan RBAC.
 - Draft Buku Kas memakai izin modul `journal` (lihat = view, ubah/posting = edit, sama dengan jurnal manual); posting tidak lewat `needsApproval` tetapi aktor AIRA level Standar selalu lewat antrian persetujuan.
+- Akun lawan Draft Buku Kas mengikuti aturan jurnal manual: baris ke akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability `journal.control` (default hanya Admin), akun Uang Muka Customer/Supplier selalu ditolak. Tanpa hak itu baris gagal `ACCOUNT_CONTROL` (dengan `partial=true` baris lain tetap diposting). Untuk membayar Supplier, menerima pelunasan Customer, atau menyetor PPN, arahkan ke modul Pembayaran (`pay_record`) bila pengguna tidak punya `journal.control`.
 - Pembatalan butuh capability `doc.cancel` (default hanya Admin): `pay_cancel`, `pg_cancel`, `pg_settlement_cancel`.
 - Izin modul: `payment`, `reconciliation`, `recurring`, `project_guarantee` (Accountant edit; Viewer hanya `payment` dan `project_guarantee` lihat; StaffProduksi tidak punya akses default kecuali yang dikonfigurasi).
 
@@ -487,7 +488,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
 - **Roles & izin:** Admin, Accountant (modul `journal` / `edit`)
-- **Catatan akses:** Pemegang izin edit modul Jurnal (sama dengan membuat jurnal manual). Aktor AIRA level Standar selalu lewat antrian persetujuan.
+- **Catatan akses:** Pemegang izin edit modul Jurnal (sama dengan membuat jurnal manual). Akun lawan mengikuti aturan jurnal manual: akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability journal.control (default hanya Admin); akun Uang Muka Customer/Supplier selalu ditolak. Untuk pengajuan yang disetujui, hak yang dipakai adalah hak pengaju. Aktor AIRA level Standar selalu lewat antrian persetujuan.
 - **Handler:** `POST /api/cash-book-drafts/:id/post` (src/routes/cashBookDrafts.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
 
@@ -521,7 +522,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 }
 ```
 
-**Isi hasil:** { status, postedCount, totalAmount, journals[{rowIdx, journalEntryId, entryNumber}], failed[{idx, error}], learned }.
+**Isi hasil:** { status, postedCount, totalAmount, journals[{rowIdx, journalEntryId, entryNumber}], failed[{idx, error, code?}], learned }. code diisi untuk masalah akun (mis. ACCOUNT_CONTROL).
 
 **Efek pembukuan/stok:** Jurnal JV-… (Submitted) per baris ke buku besar tak-terhapus; saldo akun kas dan akun lawan berubah. pengeluaran/lainnya keluar = DR akun lawan / CR kas; pemasukan/lainnya masuk = DR kas / CR akun lawan; uang_muka = DR Uang Muka Karyawan (1.5.6) / CR kas; terima_kasbon = DR kas / CR Uang Muka Karyawan. Tidak ada efek stok.
 
@@ -531,11 +532,14 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - Draft berstatus Draft atau Sebagian Diposting.
 - Setiap baris non-skip punya akun lawan valid (detail, aktif, bukan akun kas).
+- Baris ke akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) hanya untuk pemegang journal.control (Admin); akun uang muka Customer/Supplier tidak pernah bisa.
 - Tahun buku terbuka untuk tanggal tiap baris.
 
 **Error umum**
 
 - 400: baris bermasalah (rowErrors) - tidak ada yang diposting
+- 400 ACCOUNT_CONTROL (per baris): akun lawan adalah akun kontrol dan pemosting tidak punya journal.control, atau akun uang muka (selalu ditolak); mode partial: baris itu gagal dengan failed[].code = ACCOUNT_CONTROL, baris lain tetap diposting
+- 400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE (per baris): akun lawan tidak ada, akun grup, atau tidak aktif
 - 400: draft sudah diposting
 - 400: tahun buku ditutup untuk tanggal baris
 - 400 PERIOD_LOCKED: tanggal baris pada atau sebelum tanggal kunci periode bulanan (mode partial: baris itu gagal, baris lain tetap diposting)

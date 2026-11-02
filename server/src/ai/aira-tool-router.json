@@ -35163,7 +35163,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "{ status, postedCount, totalAmount, journals[{rowIdx, journalEntryId, entryNumber}], failed[{idx, error}], learned }.",
+      "outputSummary": "{ status, postedCount, totalAmount, journals[{rowIdx, journalEntryId, entryNumber}], failed[{idx, error, code?}], learned }. code diisi untuk masalah akun (mis. ACCOUNT_CONTROL).",
       "handler": "POST /api/cash-book-drafts/:id/post",
       "permAction": "edit",
       "enabled": true,
@@ -35172,14 +35172,17 @@
       "draftCapable": false,
       "postingEffect": "Jurnal JV-… (Submitted) per baris ke buku besar tak-terhapus; saldo akun kas dan akun lawan berubah. pengeluaran/lainnya keluar = DR akun lawan / CR kas; pemasukan/lainnya masuk = DR kas / CR akun lawan; uang_muka = DR Uang Muka Karyawan (1.5.6) / CR kas; terima_kasbon = DR kas / CR Uang Muka Karyawan. Tidak ada efek stok.",
       "confirm_template": "POSTING draft buku kas {id} menjadi jurnal (satu jurnal per baris)? Saldo kas dan akun lawan akan berubah.",
-      "accessNote": "Pemegang izin edit modul Jurnal (sama dengan membuat jurnal manual). Aktor AIRA level Standar selalu lewat antrian persetujuan.",
+      "accessNote": "Pemegang izin edit modul Jurnal (sama dengan membuat jurnal manual). Akun lawan mengikuti aturan jurnal manual: akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability journal.control (default hanya Admin); akun Uang Muka Customer/Supplier selalu ditolak. Untuk pengajuan yang disetujui, hak yang dipakai adalah hak pengaju. Aktor AIRA level Standar selalu lewat antrian persetujuan.",
       "prerequisites": [
         "Draft berstatus Draft atau Sebagian Diposting.",
         "Setiap baris non-skip punya akun lawan valid (detail, aktif, bukan akun kas).",
+        "Baris ke akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) hanya untuk pemegang journal.control (Admin); akun uang muka Customer/Supplier tidak pernah bisa.",
         "Tahun buku terbuka untuk tanggal tiap baris."
       ],
       "errors": [
         "400: baris bermasalah (rowErrors) - tidak ada yang diposting",
+        "400 ACCOUNT_CONTROL (per baris): akun lawan adalah akun kontrol dan pemosting tidak punya journal.control, atau akun uang muka (selalu ditolak); mode partial: baris itu gagal dengan failed[].code = ACCOUNT_CONTROL, baris lain tetap diposting",
+        "400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE (per baris): akun lawan tidak ada, akun grup, atau tidak aktif",
         "400: draft sudah diposting",
         "400: tahun buku ditutup untuk tanggal baris",
         "400 PERIOD_LOCKED: tanggal baris pada atau sebelum tanggal kunci periode bulanan (mode partial: baris itu gagal, baris lain tetap diposting)",

@@ -27,15 +27,25 @@ import { postCashBookDraft } from '../cashBookDraftPost';
 import { BusinessError } from '../../utils/errors';
 
 const ACCOUNTS = [
-  { id: 'acc-cash', accountNumber: '1.1.1', name: 'Kas Kecil', isGroup: false, isActive: true },
-  { id: 'acc-adv', accountNumber: '1.5.6', name: 'Uang Muka Karyawan', isGroup: false, isActive: true },
-  { id: 'acc-exp', accountNumber: '8.7', name: 'Beban Lain-lain', isGroup: false, isActive: true },
-  { id: 'acc-inc', accountNumber: '7.4', name: 'Pendapatan Lain-lain', isGroup: false, isActive: true },
-  { id: 'acc-atk', accountNumber: '6.1', name: 'Beban ATK', isGroup: false, isActive: true },
-  { id: 'acc-bbm', accountNumber: '6.2', name: 'Beban BBM', isGroup: false, isActive: true },
-  { id: 'acc-sales', accountNumber: '4.1', name: 'Penjualan', isGroup: false, isActive: true },
-  { id: 'acc-grp', accountNumber: '6', name: 'Beban', isGroup: true, isActive: true },
-  { id: 'acc-off', accountNumber: '6.9', name: 'Nonaktif', isGroup: false, isActive: false },
+  { id: 'acc-cash', accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', isGroup: false, isActive: true },
+  { id: 'acc-adv', accountNumber: '1.5.6', name: 'Uang Muka Karyawan', rootType: 'ASSET', isGroup: false, isActive: true },
+  { id: 'acc-exp', accountNumber: '8.7', name: 'Beban Lain-lain', rootType: 'EXPENSE', isGroup: false, isActive: true },
+  { id: 'acc-inc', accountNumber: '7.4', name: 'Pendapatan Lain-lain', rootType: 'REVENUE', isGroup: false, isActive: true },
+  { id: 'acc-atk', accountNumber: '6.1', name: 'Beban ATK', rootType: 'EXPENSE', isGroup: false, isActive: true },
+  { id: 'acc-bbm', accountNumber: '6.2', name: 'Beban BBM', rootType: 'EXPENSE', isGroup: false, isActive: true },
+  { id: 'acc-sales', accountNumber: '4.1', name: 'Penjualan', rootType: 'REVENUE', isGroup: false, isActive: true },
+  { id: 'acc-grp', accountNumber: '6', name: 'Beban', rootType: 'EXPENSE', isGroup: true, isActive: true },
+  { id: 'acc-off', accountNumber: '6.9', name: 'Nonaktif', rootType: 'EXPENSE', isGroup: false, isActive: false },
+  { id: 'acc-ar', accountNumber: '1.2.1', name: 'Piutang Usaha', rootType: 'ASSET', isGroup: false, isActive: true },
+  { id: 'acc-vat-in', accountNumber: '1.4.1', name: 'PPN Masukan', rootType: 'ASSET', isGroup: false, isActive: true },
+  { id: 'acc-cdep', accountNumber: '2.1.2', name: 'Uang Muka Customer', rootType: 'LIABILITY', isGroup: false, isActive: true },
+];
+
+/** Control and tax role mappings seen by the account guard (loadControlAccountMap). */
+const ROLE_MAPPINGS = [
+  { role: 'AR', accountId: 'acc-ar' },
+  { role: 'TAX_INPUT', accountId: 'acc-vat-in' },
+  { role: 'CUSTOMER_DEPOSIT', accountId: 'acc-cdep' },
 ];
 
 const matches = (obj: any, where: any): boolean =>
@@ -61,7 +71,9 @@ function makeDb(opts: { existingRows?: any[]; learned?: any[] } = {}) {
     },
     systemAccountMapping: {
       findFirst: vi.fn(async ({ where }: any) => ({ OTHER_EXPENSE: { accountId: 'acc-exp' }, OTHER_INCOME: { accountId: 'acc-inc' } } as any)[where.role] ?? null),
+      findMany: vi.fn(async ({ where }: any) => ROLE_MAPPINGS.filter((m) => where.role.in.includes(m.role))),
     },
+    inventoryItem: { findMany: vi.fn(async () => []) },
     cashBookLearnedMap: {
       findMany: vi.fn(async () => maps),
       findUnique: vi.fn(async ({ where }: any) => maps.find((m) => m.pattern === where.pattern_txnType.pattern && m.txnType === where.pattern_txnType.txnType) ?? null),
@@ -98,7 +110,8 @@ function makeDb(opts: { existingRows?: any[]; learned?: any[] } = {}) {
       count: vi.fn(async ({ where }: any) => [...rows.values()].filter((r) => matches(r, where)).length),
     },
     user: { findUnique: vi.fn(async () => ({ id: 'u1', fullName: 'Staf' })) },
-    journalEntry: { findMany: vi.fn(async ({ where }: any) => where.id.in.map((id: string) => ({ id, entryNumber: `JV-${id}` }))) },
+    // By id: the posted rows' journals. Otherwise the remap journals of loadFormerRoleAccounts (none).
+    journalEntry: { findMany: vi.fn(async ({ where }: any) => (where.id ? where.id.in.map((id: string) => ({ id, entryNumber: `JV-${id}` })) : [])) },
   };
   const db: any = { ...tx, $transaction: async (fn: any) => fn(tx) };
   return { db, tx };
@@ -356,7 +369,9 @@ describe('postCashBookDraft', () => {
     expect(res).toMatchObject({ status: 'Posted', postedCount: 2, failed: [], totalAmount: 400 });
     expect(postJournal).toHaveBeenCalledTimes(2);
     const [, first] = postJournal.mock.calls[0] as [unknown, any];
-    expect(first).toMatchObject({ actorId: 'poster-1', fiscalYearId: 'fy1' });
+    expect(first).toMatchObject({ actorId: 'poster-1', fiscalYearId: 'fy1', sourceType: 'CASH_BOOK' });
+    // The manual journal rule without journal.control, so postJournal refuses control accounts too.
+    expect(first.accountRule).toMatchObject({ label: 'Akun jurnal', allowControl: false });
     expect(first.narration).toContain('DKB-202610-0001 #1');
     expect(first.lines).toEqual([
       { accountId: 'acc-atk', debit: 100, credit: 0, description: 'Beli ATK' },
@@ -443,7 +458,7 @@ describe('postCashBookDraft', () => {
     tx.rows.get(draftRows(tx)[0].id).accountId = 'acc-grp'; // becomes invalid
     const res = await postCashBookDraft(db, id, 'u1', { partial: true });
     expect(res).toMatchObject({ status: 'PartiallyPosted', postedCount: 2 });
-    expect(res.failed).toEqual([{ idx: 1, error: expect.stringMatching(/Akun lawan tidak valid/) }]);
+    expect(res.failed).toEqual([{ idx: 1, error: 'Akun jurnal: 6 Beban adalah akun grup; pilih akun detail.', code: 'ACCOUNT_GROUP' }]);
     expect(postJournal).toHaveBeenCalledTimes(2);
     expect(draftRows(tx)[0].error).toBeTruthy();
     expect(tx.drafts.get(id).status).toBe('PartiallyPosted');
@@ -454,6 +469,65 @@ describe('postCashBookDraft', () => {
     expect(again).toMatchObject({ status: 'Posted', postedCount: 1 });
     expect(postJournal).toHaveBeenCalledTimes(1);
     expect(tx.drafts.get(id).status).toBe('Posted');
+  });
+
+  describe('control accounts (manual journal rule)', () => {
+    const rows = [
+      { date: '2026-10-03', description: 'Beli ATK', keluar: 100, accountCode: '6.1', confidence: 0.9 },
+      { date: '2026-10-04', description: 'Terima pelunasan', masuk: 300, accountCode: '4.1', confidence: 0.9 },
+    ];
+
+    it('partial without journal.control: the Cr Piutang row fails ACCOUNT_CONTROL, the other row is posted', async () => {
+      const { db, tx, id } = await seeded(rows);
+      tx.rows.get(draftRows(tx)[1].id).accountId = 'acc-ar';
+      const res = await postCashBookDraft(db, id, 'u1', { partial: true });
+      expect(res).toMatchObject({ status: 'PartiallyPosted', postedCount: 1 });
+      expect(res.failed).toEqual([
+        {
+          idx: 2,
+          code: 'ACCOUNT_CONTROL',
+          error:
+            'Akun jurnal: akun 1.2.1 Piutang Usaha adalah akun kontrol Piutang Usaha dan tidak boleh diposting langsung. Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.',
+        },
+      ]);
+      expect(postJournal).toHaveBeenCalledTimes(1);
+      expect((postJournal.mock.calls[0] as [unknown, any])[1].lines[0]).toMatchObject({ accountId: 'acc-atk' });
+      expect(draftRows(tx)[1]).toMatchObject({ journalEntryId: null, error: expect.stringContaining('akun kontrol Piutang Usaha') });
+    });
+
+    it('all-or-nothing without journal.control: a tax account row aborts the post', async () => {
+      const { db, tx, id } = await seeded(rows);
+      tx.rows.get(draftRows(tx)[0].id).accountId = 'acc-vat-in';
+      const err = await postCashBookDraft(db, id, 'u1').catch((e) => e);
+      expect(err).toBeInstanceOf(RowErrorsError);
+      expect(err.rowErrors).toEqual([expect.stringMatching(/^Baris 1: Akun jurnal: akun 1\.4\.1 PPN Masukan adalah akun kontrol PPN Masukan/)]);
+      expect(postJournal).not.toHaveBeenCalled();
+    });
+
+    it('with journal.control: the Cr Piutang row is posted under the manual rule that allows control accounts', async () => {
+      const { db, tx, id } = await seeded(rows);
+      tx.rows.get(draftRows(tx)[1].id).accountId = 'acc-ar';
+      const res = await postCashBookDraft(db, id, 'u1', { canControl: true });
+      expect(res).toMatchObject({ status: 'Posted', postedCount: 2, failed: [] });
+      const [, second] = postJournal.mock.calls[1] as [unknown, any];
+      expect(second.lines[1]).toMatchObject({ accountId: 'acc-ar', debit: 0, credit: 300 });
+      expect(second.accountRule.allowControl).toEqual(expect.arrayContaining(['AR', 'TAX_INPUT']));
+    });
+
+    it('a customer deposit account is refused even with journal.control', async () => {
+      const { db, tx, id } = await seeded(rows);
+      tx.rows.get(draftRows(tx)[1].id).accountId = 'acc-cdep';
+      const res = await postCashBookDraft(db, id, 'u1', { partial: true, canControl: true });
+      expect(res.failed).toEqual([
+        {
+          idx: 2,
+          code: 'ACCOUNT_CONTROL',
+          error:
+            'Akun jurnal: akun 2.1.2 Uang Muka Customer adalah akun kontrol Uang Muka Customer dan tidak boleh diposting langsung. Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.',
+        },
+      ]);
+      expect(postJournal).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('partial with nothing valid is an error, not a silent no-op', async () => {
