@@ -26,17 +26,29 @@ export function sanitizeCellValue(value: unknown): string {
   return str;
 }
 
+/** A parsed file: the rows, and per row the headers whose Excel cell was a number or formula (not text). */
+export interface ParsedFile {
+  rows: Record<string, string>[];
+  numericCells: Array<Record<string, boolean>>;
+}
+
 // Helper: Parse uploaded file to array of objects
 export async function parseFile(buffer: Buffer, filename: string): Promise<Record<string, string>[]> {
+  return (await parseFileDetailed(buffer, filename)).rows;
+}
+
+/** parseFile plus which cells were typed numbers, so amounts can tell 110000.00000000001 (a float) from text. */
+export async function parseFileDetailed(buffer: Buffer, filename: string): Promise<ParsedFile> {
   const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
 
   if (ext === '.csv') {
-    return parse(buffer, {
+    const rows = parse(buffer, {
       columns: true,
       skip_empty_lines: true,
       trim: true,
       bom: true,
     }) as Record<string, string>[];
+    return { rows, numericCells: rows.map(() => ({})) };
   }
 
   // Excel (.xlsx / .xls)
@@ -48,6 +60,7 @@ export async function parseFile(buffer: Buffer, filename: string): Promise<Recor
 
   const headers: string[] = [];
   const rows: Record<string, string>[] = [];
+  const numericCells: Array<Record<string, boolean>> = [];
 
   worksheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) {
@@ -60,6 +73,7 @@ export async function parseFile(buffer: Buffer, filename: string): Promise<Recor
       });
     } else {
       const rowData: Record<string, string> = {};
+      const numeric: Record<string, boolean> = {};
       // Initialize all headers with empty string (equivalent to defval: '')
       for (const h of headers) {
         rowData[h] = '';
@@ -72,12 +86,17 @@ export async function parseFile(buffer: Buffer, filename: string): Promise<Recor
           const resolved = (raw && typeof raw === 'object' && 'result' in raw)
             ? (raw as { result: unknown }).result
             : raw;
-          rowData[header] = String(resolved ?? '');
+          // A date cell becomes YYYY-MM-DD (String(date) would be a locale-dependent long text).
+          rowData[header] = resolved instanceof Date && !Number.isNaN(resolved.getTime())
+            ? resolved.toISOString().slice(0, 10)
+            : String(resolved ?? '');
+          if (typeof resolved === 'number') numeric[header] = true;
         }
       });
       rows.push(rowData);
+      numericCells.push(numeric);
     }
   });
 
-  return rows;
+  return { rows, numericCells };
 }

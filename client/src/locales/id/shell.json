@@ -378,6 +378,8 @@
     "formats": "Mendukung format CSV, XLSX, XLS (maks {{size}})",
     "chooseFile": "Pilih file import",
     "downloadTemplate": "Download Template Excel",
+    "allOrNothing": "Tidak ada jurnal yang diposting sebelum semua baris diperbaiki.",
+    "alreadyImported": "{{count}} jurnal sudah pernah diimpor dan dilewati:",
     "previewSummary": "{{valid}} data valid, {{errors}} error",
     "errorsCount_one": "Error ({{count}}):",
     "errorsCount_other": "Error ({{count}}):",
