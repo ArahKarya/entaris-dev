@@ -7,6 +7,9 @@ import { computeBalanceSheet } from '../services/reports/balanceSheet';
 import { logger } from '../lib/logger';
 import { compareAccountNumber } from '../utils/accountSort';
 import { buildTrialBalance } from '../utils/trialBalance';
+import { sumMoney } from '../utils/moneySum';
+import { computeImpact } from '../utils/accountBalance';
+import Decimal from 'decimal.js';
 import { asOfBound, businessToday, reportRange } from '../utils/businessDate';
 import operationalRouter from './reports/operational';
 import purchasingReportRouter from './reports/purchasing';
@@ -44,7 +47,7 @@ router.get('/trial-balance', async (req, res) => {
 
     const report = buildTrialBalance(
       accounts.map((a) => ({ ...a, accountType: a.accountType as string, rootType: a.rootType as string })),
-      entries.map((e) => ({ accountId: e.accountId, debit: Number(e._sum.debit || 0), credit: Number(e._sum.credit || 0) })),
+      entries.map((e) => ({ accountId: e.accountId, debit: e._sum.debit ?? 0, credit: e._sum.credit ?? 0 })),
     );
 
     return res.json(report);
@@ -83,7 +86,7 @@ router.get('/profit-loss', async (req, res) => {
     const summaryMap = new Map(
       entries.map((e) => [
         e.accountId,
-        { debit: Number(e._sum.debit || 0), credit: Number(e._sum.credit || 0) },
+        { debit: new Decimal(e._sum.debit?.toString() ?? 0), credit: new Decimal(e._sum.credit?.toString() ?? 0) },
       ])
     );
 
@@ -98,14 +101,14 @@ router.get('/profit-loss', async (req, res) => {
     const getBalance = (accountId: string): number => {
       const summ = summaryMap.get(accountId);
       const account = accountById.get(accountId);
-      let balance = 0;
+      let balance = new Decimal(0);
       if (summ && account) {
-        balance = account.rootType === 'REVENUE' ? summ.credit - summ.debit : summ.debit - summ.credit;
+        balance = account.rootType === 'REVENUE' ? summ.credit.minus(summ.debit) : summ.debit.minus(summ.credit);
       }
       for (const child of childrenOf.get(accountId) ?? []) {
-        balance += getBalance(child.id);
+        balance = balance.plus(getBalance(child.id));
       }
-      return balance;
+      return balance.toNumber();
     };
 
     const buildHierarchy = (parentId: string | null): any[] =>
@@ -139,15 +142,15 @@ router.get('/profit-loss', async (req, res) => {
     const revenueAccounts = buildRootItems('REVENUE');
     const expenseAccounts = buildRootItems('EXPENSE');
 
-    const totalRevenue = revenueAccounts.reduce((s: number, a: any) => s + Number(a.balance), 0);
-    const totalExpense = expenseAccounts.reduce((s: number, a: any) => s + Number(a.balance), 0);
+    const totalRevenue = sumMoney(revenueAccounts.map((a: any) => a.balance));
+    const totalExpense = sumMoney(expenseAccounts.map((a: any) => a.balance));
 
     return res.json({
       revenue: revenueAccounts,
       expense: expenseAccounts,
       totalRevenue,
       totalExpense,
-      netProfit: totalRevenue - totalExpense,
+      netProfit: sumMoney([totalRevenue, new Decimal(totalExpense).negated()]),
     });
   } catch (error) {
     logger.error({ error }, 'GET /reports/profit-loss error');
@@ -390,10 +393,7 @@ router.get('/ledger-book', async (req, res) => {
       for (const entry of openingEntries) {
         const account = accounts.find(a => a.id === entry.accountId);
         if (!account) continue;
-        const dr = Number(entry._sum.debit ?? 0);
-        const cr = Number(entry._sum.credit ?? 0);
-        const isDebitNormal = account.rootType === 'ASSET' || account.rootType === 'EXPENSE';
-        openingBalances.set(account.id, isDebitNormal ? (dr - cr) : (cr - dr));
+        openingBalances.set(account.id, computeImpact(account.rootType, entry._sum.debit ?? 0, entry._sum.credit ?? 0));
       }
     }
 
@@ -426,27 +426,24 @@ router.get('/ledger-book', async (req, res) => {
     const result = accounts
       .filter(account => entriesByAccount.has(account.id) || (openingBalances.get(account.id) ?? 0) !== 0)
       .map(account => {
-        const isDebitNormal = account.rootType === 'ASSET' || account.rootType === 'EXPENSE';
         const openingBalance = openingBalances.get(account.id) ?? 0;
-        let runningBalance = openingBalance;
+        let runningBalance = new Decimal(openingBalance);
 
         const entries = (entriesByAccount.get(account.id) ?? []).map(e => {
-          const debit = Number(e.debit);
-          const credit = Number(e.credit);
-          runningBalance += isDebitNormal ? (debit - credit) : (credit - debit);
+          runningBalance = runningBalance.plus(computeImpact(account.rootType, e.debit, e.credit));
           return {
             id: e.id,
             date: e.date,
-            debit,
-            credit,
+            debit: Number(e.debit),
+            credit: Number(e.credit),
             description: e.description,
             referenceType: e.referenceType,
-            runningBalance,
+            runningBalance: runningBalance.toNumber(),
           };
         });
 
-        const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
-        const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
+        const totalDebit = sumMoney(entries.map((e) => e.debit));
+        const totalCredit = sumMoney(entries.map((e) => e.credit));
 
         return {
           accountId: account.id,
@@ -457,7 +454,7 @@ router.get('/ledger-book', async (req, res) => {
           entries,
           totalDebit,
           totalCredit,
-          closingBalance: runningBalance,
+          closingBalance: runningBalance.toNumber(),
         };
       });
 

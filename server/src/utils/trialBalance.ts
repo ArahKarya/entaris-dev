@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { computeImpact } from './accountBalance';
 import { compareAccountNumber } from './accountSort';
 
@@ -11,8 +12,8 @@ export interface TrialBalanceAccount {
 
 export interface TrialBalanceSums {
   accountId: string;
-  debit: number;
-  credit: number;
+  debit: Decimal.Value;
+  credit: Decimal.Value;
 }
 
 export type TrialBalanceRow = TrialBalanceAccount & { debit: number; credit: number; balance: number };
@@ -34,9 +35,14 @@ export function buildTrialBalance(
     .sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber))
     .map((account) => {
       const s = sumMap.get(account.id);
-      const debit = Number(s?.debit || 0);
-      const credit = Number(s?.credit || 0);
-      return { ...account, debit, credit, balance: computeImpact(account.rootType, debit, credit) };
+      const debit = new Decimal(s?.debit ?? 0);
+      const credit = new Decimal(s?.credit ?? 0);
+      return {
+        ...account,
+        debit: debit.toNumber(),
+        credit: credit.toNumber(),
+        balance: computeImpact(account.rootType, debit, credit),
+      };
     })
     .filter((a) => a.debit !== 0 || a.credit !== 0);
 }
