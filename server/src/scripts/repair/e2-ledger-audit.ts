@@ -11,7 +11,7 @@
 // differ at all. Findings in closed years are reported but never fail a gate.
 //
 // Options: --out file.csv   --section <id> (repeatable)   --since YYYY-MM-DD (only rows created
-// on or after that business day)   --gate trigger|tolerance
+// on or after that business day; open fiscal years are always checked in full, because a delete or cancel of an old row cannot be dated)   --gate trigger|tolerance
 // Exit code: 0 clean, 1 gate findings, 2 error.
 //
 // Usage (from server/, DATABASE_URL set):
@@ -19,15 +19,17 @@
 //   (or `npx tsx src/scripts/repair/e2-ledger-audit.ts …` from a source checkout)
 
 import { writeFileSync } from 'node:fs';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { auditCsv, gateExitCode, runLedgerAudit } from '../../services/ledger/ledgerAudit';
 import { parseAuditArgs } from '../../services/ledger/ledgerAudit/args';
 
 async function main(): Promise<number> {
   const opts = parseAuditArgs(process.argv.slice(2));
-  // One read transaction, so every section sees the same snapshot.
+  // One repeatable-read transaction, so every section sees the same snapshot even while users post.
   const result = await prisma.$transaction((tx) => runLedgerAudit(tx, { only: opts.sections, since: opts.since ?? undefined }), {
     timeout: 300000,
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
   });
   for (const s of result.sections) {
     const gate = s.gate ? ` [gate ${s.gate}: ${s.gateRows} open-year finding(s)]` : '';

@@ -40,11 +40,11 @@ export const ledgerOnGroupOrInactiveSection: AuditSection = {
       key: r.account_id,
       label: `${r.account_number} ${r.name}`,
       date: businessDayOf(r.last_date),
-      amount: new Prisma.Decimal(r.debit).minus(r.credit).toFixed(2),
+      amount: new Prisma.Decimal(r.debit).minus(r.credit).abs().toFixed(2),
       count: r.entries,
       yearClosed: null,
       gate: false,
-      detail: `${r.entries} active ledger row(s); debit ${r.debit}, credit ${r.credit}; amount is debit minus credit; date is the latest row`,
+      detail: `${r.entries} active ledger row(s); debit ${r.debit}, credit ${r.credit}; amount is the absolute difference, ${new Prisma.Decimal(r.debit).gte(r.credit) ? 'debit' : 'credit'} balance; date is the latest row`,
     }));
   },
 };

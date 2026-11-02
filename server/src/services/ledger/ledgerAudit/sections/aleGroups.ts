@@ -72,7 +72,9 @@ export async function findUnbalancedAleGroups(tx: Tx, query: AleGroupQuery = {})
     ? Prisma.sql`(s.diff <> 0 OR g.fy_count > 1)`
     : Prisma.sql`s.diff <> 0`;
   const yearFilter = fiscalYearId ? Prisma.sql`AND s.fiscal_year_id = ${fiscalYearId}` : Prisma.empty;
-  const sinceFilter = since ? Prisma.sql`AND s.last_created >= ${since}` : Prisma.empty;
+  // ALE has no updated_at, so a group that broke by a delete or cancel of an old row cannot be dated:
+  // open-year slices are always reported, --since only narrows closed years.
+  const sinceFilter = since ? Prisma.sql`AND (s.last_created >= ${since} OR fy.is_closed = false)` : Prisma.empty;
 
   const rows = await tx.$queryRaw<Row[]>`
     WITH slices AS (

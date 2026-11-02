@@ -194,6 +194,7 @@ d('ledger audit', () => {
       const balanced = randomUUID();
       const onlyCancelledRows = randomUUID();
       const old = randomUUID();
+      const oldClosed = randomUUID();
 
       await ale(tx, f, { id: missingId, debit: 100 });
       await ale(tx, f, { id: cancelled.id, debit: 50 });
@@ -206,6 +207,7 @@ d('ledger audit', () => {
       await ale(tx, f, { id: balanced, credit: 30 });
       await ale(tx, f, { id: onlyCancelledRows, debit: 9, cancelled: true });
       await ale(tx, f, { type: 'Payment', id: old, debit: 5, createdAt: new Date('2020-01-01T00:00:00Z') });
+      await ale(tx, f, { type: 'Payment', id: oldClosed, fy: f.fyB, debit: 5, createdAt: new Date('2020-01-01T00:00:00Z') });
 
       const found = await findUnbalancedAleGroups(tx, { fiscalYearId: f.fyA.id });
       const byRef = (id: string) => found.filter((g) => g.referenceId === id);
@@ -229,9 +231,11 @@ d('ledger audit', () => {
         expect.arrayContaining([[true, true], [false, false]]),
       );
 
-      // --since drops the old row only.
-      const recent = await findUnbalancedAleGroups(tx, { fiscalYearId: f.fyA.id, since: new Date('2021-01-01T00:00:00Z') });
-      expect(recent.filter((g) => g.referenceId === old)).toEqual([]);
+      // --since cannot date a delete / cancel of an old row, so an old open-year group still shows;
+      // an old closed-year group is dropped.
+      const recent = await findUnbalancedAleGroups(tx, { since: new Date('2021-01-01T00:00:00Z') });
+      expect(recent.filter((g) => g.referenceId === old)).toHaveLength(1);
+      expect(recent.filter((g) => g.referenceId === oldClosed)).toEqual([]);
       expect(recent.filter((g) => g.referenceId === payment)).toHaveLength(1);
 
       // Gate: open year A blocks, a run limited to closed year B never does.
@@ -293,7 +297,8 @@ d('ledger audit', () => {
       const res = await runLedgerAudit(tx, { only: ['ledgerOnGroupOrInactive', 'sourceNull'], fiscalYearId: f.fyA.id });
       const accts = rowsOf(res, 'ledgerOnGroupOrInactive');
       expect(accts.find((r) => r.key === f.group)).toMatchObject({ cause: 'group', amount: '40.00', count: 1 });
-      expect(accts.find((r) => r.key === f.inactive)).toMatchObject({ cause: 'inactive', amount: '-15.00' });
+      expect(accts.find((r) => r.key === f.inactive)).toMatchObject({ cause: 'inactive', amount: '15.00' });
+      expect(accts.find((r) => r.key === f.inactive)?.detail).toContain('credit balance');
       expect(accts.find((r) => r.key === f.cash)).toBeUndefined();
 
       const nulls = rowsOf(res, 'sourceNull');
@@ -309,6 +314,8 @@ d('ledger audit', () => {
       const importNoParty = await journal(tx, f, { sourceType: 'IMPORT' }, [{ accountId: f.ar, debit: 20 }, { accountId: f.cash, credit: 20 }]);
       const wrongType = await journal(tx, f, { sourceType: 'MANUAL' }, [{ accountId: f.ar, debit: 30, partyId: f.supplier }, { accountId: f.cash, credit: 30 }]);
       const deposit = await journal(tx, f, { sourceType: 'MANUAL' }, [{ accountId: f.customerDeposit, credit: 40, partyId: f.customer }, { accountId: f.cash, debit: 40 }]);
+      const both = await tx.party.create({ data: { name: `IT Both ${tag()}`, partyType: 'Both' } });
+      const bothLine = await journal(tx, f, { sourceType: 'MANUAL' }, [{ accountId: f.ar, debit: 25, partyId: both.id }, { accountId: f.cash, credit: 25 }]);
       const clean = await journal(tx, f, { sourceType: 'MANUAL' }, [{ accountId: f.ar, debit: 50, partyId: f.customer }, { accountId: f.cash, credit: 50 }]);
       const documentJournal = await journal(tx, f, { sourceType: 'SYSTEM_DOC' }, [{ accountId: f.contra, debit: 60, partyId: f.customer }, { accountId: f.cash, credit: 60 }]);
 
@@ -319,6 +326,7 @@ d('ledger audit', () => {
       expect(rows.find((r) => r.key === byItem(onPlain, f.contra))?.cause).toBe('party-on-non-role-account');
       expect(rows.find((r) => r.key === byItem(importNoParty, f.ar))?.cause).toBe('import-role-line-without-party');
       expect(rows.find((r) => r.key === byItem(wrongType, f.ar))?.cause).toBe('party-type-mismatch');
+      expect(rows.find((r) => r.key === byItem(bothLine, f.ar))?.cause).toBe('party-both-pending-e2pr9');
       expect(rows.find((r) => r.key === byItem(deposit, f.customerDeposit))?.cause).toBe('manual-deposit-account');
       expect(rows.filter((r) => clean.items.some((i) => i.id === r.key))).toEqual([]);
       expect(rows.filter((r) => documentJournal.items.some((i) => i.id === r.key))).toEqual([]);

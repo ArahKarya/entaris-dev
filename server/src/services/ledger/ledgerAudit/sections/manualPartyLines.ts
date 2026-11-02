@@ -39,6 +39,8 @@ const DEPOSIT_ROLES: readonly PartyRole[] = ['CUSTOMER_DEPOSIT', 'VENDOR_DEPOSIT
 
 function causeOf(r: Row, role: PartyRole | undefined): string | null {
   if (role && DEPOSIT_ROLES.includes(role)) return 'manual-deposit-account';
+  // A partner that is both customer and supplier is a known legacy state until E2-PR9.
+  if (r.party_id && r.party_type === 'Both' && role) return 'party-both-pending-e2pr9';
   const problem = partyLineProblem({ partyId: r.party_id, partyType: r.party_type }, role, 'strict');
   if (!problem) return null;
   if (problem.code === PARTY_NOT_ALLOWED) return 'party-on-non-role-account';
