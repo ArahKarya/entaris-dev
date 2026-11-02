@@ -78,7 +78,7 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
       setNarration(td?.narration || '');
       setLines(td?.items?.length > 0
         // Stored amounts are 2-decimal strings; the form works with numbers.
-        ? td.items.map((i: any) => ({ ...i, debit: Number(i.debit) || 0, credit: Number(i.credit) || 0 }))
+        ? td.items.map((i: JournalLine) => ({ ...i, debit: Number(i.debit) || 0, credit: Number(i.credit) || 0 }))
         : [defaultLine(), defaultLine()]);
     } else if (isOpen) {
       setName('');
