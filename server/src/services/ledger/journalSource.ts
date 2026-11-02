@@ -2,9 +2,11 @@
 // Pure: the backfill script gathers the facts (link columns, audit rows, templates) and this
 // module applies the rules top-down, first match wins. A NULL source means "not manual", so only
 // confident results should ever be written; low-confidence rows stay NULL for the accountant.
-// Also holds the Journal-menu allowlist: which source types the menu may cancel.
+// Also holds the Journal-menu allowlist (which source types the menu may cancel) and the one
+// sourceKey convention (sourceKeys): every writer builds its key here, so keys stay parseable.
 
 import { JournalSourceType } from '@prisma/client';
+import { businessDayOf } from '../../utils/businessDate';
 
 /**
  * Source types the Journal menu (PATCH /journals/:id/cancel) may cancel: journals a person made
@@ -22,6 +24,73 @@ export const MENU_CANCELLABLE_SOURCES: ReadonlySet<JournalSourceType> = new Set(
 /** True when the Journal menu may cancel a journal with this source type. */
 export function isMenuCancellableSource(sourceType: JournalSourceType | null): boolean {
   return sourceType !== null && MENU_CANCELLABLE_SOURCES.has(sourceType);
+}
+
+/** One sourceKey segment: non-empty and without ':' so a key splits back into its parts. */
+function keyPart(value: string): string {
+  if (!value || value.includes(':')) throw new Error(`sourceKey part "${value}" must be non-empty and contain no ":"`);
+  return value;
+}
+
+/** Business day of a run date as YYYY-MM-DD; a string must already be that day. */
+function dayPart(day: Date | string): string {
+  if (typeof day !== 'string') return businessDayOf(day);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`sourceKey day "${day}" must be YYYY-MM-DD`);
+  return day;
+}
+
+/** Opening-balance subledger of a party: receivable, payable, supplier or customer deposit. */
+export type OpeningPartyKind = 'AR' | 'AP' | 'VDEP' | 'CDEP';
+
+/**
+ * The sourceKey of each journal kind that has one (plan step 4 §2.5). Keys are not unique in the
+ * database: FY_CLOSE:<id> repeats after a reopen, and the guards that use a key check it themselves.
+ * Writers without a key (manual journal, cash book, unmigrated document writers) leave it NULL.
+ */
+export const sourceKeys = {
+  /** Year-end closing journal of a fiscal year. */
+  close: (fiscalYearId: string): string => `FY_CLOSE:${keyPart(fiscalYearId)}`,
+  /** Refund journal of a customer or supplier deposit. */
+  depositRefund: (depositId: string): string => `DEPOSIT_REFUND:${keyPart(depositId)}`,
+  /** One run of a recurring template on its business day. */
+  recurring: (templateId: string, runDay: Date | string): string => `RECURRING:${keyPart(templateId)}:${dayPart(runDay)}`,
+  /** Journal group n (1-based) of an imported file, keyed by the file's SHA-256 (first 16 hex chars). */
+  importGroup: (fileSha256: string, groupNo: number): string => {
+    if (!/^[0-9a-f]{16,64}$/.test(fileSha256)) throw new Error('sourceKey import hash must be lowercase SHA-256 hex');
+    if (!Number.isInteger(groupNo) || groupNo < 1) throw new Error(`sourceKey import group "${groupNo}" must be a positive integer`);
+    return `IMPORT:${fileSha256.slice(0, 16)}:${groupNo}`;
+  },
+  /** Balance-sheet reclass when a system account role moves from one account to another. */
+  remap: (role: string, fromAccountId: string, toAccountId: string, day: Date | string): string =>
+    `REMAP:${keyPart(role)}:${keyPart(fromAccountId)}:${keyPart(toAccountId)}:${dayPart(day).replace(/-/g, '')}`,
+  /** Opening balance of an account. */
+  openingAccount: (accountId: string): string => `OPENING:ACCOUNT:${keyPart(accountId)}`,
+  /** Opening balance of one subledger of a party. */
+  openingParty: (partyId: string, kind: OpeningPartyKind): string => `OPENING:PARTY:${keyPart(partyId)}:${kind}`,
+} as const;
+
+/** sourceKey of a deposit refund journal: the deposit payment it refunds. */
+export function depositRefundSourceKey(depositId: string): string {
+  return sourceKeys.depositRefund(depositId);
+}
+
+/** Prefix shared by every remap sourceKey (for startsWith queries). */
+export const REMAP_KEY_PREFIX = 'REMAP:';
+
+export interface RemapKey {
+  role: string;
+  fromAccountId: string;
+  toAccountId: string;
+  /** YYYYMMDD business day of the reclass. */
+  day: string;
+}
+
+/** Parts of a remap sourceKey, or null when the key is not one. */
+export function parseRemapSourceKey(key: string | null | undefined): RemapKey | null {
+  if (!key?.startsWith(REMAP_KEY_PREFIX)) return null;
+  const parts = key.split(':');
+  if (parts.length !== 5 || parts.slice(1).some((p) => !p) || !/^\d{8}$/.test(parts[4])) return null;
+  return { role: parts[1], fromAccountId: parts[2], toAccountId: parts[3], day: parts[4] };
 }
 
 export type ClassifyConfidence = 'high' | 'medium' | 'low';
@@ -85,7 +154,7 @@ export function classifyLegacyJournal(f: LegacyJournalFacts): LegacyClassificati
   const no = f.entryNumber;
   const narration = f.narration ?? '';
 
-  if (no.startsWith('CLOSE-')) return result('FY_CLOSE', 'high', 'number CLOSE-', `FY_CLOSE:${f.fiscalYearId}`);
+  if (no.startsWith('CLOSE-')) return result('FY_CLOSE', 'high', 'number CLOSE-', sourceKeys.close(f.fiscalYearId));
   if (no.startsWith('DEP-')) return result('DEPRECIATION', 'high', 'number DEP-');
   if (f.depreciationEntryCount > 0) return result('DEPRECIATION', 'high', 'linked depreciation entry');
   if (no.startsWith('OB-')) return result('OPENING', 'high', 'number OB- (COA opening balance)');

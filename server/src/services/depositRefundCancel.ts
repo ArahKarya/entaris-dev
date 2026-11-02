@@ -14,6 +14,7 @@ import { voidJournalInTx } from '../utils/journalCancel';
 import { cancelTrail, STALE_STATUS } from '../utils/cancelClaim';
 import { STALE_STATUS_ERROR } from './paymentRequestRules';
 import { systemAccounts } from './systemAccounts';
+import { depositRefundSourceKey } from './ledger/journalSource';
 
 type Tx = Prisma.TransactionClient;
 
@@ -59,10 +60,9 @@ const SIDES: Record<DepositSide, SideConfig> = {
 
 const REFUND_NARRATION = /^Refund UM (Vendor|Pelanggan):/;
 
-/** sourceKey of a refund journal: the deposit payment it refunds. */
-export function depositRefundSourceKey(depositId: string): string {
-  return `DEPOSIT_REFUND:${depositId}`;
-}
+// sourceKey of a refund journal (the deposit payment it refunds) lives with the other keys in
+// ledger/journalSource; re-exported here for the existing callers.
+export { depositRefundSourceKey };
 
 /**
  * True for a deposit refund journal: tagged DEPOSIT_REFUND, or legacy and unclassified (no source
