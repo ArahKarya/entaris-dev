@@ -9,6 +9,9 @@ import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
 import { upload, parseFile, sanitizeCellValue } from './shared';
+import { ACCOUNT_PARENT_NOT_FOUND } from '../../services/coa/accountRules';
+import { lockAccounts } from '../../services/coa/accountStructure';
+import { parseCoaRows, validateCoaRows } from '../../services/coa/coaImport';
 
 const router = Router();
 
@@ -22,123 +25,60 @@ router.post(
     try {
       const rows = await parseFile(req.file.buffer, req.file.originalname);
       const isPreview = req.query.preview === 'true';
-      const errors: Array<{ row: number; message: string }> = [];
-      const validTypes = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
 
-      interface COARow {
-        accountNumber: string;
-        name: string;
-        rootType: string;
-        accountType: string;
-        parentNumber?: string;
-        isGroup: boolean;
-        openingBalance: number;
-      }
-
-      const validRows: COARow[] = [];
-
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        const rowNum = i + 2;
-
-        const accountNumber = (r.accountNumber || r.account_number || '').trim();
-        const name = (r.name || '').trim();
-        const rootType = (r.rootType || r.root_type || '').trim().toUpperCase();
-        const accountType = (r.accountType || r.account_type || rootType).trim().toUpperCase();
-        const parentNumber = (r.parentNumber || r.parent_number || '').trim();
-        const isGroupStr = (r.isGroup || r.is_group || '').toString().trim().toLowerCase();
-        const isGroup = ['true', '1', 'yes', 'ya'].includes(isGroupStr);
-        const openingBalanceStr = (r.openingBalance || r.opening_balance || r.outstandingAmount || r.outstanding_amount || r.saldoAwal || r.saldo_awal || r.piutang || r.hutang || r.balance || '').toString().trim();
-        const openingBalance = openingBalanceStr ? parseFloat(openingBalanceStr) : 0;
-
-        if (!accountNumber) {
-          errors.push({ row: rowNum, message: 'Kolom "accountNumber" wajib diisi.' });
-          continue;
-        }
-        if (!name) {
-          errors.push({ row: rowNum, message: 'Kolom "name" wajib diisi.' });
-          continue;
-        }
-        if (!validTypes.includes(rootType)) {
-          errors.push({ row: rowNum, message: `rootType "${rootType}" tidak valid.` });
-          continue;
-        }
-        if (isNaN(openingBalance)) {
-          errors.push({ row: rowNum, message: `openingBalance "${openingBalanceStr}" bukan angka valid.` });
-          continue;
-        }
-
-        validRows.push({
-          accountNumber,
-          name: sanitizeCellValue(name),
-          rootType,
-          accountType,
-          parentNumber,
-          isGroup,
-          openingBalance,
-        });
-      }
-
-      // Auto-detect isGroup: any account that is a parent of another should be a group
-      for (const row of validRows) {
-        const parts = row.accountNumber.split('.');
-        // Mark all ancestor numbers as groups
-        for (let depth = 1; depth < parts.length; depth++) {
-          const ancestor = parts.slice(0, depth).join('.');
-          const ancestorRow = validRows.find((r) => r.accountNumber === ancestor);
-          if (ancestorRow) ancestorRow.isGroup = true;
-        }
-      }
-
-      // Sort by account number depth so parents are inserted before children
-      validRows.sort((a, b) => {
-        const depthA = a.accountNumber.split('.').length;
-        const depthB = b.accountNumber.split('.').length;
-        if (depthA !== depthB) return depthA - depthB;
-        return a.accountNumber.localeCompare(b.accountNumber, undefined, { numeric: true });
-      });
+      const { parsed, errors } = parseCoaRows(rows, sanitizeCellValue);
+      const validated = await validateCoaRows(prisma, parsed);
+      errors.push(...validated.errors);
+      const validRows = validated.rows;
 
       if (isPreview) {
-        return res.json({ data: validRows, errors, total: rows.length });
+        const data = validRows.map((r) => ({
+          accountNumber: r.accountNumber,
+          name: r.name,
+          rootType: r.rootType,
+          accountType: r.accountType,
+          parentNumber: r.parentNumber ?? '',
+          isGroup: r.isGroup,
+          openingBalance: r.openingBalance,
+        }));
+        return res.json({ data, errors, total: rows.length });
       }
 
-      // Insert valid rows — resolve parent by accountNumber
+      // Insert valid rows, parents first (validateCoaRows sorts by depth).
       let success = 0;
       for (const row of validRows) {
+        let account: Awaited<ReturnType<typeof prisma.account.upsert>>;
         try {
-          // Auto-derive parentNumber from accountNumber if not provided
-          // e.g. "1.4.5" → parent "1.4", "1.4" → parent "1", "1" → no parent
-          let effectiveParentNumber = row.parentNumber;
-          if (!effectiveParentNumber) {
-            const parts = row.accountNumber.split('.');
-            if (parts.length > 1) {
-              effectiveParentNumber = parts.slice(0, -1).join('.');
+          account = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+            let parentId: string | null = null;
+            if (row.parentNumber) {
+              const parent = await tx.account.findUnique({ where: { accountNumber: row.parentNumber }, select: { id: true } });
+              if (!parent) throw new BusinessError(`Induk ${row.parentNumber} tidak ditemukan atau barisnya ditolak.`, ACCOUNT_PARENT_NOT_FOUND);
+              parentId = parent.id;
             }
-          }
+            // Same lock order as the COA screen, so an edit and an import of the same account queue up.
+            await lockAccounts(tx, [parentId, row.existingId]);
 
-          let parentId: string | null = null;
-          if (effectiveParentNumber) {
-            const parent = await prisma.account.findUnique({
-              where: { accountNumber: effectiveParentNumber },
-              select: { id: true },
+            const upsertData = {
+              name: row.name,
+              rootType: row.rootType,
+              accountType: row.accountType,
+              parentId,
+              isGroup: row.isGroup,
+            };
+            return tx.account.upsert({
+              where: { accountNumber: row.accountNumber },
+              update: upsertData,
+              create: { accountNumber: row.accountNumber, ...upsertData },
             });
-            if (parent) parentId = parent.id;
-          }
-
-          const upsertData = {
-            name: row.name,
-            rootType: row.rootType as any,
-            accountType: row.accountType as any,
-            parentId,
-            isGroup: row.isGroup,
-          };
-
-          const account = await prisma.account.upsert({
-            where: { accountNumber: row.accountNumber },
-            update: upsertData,
-            create: { accountNumber: row.accountNumber, ...upsertData },
           });
+        } catch (err: any) {
+          const message = err instanceof BusinessError ? err.message : `Baris ${row.rowNum}: gagal menyimpan akun "${row.accountNumber}": ${err.message}`;
+          errors.push({ row: row.rowNum, message });
+          continue;
+        }
 
+        try {
           // Create opening balance GL journal for non-group accounts with balance
           if (row.openingBalance !== 0 && !row.isGroup) {
             const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
@@ -147,7 +87,7 @@ router.post(
               const absAmount = Math.abs(row.openingBalance);
 
               // ASSET/EXPENSE normal balance = debit, LIABILITY/EQUITY/REVENUE normal balance = credit
-              const isDebitNormal = ['ASSET', 'EXPENSE'].includes(row.rootType);
+              const isDebitNormal = ['ASSET', 'EXPENSE'].includes(account.rootType);
               const isPositive = row.openingBalance > 0;
 
               // Positive balance on debit-normal account → DR account / CR retained
@@ -224,9 +164,9 @@ router.post(
           if (err instanceof BusinessError) {
             // The account itself was saved; only its opening balance was left as it was.
             success++;
-            errors.push({ row: 0, message: `Akun "${row.accountNumber}" disimpan, tetapi ${err.message}` });
+            errors.push({ row: row.rowNum, message: `Akun "${row.accountNumber}" disimpan, tetapi ${err.message}` });
           } else {
-            errors.push({ row: 0, message: `Gagal insert akun "${row.accountNumber}": ${err.message}` });
+            errors.push({ row: row.rowNum, message: `Baris ${row.rowNum}: gagal membuat jurnal saldo awal akun "${row.accountNumber}": ${err.message}` });
           }
         }
       }
