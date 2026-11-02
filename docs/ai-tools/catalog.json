@@ -33551,7 +33551,7 @@
           "in": "body",
           "type": "date",
           "required": true,
-          "description": "Tanggal eksekusi berikutnya (YYYY-MM-DD)."
+          "description": "YYYY-MM-DD, tidak boleh sudah lewat."
         },
         {
           "name": "templateData",
@@ -33578,12 +33578,6 @@
                   "required": true
                 },
                 {
-                  "name": "partyId",
-                  "in": "body",
-                  "type": "uuid",
-                  "required": false
-                },
-                {
                   "name": "debit",
                   "in": "body",
                   "type": "number",
@@ -33604,7 +33598,7 @@
               ]
             }
           ],
-          "description": "Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, partyId?, description? }] }; harus seimbang karena eksekusi tidak memvalidasi balance."
+          "description": "Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan."
         }
       ],
       "output": {
@@ -33616,17 +33610,21 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "draftCapable": true,
-      "postingEffect": "Tidak ada efek GL/stok saat template dibuat. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).",
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA menunggu persetujuan manusia untuk aktor level Standar (aktor level direct atau alat yang dipin otomatis mengeksekusinya segera). Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).",
       "confirm_template": "Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?",
       "errors": [
-        "400: validasi skema (tipe/frekuensi tidak dikenal)"
+        "400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)",
+        "400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid",
+        "400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak",
+        "400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak",
+        "400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid"
       ],
       "related": [
         "rec_execute",
         "rec_update"
       ],
-      "doc": "### rec_create\n\n**Ringkasan:** Membuat template transaksi berulang. Hanya templateType journal yang dapat dieksekusi otomatis; tipe sales_invoice/purchase_invoice tersimpan tetapi eksekusinya belum didukung. templateData journal berisi narration dan items (accountId, debit, credit, partyId, description).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `POST /api/recurring` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `name` | body | `string` | ya | Nama template. |\n| `templateType` | body | enum: `journal`, `sales_invoice`, `purchase_invoice` | ya | journal \\| sales_invoice \\| purchase_invoice (hanya journal yang bisa dieksekusi). |\n| `frequency` | body | enum: `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | ya | daily \\| weekly \\| monthly \\| quarterly \\| yearly. |\n| `dayOfMonth` | body | `number` | tidak | Tanggal jalan dalam bulan untuk monthly/quarterly (opsional). |\n| `nextRunDate` | body | `date` | ya | Tanggal eksekusi berikutnya (YYYY-MM-DD). |\n| `templateData` | body | `object` | ya | Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, partyId?, description? }] }; harus seimbang karena eksekusi tidak memvalidasi balance. |\n| `templateData.narration` | body | `string` | ya |  |\n| `templateData.items` | body | `array<object>` | ya |  |\n| `templateData.items[].accountId` | body | `uuid` | ya |  |\n| `templateData.items[].partyId` | body | `uuid` | tidak |  |\n| `templateData.items[].debit` | body | `number` | ya |  |\n| `templateData.items[].credit` | body | `number` | ya |  |\n| `templateData.items[].description` | body | `string` | tidak |  |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_create\",\n  \"args\": {\n    \"name\": \"<name>\",\n    \"templateType\": \"journal\",\n    \"frequency\": \"daily\",\n    \"nextRunDate\": \"2026-01-31\",\n    \"templateData\": {}\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Buat template berulang <name> (journal, daily) mulai 2026-01-31. Setujui?\"\n}\n```\n\n**Isi hasil:** Template yang dibuat. HTTP 201.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok saat template dibuat. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).\n\n**Teks konfirmasi:** Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?\n\n**Error umum**\n\n- 400: validasi skema (tipe/frekuensi tidak dikenal)\n\n**Tool terkait:** [`rec_execute`](#rec_execute), [`rec_update`](#rec_update)\n",
+      "doc": "### rec_create\n\n**Ringkasan:** Membuat template transaksi berulang. Hanya templateType journal yang dapat dieksekusi otomatis; tipe sales_invoice/purchase_invoice tersimpan tetapi eksekusinya belum didukung. templateData journal berisi narration dan items (accountId, debit, credit, partyId, description).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `POST /api/recurring` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `name` | body | `string` | ya | Nama template. |\n| `templateType` | body | enum: `journal`, `sales_invoice`, `purchase_invoice` | ya | journal \\| sales_invoice \\| purchase_invoice (hanya journal yang bisa dieksekusi). |\n| `frequency` | body | enum: `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | ya | daily \\| weekly \\| monthly \\| quarterly \\| yearly. |\n| `dayOfMonth` | body | `number` | tidak | Tanggal jalan dalam bulan untuk monthly/quarterly (opsional). |\n| `nextRunDate` | body | `date` | ya | YYYY-MM-DD, tidak boleh sudah lewat. |\n| `templateData` | body | `object` | ya | Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan. |\n| `templateData.narration` | body | `string` | ya |  |\n| `templateData.items` | body | `array<object>` | ya |  |\n| `templateData.items[].accountId` | body | `uuid` | ya |  |\n| `templateData.items[].debit` | body | `number` | ya |  |\n| `templateData.items[].credit` | body | `number` | ya |  |\n| `templateData.items[].description` | body | `string` | tidak |  |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_create\",\n  \"args\": {\n    \"name\": \"<name>\",\n    \"templateType\": \"journal\",\n    \"frequency\": \"daily\",\n    \"nextRunDate\": \"2026-01-31\",\n    \"templateData\": {}\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Buat template berulang <name> (journal, daily) mulai 2026-01-31. Setujui?\"\n}\n```\n\n**Isi hasil:** Template yang dibuat. HTTP 201.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA menunggu persetujuan manusia untuk aktor level Standar (aktor level direct atau alat yang dipin otomatis mengeksekusinya segera). Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).\n\n**Teks konfirmasi:** Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?\n\n**Error umum**\n\n- 400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)\n- 400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid\n- 400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak\n- 400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak\n- 400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid\n\n**Tool terkait:** [`rec_execute`](#rec_execute), [`rec_update`](#rec_update)\n",
       "example": {
         "tool": "rec_create",
         "args": {
@@ -33670,14 +33668,14 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "draftCapable": true,
+      "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok (hanya menonaktifkan template; dapat diaktifkan kembali lewat rec_update).",
       "confirm_template": "Nonaktifkan template berulang {id}? Setujui?",
       "related": [
         "rec_update",
         "rec_list"
       ],
-      "doc": "### rec_delete\n\n**Ringkasan:** Menonaktifkan template transaksi berulang (soft delete: isActive=false). Data template dan jurnal yang sudah dibuat tidak dihapus.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `DELETE /api/recurring/:id` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID template (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Nonaktifkan template berulang <id>? Setujui?\"\n}\n```\n\n**Isi hasil:** { message: 'Template berulang dinonaktifkan.' }.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok (hanya menonaktifkan template; dapat diaktifkan kembali lewat rec_update).\n\n**Teks konfirmasi:** Nonaktifkan template berulang {id}? Setujui?\n\n**Tool terkait:** [`rec_update`](#rec_update), [`rec_list`](#rec_list)\n",
+      "doc": "### rec_delete\n\n**Ringkasan:** Menonaktifkan template transaksi berulang (soft delete: isActive=false). Data template dan jurnal yang sudah dibuat tidak dihapus.\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `DELETE /api/recurring/:id` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID template (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_delete\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Nonaktifkan template berulang <id>? Setujui?\"\n}\n```\n\n**Isi hasil:** { message: 'Template berulang dinonaktifkan.' }.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok (hanya menonaktifkan template; dapat diaktifkan kembali lewat rec_update).\n\n**Teks konfirmasi:** Nonaktifkan template berulang {id}? Setujui?\n\n**Tool terkait:** [`rec_update`](#rec_update), [`rec_list`](#rec_list)\n",
       "example": {
         "tool": "rec_delete",
         "args": {
@@ -33718,7 +33716,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Tidak memvalidasi total debit = kredit, jadi template harus seimbang. Tipe invoice: tidak ada efek.",
+      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi (manual maupun scheduler). Tipe invoice: tidak ada efek.",
       "confirm_template": "Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.",
       "prerequisites": [
         "Template bertipe journal dengan items valid",
@@ -33732,7 +33730,7 @@
         "rec_list",
         "rec_update"
       ],
-      "doc": "### rec_execute\n\n**Ringkasan:** Menjalankan satu template berulang sekarang. Untuk tipe journal langsung membuat dan memposting Jurnal Umum bertanggal hari ini; tipe lain mengembalikan success=false. Setelah berhasil, lastRunDate dan nextRunDate diperbarui.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `POST /api/recurring/:id/execute` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID template (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_execute\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Jalankan template berulang <id> sekarang? Jurnal akan langsung diposting.\"\n}\n```\n\n**Isi hasil:** { success, result (jurnal) } atau { success: false, error }.\n\n**Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Tidak memvalidasi total debit = kredit, jadi template harus seimbang. Tipe invoice: tidak ada efek.\n\n**Teks konfirmasi:** Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.\n\n**Prasyarat**\n\n- Template bertipe journal dengan items valid\n- Periode fiskal terbuka\n\n**Error umum**\n\n- 404: Template tidak ditemukan\n- success=false: tipe belum didukung / gagal membuat jurnal\n\n**Tool terkait:** [`rec_list`](#rec_list), [`rec_update`](#rec_update)\n",
+      "doc": "### rec_execute\n\n**Ringkasan:** Menjalankan satu template berulang sekarang. Untuk tipe journal langsung membuat dan memposting Jurnal Umum bertanggal hari ini; tipe lain mengembalikan success=false. Setelah berhasil, lastRunDate dan nextRunDate diperbarui.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `POST /api/recurring/:id/execute` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID template (UUID). |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_execute\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Jalankan template berulang <id> sekarang? Jurnal akan langsung diposting.\"\n}\n```\n\n**Isi hasil:** { success, result (jurnal) } atau { success: false, error }.\n\n**Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi (manual maupun scheduler). Tipe invoice: tidak ada efek.\n\n**Teks konfirmasi:** Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.\n\n**Prasyarat**\n\n- Template bertipe journal dengan items valid\n- Periode fiskal terbuka\n\n**Error umum**\n\n- 404: Template tidak ditemukan\n- success=false: tipe belum didukung / gagal membuat jurnal\n\n**Tool terkait:** [`rec_list`](#rec_list), [`rec_update`](#rec_update)\n",
       "example": {
         "tool": "rec_execute",
         "args": {
@@ -33869,12 +33867,6 @@
                   "required": true
                 },
                 {
-                  "name": "partyId",
-                  "in": "body",
-                  "type": "uuid",
-                  "required": false
-                },
-                {
                   "name": "debit",
                   "in": "body",
                   "type": "number",
@@ -33894,7 +33886,8 @@
                 }
               ]
             }
-          ]
+          ],
+          "description": "Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan."
         },
         {
           "name": "isActive",
@@ -33913,17 +33906,22 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "draftCapable": true,
-      "postingEffect": "Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya.",
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya. Selalu menunggu persetujuan (tidak draft-capable).",
       "confirm_template": "Ubah template berulang {id}. Setujui?",
       "errors": [
-        "404/500: template tidak ditemukan"
+        "400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)",
+        "400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid",
+        "400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak",
+        "400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak",
+        "400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid",
+        "404: template tidak ditemukan (rec_update)"
       ],
       "related": [
         "rec_list",
         "rec_delete"
       ],
-      "doc": "### rec_update\n\n**Ringkasan:** Mengubah template transaksi berulang (nama, tipe, frekuensi, tanggal berikutnya, data template) atau mengaktifkan/menonaktifkannya lewat isActive. Semua field opsional (parsial).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `PUT /api/recurring/:id` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID template (UUID). |\n| `name` | body | `string` | tidak | Nama. |\n| `templateType` | body | enum: `journal`, `sales_invoice`, `purchase_invoice` | tidak |  |\n| `frequency` | body | enum: `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | tidak |  |\n| `dayOfMonth` | body | `number` | tidak |  |\n| `nextRunDate` | body | `date` | tidak |  |\n| `templateData` | body | `object` | tidak |  |\n| `templateData.narration` | body | `string` | ya |  |\n| `templateData.items` | body | `array<object>` | ya |  |\n| `templateData.items[].accountId` | body | `uuid` | ya |  |\n| `templateData.items[].partyId` | body | `uuid` | tidak |  |\n| `templateData.items[].debit` | body | `number` | ya |  |\n| `templateData.items[].credit` | body | `number` | ya |  |\n| `templateData.items[].description` | body | `string` | tidak |  |\n| `isActive` | body | `boolean` | tidak | false = nonaktifkan template. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_update\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah template berulang <id>. Setujui?\"\n}\n```\n\n**Isi hasil:** Template setelah diubah.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya.\n\n**Teks konfirmasi:** Ubah template berulang {id}. Setujui?\n\n**Error umum**\n\n- 404/500: template tidak ditemukan\n\n**Tool terkait:** [`rec_list`](#rec_list), [`rec_delete`](#rec_delete)\n",
+      "doc": "### rec_update\n\n**Ringkasan:** Mengubah template transaksi berulang (nama, tipe, frekuensi, tanggal berikutnya, data template) atau mengaktifkan/menonaktifkannya lewat isActive. Semua field opsional (parsial).\n\n- **Risk / tier:** `write` / Draft/Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)\n- **Handler:** `PUT /api/recurring/:id` (src/routes/recurring.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID template (UUID). |\n| `name` | body | `string` | tidak | Nama. |\n| `templateType` | body | enum: `journal`, `sales_invoice`, `purchase_invoice` | tidak |  |\n| `frequency` | body | enum: `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | tidak |  |\n| `dayOfMonth` | body | `number` | tidak |  |\n| `nextRunDate` | body | `date` | tidak |  |\n| `templateData` | body | `object` | tidak | Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan. |\n| `templateData.narration` | body | `string` | ya |  |\n| `templateData.items` | body | `array<object>` | ya |  |\n| `templateData.items[].accountId` | body | `uuid` | ya |  |\n| `templateData.items[].debit` | body | `number` | ya |  |\n| `templateData.items[].credit` | body | `number` | ya |  |\n| `templateData.items[].description` | body | `string` | tidak |  |\n| `isActive` | body | `boolean` | tidak | false = nonaktifkan template. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"rec_update\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah template berulang <id>. Setujui?\"\n}\n```\n\n**Isi hasil:** Template setelah diubah.\n\n**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya. Selalu menunggu persetujuan (tidak draft-capable).\n\n**Teks konfirmasi:** Ubah template berulang {id}. Setujui?\n\n**Error umum**\n\n- 400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)\n- 400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid\n- 400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak\n- 400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak\n- 400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid\n- 404: template tidak ditemukan (rec_update)\n\n**Tool terkait:** [`rec_list`](#rec_list), [`rec_delete`](#rec_delete)\n",
       "example": {
         "tool": "rec_update",
         "args": {
