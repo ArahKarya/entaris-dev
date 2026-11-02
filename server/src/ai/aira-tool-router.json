@@ -1686,7 +1686,7 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "draftCapable": true,
+      "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok (hanya menonaktifkan template; dapat diaktifkan kembali lewat rec_update).",
       "confirm_template": "Nonaktifkan template berulang {id}? Setujui?",
       "related": [
@@ -25771,7 +25771,7 @@
           "in": "body",
           "type": "date",
           "required": true,
-          "description": "Tanggal eksekusi berikutnya (YYYY-MM-DD)."
+          "description": "YYYY-MM-DD, tidak boleh sudah lewat."
         },
         {
           "name": "templateData",
@@ -25824,7 +25824,7 @@
               ]
             }
           ],
-          "description": "Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, partyId?, description? }] }; harus seimbang karena eksekusi tidak memvalidasi balance."
+          "description": "Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan."
         }
       ],
       "output": {
@@ -25836,11 +25836,15 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "draftCapable": true,
-      "postingEffect": "Tidak ada efek GL/stok saat template dibuat. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).",
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA selalu menunggu persetujuan. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).",
       "confirm_template": "Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?",
       "errors": [
-        "400: validasi skema (tipe/frekuensi tidak dikenal)"
+        "400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)",
+        "400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid",
+        "400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak",
+        "400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak",
+        "400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid"
       ],
       "related": [
         "rec_execute",
@@ -25880,7 +25884,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Tidak memvalidasi total debit = kredit, jadi template harus seimbang. Tipe invoice: tidak ada efek.",
+      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi. Tipe invoice: tidak ada efek.",
       "confirm_template": "Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.",
       "prerequisites": [
         "Template bertipe journal dengan items valid",
@@ -33431,7 +33435,8 @@
                 }
               ]
             }
-          ]
+          ],
+          "description": "Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan."
         },
         {
           "name": "isActive",
@@ -33450,11 +33455,16 @@
       "enabled": true,
       "level": 1,
       "phase": 1,
-      "draftCapable": true,
-      "postingEffect": "Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya.",
+      "draftCapable": false,
+      "postingEffect": "Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya. Selalu menunggu persetujuan (tidak draft-capable).",
       "confirm_template": "Ubah template berulang {id}. Setujui?",
       "errors": [
-        "404/500: template tidak ditemukan"
+        "400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)",
+        "400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid",
+        "400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak",
+        "400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak",
+        "400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid",
+        "404: template tidak ditemukan (rec_update)"
       ],
       "related": [
         "rec_list",
