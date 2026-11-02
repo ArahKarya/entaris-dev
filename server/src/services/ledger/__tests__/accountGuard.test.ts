@@ -9,11 +9,15 @@ import {
   ACCOUNT_NOT_FOUND,
   ACCOUNT_ROOT_TYPE,
   CONTROL_ACCOUNT_ROLES,
+  DOCUMENT_RULE,
   INVENTORY_ITEM,
+  MANUAL_CONTROL_KINDS,
+  TEMPLATE_RULE,
   TAX_ACCOUNT_ROLES,
   assertPostableAccount,
   assertPostableAccounts,
   isControlAccount,
+  manualJournalRule,
   postableAccountProblem,
   type AccountLite,
 } from '../accountGuard';
@@ -167,5 +171,58 @@ describe('assertPostableAccounts', () => {
     const { tx: t } = tx();
     expect(await codeOf(assertPostableAccount(t, 'nope', rule))).toBe(ACCOUNT_NOT_FOUND);
     expect(await codeOf(assertPostableAccount(t, 'grp', rule))).toBe(ACCOUNT_GROUP);
+  });
+});
+
+describe('named rules', () => {
+  const ar = acc({ accountNumber: '1.2.1', name: 'Piutang Usaha (Dagang)', rootType: 'ASSET' });
+  const kindsOk = (r: Parameters<typeof postableAccountProblem>[1], kind: Parameters<typeof postableAccountProblem>[2]) =>
+    postableAccountProblem(ar, r, kind) === null;
+
+  it('manual journal kinds = every control role except the deposits, plus item inventory and tax', () => {
+    const deposits = ['CUSTOMER_DEPOSIT', 'VENDOR_DEPOSIT'];
+    expect([...MANUAL_CONTROL_KINDS].sort()).toEqual(
+      [...CONTROL_ACCOUNT_ROLES.filter((r) => !deposits.includes(r)), INVENTORY_ITEM, ...TAX_ACCOUNT_ROLES].sort(),
+    );
+  });
+
+  it('manualJournalRule(false) refuses control and tax accounts, naming the journal.control right', () => {
+    const r = manualJournalRule(false);
+    expect(r.alsoRestrict).toEqual(TAX_ACCOUNT_ROLES);
+    for (const kind of [...MANUAL_CONTROL_KINDS, 'CUSTOMER_DEPOSIT', 'VENDOR_DEPOSIT'] as const) expect(kindsOk(r, [kind]), kind).toBe(false);
+    expect(postableAccountProblem(ar, r, ['AR'])?.message).toBe(
+      'Akun jurnal: akun 1.2.1 Piutang Usaha (Dagang) adalah akun kontrol Piutang Usaha dan tidak boleh diposting langsung. Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.',
+    );
+    expect(kindsOk(r, null)).toBe(true);
+  });
+
+  it('manualJournalRule(true) allows control and tax accounts but never the deposit accounts', () => {
+    const r = manualJournalRule(true);
+    for (const kind of MANUAL_CONTROL_KINDS) expect(kindsOk(r, [kind]), kind).toBe(true);
+    expect(kindsOk(r, ['CUSTOMER_DEPOSIT'])).toBe(false);
+    expect(kindsOk(r, ['VENDOR_DEPOSIT'])).toBe(false);
+  });
+
+  it('TEMPLATE_RULE refuses every control and tax account', () => {
+    for (const kind of [...MANUAL_CONTROL_KINDS, 'CUSTOMER_DEPOSIT', 'VENDOR_DEPOSIT'] as const) expect(kindsOk(TEMPLATE_RULE, [kind]), kind).toBe(false);
+    expect(TEMPLATE_RULE.alsoRestrict).toEqual(TAX_ACCOUNT_ROLES);
+  });
+
+  it('DOCUMENT_RULE allows every control account but still needs an active detail account', () => {
+    expect(kindsOk(DOCUMENT_RULE, ['AR', 'CUSTOMER_DEPOSIT', 'INVENTORY_ITEM'])).toBe(true);
+    expect(postableAccountProblem(acc({ isGroup: true }), DOCUMENT_RULE, null)?.code).toBe(ACCOUNT_GROUP);
+    expect(postableAccountProblem(acc({ isActive: false }), DOCUMENT_RULE, null)?.code).toBe(ACCOUNT_INACTIVE);
+  });
+
+  it('rule messages translate to English', () => {
+    expect(translateMessage(postableAccountProblem(ar, manualJournalRule(false), ['AR'])!.message, 'en')).toBe(
+      'Journal account: account 1.2.1 Piutang Usaha (Dagang) is a control account (Accounts Receivable) and cannot be posted to directly. Requires the Journal to control accounts right (journal.control); deposit accounts only through the Deposits module.',
+    );
+    expect(translateMessage(postableAccountProblem(ar, manualJournalRule(true), ['CUSTOMER_DEPOSIT'])!.message, 'en')).toBe(
+      'Journal account: account 1.2.1 Piutang Usaha (Dagang) is a control account (Customer deposit) and cannot be posted to directly. Deposit accounts can only be corrected through the Deposits module.',
+    );
+    expect(translateMessage(postableAccountProblem(ar, TEMPLATE_RULE, ['TAX_OUTPUT'])!.message, 'en')).toBe(
+      'Template account: account 1.2.1 Piutang Usaha (Dagang) is a control account (Output VAT) and cannot be posted to directly. Recurring journal templates cannot use control or tax accounts.',
+    );
   });
 });

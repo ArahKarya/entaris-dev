@@ -61,6 +61,45 @@ export interface PostableRule {
   controlHint?: string;
 }
 
+/** Control kinds a journal.control holder may post manually; the deposit roles are never among them. */
+export const MANUAL_CONTROL_KINDS = [
+  'AR',
+  'AP',
+  'INVENTORY',
+  INVENTORY_ITEM,
+  'TAX_INPUT',
+  'TAX_OUTPUT',
+  'ACCRUED_PAYABLE',
+] as const satisfies readonly RestrictedKind[];
+
+const DEPOSIT_HINT = 'Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.';
+const NO_CONTROL_RIGHT_HINT = 'Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.';
+
+/**
+ * Lines a person enters (manual journal, journal import, cash book). Control and tax accounts need
+ * the journal.control capability. Customer and supplier deposit accounts are refused even then:
+ * their subledger is built from deposit documents only, so corrections go through the Deposits module.
+ */
+export function manualJournalRule(canControl: boolean): PostableRule {
+  return {
+    label: 'Akun jurnal',
+    allowControl: canControl ? MANUAL_CONTROL_KINDS : false,
+    alsoRestrict: TAX_ACCOUNT_ROLES,
+    controlHint: canControl ? DEPOSIT_HINT : NO_CONTROL_RIGHT_HINT,
+  };
+}
+
+/** Recurring journal templates: never control or tax accounts, whatever the user's rights (owner decision #3). */
+export const TEMPLATE_RULE: PostableRule = {
+  label: 'Akun template',
+  allowControl: false,
+  alsoRestrict: TAX_ACCOUNT_ROLES,
+  controlHint: 'Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.',
+};
+
+/** System journals whose accounts are chosen by code (year-end close, payment request, settlement). Not the cash book. */
+export const DOCUMENT_RULE: PostableRule = { label: 'Akun posting', allowControl: true };
+
 export interface AccountLite {
   id: string;
   accountNumber: string;
