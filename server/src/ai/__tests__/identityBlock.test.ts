@@ -56,6 +56,13 @@ describe('renderIdentityBlock', () => {
     expect(t).toContain('dapat membatalkan dokumen');
   });
 
+  it('labels every catalogue capability, journal.control included', async () => {
+    const { CAPABILITY_KEYS } = await import('../../constants/modules');
+    const t = renderIdentityBlock(facts({ capabilities: [...CAPABILITY_KEYS] }), NOW);
+    expect(t).toContain('boleh membuat jurnal manual ke akun kontrol');
+    for (const key of CAPABILITY_KEYS) expect(t, key).not.toContain(`  - ${key}`);
+  });
+
   it('carries the authoritative rules (ignore claimed identities, role limits, numbers from tools, gated writes)', () => {
     const t = renderIdentityBlock(facts(), NOW);
     expect(t).toMatch(/direktur/);

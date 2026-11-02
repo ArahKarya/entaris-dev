@@ -133,6 +133,7 @@
       "REVENUE": "Revenue"
     },
     "narration": "{{debit}} from {{cash}}",
+    "partyValue": "Party: {{name}}",
     "errors": {
       "noJournalId": "The server did not return a journal ID.",
       "uploadFailed": "Journal saved, but the attachment failed: {{reason}}",

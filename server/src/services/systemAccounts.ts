@@ -1,15 +1,41 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
+import { BusinessError } from '../utils/errors';
 import {
+  ACCOUNT_MAPPING_MISSING,
+  POSTING_SYSTEM_ROLES,
   SYSTEM_ACCOUNT_ROLES,
   REQUIRED_SYSTEM_ROLES,
   type SystemAccountRole,
 } from '../types/systemAccounts';
+import type { Prisma } from '@prisma/client';
 
-interface MappedAccount {
+export interface MappedAccount {
   id: string;
   accountNumber: string;
   name: string;
+}
+
+function missingMappingError(role: SystemAccountRole): BusinessError {
+  return new BusinessError(
+    `Akun sistem untuk "${SYSTEM_ACCOUNT_ROLES[role].label}" belum dikonfigurasi. Silakan atur di Pengaturan > Akun Sistem.`,
+    ACCOUNT_MAPPING_MISSING,
+  );
+}
+
+/**
+ * First account mapped to `role`, read through `tx` (never the process cache, so a mapping
+ * changed in the same transaction or by another instance is seen). Throws a 400-class
+ * BusinessError with ACCOUNT_MAPPING_MISSING when the role is unmapped.
+ */
+export async function mappedAccount(tx: Prisma.TransactionClient, role: SystemAccountRole): Promise<MappedAccount> {
+  const row = await tx.systemAccountMapping.findFirst({
+    where: { role },
+    orderBy: { sortOrder: 'asc' },
+    select: { account: { select: { id: true, accountNumber: true, name: true } } },
+  });
+  if (!row) throw missingMappingError(role);
+  return row.account;
 }
 
 class SystemAccountsService {
@@ -52,10 +78,7 @@ class SystemAccountsService {
     await this.ensureLoaded();
     const accounts = this.cache.get(role);
     if (!accounts || accounts.length === 0) {
-      const meta = SYSTEM_ACCOUNT_ROLES[role];
-      throw new Error(
-        `Akun sistem untuk "${meta.label}" belum dikonfigurasi. Silakan atur di Pengaturan > Akun Sistem.`,
-      );
+      throw missingMappingError(role);
     }
     return accounts[0];
   }
@@ -101,6 +124,27 @@ class SystemAccountsService {
       );
     } else {
       logger.info('Semua system account mappings sudah terkonfigurasi.');
+    }
+
+    // A posting role on a group or inactive account fails the next posting; make it loud at boot.
+    const broken = await prisma.systemAccountMapping.findMany({
+      where: {
+        role: { in: [...POSTING_SYSTEM_ROLES] },
+        account: { OR: [{ isGroup: true }, { isActive: false }] },
+      },
+      select: { role: true, account: { select: { accountNumber: true, name: true, isGroup: true, isActive: true } } },
+    });
+    if (broken.length > 0) {
+      logger.error(
+        {
+          mappings: broken.map((m) => ({
+            role: m.role,
+            account: `${m.account.accountNumber} ${m.account.name}`,
+            problem: m.account.isGroup ? 'group' : 'inactive',
+          })),
+        },
+        'System account mappings point at a group or inactive account; postings for these roles will fail. Run scripts/repair/e2-system-account-audit and fix them in Settings > System Accounts.',
+      );
     }
   }
 }

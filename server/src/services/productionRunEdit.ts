@@ -381,7 +381,6 @@ export async function editProductionRunInTx(
       itemId: output.itemId,
       qtyAvailable: output.quantity,
       unitCostNow: unitCost,
-      fiscalYearId: fiscalYear.id,
       userId,
       settleDate: txDate,
       source: { type: 'ProductionRun', refId: runId, refNo: oldRun.runNumber },

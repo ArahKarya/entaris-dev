@@ -133,6 +133,7 @@
       "REVENUE": "Pendapatan"
     },
     "narration": "{{debit}} dari {{cash}}",
+    "partyValue": "Pihak: {{name}}",
     "errors": {
       "noJournalId": "Server tidak mengembalikan ID jurnal.",
       "uploadFailed": "Jurnal tersimpan, tapi lampiran gagal: {{reason}}",

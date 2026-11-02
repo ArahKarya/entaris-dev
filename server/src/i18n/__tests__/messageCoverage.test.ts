@@ -25,6 +25,11 @@ const IGNORED = new Set<string>([
   'HTTP {0}',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
+  // Programming errors of the sourceKey builders (services/ledger/journalSource.ts sourceKeys), never reach a client.
+  'sourceKey part "{0}" must be non-empty and contain no ":"',
+  'sourceKey day "{0}" must be YYYY-MM-DD',
+  'sourceKey import hash must be lowercase SHA-256 hex',
+  'sourceKey import group "{0}" must be a positive integer',
   // Refusals of the one-time baseline capture script (scripts/repair/e1-close-baseline.ts), CLI only.
   '{0} is not a baseline-aware close check (known: {1})',
   '--allow-existing only goes with --check <id>',
@@ -34,6 +39,13 @@ const IGNORED = new Set<string>([
   // scripts/repair/e5-pi-approval-amount.ts, scripts/repair/e2-rupiah-only-check.ts), CLI only.
   '--apply needs --approved-by "<accountant name>"',
   'No active Admin user to record the audit rows under.',
+  // Refusals of the read-only ledger audit command line (scripts/repair/e2-ledger-audit.ts,
+  // services/ledger/ledgerAudit/args.ts), CLI only.
+  '{0} needs a value',
+  'Unknown section {0} (known: {1})',
+  '--since needs a date as YYYY-MM-DD, got {0}',
+  '--gate must be one of: {0}',
+  'Unknown argument: {0}',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */

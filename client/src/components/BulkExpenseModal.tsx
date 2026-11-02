@@ -29,6 +29,8 @@ interface ExpenseRow {
   debitAccountId: string;
   description: string;
   partyId: string;
+  /** Name of the chosen party; it goes into the narration, never on the expense line. */
+  partyName: string;
   amount: number | '';
   files: File[];
   status: RowStatus;
@@ -46,6 +48,7 @@ const makeEmptyRow = (): ExpenseRow => ({
   debitAccountId: '',
   description: '',
   partyId: '',
+  partyName: '',
   amount: '',
   files: [],
   status: 'pending',
@@ -60,16 +63,17 @@ const makeBatchNote = (d: string): string => {
 interface RowPartyPickerProps {
   id: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (value: string, name: string) => void;
   placeholder: string;
   emptyLabel: string;
   disabled?: boolean;
 }
 
 /** Per-row party picker: each row searches the server on its own. */
-function RowPartyPicker({ value, ...rest }: RowPartyPickerProps) {
-  const { pickerProps } = usePartyPicker({ selectedId: value || null });
-  return <OptionPicker {...pickerProps} value={value} {...rest} />;
+function RowPartyPicker({ value, onChange, ...rest }: RowPartyPickerProps) {
+  const { pickerProps, parties, selectedParty } = usePartyPicker({ selectedId: value || null });
+  const nameOf = (id: string) => (id === selectedParty?.id ? selectedParty.name : parties.find((p) => p.id === id)?.name) ?? '';
+  return <OptionPicker {...pickerProps} value={value} onChange={(v: string) => onChange(v, v ? nameOf(v) : '')} {...rest} />;
 }
 
 const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
@@ -185,7 +189,13 @@ const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
         const debitLabel = debitAcc ? `${debitAcc.accountNumber} ${debitAcc.name}` : '';
         const cashLabel = cashAcc ? `${cashAcc.accountNumber} ${cashAcc.name}` : '';
         const amount = Number(row.amount) || 0;
-        const narration = `[${batchNote}] ${row.description} (${t('bulkExpenseModal.narration', { debit: debitLabel, cash: cashLabel })})`;
+        // A party rides on the debit line only when that account carries one (partyRole from
+        // /coa/flat: receivable, payable, deposit); on an expense line it goes into the text
+        // instead (owner decision #6, E2-R4).
+        const partyOnLine = !!row.partyId && !!debitAcc?.partyRole;
+        const partyPart = row.partyId && row.partyName && !partyOnLine ? ` - ${t('bulkExpenseModal.partyValue', { name: row.partyName })}` : '';
+        const description = `${row.description}${partyPart}`;
+        const narration = `[${batchNote}] ${description} (${t('bulkExpenseModal.narration', { debit: debitLabel, cash: cashLabel })})`;
 
         const res = await api.post('/journals', {
           date,
@@ -193,17 +203,16 @@ const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
           items: [
             {
               accountId: row.debitAccountId,
-              partyId: row.partyId || null,
+              ...(partyOnLine ? { partyId: row.partyId } : {}),
               debit: amount,
               credit: 0,
-              description: row.description,
+              description,
             },
             {
               accountId: cashAccountId,
-              partyId: null,
               debit: 0,
               credit: amount,
-              description: row.description,
+              description,
             },
           ],
         });
@@ -402,7 +411,7 @@ const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
                 <RowPartyPicker
                   id={`bx-party-${row.tempId}`}
                   value={row.partyId}
-                  onChange={(v) => updateRow(row.tempId, { partyId: v })}
+                  onChange={(v, name) => updateRow(row.tempId, { partyId: v, partyName: name })}
                   placeholder={t('bulkExpenseModal.row.noParty')}
                   emptyLabel={t('bulkExpenseModal.row.noParty')}
                   disabled={locked}

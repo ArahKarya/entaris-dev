@@ -1,13 +1,13 @@
 // Price revision of a Submitted/Paid purchase invoice whose goods may already be consumed
 // (cancel + recreate could drive stock negative). Delta = (new rate - old rate) x qty, split by
 // qty: still in stock -> Persediaan + WAC correction; already out -> 5.11 variance (old COGS
-// untouched). Counter entry is always Hutang Usaha 2.1.1: delta > 0 CRs it, delta < 0 DRs it.
+// untouched). Counter entry is always the mapped AP account: delta > 0 CRs it, delta < 0 DRs it.
 
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
-import { systemAccounts } from '../services/systemAccounts';
+import { systemAccounts, mappedAccount } from '../services/systemAccounts';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
@@ -27,7 +27,6 @@ export interface RevisePurchaseInvoiceInput {
   reason: string;
 }
 
-const VARIANCE_ACCOUNT_NUMBER = '5.11';
 
 /**
  * Hitung berapa qty dari sebuah inbound batch (stockMovement STT) yang SUDAH
@@ -76,9 +75,8 @@ export async function revisePurchaseInvoiceInTx(
   const lineMap = new Map(invoice.items.map((it) => [it.id, it]));
 
   // Resolve accounts once.
-  const varianceAccount = await tx.account.findFirst({ where: { accountNumber: VARIANCE_ACCOUNT_NUMBER } });
-  if (!varianceAccount) throw new BusinessError(`Akun ${VARIANCE_ACCOUNT_NUMBER} (Selisih Harga Pembelian) tidak ditemukan.`);
-  const apAccount = await systemAccounts.getAccount('AP'); // 2.1.1 Hutang Usaha
+  const varianceAccount = await mappedAccount(tx, 'PURCHASE_PRICE_VARIANCE');
+  const apAccount = await mappedAccount(tx, 'AP');
   const defaultInv = await systemAccounts.getAccount('INVENTORY');
 
   // Journal lines accumulator (net per account → satu baris per akun).

@@ -14,6 +14,7 @@ import { compareAccountNumber } from '../utils/accountSort';
 import { systemAccountRenumberError } from '../utils/systemAccountGuard';
 import { planCreate, planUpdate } from '../services/coa/accountRules';
 import { accountIdsWithLedger, loadStructureFacts, lockAccounts } from '../services/coa/accountStructure';
+import { loadPartyRoleMap } from '../services/ledger/partyRules';
 
 const router = Router();
 
@@ -59,7 +60,11 @@ router.get('/flat', async (req, res) => {
     });
     const withFlag = await withLocked(accounts);
     withFlag.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
-    return res.json(withFlag);
+    // partyRole (AR, AP, CUSTOMER_DEPOSIT, VENDOR_DEPOSIT or null) tells a form whether a line on
+    // the account takes a party (E2-R4 'strict'); same role map as postJournal. An empty id list
+    // never throws PARTY_ROLE_AMBIGUOUS here: the posting reports that conflict.
+    const roles = await loadPartyRoleMap(prisma, []);
+    return res.json(withFlag.map((acc) => ({ ...acc, partyRole: roles.get(acc.id) ?? null })));
   } catch (error) {
     logger.error({ error }, 'GET /coa/flat error');
     return res.status(500).json({ error: 'Gagal mengambil daftar akun.' });
