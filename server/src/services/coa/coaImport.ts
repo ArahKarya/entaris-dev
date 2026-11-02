@@ -6,6 +6,7 @@
 import type { Prisma } from '@prisma/client';
 import {
   planImportRow,
+  type ImportRowInput,
   type ImportRowPlan,
   type ParentFacts,
 } from './accountRules';
@@ -14,6 +15,7 @@ import { loadImportFacts } from './accountStructure';
 type Db = Prisma.TransactionClient;
 
 export const ACCOUNT_IMPORT_DUPLICATE = 'ACCOUNT_IMPORT_DUPLICATE';
+export const ACCOUNT_IMPORT_STALE = 'ACCOUNT_IMPORT_STALE';
 
 export interface ImportRowError {
   row: number;
@@ -37,6 +39,9 @@ export interface CoaImportRow extends ImportRowPlan {
   rowNum: number;
   name: string;
   openingBalance: number;
+  /** What the row was planned from, so the write can plan it again under the locks. */
+  input: ImportRowInput;
+  hasChildInFile: boolean;
 }
 
 type RawRow = Record<string, string>;
@@ -134,10 +139,11 @@ export async function validateCoaRows(
     const parent = row.parentNumber
       ? accepted.get(row.parentNumber) ?? (rejected.has(row.parentNumber) ? null : facts.parents.get(row.parentNumber) ?? null)
       : null;
+    const childInFile = hasChildInFile.has(row.accountNumber);
     const plan = planImportRow(row, {
       existing: facts.existing.get(row.accountNumber) ?? null,
       parent,
-      hasChildInFile: hasChildInFile.has(row.accountNumber),
+      hasChildInFile: childInFile,
     });
     if (!plan.ok) {
       rejected.add(row.accountNumber);
@@ -150,8 +156,40 @@ export async function validateCoaRows(
       rootType: plan.data.rootType,
       isGroup: plan.data.isGroup,
     });
-    rows.push({ ...plan.data, rowNum: row.rowNum, name: row.name, openingBalance: row.openingBalance });
+    rows.push({
+      ...plan.data, rowNum: row.rowNum, name: row.name, openingBalance: row.openingBalance,
+      input: row, hasChildInFile: childInFile,
+    });
   }
   errors.sort((a, b) => a.row - b.row);
   return { rows, errors };
+}
+
+/**
+ * Step 3a, inside the row's write transaction and after its accounts are locked: read the stored
+ * facts again and plan the row again. The validation ran once over the whole file without locks,
+ * so a posting or an edit may have landed since; the row is written only if the plan still holds.
+ * Returns the parent's id for the write.
+ */
+export async function replanImportRow(
+  tx: Db,
+  row: CoaImportRow,
+): Promise<{ ok: true; parentId: string | null } | { ok: false; message: string; code: string }> {
+  const facts = await loadImportFacts(tx, [row.accountNumber, row.input.parentNumber].filter(Boolean));
+  const parent = row.input.parentNumber ? facts.parents.get(row.input.parentNumber) ?? null : null;
+  const plan = planImportRow(row.input, {
+    existing: facts.existing.get(row.accountNumber) ?? null,
+    parent,
+    hasChildInFile: row.hasChildInFile,
+  });
+  if (!plan.ok) return { ok: false, message: plan.message, code: plan.code };
+  const p = plan.data;
+  if (p.rootType !== row.rootType || p.isGroup !== row.isGroup || p.existingId !== row.existingId || p.parentNumber !== row.parentNumber) {
+    return {
+      ok: false,
+      code: ACCOUNT_IMPORT_STALE,
+      message: `Data akun ${row.accountNumber} berubah saat impor berjalan; baris ini dilewati. Unggah ulang file.`,
+    };
+  }
+  return { ok: true, parentId: parent?.id ?? null };
 }

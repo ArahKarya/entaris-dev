@@ -15875,7 +15875,10 @@
       "phase": 1,
       "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok. Invoice lama tidak berubah; perubahan akun hanya berlaku untuk invoice berikutnya.",
-      "confirm_template": "Ubah item jasa {id}?"
+      "confirm_template": "Ubah item jasa {id}?",
+      "errors": [
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE: akun pendapatan harus akun REVENUE detail aktif"
+      ]
     },
     {
       "name": "stf_update",
@@ -21469,7 +21472,8 @@
       "postingEffect": "Tidak ada efek GL/stok (hanya master; stok 0, WAC 0).",
       "confirm_template": "Buat item persediaan {code} - {name} (satuan {unit})?",
       "errors": [
-        "400: Kode item sudah digunakan"
+        "400: Kode item sudah digunakan",
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan bukan akun ASSET detail aktif non-kontrol"
       ],
       "related": [
         "inv_item_update",
@@ -26855,7 +26859,8 @@
       "postingEffect": "Tidak ada efek GL/stok. Hanya master data.",
       "confirm_template": "Buat item jasa {code} - {name}?",
       "errors": [
-        "409/400: kode sudah dipakai."
+        "409/400: kode sudah dipakai.",
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE: akun pendapatan harus akun REVENUE detail aktif"
       ]
     },
     {
@@ -29981,7 +29986,9 @@
       "postingEffect": "Tidak ada efek GL/stok langsung. Catatan: mengganti accountId membuat transaksi baru memakai akun lain (jurnal lama tidak dipindah).",
       "confirm_template": "Ubah master item {id}?",
       "errors": [
-        "404: item tidak ditemukan"
+        "404: item tidak ditemukan",
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan tidak valid",
+        "400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok"
       ],
       "related": [
         "inv_items_list"

@@ -5,7 +5,7 @@
 
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
-import { assertPostableAccount, type PostableRule } from '../ledger/accountGuard';
+import { assertPostableAccount, TAX_ACCOUNT_ROLES, type PostableRule } from '../ledger/accountGuard';
 
 type Tx = Prisma.TransactionClient;
 
@@ -15,6 +15,7 @@ export const ITEM_ACCOUNT_RULE: PostableRule = {
   label: 'Akun persediaan item',
   rootTypes: ['ASSET'],
   allowControl: ['INVENTORY', 'INVENTORY_ITEM'],
+  alsoRestrict: TAX_ACCOUNT_ROLES,
 };
 
 /** The account stock posts to: the item's own, else the account mapped to the INVENTORY role. */

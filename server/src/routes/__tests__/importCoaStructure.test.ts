@@ -72,6 +72,18 @@ beforeEach(() => {
     return hit ? { id: hit.id } : { id: `new-${where.accountNumber}` };
   });
   db._tx.account.upsert.mockImplementation(async ({ create }: any) => ({ id: `new-${create.accountNumber}`, rootType: create.rootType }));
+  db._tx.accountingLedgerEntry.groupBy.mockResolvedValue([{ accountId: 'a-12' }]);
+  // Inside the write transaction the stored accounts are read again, with the rows already imported.
+  db._tx.account.findMany.mockImplementation(async () => [
+    ...stored,
+    ...db._tx.account.upsert.mock.calls.map((c: any[]) => ({
+      id: `new-${c[0].create.accountNumber}`,
+      accountNumber: c[0].create.accountNumber,
+      rootType: c[0].create.rootType,
+      isGroup: c[0].create.isGroup,
+      parentId: null,
+    })),
+  ]);
 });
 
 describe('POST /api/import/coa structure rules', () => {
@@ -154,6 +166,58 @@ describe('POST /api/import/coa structure rules', () => {
 
     expect(res.body).toMatchObject({ success: 1, errors: [] });
     expect(db._tx.account.upsert.mock.calls[0][0].update).toMatchObject({ name: 'Kas (nama baru)', parentId: 'a-1', isGroup: false });
+  });
+
+  it('does not re-type a group that has children (7 EXPENSE -> REVENUE) and leaves it unchanged', async () => {
+    const legacy = [
+      { id: 'g-7', accountNumber: '7', rootType: 'EXPENSE', isGroup: true, parentId: null },
+      { id: 'g-71', accountNumber: '7.1', rootType: 'EXPENSE', isGroup: false, parentId: 'g-7' },
+    ];
+    db.account.findMany.mockResolvedValue(legacy);
+    db._tx.account.findMany.mockResolvedValue(legacy);
+    db.accountingLedgerEntry.groupBy.mockResolvedValue([{ accountId: 'g-71' }]);
+    db.rows = [
+      { accountNumber: '7', name: 'Pendapatan lain', rootType: 'REVENUE' },
+      { accountNumber: '7.1', name: 'Bunga', rootType: 'REVENUE' },
+    ];
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors.map((e: any) => [e.row, e.code])).toEqual([[2, 'ACCOUNT_STRUCTURE_LOCKED'], [3, 'ACCOUNT_PARENT_NOT_FOUND']]);
+    expect(db._tx.account.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps a posted detail account that has a stored child from becoming a group on a blank isGroup', async () => {
+    const legacy = [
+      { id: 'a-1', accountNumber: '1', rootType: 'ASSET', isGroup: true, parentId: null },
+      { id: 'a-15', accountNumber: '1.5', rootType: 'ASSET', isGroup: false, parentId: 'a-1' },
+      { id: 'a-151', accountNumber: '1.5.1', rootType: 'ASSET', isGroup: false, parentId: 'a-15' },
+    ];
+    db.account.findMany.mockResolvedValue(legacy);
+    db.accountingLedgerEntry.groupBy.mockResolvedValue([{ accountId: 'a-15' }]);
+    db.rows = [{ accountNumber: '1.5', name: 'Nama baru', rootType: 'ASSET' }];
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors).toEqual([expect.objectContaining({ row: 2, code: 'ACCOUNT_STRUCTURE_LOCKED' })]);
+    expect(db._tx.account.upsert).not.toHaveBeenCalled();
+  });
+
+  it('skips a row whose account got ledger rows after the validation (plan no longer holds)', async () => {
+    db.rows = [
+      { accountNumber: '1.1.2', name: 'Bank', rootType: 'ASSET' },
+      { accountNumber: '1.1.2.1', name: 'Bank anak', rootType: 'ASSET' },
+    ];
+    // Validation sees 1.1.2 as new; by the write it exists as a posted detail account.
+    const posted = [...stored, { id: 'a-112', accountNumber: '1.1.2', rootType: 'ASSET', isGroup: false, parentId: 'a-11' }];
+    // (db and its transaction share these mocks: the first read is the validation, the rest are writes.)
+    db.account.findMany.mockReset().mockResolvedValueOnce(stored).mockResolvedValue(posted);
+    db.accountingLedgerEntry.groupBy.mockReset().mockResolvedValueOnce([]).mockResolvedValue([{ accountId: 'a-112' }]);
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors[0]).toMatchObject({ row: 2, code: 'ACCOUNT_IMPORT_STALE' });
+    expect(upsertedNumbers()).not.toContain('1.1.2');
   });
 
   it('rejects the second row of a repeated number', async () => {

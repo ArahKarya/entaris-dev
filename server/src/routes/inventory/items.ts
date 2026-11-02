@@ -265,7 +265,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
 
   try {
     const item = await prisma.$transaction(async (tx) => {
-      // The row lock keeps a stock movement from landing between the stock check and the update.
+      // Serialises two edits of the item and the stock counter update of a posting. Posting paths read
+      // accountId before they lock the item, so a posting already in flight can still land on the old account.
       const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM inventory_items WHERE id = ${id} FOR UPDATE`;
       if (locked.length === 0) return null;
       if (body.accountId !== undefined) await assertItemAccountChange(tx, id, body.accountId || null);

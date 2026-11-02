@@ -424,7 +424,11 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Akun {0} sudah memiliki transaksi; tipe, induk, dan status grup tidak dapat diubah lewat impor.": "Account {0} already has transactions; its type, parent and group status cannot be changed by an import.",
   "Nomor akun {0} muncul lebih dari sekali di file; baris ini dilewati.": "Account number {0} appears more than once in the file; this row was skipped.",
   "Baris {0}: gagal menyimpan akun \"{1}\": {2}": "Row {0}: failed to save account \"{1}\": {2}",
+  "Akun {0} memiliki sub-akun; tipenya tidak dapat diubah lewat impor. Gunakan skrip e2-coa-structure-check untuk koreksi tipe.": "Account {0} has sub-accounts; its type cannot be changed by an import. Use the e2-coa-structure-check script to correct the type.",
+  "Data akun {0} berubah saat impor berjalan; baris ini dilewati. Unggah ulang file.": "Account {0} changed while the import was running; this row was skipped. Upload the file again.",
   // item account (E2-R6): services/inventory/itemAccount.ts
+  "Akun persediaan item": "Item inventory account",
+  "Akun pendapatan layanan": "Service revenue account",
   "Akun persediaan item tidak dapat diganti selama item masih memiliki stok (termasuk stok negatif). Kosongkan stok di semua gudang terlebih dahulu.": "The item's inventory account cannot be changed while the item still has stock (negative stock included). Empty the stock in every warehouse first.",
   "Baris {0}: gagal membuat jurnal saldo awal akun \"{1}\": {2}": "Row {0}: failed to create the opening balance journal of account \"{1}\": {2}",
 };

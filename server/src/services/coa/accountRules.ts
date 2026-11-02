@@ -348,11 +348,21 @@ export function planImportRow(input: ImportRowInput, ctx: ImportRowContext): Pla
   if (input.isGroup === false && existing.childCount > 0) {
     return problem(ACCOUNT_HAS_CHILDREN, 'Tidak dapat mengubah akun grup yang masih memiliki sub-akun.');
   }
-  // A group stays a group; a detail account becomes one only when nothing is posted to it.
+  // Children keep the type they have, so an account that has any cannot be re-typed here (as on the
+  // COA screen); the 7.x reclassification is the repair script's job (e2-coa-structure-check).
+  if (existing.rootType !== rootType && existing.childCount > 0) {
+    return problem(
+      ACCOUNT_STRUCTURE_LOCKED,
+      `Akun ${accountNumber} memiliki sub-akun; tipenya tidak dapat diubah lewat impor. Gunakan skrip e2-coa-structure-check untuk koreksi tipe.`,
+    );
+  }
+  // A group stays a group; a detail account becomes one only when nothing is posted to it. An
+  // account that already has children is saved as a group whatever the file says.
   const wantsGroup = input.isGroup ?? (existing.isGroup || (ctx.hasChildInFile && !existing.hasLedger));
+  const finalGroup = wantsGroup || existing.childCount > 0;
   if (existing.hasLedger) {
     const sameParent = (existing.parentId ?? null) === (ctx.parent?.id ?? null);
-    if (existing.rootType !== rootType || !sameParent || wantsGroup !== existing.isGroup) {
+    if (existing.rootType !== rootType || !sameParent || finalGroup !== existing.isGroup) {
       return problem(
         ACCOUNT_STRUCTURE_LOCKED,
         `Akun ${accountNumber} sudah memiliki transaksi; tipe, induk, dan status grup tidak dapat diubah lewat impor.`,
@@ -364,7 +374,7 @@ export function planImportRow(input: ImportRowInput, ctx: ImportRowContext): Pla
     data: {
       accountNumber, rootType, accountType: rootType, existingId: existing.id,
       parentNumber: input.parentNumber || null,
-      isGroup: wantsGroup || existing.childCount > 0,
+      isGroup: finalGroup,
     },
   };
 }

@@ -10,8 +10,8 @@ import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
 import { upload, parseFile, sanitizeCellValue } from './shared';
 import { ACCOUNT_PARENT_NOT_FOUND } from '../../services/coa/accountRules';
-import { lockAccounts } from '../../services/coa/accountStructure';
-import { parseCoaRows, validateCoaRows } from '../../services/coa/coaImport';
+import { loadImportFacts, lockAccounts } from '../../services/coa/accountStructure';
+import { parseCoaRows, replanImportRow, validateCoaRows } from '../../services/coa/coaImport';
 
 const router = Router();
 
@@ -50,14 +50,17 @@ router.post(
         let account: Awaited<ReturnType<typeof prisma.account.upsert>>;
         try {
           account = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-            let parentId: string | null = null;
-            if (row.parentNumber) {
-              const parent = await tx.account.findUnique({ where: { accountNumber: row.parentNumber }, select: { id: true } });
-              if (!parent) throw new BusinessError(`Induk ${row.parentNumber} tidak ditemukan atau barisnya ditolak.`, ACCOUNT_PARENT_NOT_FOUND);
-              parentId = parent.id;
-            }
             // Same lock order as the COA screen, so an edit and an import of the same account queue up.
-            await lockAccounts(tx, [parentId, row.existingId]);
+            const before = await loadImportFacts(tx, [row.accountNumber, row.parentNumber ?? ''].filter(Boolean));
+            const parentBefore = row.parentNumber ? before.parents.get(row.parentNumber) : undefined;
+            if (row.parentNumber && !parentBefore) {
+              throw new BusinessError(`Induk ${row.parentNumber} tidak ditemukan atau barisnya ditolak.`, ACCOUNT_PARENT_NOT_FOUND);
+            }
+            await lockAccounts(tx, [parentBefore?.id, before.existing.get(row.accountNumber)?.id, row.existingId]);
+            // The file was validated without locks; plan the row again now that the accounts are held.
+            const current = await replanImportRow(tx, row);
+            if (!current.ok) throw new BusinessError(current.message, current.code);
+            const parentId = current.parentId;
 
             const upsertData = {
               name: row.name,
@@ -74,7 +77,7 @@ router.post(
           });
         } catch (err: any) {
           const message = err instanceof BusinessError ? err.message : `Baris ${row.rowNum}: gagal menyimpan akun "${row.accountNumber}": ${err.message}`;
-          errors.push({ row: row.rowNum, message });
+          errors.push({ row: row.rowNum, message, ...(err instanceof BusinessError && err.code ? { code: err.code } : {}) });
           continue;
         }
 

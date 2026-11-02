@@ -157,12 +157,15 @@ d('item inventory account (E2-R6)', () => {
       const inactive = await account(tx, 'ASSET', numberUnder('1'), { isActive: false });
       const ar = await account(tx, 'ASSET', numberUnder('1'));
       await tx.systemAccountMapping.create({ data: { role: 'AR', accountId: ar.id, sortOrder: 99 } });
+      const ppnIn = await account(tx, 'ASSET', numberUnder('1'));
+      await tx.systemAccountMapping.create({ data: { role: 'TAX_INPUT', accountId: ppnIn.id, sortOrder: 99 } });
 
       for (const [bad, code] of [
         [group, 'ACCOUNT_GROUP'],
         [expense, 'ACCOUNT_ROOT_TYPE'],
         [inactive, 'ACCOUNT_INACTIVE'],
         [ar, 'ACCOUNT_CONTROL'],
+        [ppnIn, 'ACCOUNT_CONTROL'],
       ] as const) {
         const r = await putItem(item.id, { accountId: bad.id });
         expect(r.status, `${code}: ${JSON.stringify(r.body)}`).toBe(400);

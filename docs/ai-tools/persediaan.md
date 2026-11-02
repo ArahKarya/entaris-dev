@@ -463,6 +463,7 @@ Aturan wajib:
 **Error umum**
 
 - 400: Kode item sudah digunakan
+- 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan bukan akun ASSET detail aktif non-kontrol
 
 **Tool terkait:** [`inv_item_update`](#inv_item_update), [`inv_mov_create`](#inv_mov_create), [`opn_create`](#opn_create)
 
@@ -575,6 +576,8 @@ Aturan wajib:
 **Error umum**
 
 - 404: item tidak ditemukan
+- 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan tidak valid
+- 400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok
 
 **Tool terkait:** [`inv_items_list`](#inv_items_list)
 
