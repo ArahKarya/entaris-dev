@@ -650,17 +650,22 @@ export const ChangePasswordSchema = z.object({
 });
 
 // Recurring Template
+// Shape only; the business rules (balance, accounts, no party, dates) run in routes/recurring.ts
+// through utils/recurringRules.ts. Amounts are a number or a plain numeric string: no coercion, so
+// "1.000" or "1e3" is refused by the line validator instead of being reinterpreted.
+const TemplateAmountSchema = z.union([z.number(), z.string()]);
+
 const JournalTemplateItemSchema = z.object({
   accountId: z.string().uuid('Account ID harus UUID yang valid.'),
-  partyId: z.string().uuid().nullable().optional(),
-  debit: z.coerce.number().min(0, 'Debit tidak boleh negatif.'),
-  credit: z.coerce.number().min(0, 'Credit tidak boleh negatif.'),
+  partyId: z.string().nullable().optional(),
+  debit: TemplateAmountSchema,
+  credit: TemplateAmountSchema,
   description: z.string().optional(),
 });
 
-const JournalTemplateDataSchema = z.object({
+export const JournalTemplateDataSchema = z.object({
   narration: z.string().min(1, 'Narasi wajib diisi.'),
-  items: z.array(JournalTemplateItemSchema).min(1, 'Minimal 1 item jurnal.'),
+  items: z.array(JournalTemplateItemSchema).min(2, 'Minimal 2 item jurnal.'),
 });
 
 const InvoiceTemplateItemSchema = z.object({
@@ -674,7 +679,7 @@ const InvoiceTemplateItemSchema = z.object({
   accountId: z.string().uuid().optional(),
 });
 
-const InvoiceTemplateDataSchema = z.object({
+export const InvoiceTemplateDataSchema = z.object({
   partyId: z.string().uuid().optional(),
   taxPct: z.coerce.number().min(0).max(100).optional(),
   potongan: z.coerce.number().min(0).optional(),
@@ -683,27 +688,37 @@ const InvoiceTemplateDataSchema = z.object({
   items: z.array(InvoiceTemplateItemSchema).min(1, 'Minimal 1 item.'),
 });
 
-const TemplateDataSchema = z.union([
-  JournalTemplateDataSchema,
-  InvoiceTemplateDataSchema,
-]);
+export const RecurringTemplateTypeSchema = z.enum(['journal', 'sales_invoice', 'purchase_invoice']);
+export type RecurringTemplateType = z.infer<typeof RecurringTemplateTypeSchema>;
+
+/** The template data must have the shape of its type: a journal body for 'journal', an invoice body otherwise. */
+export function parseTemplateData(templateType: RecurringTemplateType, data: unknown) {
+  return (templateType === 'journal' ? JournalTemplateDataSchema : InvoiceTemplateDataSchema).safeParse(data);
+}
+
+const NextRunDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal berikutnya harus berformat YYYY-MM-DD.');
 
 export const CreateRecurringSchema = z.object({
   name: z.string().min(1, 'Nama template wajib diisi.'),
-  templateType: z.enum(['journal', 'sales_invoice', 'purchase_invoice']),
+  templateType: RecurringTemplateTypeSchema,
   frequency: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'yearly']),
   dayOfMonth: z.coerce.number().min(1).max(31).nullable().optional(),
-  nextRunDate: z.string().min(1, 'Tanggal berikutnya wajib diisi.'),
-  templateData: TemplateDataSchema,
+  nextRunDate: NextRunDateSchema,
+  templateData: z.record(z.string(), z.unknown()),
+}).superRefine((data, ctx) => {
+  const parsed = parseTemplateData(data.templateType, data.templateData);
+  if (!parsed.success) {
+    ctx.addIssue({ code: 'custom', path: ['templateData'], message: parsed.error.issues[0].message });
+  }
 });
 
 export const UpdateRecurringSchema = z.object({
   name: z.string().min(1, 'Nama template wajib diisi.').optional(),
-  templateType: z.enum(['journal', 'sales_invoice', 'purchase_invoice']).optional(),
+  templateType: RecurringTemplateTypeSchema.optional(),
   frequency: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'yearly']).optional(),
   dayOfMonth: z.coerce.number().min(1).max(31).nullable().optional(),
-  nextRunDate: z.string().optional(),
-  templateData: TemplateDataSchema.optional(),
+  nextRunDate: NextRunDateSchema.optional(),
+  templateData: z.record(z.string(), z.unknown()).optional(),
   isActive: z.boolean().optional(),
 });
 
