@@ -371,7 +371,6 @@ export async function submitProductionRunInTx(
       itemId: output.itemId,
       qtyAvailable: output.quantity,
       unitCostNow: unitCost,
-      fiscalYearId: fiscalYear.id,
       userId,
       settleDate: txDate,
       source: { type: 'ProductionRun', refId: run.id, refNo: runNumber },
