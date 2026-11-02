@@ -39,6 +39,7 @@ Toolset **kas-bank** memungkinkan AIRA membaca dan mengoperasikan arus kas Entar
 **Transaksi Berulang**
 - Template (`rec_create`) dengan frekuensi `daily/weekly/monthly/quarterly/yearly`. Hanya tipe **`journal`** yang bisa dieksekusi; tipe `sales_invoice`/`purchase_invoice` tersimpan tetapi eksekusi mengembalikan `success=false`.
 - Eksekusi otomatis dilakukan scheduler harian 02:00. `rec_execute` menjalankan **satu** template sekarang (bertanggal hari ini). Endpoint massal `POST /api/recurring/run-due` sengaja **tidak** menjadi tool (lihat DENYLIST).
+- `rec_create`, `rec_update` dan `rec_delete` tidak draft-capable: selalu masuk antrean persetujuan.
 - `rec_delete` hanyalah soft delete (`isActive=false`); aktifkan lagi lewat `rec_update`.
 
 ### Buku kas dari nota (Draft Buku Kas)
@@ -94,7 +95,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - `splits` harus berjumlah sama persis (toleransi 0,01) dengan `amount`. Akun split boleh akun beban (mis. komisi), tetapi akun utama tanpa split harus akun kas.
 - `pay_list` hanya paging dasar; untuk laporan arus kas pakai `pay_ledger` + `pay_ledger_summary`. Perhatikan `pay_cash_journals` dibatasi 100 baris.
 - Uang jaminan: bagian hangus **harus** akun beban (EXPENSE); bagian dikembalikan **harus** akun kas/bank. Total return + hangus tidak boleh melebihi sisa jaminan.
-- `rec_create` template jurnal: eksekusi **tidak memvalidasi** debit = kredit dan tidak mengecek `isActive`; pastikan template seimbang sebelum eksekusi.
+- `rec_create` / `rec_update` template jurnal: divalidasi saat disimpan (seimbang persis, minimal 2 baris, maksimal 2 desimal, tanpa pihak, tanpa akun kontrol/pajak, `nextRunDate` tidak boleh sudah lewat atau sebelum eksekusi terakhir) dan lagi saat dieksekusi (manual maupun scheduler). Perubahan template lewat AIRA (`rec_create`, `rec_update`, `rec_delete`) menunggu persetujuan manusia, juga untuk aktor level Standar (aktor level direct dan alat yang dipin otomatis tetap dieksekusi langsung).
 - Rekonsiliasi `Completed` terkunci permanen; selesaikan hanya setelah semua item dicocokkan sesuai rekening koran.
 - **Draft Buku Kas**: jangan menebak kode akun, jangan mengisi `masuk` dan `keluar` sekaligus, jangan menganggap draft = sudah tercatat (belum ada jurnal sampai diposting), dan jangan menunggu `kas_draft_posting` langsung jalan (menunggu persetujuan). Jurnal dari draft yang salah dibatalkan lewat `je_cancel` (toolset akuntansi) pada nomor jurnal baris terkait.
 - Format tanggal `YYYY-MM-DD`; jumlah dalam Rupiah (angka, tanpa pemisah ribuan).
