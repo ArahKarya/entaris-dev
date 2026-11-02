@@ -61,7 +61,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 | STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dibalik; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`) |
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
 | PI dari STT | DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang |
-| Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> 5.11. Lawan selalu Hutang Usaha (2.1.1) |
+| Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> akun Selisih Harga Pembelian terpetakan (bawaan 5.11). Lawan selalu Hutang Usaha (akun AP terpetakan, bawaan 2.1.1) |
 | PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik, STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
@@ -759,7 +759,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 ### pi_revise_price
 
-**Ringkasan:** Merevisi harga baris Invoice Pembelian yang sudah diposting (pemasok mengoreksi harga). Selisih dipecah: porsi barang masih di stok masuk ke Persediaan + koreksi WAC, porsi yang sudah keluar masuk ke Selisih Harga Pembelian (5.11). Untuk role non-bypass hanya mengantrekan ApprovalRequest PurchaseInvoiceRevisePrice (HTTP 202).
+**Ringkasan:** Merevisi harga baris Invoice Pembelian yang sudah diposting (pemasok mengoreksi harga). Selisih dipecah: porsi barang masih di stok masuk ke Persediaan + koreksi WAC, porsi yang sudah keluar masuk ke akun Selisih Harga Pembelian (terpetakan di Akun Sistem, bawaan 5.11). Untuk role non-bypass hanya mengantrekan ApprovalRequest PurchaseInvoiceRevisePrice (HTTP 202).
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** ya (hanya membuat draft / pengajuan pending)
@@ -809,7 +809,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** Bypass: hasil revisi (jurnal/penyesuaian). Non-bypass: permintaan persetujuan (HTTP 202).
 
-**Efek pembukuan/stok:** Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (2.1.1) / DR Persediaan (porsi stok) + DR 5.11 (porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).
+**Efek pembukuan/stok:** Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).
 
 **Teks konfirmasi:** Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?
 
@@ -826,6 +826,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan
 
 **Tool terkait:** [`pi_get`](#pi_get), [`pi_cancel`](#pi_cancel)
 

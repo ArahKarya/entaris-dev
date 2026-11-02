@@ -65,7 +65,6 @@ export const PURCHASING_MESSAGES: MessageDictionary = {
   "Harga satuan untuk '{0}' belum ada (item baru, belum pernah ada stok masuk). Isi Harga perkiraan di baris STT, atau tandai STT ini sebagai Barang Titipan Customer bila barang bukan milik perusahaan.": "No unit price for '{0}' yet (new item with no stock received). Enter an Estimated price on the goods receipt line, or mark it as Customer Consignment if the goods are not company-owned.",
   "Status invoice tidak dikenal.": "Unknown invoice status.",
   "Alasan revisi harga wajib diisi (minimal 10 karakter).": "A reason for the price revision is required (at least 10 characters).",
-  "Akun {0} (Selisih Harga Pembelian) tidak ditemukan.": "Account {0} (Selisih Harga Pembelian) not found.",
   "Baris invoice {0} tidak ditemukan di PI ini.": "Invoice line {0} not found on this purchase invoice.",
   "Harga baru tidak boleh negatif.": "New price cannot be negative.",
   "Tidak ada perubahan harga (semua baris sama dengan harga lama).": "No price changes (all lines match the old price).",

@@ -139,22 +139,27 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose }) => {
     const debitName = debitAccount ? `${debitAccount.accountNumber} ${debitAccount.name}` : '';
     const creditName = creditAccount ? `${creditAccount.accountNumber} ${creditAccount.name}` : '';
     const refPart = referenceNo ? ` (Ref: ${referenceNo})` : '';
-    const descPart = description || t('expenseModal.narration.description', { account: debitName });
+    // A party rides on the debit line only when that account carries one (partyRole from
+    // /coa/flat: receivable, payable, deposit); on an expense line it goes into the text instead
+    // (owner decision #6, E2-R4).
+    const partyOnLine = !!partyId && !!debitAccount?.partyRole;
+    const partyName = partyId && !partyOnLine ? partyPicker.selectedParty?.name : undefined;
+    const partyPart = partyName ? ` - ${t('expenseModal.partyValue', { name: partyName })}` : '';
+    const descPart = `${description || t('expenseModal.narration.description', { account: debitName })}${partyPart}`;
 
     mutation.mutate({
       date,
-      narration: `${t('expenseModal.narration.text', { debit: debitName, credit: creditName })}${refPart}${notes ? ` - ${notes}` : ''}`,
+      narration: `${t('expenseModal.narration.text', { debit: debitName, credit: creditName })}${refPart}${notes ? ` - ${notes}` : ''}${partyPart}`,
       items: [
         {
           accountId: debitAccountId,
-          partyId: partyId || null,
+          ...(partyOnLine ? { partyId } : {}),
           debit: numAmount,
           credit: 0,
           description: descPart,
         },
         {
           accountId: creditAccountId,
-          partyId: null,
           debit: 0,
           credit: numAmount,
           description: descPart,

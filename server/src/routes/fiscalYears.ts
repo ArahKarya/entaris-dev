@@ -11,13 +11,13 @@ import { voidJournalInTx } from '../utils/journalCancel';
 import { cancelTrail } from '../utils/cancelClaim';
 import { systemAccounts } from '../services/systemAccounts';
 import { CloseChecklistFailedError, assertCloseChecklistPasses, runCloseChecklist } from '../services/fiscalYearClose';
-import { SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
+import { ACCOUNT_MAPPING_MISSING, SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
 
-/** Error code: CURRENT_PROFIT or RETAINED_EARNINGS, which the year close posts to, is not mapped. */
-export const ACCOUNT_MAPPING_MISSING = 'ACCOUNT_MAPPING_MISSING';
+/** CURRENT_PROFIT or RETAINED_EARNINGS, which the year close posts to, is not mapped (defined with the roles). */
+export { ACCOUNT_MAPPING_MISSING };
 /** Error code: a reopen while a later fiscal year is still closed. */
 export const FY_LATER_CLOSED = 'FY_LATER_CLOSED';
 
