@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../utils/documentNumber', () => ({ generateDocumentNumber: vi.fn(async (_tx, prefix: string) => `${prefix}-202610-0001`) }));
-vi.mock('../../utils/accountBalance', () => ({ updateBalancesForItems: vi.fn(async () => undefined) }));
+// postJournalInTx wraps the one posting function; this fake hands its lines to journalEntry.create
+// so the tests read the posted items there. postJournal itself is covered by its own tests.
+vi.mock('../ledger/postJournal', () => ({
+  postJournal: vi.fn(async (tx: any, input: any) => ({
+    journal: await tx.journalEntry.create({ data: { items: { create: input.lines } } }),
+    fiscalYear: { id: input.expectFiscalYearId },
+  })),
+}));
 vi.mock('../gaFinance', () => ({ cancelJournalInTx: vi.fn(async () => undefined) }));
 
 import { cancelJournalInTx } from '../gaFinance';

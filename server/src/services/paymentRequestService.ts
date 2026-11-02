@@ -10,10 +10,11 @@ import { z } from 'zod';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodOpen } from '../utils/periodGuard';
-import { updateBalancesForItems } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
 import { PaymentRequestInputSchema } from '../utils/schemas';
 import { cancelJournalInTx } from './gaFinance';
+import { DOCUMENT_RULE, type PostableRule } from './ledger/accountGuard';
+import { postJournal } from './ledger/postJournal';
 import { checkLineRate, validateTravel } from './paymentRequestTravel';
 import { initialSettlementStatus } from './paymentRequestSettlementRules';
 import {
@@ -372,7 +373,13 @@ export async function assertCashAccount(tx: Tx, accountId: string) {
   return acc;
 }
 
-/** Create a Submitted journal + ledger rows + balance updates for already-balanced lines. */
+/**
+ * Posts a document journal through the one posting function (services/ledger/postJournal.ts) and
+ * keeps this signature for its callers (payment, settlement, cash book). `fiscalYearId` is only
+ * verified against the year of `date` (JOURNAL_FY_MISMATCH), never used to choose it. The party,
+ * when given, goes on every journal item (Kas & Bank "Pihak" column) and is not checked; ledger
+ * rows stay party-less, as before.
+ */
 export async function postJournalInTx(
   tx: Tx,
   input: {
@@ -385,49 +392,23 @@ export async function postJournalInTx(
     partyId?: string | null;
     /** Journal origin; document-backed postings (payment request, settlement) by default. */
     sourceType?: JournalSourceType;
+    /** Default DOCUMENT_RULE (accounts chosen by code); the cash book passes manualJournalRule. */
+    accountRule?: PostableRule;
   },
 ) {
-  const { date, narration, fiscalYearId } = input;
-  const entryNumber = await generateDocumentNumber(tx, 'JV', date, fiscalYearId);
-  const journal = await tx.journalEntry.create({
-    data: {
-      entryNumber,
-      date,
-      narration,
-      status: 'Submitted',
-      fiscalYearId,
-      createdBy: input.actorId,
-      submittedAt: input.now,
-      sourceType: input.sourceType ?? 'SYSTEM_DOC',
-      items: {
-        create: input.lines.map((l) => ({
-          accountId: l.accountId,
-          debit: l.debit,
-          credit: l.credit,
-          description: l.description,
-          // Journal-item party only (Kas & Bank "Pihak" column); ledger rows stay party-less.
-          ...(input.partyId ? { partyId: input.partyId } : {}),
-        })),
-      },
-    },
-    include: { items: true },
+  const partyId = input.partyId ?? null;
+  const { journal } = await postJournal(tx, {
+    date: input.date,
+    narration: input.narration,
+    lines: input.lines.map((l) => ({ ...l, partyId })),
+    sourceType: input.sourceType ?? 'SYSTEM_DOC',
+    createdBy: input.actorId,
+    now: input.now,
+    accountRule: input.accountRule ?? DOCUMENT_RULE,
+    partyRule: 'off',
+    ledgerPartyless: true,
+    expectFiscalYearId: input.fiscalYearId,
   });
-  await tx.accountingLedgerEntry.createMany({
-    data: journal.items.map((item) => ({
-      date,
-      accountId: item.accountId,
-      debit: item.debit,
-      credit: item.credit,
-      referenceType: 'JournalEntry',
-      referenceId: journal.id,
-      description: item.description ?? narration,
-      fiscalYearId,
-    })),
-  });
-  await updateBalancesForItems(
-    tx,
-    journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) })),
-  );
   return journal;
 }
 

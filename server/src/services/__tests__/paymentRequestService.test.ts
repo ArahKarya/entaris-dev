@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../utils/documentNumber', () => ({ generateDocumentNumber: vi.fn(async (_tx, prefix: string) => `${prefix}-202610-0001`) }));
-vi.mock('../../utils/accountBalance', () => ({ updateBalancesForItems: vi.fn(async () => undefined) }));
+// postJournalInTx wraps the one posting function; this fake hands its lines to journalEntry.create
+// so the tests read the posted items there. postJournal itself is covered by its own tests.
+vi.mock('../ledger/postJournal', () => ({
+  postJournal: vi.fn(async (tx: any, input: any) => ({
+    journal: await tx.journalEntry.create({ data: { items: { create: input.lines } } }),
+    fiscalYear: { id: input.expectFiscalYearId },
+  })),
+}));
 vi.mock('../gaFinance', () => ({ cancelJournalInTx: vi.fn(async () => undefined) }));
 
-import { updateBalancesForItems } from '../../utils/accountBalance';
+import { postJournal } from '../ledger/postJournal';
+import { DOCUMENT_RULE } from '../ledger/accountGuard';
 import { cancelJournalInTx } from '../gaFinance';
 import {
   approvePaymentRequestInTx,
@@ -103,7 +111,17 @@ describe('payPaymentRequestInTx', () => {
     expect(tx.paymentRequest.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'pr-1', status: { in: ['APPROVED'] } }, data: expect.objectContaining({ status: 'PAID' }) }),
     );
-    expect(updateBalancesForItems).toHaveBeenCalledTimes(1);
+    expect(postJournal).toHaveBeenCalledTimes(1);
+    // Through the one posting function: accounts chosen by code, party unchecked and kept off the
+    // ledger rows, the year verified against the payment date.
+    expect(vi.mocked(postJournal).mock.calls[0]![1]).toMatchObject({
+      sourceType: 'SYSTEM_DOC',
+      createdBy: 'u-fin',
+      accountRule: DOCUMENT_RULE,
+      partyRule: 'off',
+      ledgerPartyless: true,
+      expectFiscalYearId: 'fy-2026',
+    });
     expect(out.events[0].kind).toBe('paid');
   });
 
@@ -132,7 +150,7 @@ describe('payPaymentRequestInTx', () => {
   it('leaves partyId off the journal for employee payees', async () => {
     const tx = makeTx(makeRequest({ payeeKind: 'EMPLOYEE', partyId: null }));
     await payPaymentRequestInTx(asTx(tx), 'pr-1', finance, { cashAccountId: 'acc-cash', paymentDate: '2026-10-05' });
-    for (const it of tx.journalEntry.create.mock.calls[0][0].data.items.create) expect(it).not.toHaveProperty('partyId');
+    for (const it of tx.journalEntry.create.mock.calls[0][0].data.items.create) expect(it.partyId).toBeNull();
   });
 
   it('rejects a payment dated in a closed fiscal period — nothing is posted', async () => {
