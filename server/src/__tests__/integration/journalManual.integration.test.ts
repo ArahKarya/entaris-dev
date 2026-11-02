@@ -14,6 +14,9 @@
  * - Cr Uang Muka Customer with journal.control -> 400 ACCOUNT_CONTROL.
  * - Cancelling an old RECURRING journal with a Customer on AR does not push the outstanding below
  *   the recalculated value; cancelling an old MANUAL deposit line reverses the deposit balance.
+ * - The menu cancel of a journal on a control or deposit account needs journal.control
+ *   (ACCOUNT_CONTROL before any balance moves); a journal without one stays cancellable.
+ * - GET /coa/flat gives each account its partyRole (AR, CUSTOMER_DEPOSIT, ...) or null.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, type JournalSourceType } from '@prisma/client';
@@ -30,6 +33,7 @@ import { invalidatePermissionCache } from '../../services/permissionService';
 import { findArSubledgerDiffs } from '../../services/ledger/arSubledgerCheck';
 import { recalcPartyOutstanding } from '../../utils/accountBalance';
 import journalsRouter from '../../routes/journals';
+import coaRouter from '../../routes/coa';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -319,6 +323,71 @@ d('Journal menu cancel: party balances (R2 S-3)', () => {
       const c = await cancel(b.control, old);
       expect(c.status, JSON.stringify(c.body)).toBe(200);
       expect((await tx.party.findUniqueOrThrow({ where: { id: customer } })).customerDepositBalance.toFixed(2)).toBe('3000000.00');
+    });
+  });
+});
+
+d('Journal menu cancel: control accounts need journal.control (owner decision #1)', () => {
+  it('without journal.control an inventory journal cannot be cancelled and no balance moves; with it, it can', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const r = await post(b.control, [
+        { accountId: b.inventoryId, debit: 50 * JT },
+        { accountId: b.cashId, credit: 50 * JT },
+      ]);
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      const before = (await tx.account.findUniqueOrThrow({ where: { id: b.inventoryId } })).balance.toFixed(2);
+
+      expectCode(await cancel(b.plain, r.body.id), 'ACCOUNT_CONTROL');
+      expect((await tx.account.findUniqueOrThrow({ where: { id: b.inventoryId } })).balance.toFixed(2)).toBe(before);
+      expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: r.body.id } })).status).not.toBe('Cancelled');
+      expect(await tx.accountingLedgerEntry.count({ where: { referenceId: r.body.id, isCancelled: true } })).toBe(0);
+
+      const c = await cancel(b.control, r.body.id);
+      expect(c.status, JSON.stringify(c.body)).toBe(200);
+    });
+  });
+
+  it('without journal.control an old MANUAL deposit line cannot be reversed; the deposit balance stays', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const customer = await party(tx, 'Customer');
+      const old = await legacyJournal(tx, b, 'MANUAL', [
+        { accountId: b.cashId, debit: JT },
+        { accountId: b.depositId, credit: JT, partyId: customer },
+      ]);
+      await tx.party.update({ where: { id: customer }, data: { customerDepositBalance: JT } });
+
+      expectCode(await cancel(b.plain, old), 'ACCOUNT_CONTROL');
+      expect((await tx.party.findUniqueOrThrow({ where: { id: customer } })).customerDepositBalance.toFixed(2)).toBe('1000000.00');
+    });
+  });
+
+  it('a journal without control accounts is still cancelled by a doc.cancel holder without journal.control', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const r = await post(b.plain, [
+        { accountId: b.expenseId, debit: JT },
+        { accountId: b.cashId, credit: JT },
+      ]);
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      const c = await cancel(b.plain, r.body.id);
+      expect(c.status, JSON.stringify(c.body)).toBe(200);
+    });
+  });
+});
+
+d('GET /coa/flat partyRole (the expense forms send a party only on a party-role account)', () => {
+  it('marks the receivable and deposit accounts with their role and other accounts with null', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const r = await callRoute(coaRouter, 'get', '/flat', { ...b.plain });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const role = (id: string) => (r.body as { id: string; partyRole: string | null }[]).find((a) => a.id === id)?.partyRole;
+      expect(role(b.arId)).toBe('AR');
+      expect(role(b.depositId)).toBe('CUSTOMER_DEPOSIT');
+      expect(role(b.expenseId)).toBeNull();
+      expect(role(b.inventoryId)).toBeNull();
     });
   });
 });

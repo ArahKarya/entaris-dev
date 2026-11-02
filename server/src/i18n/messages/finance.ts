@@ -404,10 +404,12 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Persediaan item": "item inventory",
   "PPN Masukan": "Input VAT",
   "PPN Keluaran": "Output VAT",
-  // Account guard rules (services/ledger/accountGuard.ts manualJournalRule / TEMPLATE_RULE); hints keep their leading space.
+  // Account guard rules (services/ledger/accountGuard.ts manualJournalRule / TEMPLATE_RULE / manualCancelRule); hints keep their leading space.
   "Akun jurnal": "Journal account",
   "Akun template": "Template account",
   "Akun posting": "Posting account",
+  "Batal jurnal": "Journal cancel",
+  " Membatalkan jurnal yang memuat akun kontrol butuh hak Jurnal ke akun kontrol (journal.control).": " Cancelling a journal that holds a control account requires the Journal to control accounts right (journal.control).",
   " Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.": " Requires the Journal to control accounts right (journal.control); deposit accounts only through the Deposits module.",
   " Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.": " Deposit accounts can only be corrected through the Deposits module.",
   " Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.": " Recurring journal templates cannot use control or tax accounts.",

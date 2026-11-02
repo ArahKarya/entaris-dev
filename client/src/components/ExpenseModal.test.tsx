@@ -1,5 +1,6 @@
 // Owner decision #6 (E2-R4): the expense form never sends the party on the expense line; a party is
 // only allowed on receivable/payable lines. Its name goes into the narration and line description.
+// On a debit account with a party role (partyRole from /coa/flat) the party stays on the line.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -41,6 +42,7 @@ beforeEach(() => {
   get.mockResolvedValue({ data: { data: [
     { id: 'exp', accountNumber: '6.16', name: 'Beban Perbaikan', accountType: 'EXPENSE', isGroup: false },
     { id: 'cash', accountNumber: '1.1.1', name: 'Kas Kecil', accountType: 'ASSET', isGroup: false },
+    { id: 'ap', accountNumber: '2.1.1', name: 'Hutang Usaha', accountType: 'LIABILITY', isGroup: false, partyRole: 'AP' },
   ] } });
   post.mockResolvedValue({ data: { id: 'je-1' } });
 });
@@ -85,5 +87,24 @@ describe('ExpenseModal', () => {
     const body = post.mock.calls[0][1];
     for (const item of body.items) expect(item).not.toHaveProperty('partyId');
     expect(body.narration).not.toContain(supplier.name);
+  });
+
+  it('keeps partyId on a payable debit line (party role) and leaves the party out of the text', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={qc}><ExpenseModal isOpen onClose={vi.fn()} /></QueryClientProvider>);
+
+    const debit = await screen.findByLabelText(tf('expenseModal.debitPlaceholder'));
+    await waitFor(() => expect(debit.querySelectorAll('option').length).toBeGreaterThan(1));
+    fireEvent.change(debit, { target: { value: 'ap' } });
+    fireEvent.change(screen.getByLabelText(tf('expenseModal.creditPlaceholder')), { target: { value: 'cash' } });
+    fireEvent.change(screen.getByLabelText(tf('expenseModal.noParty')), { target: { value: 's1' } });
+    fireEvent.change(screen.getByPlaceholderText('0'), { target: { value: '5000000' } });
+    fireEvent.click(screen.getByRole('button', { name: tf('expenseModal.submit') }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const body = post.mock.calls[0][1];
+    expect(body.items[0]).toMatchObject({ accountId: 'ap', partyId: 's1', debit: 5000000, credit: 0 });
+    expect(body.items[1]).not.toHaveProperty('partyId');
+    expect(body.narration).not.toContain(tf('expenseModal.partyValue', { name: supplier.name }));
   });
 });

@@ -189,9 +189,11 @@ const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
         const debitLabel = debitAcc ? `${debitAcc.accountNumber} ${debitAcc.name}` : '';
         const cashLabel = cashAcc ? `${cashAcc.accountNumber} ${cashAcc.name}` : '';
         const amount = Number(row.amount) || 0;
-        // The party goes into the text, never on the expense line: a party is only allowed on
-        // receivable/payable lines (owner decision #6, E2-R4).
-        const partyPart = row.partyId && row.partyName ? ` - ${t('bulkExpenseModal.partyValue', { name: row.partyName })}` : '';
+        // A party rides on the debit line only when that account carries one (partyRole from
+        // /coa/flat: receivable, payable, deposit); on an expense line it goes into the text
+        // instead (owner decision #6, E2-R4).
+        const partyOnLine = !!row.partyId && !!debitAcc?.partyRole;
+        const partyPart = row.partyId && row.partyName && !partyOnLine ? ` - ${t('bulkExpenseModal.partyValue', { name: row.partyName })}` : '';
         const description = `${row.description}${partyPart}`;
         const narration = `[${batchNote}] ${description} (${t('bulkExpenseModal.narration', { debit: debitLabel, cash: cashLabel })})`;
 
@@ -201,6 +203,7 @@ const BulkExpenseModal = ({ isOpen, onClose }: Props) => {
           items: [
             {
               accountId: row.debitAccountId,
+              ...(partyOnLine ? { partyId: row.partyId } : {}),
               debit: amount,
               credit: 0,
               description,

@@ -272,11 +272,11 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 {
   "ok": true,
   "kind": "read",
-  "data": "<Array akun aktif tanpa hierarki.>"
+  "data": "<Array akun aktif tanpa hierarki; tiap akun: id, accountNumber, name, accountType, rootType>"
 }
 ```
 
-**Isi hasil:** Array akun aktif tanpa hierarki.
+**Isi hasil:** Array akun aktif tanpa hierarki; tiap akun: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, partyRole (AR/AP/CUSTOMER_DEPOSIT/VENDOR_DEPOSIT atau null: baris jurnal manual di akun ber-partyRole wajib partyId, akun lain menolak partyId).
 
 **Tool terkait:** [`coa_list`](#coa_list), [`je_create`](#je_create)
 
@@ -1425,7 +1425,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - Jurnal bersumber MANUAL, IMPORT, RECURRING, atau CASH_BOOK yang belum dibatalkan, tidak terhubung ke dokumen modul lain.
 - Tahun buku dokumen dan jurnalnya masih terbuka.
-- User memiliki capability doc.cancel.
+- User memiliki capability doc.cancel; bila jurnal memuat akun kontrol atau PPN, juga journal.control.
 
 **Error umum**
 
@@ -1436,6 +1436,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400 JOURNAL_USE_DEPOSIT_REFUND_CANCEL: jurnal refund uang muka; batalkan lewat cdep_refund_cancel/vdep_refund_cancel (tombol "Batalkan refund" di menu Uang Muka)
 - 400 JOURNAL_NOT_MANUAL: jurnal bukan buatan manusia (sumber modul/sistem, atau jurnal lama yang sumbernya tidak tercatat), atau terhubung ke dokumen modul (pembayaran, stok, aplikasi/offset uang muka, tutup buku, penyusutan, revisi harga, GA, pengajuan dana, uang jaminan); batalkan dari dokumen sumbernya atau buat jurnal balik manual
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 400 ACCOUNT_CONTROL: jurnal memuat akun kontrol (Piutang, Hutang, Uang Muka, Persediaan, Hutang Belum Tagih) atau akun PPN dan user tidak memegang journal.control; minta Admin membatalkannya
 - 403: tanpa capability doc.cancel
 - 400: alasan pembatalan maksimal 500 karakter
 

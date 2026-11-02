@@ -6,6 +6,7 @@ import { recalcPartyOutstanding, updateBalancesForItems } from '../utils/account
 import { reverseManualDepositLines } from '../utils/partyBalance';
 import { hasCap } from '../services/permissionService';
 import { createManualJournalInTx } from '../services/manualJournal';
+import { loadControlAccountMap, manualCancelRule, restrictedKindProblem } from '../services/ledger/accountGuard';
 import { validateBody } from '../utils/validate';
 import { CancelReasonSchema, CreateJournalSchema } from '../utils/schemas';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
@@ -84,7 +85,7 @@ router.post('/', async (req: AuthRequest, res) => {
         where: { id: journal.id },
         include: {
           items: {
-            include: { account: { select: { accountNumber: true, rootType: true } } },
+            include: { account: { select: { accountNumber: true, name: true, rootType: true } } },
           },
         },
       });
@@ -115,6 +116,21 @@ router.get('/:id', async (req: AuthRequest, res) => {
   }
 });
 
+/** Throws ACCOUNT_CONTROL when the canceller may not reverse one of the journal's accounts. */
+async function assertMayReverseLines(
+  tx: Prisma.TransactionClient,
+  items: { accountId: string; account: { accountNumber: string; name: string } }[],
+  canControl: boolean,
+): Promise<void> {
+  const rule = manualCancelRule(canControl);
+  if (rule.allowControl === true) return;
+  const control = await loadControlAccountMap(tx, rule.alsoRestrict);
+  for (const item of items) {
+    const problem = restrictedKindProblem(item.account, rule, control.get(item.accountId) ?? null);
+    if (problem) throw new BusinessError(problem.message, problem.code);
+  }
+}
+
 // PATCH /api/journals/:id/cancel — cancel a hand-made journal (MANUAL, IMPORT, RECURRING,
 // CASH_BOOK) and reverse balances. Every other journal is undone from its source document.
 router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
@@ -123,13 +139,14 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
   if (!body) return;
 
   try {
+    const canControl = await hasCap(req.user!.role, 'journal.control');
     const found = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Read inside the transaction: the claim below decides between two concurrent cancels.
       const entry = await tx.journalEntry.findUnique({
         where: { id },
         include: {
           items: {
-            include: { account: { select: { accountNumber: true, rootType: true } } },
+            include: { account: { select: { accountNumber: true, name: true, rootType: true } } },
           },
         },
       });
@@ -158,6 +175,10 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
       // Second layer: a hand-made source type linked to a module document still goes to that module.
       const blockReason = await journalMenuCancelBlockReason(tx, entry.id);
       if (blockReason) throw new BusinessError(blockReason, JOURNAL_NOT_MANUAL);
+
+      // Reversing the lines moves the same balances as posting them, so control and tax accounts
+      // need journal.control here too (owner decision #1); see manualCancelRule.
+      await assertMayReverseLines(tx, entry.items, canControl);
 
       // Reverse account balances (swap debit↔credit to undo)
       await updateBalancesForItems(

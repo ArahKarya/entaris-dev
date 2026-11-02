@@ -139,9 +139,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose }) => {
     const debitName = debitAccount ? `${debitAccount.accountNumber} ${debitAccount.name}` : '';
     const creditName = creditAccount ? `${creditAccount.accountNumber} ${creditAccount.name}` : '';
     const refPart = referenceNo ? ` (Ref: ${referenceNo})` : '';
-    // The party goes into the text, never on the expense line: a party is only allowed on
-    // receivable/payable lines (owner decision #6, E2-R4).
-    const partyName = partyId ? partyPicker.selectedParty?.name : undefined;
+    // A party rides on the debit line only when that account carries one (partyRole from
+    // /coa/flat: receivable, payable, deposit); on an expense line it goes into the text instead
+    // (owner decision #6, E2-R4).
+    const partyOnLine = !!partyId && !!debitAccount?.partyRole;
+    const partyName = partyId && !partyOnLine ? partyPicker.selectedParty?.name : undefined;
     const partyPart = partyName ? ` - ${t('expenseModal.partyValue', { name: partyName })}` : '';
     const descPart = `${description || t('expenseModal.narration.description', { account: debitName })}${partyPart}`;
 
@@ -151,6 +153,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({ isOpen, onClose }) => {
       items: [
         {
           accountId: debitAccountId,
+          ...(partyOnLine ? { partyId } : {}),
           debit: numAmount,
           credit: 0,
           description: descPart,

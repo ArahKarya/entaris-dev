@@ -1,5 +1,6 @@
 // Owner decision #6 (E2-R4): bulk expense rows never send the party on the expense line; a party is
 // only allowed on receivable/payable lines. Its name goes into the narration and line description.
+// On a debit account with a party role (partyRole from /coa/flat) the party stays on the line.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -42,6 +43,7 @@ beforeEach(() => {
   get.mockResolvedValue({ data: { data: [
     { id: 'exp', accountNumber: '6.16', name: 'Beban Perbaikan', accountType: 'EXPENSE', isGroup: false },
     { id: 'cash', accountNumber: '1.1.1', name: 'Kas Kecil', accountType: 'ASSET', isGroup: false },
+    { id: 'ap', accountNumber: '2.1.1', name: 'Hutang Usaha', accountType: 'LIABILITY', isGroup: false, partyRole: 'AP' },
   ] } });
   post.mockResolvedValue({ data: { id: 'je-1' } });
 });
@@ -69,5 +71,25 @@ describe('BulkExpenseModal', () => {
     expect(body.items.map((i: any) => i.description)).toEqual([`Servis genset - ${partyText}`, `Servis genset - ${partyText}`]);
     expect(body.items[0]).toMatchObject({ accountId: 'exp', debit: 750000, credit: 0 });
     expect(body.items[1]).toMatchObject({ accountId: 'cash', debit: 0, credit: 750000 });
+  });
+
+  it('keeps partyId on a payable debit line (party role) and leaves the party out of the text', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={qc}><BulkExpenseModal isOpen onClose={vi.fn()} /></QueryClientProvider>);
+
+    const cash = await screen.findByLabelText(tf('bulkExpenseModal.cashPlaceholder'));
+    await waitFor(() => expect(cash.querySelectorAll('option').length).toBeGreaterThan(1));
+    fireEvent.change(cash, { target: { value: 'cash' } });
+    fireEvent.change(screen.getByLabelText(tf('bulkExpenseModal.row.accountPlaceholder')), { target: { value: 'ap' } });
+    fireEvent.change(screen.getByPlaceholderText(tf('bulkExpenseModal.row.descriptionPlaceholder', { n: 1 })), { target: { value: 'Pelunasan tagihan' } });
+    fireEvent.change(screen.getByLabelText(tf('bulkExpenseModal.row.noParty')), { target: { value: 's1' } });
+    fireEvent.change(screen.getByPlaceholderText('0'), { target: { value: '5000000' } });
+    fireEvent.click(screen.getByRole('button', { name: tf('bulkExpenseModal.footer.saveAll', { count: 1 }) }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const body = post.mock.calls[0][1];
+    expect(body.items[0]).toMatchObject({ accountId: 'ap', partyId: 's1', debit: 5000000, credit: 0 });
+    expect(body.items[1]).not.toHaveProperty('partyId');
+    expect(body.items.map((i: any) => i.description)).toEqual(['Pelunasan tagihan', 'Pelunasan tagihan']);
   });
 });
