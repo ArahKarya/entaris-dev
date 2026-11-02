@@ -1,6 +1,7 @@
 import { Prisma, type RootType } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { logger } from '../lib/logger';
+import { manualPartyAdjustments } from '../services/ledger/partyAdjustments';
 
 /**
  * Returns the correct balance impact for a given account root type.
@@ -149,7 +150,11 @@ export async function recalculateAccountBalances(
 }
 
 /**
- * Recalculate party outstanding_amount from the sum of non-cancelled invoice outstanding.
+ * Recalculate party outstanding_amount from the documents: opening outstanding plus the outstanding
+ * of non-cancelled invoices, plus the manual party adjustment (services/ledger/partyAdjustments.ts:
+ * hand-made journal lines with this party on the receivable or payable accounts). A Customer adds
+ * the receivable adjustment, a Supplier the payable one. A party typed Both keeps the old formula
+ * (no adjustment) until it gets separate receivable and payable columns (E2-PR9).
  * This is the source-of-truth approach that prevents drift from increment/decrement logic.
  */
 export async function recalcPartyOutstanding(
@@ -178,6 +183,12 @@ export async function recalcPartyOutstanding(
       _sum: { outstanding: true },
     });
     newOutstanding = newOutstanding.plus(new Decimal((siSum._sum.outstanding ?? 0).toString()));
+  }
+
+  if (party.partyType === 'Customer' || party.partyType === 'Supplier') {
+    const role = party.partyType === 'Customer' ? 'AR' : 'AP';
+    const adjustment = (await manualPartyAdjustments(tx, role, [partyId])).get(partyId);
+    if (adjustment) newOutstanding = newOutstanding.plus(adjustment.toString());
   }
 
   const oldOutstanding = new Decimal(party.outstandingAmount.toString());

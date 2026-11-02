@@ -4,6 +4,7 @@ import {
   applyAccountImpacts,
   computeImpact,
   computeImpactDecimal,
+  recalcPartyOutstanding,
   updateAccountBalance,
   updateBalancesForItems,
 } from '../accountBalance';
@@ -185,5 +186,49 @@ describe('applyAccountImpacts', () => {
     expect(tx.account.findMany).toHaveBeenCalledWith({ where: { id: { in: ['gone', 'x'] } }, select: { id: true, rootType: true } });
     expect(tx.account.update).toHaveBeenCalledTimes(1);
     expect(tx.account.update.mock.calls[0][0].where.id).toBe('x');
+  });
+});
+
+// recalcPartyOutstanding
+
+describe('recalcPartyOutstanding', () => {
+  const makeTx = (partyType: string, adjustment: string | null) => ({
+    party: {
+      findUnique: vi.fn().mockResolvedValue({ partyType, outstandingAmount: 0, openingOutstanding: 1000 }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    purchaseInvoice: { aggregate: vi.fn().mockResolvedValue({ _sum: { outstanding: 200 } }) },
+    salesInvoice: { aggregate: vi.fn().mockResolvedValue({ _sum: { outstanding: 300 } }) },
+    systemAccountMapping: {
+      findMany: vi.fn().mockResolvedValue([
+        { role: 'AR', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
+        { role: 'AP', accountId: 'ap', account: { accountNumber: '2.1.1', name: 'Hutang' } },
+      ]),
+    },
+    journalEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    $queryRaw: vi.fn().mockResolvedValue(adjustment === null ? [] : [{ party_id: 'p1', amount: adjustment }]),
+  });
+
+  it('adds the receivable manual adjustment for a Customer', async () => {
+    const tx = makeTx('Customer', '5000000.00');
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 5001300 } });
+    const [, sql] = tx.$queryRaw.mock.calls[0] as [unknown, Prisma.Sql];
+    expect(sql.values).toEqual(['ar', 'p1']);
+  });
+
+  it('adds the payable manual adjustment for a Supplier', async () => {
+    const tx = makeTx('Supplier', '-50.00');
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 1150 } });
+    const [, sql] = tx.$queryRaw.mock.calls[0] as [unknown, Prisma.Sql];
+    expect(sql.values).toEqual(['ap', 'p1']);
+  });
+
+  it('keeps the old formula for a party typed Both', async () => {
+    const tx = makeTx('Both', '999');
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 1500 } });
   });
 });

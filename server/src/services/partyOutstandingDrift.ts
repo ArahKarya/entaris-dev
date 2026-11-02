@@ -1,13 +1,14 @@
 // Read-only comparison of each real party's stored outstanding amount (E7-R13). The old dummy
 // generator and delete-dummy recalculated every party from open invoices alone, which dropped
 // opening outstanding balances. Shown per party: the stored amount, the amount recalcPartyOutstanding
-// would compute (opening + outstanding of non-cancelled invoices), and the party's AR/AP ledger
+// would compute (opening + outstanding of non-cancelled invoices + manual party adjustment), and the party's AR/AP ledger
 // balance. The ledger column is indicative only until opening balances are journaled per party
 // (E2-R11). Nothing is changed here; corrections go through the accountant.
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { systemAccounts } from './systemAccounts';
+import { manualPartyAdjustments } from './ledger/partyAdjustments';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 type Dec = Prisma.Decimal;
@@ -29,6 +30,10 @@ export interface DriftSums {
   arLedger: ReadonlyMap<string, Dec>;
   /** AP credit − debit. */
   apLedger: ReadonlyMap<string, Dec>;
+  /** Manual party adjustment on AR (services/ledger/partyAdjustments.ts); counts for a Customer only. */
+  arManual?: ReadonlyMap<string, Dec>;
+  /** Manual party adjustment on AP; counts for a Supplier only. */
+  apManual?: ReadonlyMap<string, Dec>;
 }
 
 export interface DriftRow {
@@ -48,8 +53,9 @@ const isSupplier = (t: string) => t === 'Supplier' || t === 'Both';
 /**
  * One row per party whose stored amount differs from the expected one, or whose expected amount
  * differs from its ledger balance. Expected follows recalcPartyOutstanding: opening outstanding
- * plus sales invoices (Customer/Both) plus purchase invoices (Supplier/Both); the ledger adds AR
- * and AP the same way.
+ * plus sales invoices (Customer/Both) plus purchase invoices (Supplier/Both), plus the manual party
+ * adjustment on AR for a Customer and on AP for a Supplier (not for Both); the ledger adds AR and AP
+ * the same way.
  */
 export function buildDriftRows(parties: readonly DriftParty[], sums: DriftSums): DriftRow[] {
   const zero = D(0);
@@ -65,6 +71,8 @@ export function buildDriftRows(parties: readonly DriftParty[], sums: DriftSums):
       expected = expected.plus(sums.purchaseOutstanding.get(p.id) ?? zero);
       ledger = ledger.plus(sums.apLedger.get(p.id) ?? zero);
     }
+    if (p.partyType === 'Customer') expected = expected.plus(sums.arManual?.get(p.id) ?? zero);
+    if (p.partyType === 'Supplier') expected = expected.plus(sums.apManual?.get(p.id) ?? zero);
     const storedDiff = stored.minus(expected);
     const ledgerDiff = expected.minus(ledger);
     if (storedDiff.isZero() && ledgerDiff.isZero()) return [];
@@ -84,7 +92,7 @@ export function buildDriftRows(parties: readonly DriftParty[], sums: DriftSums):
 /** Loads the real (non-dummy) parties and their sums, then builds the drift rows. */
 export async function computePartyOutstandingDrift(db: Db = prisma): Promise<DriftRow[]> {
   const [arIds, apIds] = await Promise.all([systemAccounts.getAccountIds('AR'), systemAccounts.getAccountIds('AP')]);
-  const [parties, si, pi, ledger] = await Promise.all([
+  const [parties, si, pi, ledger, arManual, apManual] = await Promise.all([
     db.party.findMany({
       where: { isDummy: false },
       select: { id: true, name: true, partyType: true, outstandingAmount: true, openingOutstanding: true },
@@ -97,6 +105,8 @@ export async function computePartyOutstandingDrift(db: Db = prisma): Promise<Dri
       where: { isCancelled: false, partyId: { not: null }, accountId: { in: [...arIds, ...apIds] } },
       _sum: { debit: true, credit: true },
     }),
+    manualPartyAdjustments(db, 'AR'),
+    manualPartyAdjustments(db, 'AP'),
   ]);
   const arLedger = new Map<string, Dec>();
   const apLedger = new Map<string, Dec>();
@@ -112,6 +122,8 @@ export async function computePartyOutstandingDrift(db: Db = prisma): Promise<Dri
     purchaseOutstanding: new Map(pi.map((g) => [g.partyId, D(g._sum.outstanding)])),
     arLedger,
     apLedger,
+    arManual,
+    apManual,
   });
 }
 
