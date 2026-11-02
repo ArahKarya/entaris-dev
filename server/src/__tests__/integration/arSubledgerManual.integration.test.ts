@@ -11,6 +11,10 @@
  * - A cancelled manual journal counts on neither side.
  * - An account AR held before a remap (sourceKey REMAP:AR:<from>:<to>:...) still counts: a manual
  *   line there is in both the ledger side and the adjustment.
+ * - One account in two party roles: AP and VENDOR_DEPOSIT on one account touch neither a Customer
+ *   recalc nor the receivable and customer deposit checks; AR and CUSTOMER_DEPOSIT on one account
+ *   make the AR check refuse (PARTY_ROLE_AMBIGUOUS) but the Customer recalc still runs, without
+ *   the manual adjustment.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -21,7 +25,7 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { postJournal } from '../../services/ledger/postJournal';
 import { DOCUMENT_RULE, manualJournalRule } from '../../services/ledger/accountGuard';
-import { findArSubledgerDiffs } from '../../services/ledger/arSubledgerCheck';
+import { findArSubledgerDiffs, findCustomerDepositDiffs } from '../../services/ledger/arSubledgerCheck';
 import { recalcPartyOutstanding } from '../../utils/accountBalance';
 import { fiscalYearRange } from '../../utils/periodGuard';
 
@@ -191,6 +195,35 @@ d('manual party adjustment (plan §2.8)', () => {
       expect(await findArSubledgerDiffs(tx, { partyIds: [partyE] })).toEqual([]);
       await recalcPartyOutstanding(tx, partyE);
       expect((await tx.party.findUniqueOrThrow({ where: { id: partyE } })).outstandingAmount.toFixed(2)).toBe('0.00');
+    });
+  });
+  it('an account in two party roles fails only what reads that role; recalc never fails on it', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const partyF = await customer(tx);
+      await manualAr(tx, b, partyF, 5 * JT);
+      const supplier = (await tx.party.create({ data: { name: `IT-ARM Supplier ${tag()}`, partyType: 'Supplier' } })).id;
+
+      // AP and VENDOR_DEPOSIT on one account: the Customer side does not care.
+      const shared = await tx.account.create({
+        data: { name: 'IT-ARM Hutang ganda', accountNumber: `IT-ARM-${tag()}`, accountType: 'LIABILITY', rootType: 'LIABILITY' },
+      });
+      await tx.systemAccountMapping.createMany({
+        data: [{ role: 'AP', accountId: shared.id }, { role: 'VENDOR_DEPOSIT', accountId: shared.id }],
+      });
+      await tx.party.update({ where: { id: partyF }, data: { outstandingAmount: 0 } });
+      await recalcPartyOutstanding(tx, partyF);
+      expect((await tx.party.findUniqueOrThrow({ where: { id: partyF } })).outstandingAmount.toFixed(2)).toBe('5000000.00');
+      expect(await findArSubledgerDiffs(tx, { partyIds: [partyF] })).toEqual([]);
+      expect(await findCustomerDepositDiffs(tx, { partyIds: [partyF] })).toEqual([]);
+      // The Supplier's own role is the ambiguous one: its recalc still runs, without an adjustment.
+      await expect(recalcPartyOutstanding(tx, supplier)).resolves.toBeUndefined();
+
+      // AR and CUSTOMER_DEPOSIT on one account: the AR check refuses, the recalc runs without the adjustment.
+      await tx.systemAccountMapping.create({ data: { role: 'CUSTOMER_DEPOSIT', accountId: b.arId } });
+      await expect(findArSubledgerDiffs(tx, { partyIds: [partyF] })).rejects.toMatchObject({ code: 'PARTY_ROLE_AMBIGUOUS' });
+      await recalcPartyOutstanding(tx, partyF);
+      expect((await tx.party.findUniqueOrThrow({ where: { id: partyF } })).outstandingAmount.toFixed(2)).toBe('0.00');
     });
   });
 });

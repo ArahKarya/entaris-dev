@@ -3,7 +3,9 @@
  *
  * - PATCH /journals/:id/cancel needs doc.cancel (403 without it).
  * - MANUAL, IMPORT, RECURRING and CASH_BOOK journals cancel (200): status Cancelled, ledger rows
- *   cancelled, account balances back to what they were before the journal.
+ *   cancelled, account balances back to what they were before the journal. The outstanding of
+ *   every party on the journal is recalculated, so a journal posted under the old classification
+ *   (a party on an expense line) does not leave it too high.
  * - Every other source type, and a NULL (unknown legacy) source, gets 400 JOURNAL_NOT_MANUAL and
  *   stays as it was: CLOSE-, DEP-, JV-STT-, deposit offsets (customer and supplier, made by the
  *   deposit refund route), opening and system journals. A hand-made source type on a journal
@@ -201,6 +203,44 @@ d('Journal menu cancel: hand-made journals', () => {
       expect(after.cancelReason).toBe('Uji menu jurnal');
       expect(await tx.accountingLedgerEntry.count({ where: { referenceId: je.id, isCancelled: false } })).toBe(0);
       expect(await accountBalances(tx, je.accountIds)).toEqual(je.balancesBefore);
+    });
+  });
+
+  it('recalculates the outstanding of a party on a journal posted under the old rule (party on an expense line)', async () => {
+    await inRollback(async (tx) => {
+      const fy = await createFiscalYear(tx, { year: Y });
+      const supplier = await tx.party.create({ data: { name: `IT-JMS Supplier ${tag()}`, partyType: 'Supplier' } });
+      const expense = await tx.account.create({
+        data: { name: 'IT-JMS Beban', accountNumber: `IT-JMS-${tag()}`, accountType: 'EXPENSE', rootType: 'EXPENSE' },
+      });
+      const date = new Date(`${Y}-03-10T00:00:00+07:00`);
+      // Stored the way the old expense form posted it: Dr Beban with the Supplier, Cr Kas. The old
+      // apply raised the Supplier's outstanding by the debit (EXPENSE is debit-normal).
+      const je = await tx.journalEntry.create({
+        data: {
+          entryNumber: `IT-JMS-${short()}`, date, narration: 'Beban lama', status: 'Submitted', fiscalYearId: fy.id,
+          createdBy: actor.userId, submittedAt: date, sourceType: 'MANUAL',
+          items: {
+            create: [
+              { accountId: expense.id, partyId: supplier.id, debit: 1_000_000, credit: 0 },
+              { accountId: cashAccountId, debit: 0, credit: 1_000_000 },
+            ],
+          },
+        },
+        include: { items: true },
+      });
+      await tx.accountingLedgerEntry.createMany({
+        data: je.items.map((i) => ({
+          date, accountId: i.accountId, partyId: i.partyId, debit: i.debit, credit: i.credit,
+          referenceType: 'JournalEntry', referenceId: je.id, description: 'Beban lama', fiscalYearId: fy.id,
+        })),
+      });
+      await tx.party.update({ where: { id: supplier.id }, data: { outstandingAmount: 1_000_000 } });
+
+      const r = await cancelFromMenu(je.id);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const after = await tx.party.findUniqueOrThrow({ where: { id: supplier.id } });
+      expect(after.outstandingAmount.toFixed(2)).toBe('0.00');
     });
   });
 

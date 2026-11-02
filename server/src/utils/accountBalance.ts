@@ -2,6 +2,8 @@ import { Prisma, type RootType } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { logger } from '../lib/logger';
 import { manualPartyAdjustments } from '../services/ledger/partyAdjustments';
+import { PARTY_ROLE_AMBIGUOUS, type PartyRole } from '../services/ledger/partyRules';
+import { BusinessError } from './errors';
 
 /**
  * Returns the correct balance impact for a given account root type.
@@ -150,6 +152,26 @@ export async function recalculateAccountBalances(
 }
 
 /**
+ * The party's manual adjustment on the role's accounts. When an account of the role also holds
+ * another party role (PARTY_ROLE_AMBIGUOUS) the adjustment cannot be told apart, so it is left out
+ * and logged: the documents still post, as they did before the adjustment existed, and the mapping
+ * is refused where a journal line actually touches that account (postJournal).
+ */
+async function partyAdjustmentOrNone(
+  tx: Prisma.TransactionClient,
+  role: PartyRole,
+  partyId: string,
+): Promise<Prisma.Decimal | undefined> {
+  try {
+    return (await manualPartyAdjustments(tx, role, [partyId])).get(partyId);
+  } catch (err) {
+    if (!(err instanceof BusinessError) || err.code !== PARTY_ROLE_AMBIGUOUS) throw err;
+    logger.error({ partyId, role, err: err.message }, 'recalcPartyOutstanding: party role mapping is ambiguous, manual adjustment left out');
+    return undefined;
+  }
+}
+
+/**
  * Recalculate party outstanding_amount from the documents: opening outstanding plus the outstanding
  * of non-cancelled invoices, plus the manual party adjustment (services/ledger/partyAdjustments.ts:
  * hand-made journal lines with this party on the receivable or payable accounts). A Customer adds
@@ -186,8 +208,7 @@ export async function recalcPartyOutstanding(
   }
 
   if (party.partyType === 'Customer' || party.partyType === 'Supplier') {
-    const role = party.partyType === 'Customer' ? 'AR' : 'AP';
-    const adjustment = (await manualPartyAdjustments(tx, role, [partyId])).get(partyId);
+    const adjustment = await partyAdjustmentOrNone(tx, party.partyType === 'Customer' ? 'AR' : 'AP', partyId);
     if (adjustment) newOutstanding = newOutstanding.plus(adjustment.toString());
   }
 

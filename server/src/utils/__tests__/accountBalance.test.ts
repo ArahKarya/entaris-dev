@@ -225,6 +225,28 @@ describe('recalcPartyOutstanding', () => {
     expect(sql.values).toEqual(['ap', 'p1']);
   });
 
+  it('a party role conflict elsewhere (AP and VENDOR_DEPOSIT on one account) does not stop a Customer recalc', async () => {
+    const tx = makeTx('Customer', '5000000.00');
+    tx.systemAccountMapping.findMany.mockResolvedValue([
+      { role: 'AR', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
+      { role: 'AP', accountId: 'ap', account: { accountNumber: '2.1.1', name: 'Hutang' } },
+      { role: 'VENDOR_DEPOSIT', accountId: 'ap', account: { accountNumber: '2.1.1', name: 'Hutang' } },
+    ]);
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 5001300 } });
+  });
+
+  it('a conflict on its own role leaves the manual adjustment out instead of failing the document', async () => {
+    const tx = makeTx('Customer', '5000000.00');
+    tx.systemAccountMapping.findMany.mockResolvedValue([
+      { role: 'AR', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
+      { role: 'CUSTOMER_DEPOSIT', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
+    ]);
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 1300 } });
+  });
+
   it('keeps the old formula for a party typed Both', async () => {
     const tx = makeTx('Both', '999');
     await recalcPartyOutstanding(tx as any, 'p1');

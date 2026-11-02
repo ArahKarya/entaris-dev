@@ -13,6 +13,10 @@
  *   a concurrent deactivation waits and afterwards sees the posting's ledger row; a deactivation
  *   that got there first makes the posting wait and then refuse the account (ACCOUNT_INACTIVE), so
  *   nothing posts to an account deactivated between the check and the write.
+ * - Lock order: a posting that takes its own JV number waits for the JV series lock before it locks
+ *   any account row, like every other JV writer (number first, then balances), so a legacy writer
+ *   holding the series lock and then updating the same account finishes, and no deadlock aborts
+ *   either side.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient, Prisma, type FiscalYear } from '@prisma/client';
@@ -23,6 +27,8 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { postJournal, JOURNAL_FY_MISMATCH, type PostJournalInput } from '../../services/ledger/postJournal';
 import { DOCUMENT_RULE, manualJournalRule } from '../../services/ledger/accountGuard';
+import { generateDocumentNumber } from '../../utils/documentNumber';
+import { updateAccountBalance } from '../../utils/accountBalance';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -251,6 +257,53 @@ d('postJournal (E2-R3)', () => {
       await prisma.accountingLedgerEntry.deleteMany({ where: { referenceId: { in: jes.map((j) => j.id) } } });
       await prisma.journalEntry.deleteMany({ where: { id: { in: jes.map((j) => j.id) } } });
       await prisma.account.deleteMany({ where: { id: { in: [expense.id, expense2.id, equity.id] } } });
+      await prisma.fiscalYear.delete({ where: { id: fy.id } });
+    }
+  });
+  it('takes the JV number before the account rows: a legacy JV writer on the same account and month does not deadlock', async () => {
+    const suffix = tag();
+    const user = await prisma.user.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!user) throw new Error('No active user to attribute the posting to.');
+    const fy = await prisma.fiscalYear.create({
+      data: { name: `IT-PJ-${Y}-${suffix}`, startDate: new Date(`${Y}-01-01`), endDate: new Date(`${Y}-12-31`) },
+    });
+    const expense = await account(prisma, 'EXPENSE');
+    const equity = await account(prisma, 'EQUITY');
+    const narration = `IT-PJ order ${suffix}`;
+    try {
+      // The legacy writer: generateDocumentNumber('JV') first, then the account balance UPDATE.
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      let numbered!: () => void;
+      const numberedSignal = new Promise<void>((r) => { numbered = r; });
+      const legacy = prisma.$transaction(async (tx) => {
+        await generateDocumentNumber(tx, 'JV', DAY, fy.id);
+        numbered();
+        await gate;
+        await updateAccountBalance(tx, expense.id, JT, 0);
+      }, { timeout: 20000 });
+      legacy.catch(() => undefined);
+      await numberedSignal;
+
+      const posting = prisma.$transaction((tx) => postJournal(tx, {
+        date: DAY, narration, createdBy: user.id,
+        sourceType: 'SYSTEM_DOC', accountRule: DOCUMENT_RULE, partyRule: 'off',
+        lines: [{ accountId: expense.id, debit: JT }, { accountId: equity.id, credit: JT }],
+      }), { timeout: 20000 });
+      posting.catch(() => undefined);
+      // The posting waits on the JV series lock, holding no account row yet.
+      expect(await settledWithin(posting, 300)).toBe(false);
+
+      release();
+      await expect(legacy).resolves.toBeUndefined();
+      const { journal } = await posting;
+      expect(journal.entryNumber).toMatch(new RegExp(`^JV-${Y}03-`));
+      expect((await balance(prisma, expense.id)).toFixed(2)).toBe((2 * JT).toFixed(2));
+    } finally {
+      const jes = await prisma.journalEntry.findMany({ where: { narration }, select: { id: true } });
+      await prisma.accountingLedgerEntry.deleteMany({ where: { referenceId: { in: jes.map((j) => j.id) } } });
+      await prisma.journalEntry.deleteMany({ where: { id: { in: jes.map((j) => j.id) } } });
+      await prisma.account.deleteMany({ where: { id: { in: [expense.id, equity.id] } } });
       await prisma.fiscalYear.delete({ where: { id: fy.id } });
     }
   });

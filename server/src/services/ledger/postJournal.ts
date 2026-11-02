@@ -3,7 +3,8 @@
 //      debit total exactly equal to credit total;
 //   2. fiscal year from the journal's own date, open and not locked (utils/periodGuard.ts); a
 //      caller that expects a year passes expectFiscalYearId to have it verified, never to choose it;
-//   3. account rows locked FOR UPDATE in id order, then the account rule (detail, active, control);
+//   3. the entry number (JV advisory lock) first, then account rows locked FOR UPDATE in id order,
+//      the same order as every other JV writer, then the account rule (detail, active, control);
 //   4. party per line under the party rule (services/ledger/partyRules.ts);
 //   5. one journal with its items, one createMany of ledger rows (reference JournalEntry);
 //   6. balances in Decimal, one UPDATE per account in id order;
@@ -59,7 +60,7 @@ export interface PostedJournal {
 /** Throws the first party problem as BusinessError, naming the 1-based line. No-op under 'off'. */
 async function assertPartyLines(tx: Tx, lines: readonly NormalizedJournalLine[], rule: PartyRule): Promise<void> {
   if (rule === 'off') return;
-  const [roles, types] = await Promise.all([loadPartyRoleMap(tx), loadPartyTypes(tx, lines.map((l) => l.partyId))]);
+  const [roles, types] = await Promise.all([loadPartyRoleMap(tx, lines.map((l) => l.accountId)), loadPartyTypes(tx, lines.map((l) => l.partyId))]);
   lines.forEach((line, index) => {
     const partyType = line.partyId ? types.get(line.partyId) ?? null : null;
     const problem = partyLineProblem({ partyId: line.partyId, partyType }, roles.get(line.accountId), rule);
@@ -78,10 +79,13 @@ export async function postJournal(tx: Tx, input: PostJournalInput): Promise<Post
     );
   }
 
+  // The number (and with it the JV advisory lock) before the account rows: every other JV writer
+  // takes generateDocumentNumber first and then updates balances, so the opposite order deadlocks.
+  const entryNumber = input.entryNumber ?? (await generateDocumentNumber(tx, 'JV', input.date, fiscalYear.id));
+
   const accounts = await assertPostableAccounts(tx, lines.map((l) => l.accountId), input.accountRule, { lockRows: true });
   await assertPartyLines(tx, lines, input.partyRule);
 
-  const entryNumber = input.entryNumber ?? (await generateDocumentNumber(tx, 'JV', input.date, fiscalYear.id));
   const journal = await tx.journalEntry.create({
     data: {
       entryNumber,

@@ -67,6 +67,13 @@ beforeEach(() => {
   mocks.generateDocumentNumber.mockResolvedValue('JV-217803-0001');
 });
 
+/** A tx whose journal number call is recorded in the same call log as the account row lock. */
+function numberedTx(...args: Parameters<typeof makeTx>) {
+  const tx = makeTx(...args);
+  mocks.generateDocumentNumber.mockImplementation(async () => { tx.calls.push('number'); return 'JV-217803-0001'; });
+  return tx;
+}
+
 describe('postJournal', () => {
   it('rejects unbalanced lines before touching the database (no tolerance)', async () => {
     const tx = makeTx();
@@ -98,6 +105,30 @@ describe('postJournal', () => {
     const sql = Prisma.sql(strings, ...args);
     expect(sql.sql).toMatch(/FOR UPDATE/);
     expect(sql.values).toEqual(['exp', 'rev']);
+  });
+
+  it('takes the JV number (advisory lock) before the account row locks, the order of every other JV writer', async () => {
+    const tx = numberedTx();
+    await postJournal(tx as any, base({ lines: [{ accountId: 'rev', credit: 5 }, { accountId: 'exp', debit: 5 }], partyRule: 'off' }));
+    expect(tx.calls.slice(0, 3)).toEqual(['number', 'lock', 'accounts']);
+  });
+
+  it('refuses an account in two party roles only when a line touches it', async () => {
+    const twoRoles = [
+      { role: 'AR', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
+      { role: 'AP', accountId: 'dup', account: { accountNumber: '2.1.1', name: 'Hutang' } },
+      { role: 'VENDOR_DEPOSIT', accountId: 'dup', account: { accountNumber: '2.1.1', name: 'Hutang' } },
+    ];
+    const clean = makeTx([acc('ar', 'ASSET'), acc('rev', 'REVENUE'), acc('dup', 'LIABILITY')]);
+    clean.systemAccountMapping.findMany.mockResolvedValue(twoRoles as any);
+    await expect(postJournal(clean as any, base())).resolves.toBeTruthy();
+
+    const touching = makeTx([acc('ar', 'ASSET'), acc('rev', 'REVENUE'), acc('dup', 'LIABILITY')]);
+    touching.systemAccountMapping.findMany.mockResolvedValue(twoRoles as any);
+    await expect(postJournal(touching as any, base({
+      accountRule: DOCUMENT_RULE, partyRule: 'allowedOnly',
+      lines: [{ accountId: 'dup', debit: 10, partyId: 'supp' }, { accountId: 'rev', credit: 10 }],
+    }))).rejects.toMatchObject({ code: 'PARTY_ROLE_AMBIGUOUS' });
   });
 
   it('refuses a group or an inactive account', async () => {

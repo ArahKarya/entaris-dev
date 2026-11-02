@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
-import { updateBalancesForItems } from '../utils/accountBalance';
+import { recalcPartyOutstanding, updateBalancesForItems } from '../utils/accountBalance';
 import { applyPartyImpact } from '../utils/partyBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
@@ -248,6 +248,12 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
         where: { referenceId: entry.id, isCancelled: false },
         data: { isCancelled: true },
       });
+
+      // The reverse above follows today's party roles; a journal posted before them was applied by
+      // account number and root type, so the reverse may not undo it. Recalculate the outstanding of
+      // every party it touched from the documents and the remaining manual adjustments instead.
+      const partyIds = [...new Set(entry.items.map((i) => i.partyId).filter((p): p is string => !!p))].sort();
+      for (const partyId of partyIds) await recalcPartyOutstanding(tx, partyId);
       return true;
     }, { timeout: 15000 });
 

@@ -3,6 +3,8 @@
 // Detection only, no fix: a difference is corrected by the accountant with a document or a journal.
 import { prisma } from '../../lib/prisma';
 import { findArSubledgerDiffs, findCustomerDepositDiffs, type PartySubledgerDiff } from '../../services/ledger/arSubledgerCheck';
+import { PARTY_ROLE_AMBIGUOUS } from '../../services/ledger/partyRules';
+import { BusinessError } from '../../utils/errors';
 import type { CheckResult } from './checks';
 
 const DETAIL_LIMIT = 20;
@@ -25,8 +27,26 @@ export function detailRows(rows: readonly PartySubledgerDiff[]) {
   }));
 }
 
+/**
+ * The rows, or an error result naming the account when the role's mapping is ambiguous
+ * (PARTY_ROLE_AMBIGUOUS): the check cannot tell that account's lines apart, and one failing check
+ * must not take the whole health check down.
+ */
+async function rowsOrAmbiguous(
+  name: string,
+  find: () => Promise<PartySubledgerDiff[]>,
+): Promise<PartySubledgerDiff[] | CheckResult> {
+  try {
+    return await find();
+  } catch (err) {
+    if (!(err instanceof BusinessError) || err.code !== PARTY_ROLE_AMBIGUOUS) throw err;
+    return { name, status: 'error', message: err.message, count: 1, details: [], fixable: false };
+  }
+}
+
 export async function checkArSubledgerVsGl(): Promise<CheckResult> {
-  const rows = await findArSubledgerDiffs(prisma);
+  const rows = await rowsOrAmbiguous('AR vs Subledger', () => findArSubledgerDiffs(prisma));
+  if (!Array.isArray(rows)) return rows;
   return {
     name: 'AR vs Subledger',
     status: rows.length > 0 ? 'warning' : 'ok',
@@ -40,7 +60,8 @@ export async function checkArSubledgerVsGl(): Promise<CheckResult> {
 }
 
 export async function checkCustomerDepositVsGl(): Promise<CheckResult> {
-  const rows = await findCustomerDepositDiffs(prisma);
+  const rows = await rowsOrAmbiguous('Customer Deposit vs Subledger', () => findCustomerDepositDiffs(prisma));
+  if (!Array.isArray(rows)) return rows;
   return {
     name: 'Customer Deposit vs Subledger',
     status: rows.length > 0 ? 'warning' : 'ok',

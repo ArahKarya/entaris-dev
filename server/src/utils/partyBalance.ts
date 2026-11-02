@@ -39,7 +39,7 @@ export async function applyPartyImpact(
   direction: 'apply' | 'reverse',
 ): Promise<void> {
   if (!items.some((it) => it.partyId)) return;
-  const roles = await loadPartyRoleMap(tx);
+  const roles = await loadPartyRoleMap(tx, items.filter((it) => it.partyId).map((it) => it.accountId));
   for (const it of items) {
     if (!it.partyId) continue;
 
