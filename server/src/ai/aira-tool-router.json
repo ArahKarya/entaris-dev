@@ -22319,7 +22319,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "journal",
-      "desc": "Membuat jurnal manual langsung berstatus Submitted (tidak ada draft) pada tahun buku terbuka sesuai tanggal. Total debit harus sama dengan total kredit dan satu baris tidak boleh berisi debit sekaligus kredit.",
+      "desc": "Membuat jurnal manual langsung berstatus Submitted (tidak ada draft) pada tahun buku terbuka sesuai tanggal. Minimal 2 baris bernilai, total debit harus tepat sama dengan total kredit (tanpa toleransi), maksimal 2 angka desimal, dan satu baris tidak boleh berisi debit sekaligus kredit. Akun harus akun detail aktif; akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) butuh journal.control; akun uang muka tidak pernah bisa dijurnal manual.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -22361,13 +22361,13 @@
               "name": "debit",
               "in": "body",
               "type": "number",
-              "required": true
+              "required": false
             },
             {
               "name": "credit",
               "in": "body",
               "type": "number",
-              "required": true
+              "required": false
             },
             {
               "name": "partyId",
@@ -22382,7 +22382,7 @@
               "required": false
             }
           ],
-          "description": "Baris jurnal: accountId*, debit, credit (salah satu > 0), partyId (opsional untuk akun piutang/hutang), description."
+          "description": "Minimal 2 baris: accountId*, debit, credit (tepat satu > 0, maksimal 2 desimal), partyId (wajib di akun Piutang Usaha = Customer dan Hutang Usaha = Supplier; dilarang di akun lain), description."
         }
       ],
       "output": {
@@ -22396,16 +22396,28 @@
       "level": 1,
       "phase": 4,
       "draftCapable": false,
-      "postingEffect": "Jurnal JV-… langsung diposting ke buku besar tak-terhapus; saldo akun diperbarui, saldo piutang/hutang pihak ikut berubah bila baris memakai partyId pada akun piutang/hutang. Tidak ada efek stok.",
+      "postingEffect": "Jurnal JV-… (sumber MANUAL) langsung diposting ke buku besar tak-terhapus; saldo akun diperbarui, saldo piutang/hutang pihak pada baris berpihak dihitung ulang dari dokumen ditambah penyesuaian manual. Tidak ada efek stok.",
       "confirm_template": "Posting jurnal manual tanggal {date} ({narration}) dengan {items} baris?",
       "prerequisites": [
         "Tahun buku untuk tanggal tersebut terbuka.",
-        "Akun pada baris adalah akun detail aktif."
+        "Akun pada baris adalah akun detail aktif.",
+        "Baris ke akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) hanya untuk pemegang journal.control (Admin)."
       ],
+      "accessNote": "Baris ke akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability journal.control (default hanya Admin). Akun Uang Muka Customer/Supplier ditolak walau punya journal.control; koreksi uang muka lewat modul Uang Muka.",
       "errors": [
-        "400: Jurnal tidak seimbang",
-        "400: debit dan kredit sekaligus dalam satu baris",
-        "400: tahun buku ditutup/tidak ada",
+        "400 JOURNAL_UNBALANCED: total debit tidak tepat sama dengan total kredit (tanpa toleransi)",
+        "400 LINES_TOO_FEW: kurang dari 2 baris bernilai",
+        "400 LINE_BOTH_SIDES: debit dan kredit sekaligus dalam satu baris",
+        "400 LINE_EMPTY: baris tanpa debit maupun kredit",
+        "400 LINE_AMOUNT_INVALID / LINE_AMOUNT_NEGATIVE / LINE_AMOUNT_PRECISION / LINE_AMOUNT_TOO_LARGE: nilai bukan angka, negatif, lebih dari 2 desimal, atau melebihi 9999999999999.99",
+        "400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun tidak ada, akun grup, atau tidak aktif",
+        "400 ACCOUNT_CONTROL: akun kontrol tanpa journal.control, atau akun uang muka (selalu ditolak)",
+        "400 PARTY_REQUIRED: baris akun Piutang/Hutang Usaha tanpa pihak",
+        "400 PARTY_NOT_ALLOWED: pihak diisi di baris akun selain Piutang/Hutang Usaha",
+        "400 PARTY_TYPE_MISMATCH: Piutang hanya Customer, Hutang hanya Supplier; mitra Both belum bisa dipakai",
+        "400 PARTY_NOT_FOUND: pihak tidak ditemukan",
+        "400 PARTY_ROLE_AMBIGUOUS: akun dipetakan ke dua peran pihak; perbaiki pemetaan Akun Sistem",
+        "400 PERIOD_CLOSED / FISCAL_YEAR_MISSING: tahun buku untuk tanggal itu ditutup atau tidak ada",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
