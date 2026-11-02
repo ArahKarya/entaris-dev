@@ -353,7 +353,35 @@ export const SYSTEM_ACCOUNT_ROLES = {
   },
 } as const;
 
+/** Error code: a role the code posts to has no mapped account. */
+export const ACCOUNT_MAPPING_MISSING = 'ACCOUNT_MAPPING_MISSING';
+/** Error code: two roles with different meanings were mapped to one account. */
+export const ACCOUNT_ROLE_CONFLICT = 'ACCOUNT_ROLE_CONFLICT';
+
 export type SystemAccountRole = keyof typeof SYSTEM_ACCOUNT_ROLES;
+
+/**
+ * Roles the posting code writes to. A mapping to a group or inactive account breaks the next
+ * posting, so startup and the mapping audit watch these. SALES_RETURN, PRODUCTION_CONVERSION and
+ * PURCHASE_PRICE_VARIANCE join once PR-4.13 reads them (they are mapped and audited now so the
+ * data is clean before that deploy).
+ */
+export const POSTING_SYSTEM_ROLES = [
+  'CASH', 'AR', 'AP', 'INVENTORY', 'SALES', 'SERVICE_REVENUE', 'VENDOR_DEPOSIT', 'CUSTOMER_DEPOSIT',
+  'COGS', 'OPENING_EQUITY', 'RETAINED_EARNINGS', 'CURRENT_PROFIT', 'TAX_OUTPUT', 'ACCRUED_PAYABLE',
+  'PROJECT_GUARANTEE', 'INVENTORY_VARIANCE', 'OTHER_EXPENSE',
+  'SALES_RETURN', 'PRODUCTION_CONVERSION', 'PURCHASE_PRICE_VARIANCE',
+] as const satisfies readonly SystemAccountRole[];
+
+/**
+ * Roles that mean something different from every other role in this list: one account cannot
+ * carry two of them (a subledger control account, the sales/COGS pair, the equity roll-forward
+ * pair). Other roles may share an account (e.g. rounding and inventory variance).
+ */
+export const EXCLUSIVE_MAPPING_ROLES = [
+  'AR', 'AP', 'INVENTORY', 'VENDOR_DEPOSIT', 'CUSTOMER_DEPOSIT', 'ACCRUED_PAYABLE',
+  'SALES', 'COGS', 'TAX_OUTPUT', 'RETAINED_EARNINGS', 'CURRENT_PROFIT',
+] as const satisfies readonly SystemAccountRole[];
 
 export const ALL_SYSTEM_ROLES = Object.keys(SYSTEM_ACCOUNT_ROLES) as SystemAccountRole[];
 
