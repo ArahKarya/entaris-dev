@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { LanguageSchema } from './language';
 import { headerPotonganMismatch } from '../services/purchaseInvoiceCalc';
-import { isValidAccountNumber } from '../services/coa/accountRules';
 
 // Rupiah only (E2-R7, E8-R12 stage 1): the books, the company settings and payment requests hold
 // IDR only. A currency field accepts 'IDR' in any case (trimmed and upper-cased) or nothing; any
@@ -16,11 +15,7 @@ const AccountTypeEnum = z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPE
 });
 
 export const CreateAccountSchema = z.object({
-  accountNumber: z
-    .string()
-    .trim()
-    .min(1, 'Nomor akun wajib diisi.')
-    .refine(isValidAccountNumber, 'Nomor akun tidak valid. Gunakan angka bertitik dengan digit pertama 1-8, mis. 1.1.6.'),
+  accountNumber: z.string().trim().min(1, 'Nomor akun wajib diisi.'),
   name: z.string().min(1, 'Nama akun wajib diisi.'),
   accountType: AccountTypeEnum.optional(),
   rootType: AccountTypeEnum.optional(),

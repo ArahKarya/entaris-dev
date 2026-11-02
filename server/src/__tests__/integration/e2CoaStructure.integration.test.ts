@@ -214,6 +214,19 @@ d('chart of accounts structure rules (E2-R6)', () => {
       const blocked = await put(parent.id, { accountNumber: numberUnder('4') });
       expect(blocked.status).toBe(400);
       expect(blocked.body.code).toBe('ACCOUNT_STRUCTURE_LOCKED');
+
+      // Inside the same prefix the children would still be left under a number that is not theirs.
+      const sameBranch = await put(parent.id, { accountNumber: numberUnder('7') });
+      expect(sameBranch.status).toBe(400);
+      expect(sameBranch.body.code).toBe('ACCOUNT_STRUCTURE_LOCKED');
+    });
+  });
+
+  it('answers a malformed number on create with the ACCOUNT_NUMBER_FORMAT code', async () => {
+    await inRollback(async () => {
+      const r = await create({ accountNumber: '9.1', name: 'x' });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('ACCOUNT_NUMBER_FORMAT');
     });
   });
 

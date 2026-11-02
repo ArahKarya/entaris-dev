@@ -108,6 +108,12 @@ describe('planUpdate', () => {
     expect(planUpdate(cur, { accountNumber: '7.19' }, facts({ childCount: 1 }), null)).toMatchObject({ code: ACCOUNT_STRUCTURE_LOCKED });
   });
 
+  it('refuses any renumber of a group with children, even inside its prefix', () => {
+    const cur = account({ accountNumber: '6.1', rootType: 'EXPENSE', isGroup: true });
+    expect(planUpdate(cur, { accountNumber: '6.9' }, facts({ childCount: 2 }), null)).toMatchObject({ code: ACCOUNT_STRUCTURE_LOCKED });
+    expect(planUpdate(cur, { name: 'Renamed', accountNumber: '6.1' }, facts({ childCount: 2 }), null).ok).toBe(true);
+  });
+
   it('keeps a renumbered child under its parent number', () => {
     const cur = account({ accountNumber: '4.1.1', rootType: 'REVENUE' });
     expect(planUpdate(cur, { accountNumber: '4.2.1' }, facts(), group('4.1', 'REVENUE'))).toMatchObject({ code: ACCOUNT_PARENT_MISMATCH });

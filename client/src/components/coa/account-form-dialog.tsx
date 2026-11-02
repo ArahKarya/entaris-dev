@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Field } from '@/components/shared';
 import { isValidAccountNumber, normalizeAccountNumber, prefixChanged } from '@/lib/accountRules';
-import { ROOT_TYPES, apiErrorMessage, rootTypeFromNumber, rootTypeLabel, walkTree, type CoaNode } from './coa-tree';
+import { apiErrorMessage, rootTypeFromNumber, rootTypeLabel, walkTree, type CoaNode } from './coa-tree';
 import { SystemAccountBadge } from './coa-tree-table';
 
 const NO_PARENT = '__root__';
@@ -80,7 +80,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
   const [accountNumber, setAccountNumber] = useState('');
   const [name, setName] = useState('');
   const [rootType, setRootType] = useState<string>('ASSET');
-  const [accountType, setAccountType] = useState<string>('ASSET');
   const [isGroup, setIsGroup] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState('');
@@ -107,7 +106,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
       setAccountNumber(p ? `${p.accountNumber}.` : '');
       setName('');
       setRootType(p?.rootType ?? 'ASSET');
-      setAccountType(p?.account.accountType ?? 'ASSET');
       setIsGroup(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,7 +121,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
     if (accountNumber === '' || accountNumber === prevPrefix) setAccountNumber(next ? `${next.accountNumber}.` : '');
     if (next) {
       setRootType(next.rootType);
-      setAccountType(next.account.accountType);
     }
   };
 
@@ -133,7 +130,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
       const derived = rootTypeFromNumber(value);
       if (derived) {
         setRootType(derived);
-        setAccountType(derived);
       }
     }
   };
@@ -178,8 +174,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
       mutation.mutate({
         accountNumber: number,
         name,
-        accountType,
-        rootType,
         isGroup,
         parentId: parent?.id || null,
       });
@@ -260,35 +254,18 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
                       : t('accountFormDialog.rootTypeHint.auto')
                 }
               >
-                {(ctl) =>
-                  isEdit || parent ? (
-                    <Input
-                      {...ctl}
-                      value={rootTypeLabel(isEdit && !locked ? (rootTypeFromNumber(accountNumber) ?? rootType) : rootType)}
-                      disabled
-                      readOnly
-                    />
-                  ) : (
-                    <Select
-                      value={rootType}
-                      onValueChange={(v) => {
-                        setRootType(v);
-                        setAccountType(v);
-                      }}
-                    >
-                      <SelectTrigger {...ctl}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROOT_TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {rootTypeLabel(type)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )
-                }
+                {(ctl) => (
+                  <Input
+                    {...ctl}
+                    value={rootTypeLabel(
+                      isEdit && !locked && editNode && prefixChanged(editNode.accountNumber, normalizeAccountNumber(accountNumber))
+                        ? (rootTypeFromNumber(accountNumber) ?? rootType)
+                        : rootType,
+                    )}
+                    disabled
+                    readOnly
+                  />
+                )}
               </Field>
             </div>
 

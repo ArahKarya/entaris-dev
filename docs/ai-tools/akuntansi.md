@@ -379,7 +379,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_update
 
-**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya (tidak boleh bila punya sub-akun). Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
+**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -438,7 +438,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 409: nomor akun dipakai akun lain
 - 400: akun sistem tidak boleh diganti nomor
 - 400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.
-- 400 ACCOUNT_STRUCTURE_LOCKED: awalan nomor atau status grup terkunci (ada transaksi, atau ada sub-akun).
+- 400 ACCOUNT_STRUCTURE_LOCKED: awalan nomor atau status grup terkunci (ada transaksi), atau nomor akun yang punya sub-akun.
 - 400 ACCOUNT_HAS_CHILDREN: akun grup masih punya sub-akun.
 - 400 ACCOUNT_PARENT_MISMATCH: nomor baru tidak diawali nomor induk.
 - 400 ACCOUNT_DEACTIVATE_BLOCKED: saldo tidak nol, Akun Sistem, sub-akun aktif, atau saldo buku besar.

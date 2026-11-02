@@ -214,13 +214,10 @@ export function planUpdate(
       `Akun ${label} sudah memiliki transaksi; status grup tidak dapat diubah.`,
     );
   }
+  if (numberChanged && facts.childCount > 0) {
+    return problem(ACCOUNT_STRUCTURE_LOCKED, `Akun ${label} memiliki sub-akun; nomor tidak dapat diubah.`);
+  }
   if (changesPrefix) {
-    if (facts.childCount > 0) {
-      return problem(
-        ACCOUNT_STRUCTURE_LOCKED,
-        `Akun ${label} memiliki sub-akun; awalan nomor (golongan akun) tidak dapat diubah.`,
-      );
-    }
     const derived = deriveRootType(requested)!;
     plan.rootType = derived;
     plan.accountType = derived;
