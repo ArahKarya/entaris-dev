@@ -404,4 +404,13 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Persediaan item": "item inventory",
   "PPN Masukan": "Input VAT",
   "PPN Keluaran": "Output VAT",
+  // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
+  "Baris {0}: {1}": "Line {0}: {1}",
+  "kredit": "credit",
+  "Nilai {0} \"{1}\" bukan angka yang valid. Tulis angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal.": "The {0} amount \"{1}\" is not a valid number. Write the number without thousands separators, with a dot as the decimal mark.",
+  "Nilai {0} tidak boleh negatif.": "The {0} amount cannot be negative.",
+  "Nilai {0} {1} lebih dari 2 angka desimal.": "The {0} amount {1} has more than 2 decimal places.",
+  "Nilai {0} {1} melebihi batas 9999999999999.99.": "The {0} amount {1} exceeds the limit of 9999999999999.99.",
+  "Baris jurnal tanpa nilai: isi debit atau kredit.": "The journal line has no amount: fill in a debit or a credit.",
+  "Jurnal minimal memiliki 2 baris bernilai.": "A journal needs at least 2 lines with an amount.",
 };
