@@ -209,6 +209,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Peran {0} dan peran {1} tidak boleh memakai akun yang sama ({2} {3}).": "Role {0} and role {1} cannot use the same account ({2} {3}).",
   "Role \"{0}\" hanya boleh memiliki 1 akun, tapi diberikan {1}.": "Role \"{0}\" can have only 1 account, but {1} were given.",
   "Konfigurasi akun sistem diperbarui.": "System account configuration updated.",
+  "Gagal menyimpan konfigurasi akun sistem.": "Failed to save the system account configuration.",
   "Gagal mengambil data konfigurasi pajak.": "Failed to load tax configurations.",
   "Gagal membuat konfigurasi pajak.": "Failed to create the tax configuration.",
   "Konfigurasi pajak tidak ditemukan.": "Tax configuration not found.",
