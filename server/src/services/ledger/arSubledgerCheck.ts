@@ -174,12 +174,11 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
 
 /**
  * Customer deposit per party: ledger credit - debit on the CUSTOMER_DEPOSIT accounts (current and
- * former) against what
- * is left of its Submitted deposits (amount - active applications - refunded, as depositFigures in
- * services/customerDepositList.ts). No manual adjustment: manual journals to a deposit account are
- * refused (manualJournalRule), so an old one shows up as a difference. In a year-scoped run a party with a Submitted deposit, or an
- * active application, dated in the year is active. [] while the account is not mapped. Largest
- * difference first.
+ * former) against what is left of its Submitted deposits (amount - active applications - refunded,
+ * as depositFigures in services/customerDepositList.ts). No manual adjustment: manual journals to a
+ * deposit account are refused (manualJournalRule), so an old one shows up as a difference. In a
+ * year-scoped run a party with a Submitted deposit, or an active application, dated in the year is
+ * active. [] while the account is not mapped. Largest difference first.
  */
 export async function findCustomerDepositDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
   const accountIds = await roleAccountIds(tx, 'CUSTOMER_DEPOSIT', { includeFormer: true });
