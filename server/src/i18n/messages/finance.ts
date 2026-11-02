@@ -404,4 +404,27 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Persediaan item": "item inventory",
   "PPN Masukan": "Input VAT",
   "PPN Keluaran": "Output VAT",
+  // Account guard rules (services/ledger/accountGuard.ts manualJournalRule / TEMPLATE_RULE); hints keep their leading space.
+  "Akun jurnal": "Journal account",
+  "Akun template": "Template account",
+  "Akun posting": "Posting account",
+  " Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.": " Requires the Journal to control accounts right (journal.control); deposit accounts only through the Deposits module.",
+  " Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.": " Deposit accounts can only be corrected through the Deposits module.",
+  " Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.": " Recurring journal templates cannot use control or tax accounts.",
+  // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
+  "Baris {0}: {1}": "Line {0}: {1}",
+  "kredit": "credit",
+  "Nilai {0} \"{1}\" bukan angka yang valid. Tulis angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal.": "The {0} amount \"{1}\" is not a valid number. Write the number without thousands separators, with a dot as the decimal mark.",
+  "Nilai {0} tidak boleh negatif.": "The {0} amount cannot be negative.",
+  "Nilai {0} {1} lebih dari 2 angka desimal.": "The {0} amount {1} has more than 2 decimal places.",
+  "Nilai {0} {1} melebihi batas 9999999999999.99.": "The {0} amount {1} exceeds the limit of 9999999999999.99.",
+  "Baris jurnal tanpa nilai: isi debit atau kredit.": "The journal line has no amount: fill in a debit or a credit.",
+  "Jurnal minimal memiliki 2 baris bernilai.": "A journal needs at least 2 lines with an amount.",
+  // party rules (E2-R4, services/ledger/partyRules.ts); role names translate inside the patterns.
+  "Pihak hanya boleh diisi di baris akun Piutang Usaha, Hutang Usaha, atau Uang Muka; kosongkan pihak di baris ini.": "A party can only be set on an Accounts Receivable, Accounts Payable or deposit account line; clear the party on this line.",
+  "Baris ke akun {0} wajib memilih {1}.": "A line to the {0} account needs a {1}.",
+  "Akun {0} hanya menerima {1}; pihak yang dipilih bertipe {2}.": "The {0} account only accepts a {1}; the selected party is of type {2}.",
+  "Akun {0} hanya menerima {1}; mitra yang terdaftar sebagai Customer sekaligus Supplier belum bisa dipakai di jurnal manual.": "The {0} account only accepts a {1}; a partner registered as both Customer and Supplier cannot be used in a manual journal yet.",
+  "Akun {0} {1} dipetakan ke dua peran pihak ({2} dan {3}). Perbaiki pemetaan di Pengaturan > Akun Sistem.": "Account {0} {1} is mapped to two party roles ({2} and {3}). Fix the mapping in Settings > System Accounts.",
+  "Akun {0} {1} memegang dua peran pihak ({2} dan {3}) lewat pemindahan akun sistem. Satu akun hanya boleh memegang satu peran pihak; pilih akun lain di Pengaturan > Akun Sistem.": "Account {0} {1} has held two party roles ({2} and {3}) through a system account move. One account can hold only one party role; choose another account in Settings > System Accounts.",
 };

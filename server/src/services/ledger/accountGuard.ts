@@ -7,6 +7,7 @@
 import type { Prisma, RootType } from '@prisma/client';
 import type { SystemAccountRole } from '../../types/systemAccounts';
 import { BusinessError } from '../../utils/errors';
+import { loadFormerRoleAccounts } from './partyRules';
 
 type Tx = Prisma.TransactionClient;
 
@@ -61,6 +62,45 @@ export interface PostableRule {
   controlHint?: string;
 }
 
+/** Control kinds a journal.control holder may post manually; the deposit roles are never among them. */
+export const MANUAL_CONTROL_KINDS = [
+  'AR',
+  'AP',
+  'INVENTORY',
+  INVENTORY_ITEM,
+  'TAX_INPUT',
+  'TAX_OUTPUT',
+  'ACCRUED_PAYABLE',
+] as const satisfies readonly RestrictedKind[];
+
+const DEPOSIT_HINT = 'Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.';
+const NO_CONTROL_RIGHT_HINT = 'Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.';
+
+/**
+ * Lines a person enters (manual journal, journal import, cash book). Control and tax accounts need
+ * the journal.control capability. Customer and supplier deposit accounts are refused even then:
+ * their subledger is built from deposit documents only, so corrections go through the Deposits module.
+ */
+export function manualJournalRule(canControl: boolean): PostableRule {
+  return {
+    label: 'Akun jurnal',
+    allowControl: canControl ? MANUAL_CONTROL_KINDS : false,
+    alsoRestrict: TAX_ACCOUNT_ROLES,
+    controlHint: canControl ? DEPOSIT_HINT : NO_CONTROL_RIGHT_HINT,
+  };
+}
+
+/** Recurring journal templates: never control or tax accounts, whatever the user's rights (owner decision #3). */
+export const TEMPLATE_RULE: PostableRule = {
+  label: 'Akun template',
+  allowControl: false,
+  alsoRestrict: TAX_ACCOUNT_ROLES,
+  controlHint: 'Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.',
+};
+
+/** System journals whose accounts are chosen by code (year-end close, payment request, settlement). Not the cash book. */
+export const DOCUMENT_RULE: PostableRule = { label: 'Akun posting', allowControl: true };
+
 export interface AccountLite {
   id: string;
   accountNumber: string;
@@ -82,24 +122,29 @@ const ACCOUNT_LITE_SELECT = {
 /**
  * Account id -> restricted kinds for the control roles (plus extraRoles) and item inventory
  * accounts. One account can be mapped under several roles; it keeps all of them, in `roles`
- * order. Role mappings replace the item-account kind for the same account.
+ * order. Role mappings replace the item-account kind for the same account. An account that held
+ * a party role before a remap keeps that role as a kind too: its ALE still counts in the party
+ * subledger (roleAccountIds includeFormer), so a former deposit account stays closed to manual
+ * journals and a former AR/AP account still needs journal.control.
  */
 export async function loadControlAccountMap(
   tx: Tx,
   extraRoles: readonly SystemAccountRole[] = [],
 ): Promise<Map<string, readonly RestrictedKind[]>> {
   const roles = [...new Set<string>([...CONTROL_ACCOUNT_ROLES, ...extraRoles])];
-  const [mappings, items] = await Promise.all([
+  const [mappings, items, former] = await Promise.all([
     tx.systemAccountMapping.findMany({ where: { role: { in: roles } }, select: { role: true, accountId: true } }),
     tx.inventoryItem.findMany({
       where: { accountId: { not: null }, account: { rootType: 'ASSET' } },
       select: { accountId: true },
       distinct: ['accountId'],
     }),
+    loadFormerRoleAccounts(tx),
   ]);
+  const claims = [...mappings, ...former];
   const byRole = new Map<string, RestrictedKind[]>();
   for (const role of roles) {
-    const ids = mappings.filter((m) => m.role === role).map((m) => m.accountId);
+    const ids = claims.filter((m) => m.role === role).map((m) => m.accountId);
     for (const id of new Set(ids)) byRole.set(id, [...(byRole.get(id) ?? []), role as RestrictedKind]);
   }
   const map = new Map<string, readonly RestrictedKind[]>();

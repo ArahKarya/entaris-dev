@@ -25,6 +25,11 @@ const IGNORED = new Set<string>([
   'HTTP {0}',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
+  // Programming errors of the sourceKey builders (services/ledger/journalSource.ts sourceKeys), never reach a client.
+  'sourceKey part "{0}" must be non-empty and contain no ":"',
+  'sourceKey day "{0}" must be YYYY-MM-DD',
+  'sourceKey import hash must be lowercase SHA-256 hex',
+  'sourceKey import group "{0}" must be a positive integer',
   // Refusals of the one-time baseline capture script (scripts/repair/e1-close-baseline.ts), CLI only.
   '{0} is not a baseline-aware close check (known: {1})',
   '--allow-existing only goes with --check <id>',
