@@ -576,7 +576,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 ### hc_run
 
-**Ringkasan:** Jalankan 9 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), dan trigger database wajib (jejak audit hanya-tambah). Cek AR dan Uang Muka Customer hanya deteksi (status warning, tanpa perbaikan otomatis) dan memakai saldo hari ini. Hanya membaca.
+**Ringkasan:** Jalankan 10 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, dan Tahun Buku hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin (modul `audit` / `view`)

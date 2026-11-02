@@ -121,6 +121,9 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Saldo Piutang di Buku Besar sama dengan sisa tagihan invoice per Customer": "The Receivable balance in the General Ledger matches the invoices' outstanding amount for every Customer",
   "{0} Customer: saldo Uang Muka Customer di Buku Besar berbeda dengan sisa uang muka": "{0} Customers: the Customer Deposit balance in the General Ledger differs from the remaining deposits",
   "Saldo Uang Muka Customer di Buku Besar sama dengan sisa uang muka per Customer": "The Customer Deposit balance in the General Ledger matches the remaining deposits for every Customer",
+  // health check: ledger rows vs fiscal year (E2-R5)
+  "{0} jurnal: entri Buku Besar tercatat di Tahun Buku yang berbeda dengan tanggal jurnalnya": "{0} journals: General Ledger entries are booked to a Fiscal Year other than the one holding the journal date",
+  "Entri Buku Besar semua jurnal tercatat di Tahun Buku sesuai tanggalnya": "General Ledger entries of every journal are booked to the Fiscal Year holding their date",
   "Dihapus {0} ALE lama, dibuat {1} ALE baru dari JournalItem": "Deleted {0} old ALE entries and created {1} new ALE entries from JournalItem",
   "Dihitung ulang saldo {0} akun dari jurnal": "Recalculated the balances of {0} accounts from journals",
   "{0} entri ALE orphan ditandai sebagai cancelled": "{0} orphan ALE entries marked as cancelled",
