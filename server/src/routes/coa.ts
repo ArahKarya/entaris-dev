@@ -12,26 +12,21 @@ import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { compareAccountNumber } from '../utils/accountSort';
 import { systemAccountRenumberError } from '../utils/systemAccountGuard';
+import { planCreate, planUpdate } from '../services/coa/accountRules';
+import { accountIdsWithLedger, loadStructureFacts, lockAccounts } from '../services/coa/accountStructure';
 
 const router = Router();
 
-/** Derive rootType from account number prefix. Overrides user-supplied value to prevent mismatch. */
-function deriveRootType(accountNumber: string, fallback: string) {
-  const prefix = accountNumber.split('.')[0];
-  switch (prefix) {
-    case '1': return 'ASSET' as const;
-    case '2': return 'LIABILITY' as const;
-    case '3': return 'EQUITY' as const;
-    case '4': return 'REVENUE' as const;
-    case '5': case '6': case '7': case '8': return 'EXPENSE' as const;
-    default: return fallback as any;
-  }
+/** Adds `locked` (an active ledger row freezes the number prefix and the group flag) to each account. */
+async function withLocked<T extends { id: string }>(accounts: T[]): Promise<(T & { locked: boolean })[]> {
+  const ids = await accountIdsWithLedger(prisma);
+  return accounts.map((a) => ({ ...a, locked: ids.has(a.id) }));
 }
 
 // GET /api/coa — hierarchical account tree
 router.get('/', async (req, res) => {
   try {
-    const allAccounts = await prisma.account.findMany();
+    const allAccounts = await withLocked(await prisma.account.findMany());
     allAccounts.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
 
     const buildTree = (accounts: typeof allAccounts, parentId: string | null = null): any[] =>
@@ -62,13 +57,16 @@ router.get('/flat', async (req, res) => {
         balance: true,
       },
     });
-    accounts.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
-    return res.json(accounts);
+    const withFlag = await withLocked(accounts);
+    withFlag.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
+    return res.json(withFlag);
   } catch (error) {
     logger.error({ error }, 'GET /coa/flat error');
     return res.status(500).json({ error: 'Gagal mengambil daftar akun.' });
   }
 });
+
+const PARENT_SELECT = { id: true, accountNumber: true, rootType: true, isGroup: true } as const;
 
 // POST /api/coa: create account (requires coa edit permission)
 router.post('/', async (req, res) => {
@@ -76,20 +74,18 @@ router.post('/', async (req, res) => {
   if (!body) return;
 
   try {
-    // Auto-detect rootType from account number prefix to prevent mismatch
-    const rootType = deriveRootType(body.accountNumber, body.rootType);
-
-    const account = await prisma.account.create({
-      data: {
-        accountNumber: body.accountNumber,
-        name: body.name,
-        accountType: body.accountType,
-        rootType,
-        isGroup: body.isGroup ?? false,
-        parentId: body.parentId || null,
-      },
+    const outcome = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await lockAccounts(tx, [body.parentId]);
+      const parent = body.parentId ? await tx.account.findUnique({ where: { id: body.parentId }, select: PARENT_SELECT }) : null;
+      const plan = planCreate(body, parent);
+      if (!plan.ok) return plan;
+      const account = await tx.account.create({
+        data: { ...plan.data, name: body.name },
+      });
+      return { ok: true as const, account };
     });
-    return res.status(201).json(account);
+    if (!outcome.ok) return res.status(outcome.status).json({ error: outcome.message, code: outcome.code });
+    return res.status(201).json(outcome.account);
   } catch (error: any) {
     logger.error({ error }, 'POST /coa error');
     if (error.code === 'P2002') {
@@ -106,42 +102,35 @@ router.put('/:id', async (req, res) => {
   if (!body) return;
 
   try {
-    // If accountNumber is changing, check uniqueness
-    if (body.accountNumber) {
-      const existing = await prisma.account.findFirst({
-        where: { accountNumber: body.accountNumber, id: { not: id } },
-      });
-      if (existing) return res.status(409).json({ error: 'Nomor akun sudah digunakan oleh akun lain.' });
+    const outcome = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const peek = await tx.account.findUnique({ where: { id }, select: { parentId: true } });
+      if (!peek) return { kind: 'notFound' as const };
+      await lockAccounts(tx, [id, peek.parentId]);
+      const current = await tx.account.findUnique({ where: { id } });
+      if (!current) return { kind: 'notFound' as const };
+      const parent = current.parentId ? await tx.account.findUnique({ where: { id: current.parentId }, select: PARENT_SELECT }) : null;
+      const facts = (await loadStructureFacts(tx, [id])).get(id)!;
 
-      // Akun yang dipetakan sebagai akun sistem tidak boleh diganti nomornya.
-      const current = await prisma.account.findUnique({ where: { id }, select: { accountNumber: true } });
-      if (current && current.accountNumber !== body.accountNumber) {
-        const mappings = await prisma.systemAccountMapping.findMany({ where: { accountId: id }, select: { role: true } });
-        const err = systemAccountRenumberError(current.accountNumber, body.accountNumber, mappings.map((m) => m.role));
-        if (err) return res.status(400).json({ error: err });
+      const plan = planUpdate(current, body, facts, parent);
+      if (!plan.ok) return { kind: 'plan' as const, plan };
+
+      if (plan.data.accountNumber) {
+        const existing = await tx.account.findFirst({ where: { accountNumber: plan.data.accountNumber, id: { not: id } }, select: { id: true } });
+        if (existing) return { kind: 'duplicate' as const };
+        // Akun yang dipetakan sebagai akun sistem tidak boleh diganti nomornya.
+        const err = systemAccountRenumberError(current.accountNumber, plan.data.accountNumber, facts.mappedRoles);
+        if (err) return { kind: 'renumber' as const, error: err };
       }
-    }
-
-    // If trying to un-group (isGroup: false), check no children exist
-    if (body.isGroup === false) {
-      const childCount = await prisma.account.count({ where: { parentId: id } });
-      if (childCount > 0) return res.status(400).json({ error: 'Tidak dapat mengubah akun grup yang masih memiliki sub-akun.' });
-    }
-
-    // Auto-fix rootType if accountNumber changes
-    const newRootType = body.accountNumber ? deriveRootType(body.accountNumber, '') : null;
-
-    const account = await prisma.account.update({
-      where: { id },
-      data: {
-        ...(body.accountNumber && { accountNumber: body.accountNumber }),
-        ...(body.name && { name: body.name }),
-        ...(body.isGroup !== undefined && { isGroup: body.isGroup }),
-        ...(body.isActive !== undefined && { isActive: body.isActive }),
-        ...(newRootType && { rootType: newRootType, accountType: newRootType }),
-      },
+      const account = await tx.account.update({ where: { id }, data: plan.data });
+      return { kind: 'ok' as const, account };
     });
-    return res.json(account);
+    switch (outcome.kind) {
+      case 'notFound': return res.status(404).json({ error: 'Akun tidak ditemukan.' });
+      case 'plan': return res.status(outcome.plan.status).json({ error: outcome.plan.message, code: outcome.plan.code });
+      case 'duplicate': return res.status(409).json({ error: 'Nomor akun sudah digunakan oleh akun lain.' });
+      case 'renumber': return res.status(400).json({ error: outcome.error });
+      case 'ok': return res.json(outcome.account);
+    }
   } catch (error: any) {
     logger.error({ error }, 'PUT /coa/:id error');
     if (error.code === 'P2025') return res.status(404).json({ error: 'Akun tidak ditemukan.' });

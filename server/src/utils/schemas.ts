@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { LanguageSchema } from './language';
 import { headerPotonganMismatch } from '../services/purchaseInvoiceCalc';
+import { isValidAccountNumber } from '../services/coa/accountRules';
 
 // Rupiah only (E2-R7, E8-R12 stage 1): the books, the company settings and payment requests hold
 // IDR only. A currency field accepts 'IDR' in any case (trimmed and upper-cased) or nothing; any
@@ -15,16 +16,26 @@ const AccountTypeEnum = z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPE
 });
 
 export const CreateAccountSchema = z.object({
-  accountNumber: z.string().min(1, 'Nomor akun wajib diisi.'),
+  accountNumber: z
+    .string()
+    .trim()
+    .min(1, 'Nomor akun wajib diisi.')
+    .refine(isValidAccountNumber, 'Nomor akun tidak valid. Gunakan angka bertitik dengan digit pertama 1-8, mis. 1.1.6.'),
   name: z.string().min(1, 'Nama akun wajib diisi.'),
-  accountType: AccountTypeEnum,
-  rootType: AccountTypeEnum,
+  accountType: AccountTypeEnum.optional(),
+  rootType: AccountTypeEnum.optional(),
   parentId: z.string().nullable().optional(),
   isGroup: z.boolean().optional(),
   currency: rupiahOnly('Pembukuan hanya rupiah: mata uang akun harus IDR.').optional(),
 });
 
-export const UpdateAccountSchema = CreateAccountSchema.partial().extend({
+// Root type, account type and parent are fixed by the number and the parent at creation and never
+// edited afterwards (E2-R6); a body that carries them is stripped.
+export const UpdateAccountSchema = z.object({
+  accountNumber: z.string().trim().min(1, 'Nomor akun wajib diisi.').optional(),
+  name: z.string().min(1, 'Nama akun wajib diisi.').optional(),
+  isGroup: z.boolean().optional(),
+  currency: rupiahOnly('Pembukuan hanya rupiah: mata uang akun harus IDR.').optional(),
   isActive: z.boolean().optional(),
 });
 
