@@ -97,6 +97,46 @@ export async function recalculateAccountBalances(
 }
 
 /**
+ * Recalculate the balance of revenue/expense accounts from the ledger rows of OPEN fiscal years
+ * only. Closing a year subtracts that year's contribution from accounts.balance (the ledger rows
+ * stay), so recalculateAccountBalances, which sums every year, would put closed years back.
+ * Balance-sheet accounts among `accountIds` get the whole-history sum as usual.
+ */
+export async function recalculatePnlAccountBalances(
+  tx: Prisma.TransactionClient,
+  accountIds: readonly string[],
+): Promise<void> {
+  if (accountIds.length === 0) return;
+  const accounts = await tx.account.findMany({
+    where: { id: { in: [...accountIds] } },
+    select: { id: true, rootType: true },
+  });
+  const sums = await tx.accountingLedgerEntry.groupBy({
+    by: ['accountId', 'fiscalYearId'],
+    where: { accountId: { in: [...accountIds] }, isCancelled: false },
+    _sum: { debit: true, credit: true },
+  });
+  const years = await tx.fiscalYear.findMany({
+    where: { id: { in: [...new Set(sums.map((r) => r.fiscalYearId))] } },
+    select: { id: true, isClosed: true },
+  });
+  const closed = new Set(years.filter((y) => y.isClosed).map((y) => y.id));
+
+  for (const account of accounts) {
+    const pnl = account.rootType === 'REVENUE' || account.rootType === 'EXPENSE';
+    let debit = new Decimal(0);
+    let credit = new Decimal(0);
+    for (const row of sums) {
+      if (row.accountId !== account.id || (pnl && closed.has(row.fiscalYearId))) continue;
+      debit = debit.plus((row._sum.debit ?? 0).toString());
+      credit = credit.plus((row._sum.credit ?? 0).toString());
+    }
+    const balance = account.rootType === 'ASSET' || account.rootType === 'EXPENSE' ? debit.minus(credit) : credit.minus(debit);
+    await tx.account.update({ where: { id: account.id }, data: { balance: balance.toFixed(2) } });
+  }
+}
+
+/**
  * Recalculate party outstanding_amount from the sum of non-cancelled invoice outstanding.
  * This is the source-of-truth approach that prevents drift from increment/decrement logic.
  */
