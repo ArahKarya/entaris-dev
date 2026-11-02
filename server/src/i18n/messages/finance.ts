@@ -420,6 +420,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Nilai {0} {1} melebihi batas 9999999999999.99.": "The {0} amount {1} exceeds the limit of 9999999999999.99.",
   "Baris jurnal tanpa nilai: isi debit atau kredit.": "The journal line has no amount: fill in a debit or a credit.",
   "Jurnal minimal memiliki 2 baris bernilai.": "A journal needs at least 2 lines with an amount.",
+  // postJournal (E2-R3, services/ledger/postJournal.ts)
+  "Tanggal jurnal {0} masuk tahun buku {1}, bukan tahun buku yang diharapkan.": "The journal date {0} falls in fiscal year {1}, not the expected fiscal year.",
   // party rules (E2-R4, services/ledger/partyRules.ts); role names translate inside the patterns.
   "Pihak hanya boleh diisi di baris akun Piutang Usaha, Hutang Usaha, atau Uang Muka; kosongkan pihak di baris ini.": "A party can only be set on an Accounts Receivable, Accounts Payable or deposit account line; clear the party on this line.",
   "Baris ke akun {0} wajib memilih {1}.": "A line to the {0} account needs a {1}.",
