@@ -16636,7 +16636,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Membuat akun baru di bagan akun (akun detail atau akun grup). rootType/accountType harus selaras dengan digit pertama nomor akun (1 aset, 2 kewajiban, 3 ekuitas, 4 pendapatan, 5-8 beban).",
+      "desc": "Membuat akun baru di bagan akun (akun detail atau akun grup). Nomor akun harus angka bertitik dengan digit pertama 1-8; rootType/accountType diturunkan dari digit pertama (1 aset, 2 kewajiban, 3 ekuitas, 4 dan 7 pendapatan, 5, 6, dan 8 beban) dan boleh dikosongkan; nilai yang berbeda ditolak 400. Bila parentId diisi, induk harus akun grup bertipe sama dan nomor akun baru harus diawali nomor induk.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -16656,7 +16656,7 @@
           "in": "body",
           "type": "string",
           "required": true,
-          "description": "Nomor akun unik, format bertitik (mis. 1.1.6). Digit pertama menentukan golongan."
+          "description": "Nomor akun unik, angka bertitik dengan digit pertama 1-8 (mis. 1.1.6). Digit pertama menentukan golongan."
         },
         {
           "name": "name",
@@ -16669,7 +16669,7 @@
           "name": "accountType",
           "in": "body",
           "type": "enum",
-          "required": true,
+          "required": false,
           "enum": [
             "ASSET",
             "LIABILITY",
@@ -16677,13 +16677,13 @@
             "REVENUE",
             "EXPENSE"
           ],
-          "description": "Jenis akun: ASSET, LIABILITY, EQUITY, REVENUE atau EXPENSE."
+          "description": "Opsional; diturunkan dari digit pertama nomor akun. Nilai yang berbeda ditolak 400 (ACCOUNT_TYPE_MISMATCH)."
         },
         {
           "name": "rootType",
           "in": "body",
           "type": "enum",
-          "required": true,
+          "required": false,
           "enum": [
             "ASSET",
             "LIABILITY",
@@ -16691,14 +16691,14 @@
             "REVENUE",
             "EXPENSE"
           ],
-          "description": "Golongan induk; samakan dengan accountType."
+          "description": "Opsional; diturunkan dari digit pertama nomor akun. Nilai yang berbeda ditolak 400 (ACCOUNT_TYPE_MISMATCH)."
         },
         {
           "name": "parentId",
           "in": "body",
           "type": "string",
           "required": false,
-          "description": "ID akun induk (grup) atau null untuk akun akar."
+          "description": "ID akun induk (harus akun grup bertipe sama) atau null untuk akun akar."
         },
         {
           "name": "isGroup",
@@ -16735,7 +16735,11 @@
       ],
       "errors": [
         "409: Nomor akun sudah digunakan.",
-        "400: induk bukan akun grup / tidak ditemukan.",
+        "400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.",
+        "400 ACCOUNT_TYPE_MISMATCH: rootType/accountType berbeda dari digit pertama nomor akun.",
+        "400 ACCOUNT_PARENT_NOT_FOUND: akun induk tidak ditemukan.",
+        "400 ACCOUNT_PARENT_NOT_GROUP: induk bukan akun grup.",
+        "400 ACCOUNT_PARENT_MISMATCH: tipe induk berbeda atau nomor tidak diawali nomor induk.",
         "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
@@ -27972,7 +27976,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya (tidak boleh bila punya sub-akun). Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -27981,9 +27985,6 @@
         "id": "string",
         "accountNumber": "string",
         "name": "string",
-        "accountType": "enum",
-        "rootType": "enum",
-        "parentId": "string",
         "isGroup": "boolean",
         "currency": "enum",
         "isActive": "boolean"
@@ -28008,38 +28009,6 @@
           "type": "string",
           "required": false,
           "description": "Nama."
-        },
-        {
-          "name": "accountType",
-          "in": "body",
-          "type": "enum",
-          "required": false,
-          "enum": [
-            "ASSET",
-            "LIABILITY",
-            "EQUITY",
-            "REVENUE",
-            "EXPENSE"
-          ]
-        },
-        {
-          "name": "rootType",
-          "in": "body",
-          "type": "enum",
-          "required": false,
-          "enum": [
-            "ASSET",
-            "LIABILITY",
-            "EQUITY",
-            "REVENUE",
-            "EXPENSE"
-          ]
-        },
-        {
-          "name": "parentId",
-          "in": "body",
-          "type": "string",
-          "required": false
         },
         {
           "name": "isGroup",
@@ -28078,12 +28047,18 @@
       "postingEffect": "Tidak ada efek GL/stok; mengubah label/status master akun. Menonaktifkan akun menyembunyikannya dari dropdown tetapi riwayat jurnal tetap.",
       "confirm_template": "Ubah akun {id}: nomor/nama/status sesuai input?",
       "prerequisites": [
-        "Akun bukan akun sistem bila nomor diganti.",
-        "Akun grup yang masih punya sub-akun tidak bisa diubah menjadi akun detail."
+        "Akun bukan akun sistem bila nomor diganti atau akun dinonaktifkan.",
+        "Akun grup yang masih punya sub-akun tidak bisa diubah menjadi akun detail.",
+        "Akun yang sudah punya transaksi: digit pertama nomor dan status grup terkunci."
       ],
       "errors": [
         "409: nomor akun dipakai akun lain",
         "400: akun sistem tidak boleh diganti nomor",
+        "400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.",
+        "400 ACCOUNT_STRUCTURE_LOCKED: awalan nomor atau status grup terkunci (ada transaksi, atau ada sub-akun).",
+        "400 ACCOUNT_HAS_CHILDREN: akun grup masih punya sub-akun.",
+        "400 ACCOUNT_PARENT_MISMATCH: nomor baru tidak diawali nomor induk.",
+        "400 ACCOUNT_DEACTIVATE_BLOCKED: saldo tidak nol, Akun Sistem, sub-akun aktif, atau saldo buku besar.",
         "404: akun tidak ditemukan",
         "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],

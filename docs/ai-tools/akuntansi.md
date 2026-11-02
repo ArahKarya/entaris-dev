@@ -14,7 +14,7 @@ Toolset Akuntansi memungkinkan AIRA membaca dan (dengan persetujuan) memelihara 
 
 Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pembayaran, stok, penyusutan) menghasilkan jurnal seimbang yang masuk ke buku besar tak-terhapus (`AccountingLedgerEntry`). Toolset ini adalah jalur manual/administratif di sekitar itu.
 
-1. **Bagan akun (COA)**: pohon akun bernomor bertitik (`1.1.1`, `2.1.1`, ...). Digit pertama menentukan golongan: 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 Pendapatan, 5-8 Beban. Akun grup (`isGroup`) hanya pengelompok dan tidak boleh dijurnal; transaksi selalu ke akun detail aktif. Cari `accountId` lewat `coa_flat` sebelum membuat jurnal atau pengajuan.
+1. **Bagan akun (COA)**: pohon akun bernomor bertitik (`1.1.1`, `2.1.1`, ...). Digit pertama menentukan golongan: 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 dan 7 Pendapatan, 5, 6, dan 8 Beban. Tipe akun selalu diturunkan dari digit pertama; nilai `rootType`/`accountType` yang berbeda ditolak. Akun grup (`isGroup`) hanya pengelompok dan tidak boleh dijurnal; transaksi selalu ke akun detail aktif. Cari `accountId` lewat `coa_flat` sebelum membuat jurnal atau pengajuan.
 2. **Jurnal manual**: `je_create` memposting jurnal `JV-…` langsung berstatus Submitted (tidak ada draf). Dipakai untuk koreksi, transfer antar bank, dan penyesuaian. `je_cancel` hanya membatalkan jurnal buatan manusia: sumber MANUAL (`je_create`), IMPORT, RECURRING, atau CASH_BOOK (Draft Buku Kas), dan butuh capability `doc.cancel`. Jurnal dari modul lain (pembayaran, faktur, STT, HPP, uang muka, tutup buku, penyusutan, saldo awal) dan jurnal lama yang sumbernya tidak tercatat ditolak dengan `JOURNAL_NOT_MANUAL`; batalkan dari dokumen asalnya, atau buat jurnal balik manual dengan `je_create`.
 3. **Saldo awal**: `coa_set_balance` menyetel saldo akun detail ke nilai tertentu. Selisihnya diposting sebagai jurnal `OB-…` melawan Ekuitas Saldo Awal (3.1).
 4. **Tahun buku**: setiap posting wajib jatuh pada tahun buku yang terbuka (`getOpenFiscalYear`). `fy_create` membuat periode; `fy_close` menutup buku (jurnal `CLOSE-<nama>`); `fy_reopen` membukanya lagi. Periode yang ditutup menolak posting baru dengan kode `PERIOD_CLOSED`; tanggal yang tidak tercakup tahun buku mana pun ditolak dengan `FISCAL_YEAR_MISSING`. Di dalam tahun buku yang terbuka berlaku **kunci periode bulanan**: `period_lock_get` menampilkan tanggal kuncinya, dan posting, edit, atau pembatalan bertanggal pada atau sebelum tanggal itu ditolak dengan `PERIOD_LOCKED` (quotation, SO, PO, proforma, inquiry, dan surat jalan sementara dikecualikan karena tanpa efek GL/stok). `period_lock_set` memajukan, memundurkan, atau membuka kunci; butuh capability `period.lock` (default hanya Admin), dan memundurkan atau membuka kunci wajib alasan. Koreksi untuk bulan yang terkunci dibuat di periode terbuka, atau minta pemegang `period.lock` memundurkan kunci. Selama tutup atau buka buku tahun itu masih berjalan, posting ke tahun tersebut menunggu paling lama 3 detik lalu ditolak dengan `PERIOD_BUSY`; tidak ada yang tersimpan, jadi ulangi setelah proses itu selesai.
@@ -53,7 +53,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **Tahun buku tidak terbuka**: posting jurnal/saldo awal ditolak ("tahun buku tidak ditemukan/ditutup"). Periksa `fy_list` lebih dulu.
 - **Jurnal tidak seimbang**: toleransi hanya 0,01. Jangan memecah satu baris menjadi debit dan kredit sekaligus.
 - **`je_cancel` pada jurnal otomatis** selalu ditolak (`JOURNAL_NOT_MANUAL`); gunakan pembatalan dokumen asal (faktur, pembayaran, aplikasi/offset uang muka) atau jurnal balik manual untuk jurnal lama tanpa sumber.
-- **`coa_update`** hanya benar-benar menyimpan nomor, nama, status grup, dan aktif. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail.
+- **`coa_update`** hanya menyimpan nomor, nama, status grup, dan aktif; tipe akun dan induk tidak dapat diubah, dan mengganti nama tidak mengubah tipe. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor atau status grup (`ACCOUNT_STRUCTURE_LOCKED`; nomor yang masih dalam golongan yang sama boleh diganti). Menonaktifkan akun ditolak (`ACCOUNT_DEACTIVATE_BLOCKED`) bila saldo tidak tepat nol, akun dipetakan sebagai akun sistem, masih punya sub-akun aktif, atau masih bersaldo di buku besar.
 - **`coa_delete`** menolak bila ada sub-akun, pemetaan akun sistem, tautan ke item persediaan/jasa, mutasi buku besar, atau saldo bukan nol.
 - **Tutup buku** mengubah saldo berjalan akun pendapatan/beban; jangan dipanggil sebelum jurnal penyesuaian selesai. Panggil `fy_close_checklist` dulu: `fy_close` ditolak dengan `CLOSE_CHECKLIST_FAILED` selama ada butir yang memblokir (tahun sebelumnya masih terbuka, jurnal/invoice/pembayaran Draft di tahun itu, penyusutan bulan-bulan tahun itu belum diposting, ledger tidak seimbang atau tidak sinkron dengan jurnal, akun sistem penutup belum dipetakan). Peringatan (draft lain, surat jalan belum ditagih) tidak memblokir. Selisih ledger lama yang tercatat di baseline saat rilis tidak memblokir selama nominalnya sama; laporkan butir yang memblokir ke pengguna, jangan mencoba menutup ulang. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
@@ -125,7 +125,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_create
 
-**Ringkasan:** Membuat akun baru di bagan akun (akun detail atau akun grup). rootType/accountType harus selaras dengan digit pertama nomor akun (1 aset, 2 kewajiban, 3 ekuitas, 4 pendapatan, 5-8 beban).
+**Ringkasan:** Membuat akun baru di bagan akun (akun detail atau akun grup). Nomor akun harus angka bertitik dengan digit pertama 1-8; rootType/accountType diturunkan dari digit pertama (1 aset, 2 kewajiban, 3 ekuitas, 4 dan 7 pendapatan, 5, 6, dan 8 beban) dan boleh dikosongkan; nilai yang berbeda ditolak 400. Bila parentId diisi, induk harus akun grup bertipe sama dan nomor akun baru harus diawali nomor induk.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -137,11 +137,11 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| `accountNumber` | body | `string` | ya | Nomor akun unik, format bertitik (mis. 1.1.6). Digit pertama menentukan golongan. |
+| `accountNumber` | body | `string` | ya | Nomor akun unik, angka bertitik dengan digit pertama 1-8 (mis. 1.1.6). Digit pertama menentukan golongan. |
 | `name` | body | `string` | ya | Nama akun. |
-| `accountType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | ya | Jenis akun: ASSET, LIABILITY, EQUITY, REVENUE atau EXPENSE. |
-| `rootType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | ya | Golongan induk; samakan dengan accountType. |
-| `parentId` | body | `string` | tidak | ID akun induk (grup) atau null untuk akun akar. |
+| `accountType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | tidak | Opsional; diturunkan dari digit pertama nomor akun. Nilai yang berbeda ditolak 400 (ACCOUNT_TYPE_MISMATCH). |
+| `rootType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | tidak | Opsional; diturunkan dari digit pertama nomor akun. Nilai yang berbeda ditolak 400 (ACCOUNT_TYPE_MISMATCH). |
+| `parentId` | body | `string` | tidak | ID akun induk (harus akun grup bertipe sama) atau null untuk akun akar. |
 | `isGroup` | body | `boolean` | tidak | true = akun grup (tidak boleh dijurnal langsung). |
 | `currency` | body | enum: `IDR` | tidak | Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. Boleh dikosongkan (akun selalu IDR). |
 
@@ -152,9 +152,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
   "tool": "coa_create",
   "args": {
     "accountNumber": "<accountNumber>",
-    "name": "<name>",
-    "accountType": "ASSET",
-    "rootType": "ASSET"
+    "name": "<name>"
   }
 }
 ```
@@ -167,7 +165,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Buat akun <accountNumber> - <name> (ASSET)?"
+  "confirm": "Buat akun <accountNumber> - <name> ({accountType})?"
 }
 ```
 
@@ -184,7 +182,11 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Error umum**
 
 - 409: Nomor akun sudah digunakan.
-- 400: induk bukan akun grup / tidak ditemukan.
+- 400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.
+- 400 ACCOUNT_TYPE_MISMATCH: rootType/accountType berbeda dari digit pertama nomor akun.
+- 400 ACCOUNT_PARENT_NOT_FOUND: akun induk tidak ditemukan.
+- 400 ACCOUNT_PARENT_NOT_GROUP: induk bukan akun grup.
+- 400 ACCOUNT_PARENT_MISMATCH: tipe induk berbeda atau nomor tidak diawali nomor induk.
 - 400: Pembukuan hanya rupiah: mata uang akun harus IDR.
 
 **Tool terkait:** [`coa_update`](#coa_update), [`coa_flat`](#coa_flat)
@@ -377,7 +379,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_update
 
-**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
+**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya (tidak boleh bila punya sub-akun). Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -392,9 +394,6 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | `id` | path | `string` | ya | ID dokumen/rekaman (UUID). |
 | `accountNumber` | body | `string` | tidak |  |
 | `name` | body | `string` | tidak | Nama. |
-| `accountType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | tidak |  |
-| `rootType` | body | enum: `ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`, `EXPENSE` | tidak |  |
-| `parentId` | body | `string` | tidak |  |
 | `isGroup` | body | `boolean` | tidak |  |
 | `currency` | body | enum: `IDR` | tidak | Hanya 'IDR': pembukuan hanya rupiah, nilai lain ditolak 400. |
 | `isActive` | body | `boolean` | tidak | Status aktif. |
@@ -430,13 +429,19 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Prasyarat**
 
-- Akun bukan akun sistem bila nomor diganti.
+- Akun bukan akun sistem bila nomor diganti atau akun dinonaktifkan.
 - Akun grup yang masih punya sub-akun tidak bisa diubah menjadi akun detail.
+- Akun yang sudah punya transaksi: digit pertama nomor dan status grup terkunci.
 
 **Error umum**
 
 - 409: nomor akun dipakai akun lain
 - 400: akun sistem tidak boleh diganti nomor
+- 400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.
+- 400 ACCOUNT_STRUCTURE_LOCKED: awalan nomor atau status grup terkunci (ada transaksi, atau ada sub-akun).
+- 400 ACCOUNT_HAS_CHILDREN: akun grup masih punya sub-akun.
+- 400 ACCOUNT_PARENT_MISMATCH: nomor baru tidak diawali nomor induk.
+- 400 ACCOUNT_DEACTIVATE_BLOCKED: saldo tidak nol, Akun Sistem, sub-akun aktif, atau saldo buku besar.
 - 404: akun tidak ditemukan
 - 400: Pembukuan hanya rupiah: mata uang akun harus IDR.
 
