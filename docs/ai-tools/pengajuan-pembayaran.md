@@ -58,7 +58,7 @@ Langkah: `payreq_settlement_save` (draf realisasi) → `payreq_settlement_submit
 | R = A | tanpa baris kas | — |
 | `payreq_settlement_cancel_posting` | (void jurnal pertanggungjawaban) | (void jurnal pertanggungjawaban) |
 | `eambill_pay` method JOURNAL | Akun beban | Kas/Bank (lunas) |
-| `eambill_pay` method PURCHASE_INVOICE | Akun beban | Hutang Usaha 2.1.1 (dilunasi lewat modul Pembayaran) |
+| `eambill_pay` method PURCHASE_INVOICE | Akun beban | Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; dilunasi lewat modul Pembayaran) |
 | `eambill_cancel` | void jurnal / batalkan faktur | — |
 
 Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal; akun kas/bank tidak boleh sama dengan akun biaya; tahun buku harus terbuka. Posting uang muka mengikuti `kind` jenis (akun 1.5.6), tetapi wajib-tidaknya pertanggungjawaban hanya mengikuti `type.requiresSettlement`; jenis uang muka yang tidak mewajibkan pertanggungjawaban tidak dilacak (bersihkan 1.5.6 lewat jurnal manual). Persetujuan, pengajuan, dan pengembalian TIDAK membuat jurnal; hanya `pay`, `settlement/post`, dan `eambill_pay` yang membuat jurnal.
@@ -73,7 +73,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 ### Jebakan umum
 
 - **Lampiran** (nota/kuitansi) hanya bisa diunggah lewat antarmuka web; jenis yang mewajibkan lampiran gagal di `payreq_submit` bila belum ada.
-- **Akun biaya wajib** pada semua baris sebelum `payreq_pay` (kecuali jenis uang muka); "Akun biaya baris N belum diisi" berarti Keuangan harus memanggil `payreq_set_accounts` atau menyertakan `lineAccounts` saat approve. Akun harus akun detail aktif dan bukan akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; akun seperti itu ditolak `ACCOUNT_CONTROL` saat dipilih dan saat posting, juga untuk Admin. Membayar Supplier atas Invoice pembelian lewat `pay_record`, bukan pengajuan dana.
+- **Akun biaya wajib** pada semua baris sebelum `payreq_pay` (kecuali jenis uang muka); "Akun biaya baris N belum diisi" berarti Keuangan harus memanggil `payreq_set_accounts` atau menyertakan `lineAccounts` saat approve. Akun harus akun detail aktif.
 - **Status stale**: perubahan status bersamaan menghasilkan "Status pengajuan sudah berubah, muat ulang"; ambil ulang `payreq_get` sebelum mencoba lagi.
 - **Self-approval**: pengaju yang juga atasan/Keuangan tetap tidak boleh memutuskan atau membayar pengajuannya sendiri.
 - **Alasan wajib** (min 3 karakter) untuk reject, return, cancel-payment, settlement return dan cancel-posting.
@@ -307,7 +307,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 
 **Isi hasil:** { success, data: hasil posting (jurnal/faktur) }.
 
-**Efek pembukuan/stok:** JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha 2.1.1 (butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.
+**Efek pembukuan/stok:** JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.
 
 **Teks konfirmasi:** POSTING Tagihan EAM {kind} {id} dengan metode {method} senilai {amount}?
 
@@ -323,6 +323,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: akun debit = akun kredit
 - 400: vendor wajib untuk PURCHASE_INVOICE
 - 400: sudah diposting
+- 400 ACCOUNT_MAPPING_MISSING: peran AP (PURCHASE_INVOICE) atau CASH (JOURNAL tanpa akun sumber) belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`eambill_list`](#eambill_list), [`eambill_cancel`](#eambill_cancel)
@@ -463,7 +464,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: tidak sedang menunggu persetujuan
 - 400: tidak dapat memproses pengajuan sendiri
 - 400: bukan atasan/Keuangan/direktur yang berwenang
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`payreq_reject`](#payreq_reject), [`payreq_return`](#payreq_return), [`payreq_set_accounts`](#payreq_set_accounts), [`payreq_pay`](#payreq_pay)
 
@@ -785,7 +785,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: pilih vendor
 - 400: akun biaya tidak valid
 - 400: Pengajuan hanya rupiah (currency selain IDR)
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`payreqtype_list`](#payreqtype_list), [`payreq_submit`](#payreq_submit), [`coa_flat`](akuntansi.md#coa_flat)
 
@@ -989,7 +988,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: akun kas sama dengan akun biaya
 - 400: tahun buku ditutup
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`payreq_set_accounts`](#payreq_set_accounts), [`payreq_cancel_payment`](#payreq_cancel_payment), [`coa_flat`](akuntansi.md#coa_flat)
 
@@ -1163,7 +1161,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: hanya Keuangan
 - 400: tahap tidak sesuai
 - 400: akun bukan akun detail aktif
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`coa_flat`](akuntansi.md#coa_flat), [`payreq_approve`](#payreq_approve), [`payreq_pay`](#payreq_pay)
 
@@ -1348,7 +1345,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: tanggal sebelum tanggal bayar
 - 400: tahun buku ditutup
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`payreq_settlement_preview`](#payreq_settlement_preview), [`payreq_settlement_cancel_posting`](#payreq_settlement_cancel_posting)
 
@@ -1517,7 +1513,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: hanya pengaju
 - 400: hanya untuk uang muka yang sudah dibayar
 - 400: hanya bisa diubah saat Belum Dipertanggungjawabkan/Perlu Revisi
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`payreq_settlement_submit`](#payreq_settlement_submit), [`payreq_advances_summary`](#payreq_advances_summary)
 
@@ -1755,7 +1750,6 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: hanya pengaju
 - 400: hanya bisa diubah saat Draf/Perlu Revisi
 - 400: Pengajuan hanya rupiah (currency selain IDR)
-- 400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka
 
 **Tool terkait:** [`payreq_create`](#payreq_create), [`payreq_submit`](#payreq_submit)
 

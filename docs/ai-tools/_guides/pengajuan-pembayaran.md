@@ -48,7 +48,7 @@ Langkah: `payreq_settlement_save` (draf realisasi) → `payreq_settlement_submit
 | R = A | tanpa baris kas | — |
 | `payreq_settlement_cancel_posting` | (void jurnal pertanggungjawaban) | (void jurnal pertanggungjawaban) |
 | `eambill_pay` method JOURNAL | Akun beban | Kas/Bank (lunas) |
-| `eambill_pay` method PURCHASE_INVOICE | Akun beban | Hutang Usaha 2.1.1 (dilunasi lewat modul Pembayaran) |
+| `eambill_pay` method PURCHASE_INVOICE | Akun beban | Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; dilunasi lewat modul Pembayaran) |
 | `eambill_cancel` | void jurnal / batalkan faktur | — |
 
 Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal; akun kas/bank tidak boleh sama dengan akun biaya; tahun buku harus terbuka. Posting uang muka mengikuti `kind` jenis (akun 1.5.6), tetapi wajib-tidaknya pertanggungjawaban hanya mengikuti `type.requiresSettlement`; jenis uang muka yang tidak mewajibkan pertanggungjawaban tidak dilacak (bersihkan 1.5.6 lewat jurnal manual). Persetujuan, pengajuan, dan pengembalian TIDAK membuat jurnal; hanya `pay`, `settlement/post`, dan `eambill_pay` yang membuat jurnal.
@@ -63,7 +63,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 ### Jebakan umum
 
 - **Lampiran** (nota/kuitansi) hanya bisa diunggah lewat antarmuka web; jenis yang mewajibkan lampiran gagal di `payreq_submit` bila belum ada.
-- **Akun biaya wajib** pada semua baris sebelum `payreq_pay` (kecuali jenis uang muka); "Akun biaya baris N belum diisi" berarti Keuangan harus memanggil `payreq_set_accounts` atau menyertakan `lineAccounts` saat approve. Akun harus akun detail aktif dan bukan akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; akun seperti itu ditolak `ACCOUNT_CONTROL` saat dipilih dan saat posting, juga untuk Admin. Membayar Supplier atas Invoice pembelian lewat `pay_record`, bukan pengajuan dana.
+- **Akun biaya wajib** pada semua baris sebelum `payreq_pay` (kecuali jenis uang muka); "Akun biaya baris N belum diisi" berarti Keuangan harus memanggil `payreq_set_accounts` atau menyertakan `lineAccounts` saat approve. Akun harus akun detail aktif.
 - **Status stale**: perubahan status bersamaan menghasilkan "Status pengajuan sudah berubah, muat ulang"; ambil ulang `payreq_get` sebelum mencoba lagi.
 - **Self-approval**: pengaju yang juga atasan/Keuangan tetap tidak boleh memutuskan atau membayar pengajuannya sendiri.
 - **Alasan wajib** (min 3 karakter) untuk reject, return, cancel-payment, settlement return dan cancel-posting.

@@ -39,6 +39,13 @@ const IGNORED = new Set<string>([
   // scripts/repair/e5-pi-approval-amount.ts, scripts/repair/e2-rupiah-only-check.ts), CLI only.
   '--apply needs --approved-by "<accountant name>"',
   'No active Admin user to record the audit rows under.',
+  // Refusals of the read-only ledger audit command line (scripts/repair/e2-ledger-audit.ts,
+  // services/ledger/ledgerAudit/args.ts), CLI only.
+  '{0} needs a value',
+  'Unknown section {0} (known: {1})',
+  '--since needs a date as YYYY-MM-DD, got {0}',
+  '--gate must be one of: {0}',
+  'Unknown argument: {0}',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */

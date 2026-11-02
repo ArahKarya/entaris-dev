@@ -19,12 +19,15 @@ interface PreviewResult {
   data: any[];
   errors: ImportError[];
   total: number;
+  /** Journals skipped because the same content was imported before (journals only). */
+  alreadyImported?: Array<{ narration: string; date: string }>;
 }
 
 interface ImportResult {
   success: number;
   failed: number;
   errors: ImportError[];
+  alreadyImported?: Array<{ narration: string; date: string }>;
 }
 
 interface Props {
@@ -51,9 +54,9 @@ const typeConfig = {
   },
   journals: {
     endpoint: '/import/journals',
-    columns: ['date', 'narration', 'accountNumber', 'debit', 'credit', 'description'],
-    templateHeaders: 'date,narration,accountNumber,debit,credit,description',
-    templateSample: '2026-03-22,Penjualan tunai,1100,1000000,0,Kas masuk',
+    columns: ['date', 'narration', 'accountNumber', 'debit', 'credit', 'description', 'ref'],
+    templateHeaders: 'date,narration,accountNumber,debit,credit,description,ref',
+    templateSample: '22/03/2026,Penjualan tunai,1.1.1,1000000,0,Kas masuk,J-001\n22/03/2026,Penjualan tunai,4.1,0,1000000,Pendapatan penjualan,J-001',
     queryKeys: ['journals', 'gl', 'coa', 'coa-all', 'balance-sheet', 'trial-balance', 'profit-loss', 'dashboard-metrics'],
   },
   inventory: {
@@ -63,6 +66,19 @@ const typeConfig = {
     templateSample: 'GKP,Gabah Kering Panen,Kg,Bahan Baku,,1000,500,10000,',
     queryKeys: ['inventory-items', 'coa', 'coa-all', 'balance-sheet', 'trial-balance', 'profit-loss', 'journals', 'dashboard-metrics'],
   },
+};
+
+const AlreadyImportedNote = ({ items }: { items: Array<{ narration: string; date: string }> }) => {
+  const { t } = useTranslation('shell');
+  return (
+    <div className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+      <p className="font-semibold">{t('importModal.alreadyImported', { count: items.length })}</p>
+      {items.slice(0, 5).map((it, i) => (
+        <p key={i}>{it.date} · {it.narration}</p>
+      ))}
+      {items.length > 5 && <p>{t('importModal.moreErrors', { count: items.length - 5 })}</p>}
+    </div>
+  );
 };
 
 const ImportModal = ({ isOpen, onClose, importType }: Props) => {
@@ -258,6 +274,14 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                 </div>
               )}
 
+              {importType === 'journals' && preview.errors.length > 0 && (
+                <p className="text-xs text-muted-foreground">{t('importModal.allOrNothing')}</p>
+              )}
+
+              {(preview.alreadyImported?.length ?? 0) > 0 && (
+                <AlreadyImportedNote items={preview.alreadyImported!} />
+              )}
+
               {preview.data.length > 0 && (
                 <ScrollRegion label={t('importModal.previewLabel')} className="max-h-72 overflow-y-auto border border-border">
                   <table className="w-full text-xs">
@@ -313,6 +337,10 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                 </div>
               </div>
 
+              {(result.alreadyImported?.length ?? 0) > 0 && (
+                <AlreadyImportedNote items={result.alreadyImported!} />
+              )}
+
               {result.errors.length > 0 && (
                 <div className="max-h-32 overflow-y-auto rounded-lg bg-danger-subtle p-3 text-danger-text">
                   <p className="mb-1 text-xs font-semibold">{t('importModal.errorDetail')}</p>
@@ -336,7 +364,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                 {t('importModal.changeFile')}
               </Button>
               <Button type="button" onClick={handleConfirmImport}
-                disabled={preview.data.length === 0} loading={importMutation.isPending}>
+                disabled={preview.data.length === 0 || (importType === 'journals' && preview.errors.length > 0)} loading={importMutation.isPending}>
                 {importMutation.isPending ? t('importModal.importing') : t('importModal.importCount', { count: preview.data.length })}
               </Button>
             </>

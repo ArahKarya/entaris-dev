@@ -82,6 +82,13 @@ export function EamBillPayDialog({ bill, onClose, onSuccess }: EamBillPayDialogP
     enabled: open,
   });
   const accounts = accountsQuery.data;
+  const systemQuery = useQuery({
+    queryKey: ['system-accounts'],
+    queryFn: async () =>
+      (await api.get<{ mappings: Record<string, Array<{ accountId: string; accountNumber: string; accountName: string }>> }>('/system-accounts')).data,
+    enabled: open && method === 'PURCHASE_INVOICE',
+    retry: false,
+  });
 
   const vendorPicker = usePartyPicker({
     type: 'Supplier',
@@ -99,6 +106,7 @@ export function EamBillPayDialog({ bill, onClose, onSuccess }: EamBillPayDialogP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts, bill]);
 
+  const apMapped = systemQuery.data?.mappings.AP?.[0];
   const expenseAccounts = useMemo(
     () => (accounts ?? []).filter((a) => a.accountType === 'EXPENSE' || a.accountNumber.startsWith('1.3')),
     [accounts],
@@ -269,7 +277,9 @@ export function EamBillPayDialog({ bill, onClose, onSuccess }: EamBillPayDialogP
                     account:
                       method === 'JOURNAL'
                         ? label(cashAccounts, creditAccountId) ?? t('eamBills.pay.pickCash')
-                        : `2.1.1 · ${t('eamBills.pay.payables')}`,
+                        : apMapped
+                          ? `${apMapped.accountNumber} · ${apMapped.accountName}`
+                          : t('eamBills.pay.payables'),
                     amount: value,
                   },
                 ]}

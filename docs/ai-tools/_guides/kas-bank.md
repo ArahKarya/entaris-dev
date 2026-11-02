@@ -73,7 +73,6 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 - Modul kas-bank **tidak** melewati antrian `needsApproval`: `pay_record`, `pg_create`, `pg_settle`, dan `rec_execute` langsung memposting bagi pemanggil yang punya izin edit modulnya. Kontrol keamanannya berada di tier AIRA (kritis = wajib persetujuan) dan RBAC.
 - Draft Buku Kas memakai izin modul `journal` (lihat = view, ubah/posting = edit, sama dengan jurnal manual); posting tidak lewat `needsApproval` tetapi aktor AIRA level Standar selalu lewat antrian persetujuan.
-- Akun lawan Draft Buku Kas mengikuti aturan jurnal manual: baris ke akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability `journal.control` (default hanya Admin), akun Uang Muka Customer/Supplier selalu ditolak. Tanpa hak itu baris gagal `ACCOUNT_CONTROL` (dengan `partial=true` baris lain tetap diposting). Untuk membayar Supplier, menerima pelunasan Customer, atau menyetor PPN, arahkan ke modul Pembayaran (`pay_record`) bila pengguna tidak punya `journal.control`.
 - Pembatalan butuh capability `doc.cancel` (default hanya Admin): `pay_cancel`, `pg_cancel`, `pg_settlement_cancel`.
 - Izin modul: `payment`, `reconciliation`, `recurring`, `project_guarantee` (Accountant edit; Viewer hanya `payment` dan `project_guarantee` lihat; StaffProduksi tidak punya akses default kecuali yang dikonfigurasi).
 
