@@ -56,13 +56,13 @@ const ROLE_LABELS: Readonly<Record<PartyRole, string>> = {
 
 const isPartyRole = (role: string): role is PartyRole => (PARTY_ROLES as readonly string[]).includes(role);
 
-interface FormerRoleAccount {
+export interface FormerRoleAccount {
   role: PartyRole;
   accountId: string;
 }
 
 /** Accounts a party role moved away from, oldest reclass first (remap journals not cancelled). */
-async function loadFormerRoleAccounts(tx: Tx): Promise<FormerRoleAccount[]> {
+export async function loadFormerRoleAccounts(tx: Tx): Promise<FormerRoleAccount[]> {
   const journals = await tx.journalEntry.findMany({
     where: { sourceType: 'SYSTEM_DOC', sourceKey: { startsWith: REMAP_KEY_PREFIX }, status: { not: 'Cancelled' } },
     select: { sourceKey: true },
@@ -76,50 +76,68 @@ async function loadFormerRoleAccounts(tx: Tx): Promise<FormerRoleAccount[]> {
   return out;
 }
 
+async function accountName(tx: Tx, accountId: string): Promise<{ accountNumber: string; name: string }> {
+  const acc = await tx.account.findUnique({ where: { id: accountId }, select: { accountNumber: true, name: true } });
+  return acc ?? { accountNumber: accountId, name: '' };
+}
+
 /**
- * Account id -> party role: current mappings plus accounts that held a party role before a remap.
- * A current mapping wins over a former role; among former roles the latest reclass wins. Throws
- * PARTY_ROLE_AMBIGUOUS when one account is currently mapped under two party roles, since a line
- * there cannot tell whether its party is a customer or a supplier.
+ * The one resolution rule for party roles: account id -> its single party role, from current
+ * mappings plus (with includeFormer) accounts that held a party role before a remap. Throws
+ * PARTY_ROLE_AMBIGUOUS when one account holds two party roles, current or former, since a line
+ * there cannot tell whether its party is a customer or a supplier and the subledgers would count
+ * it twice. A role remapped back to an account it held before is the same role, not a conflict.
  */
-export async function loadPartyRoleMap(tx: Tx): Promise<ReadonlyMap<string, PartyRole>> {
+async function resolvePartyRoles(tx: Tx, opts: { includeFormer: boolean }): Promise<Map<string, PartyRole>> {
   const [mappings, former] = await Promise.all([
     tx.systemAccountMapping.findMany({
       where: { role: { in: [...PARTY_ROLES] } },
       select: { role: true, accountId: true, account: { select: { accountNumber: true, name: true } } },
     }),
-    loadFormerRoleAccounts(tx),
+    opts.includeFormer ? loadFormerRoleAccounts(tx) : Promise.resolve([]),
   ]);
   const map = new Map<string, PartyRole>();
-  for (const f of former) map.set(f.accountId, f.role);
-
-  const current = new Map<string, PartyRole>();
   for (const m of mappings) {
     if (!isPartyRole(m.role)) continue;
-    const seen = current.get(m.accountId);
+    const seen = map.get(m.accountId);
     if (seen && seen !== m.role) {
       throw new BusinessError(
         `Akun ${m.account.accountNumber} ${m.account.name} dipetakan ke dua peran pihak (${ROLE_LABELS[seen]} dan ${ROLE_LABELS[m.role]}). Perbaiki pemetaan di Pengaturan > Akun Sistem.`,
         PARTY_ROLE_AMBIGUOUS,
       );
     }
-    current.set(m.accountId, m.role);
+    map.set(m.accountId, m.role);
   }
-  for (const [id, role] of current) map.set(id, role);
+  for (const f of former) {
+    const seen = map.get(f.accountId);
+    if (seen && seen !== f.role) {
+      const acc = await accountName(tx, f.accountId);
+      throw new BusinessError(
+        `Akun ${acc.accountNumber} ${acc.name} memegang dua peran pihak (${ROLE_LABELS[seen]} dan ${ROLE_LABELS[f.role]}) lewat pemindahan akun sistem. Satu akun hanya boleh memegang satu peran pihak; pilih akun lain di Pengaturan > Akun Sistem.`,
+        PARTY_ROLE_AMBIGUOUS,
+      );
+    }
+    map.set(f.accountId, f.role);
+  }
   return map;
 }
 
-/** Account ids of one party role: current mappings, plus former ones with includeFormer. */
+/** Account id -> party role: current mappings plus accounts that held a party role before a remap. */
+export async function loadPartyRoleMap(tx: Tx): Promise<ReadonlyMap<string, PartyRole>> {
+  return resolvePartyRoles(tx, { includeFormer: true });
+}
+
+/**
+ * Account ids of one party role: current mappings, plus former ones with includeFormer. Built from
+ * the same resolution as loadPartyRoleMap, so an account is never listed under two roles.
+ */
 export async function roleAccountIds(
   tx: Tx,
   role: PartyRole,
   opts: { includeFormer?: boolean } = {},
 ): Promise<string[]> {
-  const [mappings, former] = await Promise.all([
-    tx.systemAccountMapping.findMany({ where: { role }, select: { accountId: true } }),
-    opts.includeFormer ? loadFormerRoleAccounts(tx) : Promise.resolve([]),
-  ]);
-  return [...new Set([...mappings.map((m) => m.accountId), ...former.filter((f) => f.role === role).map((f) => f.accountId)])];
+  const map = await resolvePartyRoles(tx, { includeFormer: !!opts.includeFormer });
+  return [...map].filter(([, r]) => r === role).map(([id]) => id);
 }
 
 /** Party id -> party type for the given ids (missing ids are absent). */

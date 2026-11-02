@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { makeAutoTx } from '../../../__tests__/helpers/autoTx';
 import { BusinessError } from '../../../utils/errors';
 import { translateMessage } from '../../../i18n/translateMessage';
+import { sourceKeys } from '../journalSource';
 import {
   ACCOUNT_CONTROL,
   ACCOUNT_GROUP,
@@ -165,6 +166,26 @@ describe('assertPostableAccounts', () => {
       await expect(assertPostableAccount(t, 'ap', { ...rule, allowControl: ['AP', 'ACCRUED_PAYABLE'] })).resolves.toMatchObject({ id: 'ap' });
       expect(await isControlAccount(t, 'ap')).toBe('AP');
     }
+  });
+
+  it('a former party-role account keeps its role: AR needs journal.control, a deposit is never manual', async () => {
+    const { tx: t } = makeAutoTx({
+      'account.findMany': (args: any) =>
+        [
+          acc({ id: 'old-ar', accountNumber: '1.2.9', name: 'Piutang Lama' }),
+          acc({ id: 'old-dep', accountNumber: '2.1.9', name: 'Uang Muka Lama', rootType: 'LIABILITY' }),
+        ].filter((a) => args.where.id.in.includes(a.id)),
+      'systemAccountMapping.findMany': () => [{ role: 'AR', accountId: 'ar' }, { role: 'CUSTOMER_DEPOSIT', accountId: 'cdep' }],
+      'journalEntry.findMany': () => [
+        { sourceKey: sourceKeys.remap('AR', 'old-ar', 'ar', '2170-01-31') },
+        { sourceKey: sourceKeys.remap('CUSTOMER_DEPOSIT', 'old-dep', 'cdep', '2170-01-31') },
+      ],
+    });
+    expect(await codeOf(assertPostableAccount(t, 'old-ar', manualJournalRule(false)))).toBe(ACCOUNT_CONTROL);
+    await expect(assertPostableAccount(t, 'old-ar', manualJournalRule(true))).resolves.toMatchObject({ id: 'old-ar' });
+    expect(await codeOf(assertPostableAccount(t, 'old-dep', manualJournalRule(true)))).toBe(ACCOUNT_CONTROL);
+    expect(await codeOf(assertPostableAccount(t, 'old-ar', TEMPLATE_RULE))).toBe(ACCOUNT_CONTROL);
+    expect(await isControlAccount(t, 'old-dep')).toBe('CUSTOMER_DEPOSIT');
   });
 
   it('reports missing and group accounts', async () => {

@@ -119,6 +119,7 @@ function roleTx(mappings: Mapping[], remapKeys: string[] = []) {
         .map((m) => ({ ...m, account: ACCOUNT_NAMES[m.accountId] ?? { accountNumber: '9.9', name: m.accountId } }));
     },
     'journalEntry.findMany': () => remapKeys.map((sourceKey) => ({ sourceKey })),
+    'account.findUnique': (args: any) => ACCOUNT_NAMES[args.where.id] ?? { accountNumber: '9.9', name: args.where.id },
     'party.findMany': (args: any) =>
       [{ id: 'c', partyType: 'Customer' }, { id: 's', partyType: 'Supplier' }].filter((p) => args.where.id.in.includes(p.id)),
   });
@@ -158,23 +159,41 @@ describe('loadPartyRoleMap', () => {
     expect((await loadPartyRoleMap(tx)).get('ar2')).toBe('AR');
   });
 
-  it('holds former role accounts from remap keys; a current mapping wins, the latest remap wins otherwise', async () => {
+  it('holds former role accounts from remap keys; a role remapped back is not a conflict', async () => {
     const { tx, fn } = roleTx(BASE, [
       sourceKeys.remap('AR', 'old-ar', 'ar', '2170-01-31'),
       sourceKeys.remap('AP', 'ap', 'ap-new', '2170-02-28'), // ap is still mapped AP: stays AP
-      sourceKeys.remap('AR', 'x', 'ar', '2170-03-01'),
-      sourceKeys.remap('AP', 'x', 'ap', '2170-04-01'), // later: x is a former AP account
+      sourceKeys.remap('AP', 'ap-new', 'ap', '2170-03-31'), // remapped back
       sourceKeys.remap('COGS', 'old-cogs', 'cogs', '2170-01-01'), // not a party role
       'REMAP:broken',
     ]);
     const map = await loadPartyRoleMap(tx);
     expect(map.get('old-ar')).toBe('AR');
     expect(map.get('ap')).toBe('AP');
-    expect(map.get('x')).toBe('AP');
+    expect(map.get('ap-new')).toBe('AP');
     expect(map.has('old-cogs')).toBe(false);
     expect(fn('journalEntry.findMany').mock.calls[0][0]).toMatchObject({
       where: { sourceType: 'SYSTEM_DOC', sourceKey: { startsWith: 'REMAP:' }, status: { not: 'Cancelled' } },
     });
+  });
+
+  it('a former deposit account now mapped AR is PARTY_ROLE_AMBIGUOUS', async () => {
+    // CUSTOMER_DEPOSIT moved from x to cdep, then AR was mapped to x.
+    const { tx } = roleTx([...BASE, { role: 'AR', accountId: 'x' }], [sourceKeys.remap('CUSTOMER_DEPOSIT', 'x', 'cdep', '2170-01-31')]);
+    const err = await loadPartyRoleMap(tx).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BusinessError);
+    expect((err as BusinessError).code).toBe('PARTY_ROLE_AMBIGUOUS');
+    expect((err as BusinessError).message).toBe(
+      'Akun 9.9 x memegang dua peran pihak (Piutang Usaha dan Uang Muka Customer) lewat pemindahan akun sistem. Satu akun hanya boleh memegang satu peran pihak; pilih akun lain di Pengaturan > Akun Sistem.',
+    );
+    expect(translateMessage((err as BusinessError).message, 'en')).toBe(
+      'Account 9.9 x has held two party roles (Accounts Receivable and Customer deposit) through a system account move. One account can hold only one party role; choose another account in Settings > System Accounts.',
+    );
+  });
+
+  it('an account that was AR and later AP (both former) is PARTY_ROLE_AMBIGUOUS', async () => {
+    const { tx } = roleTx(BASE, [sourceKeys.remap('AR', 'x', 'ar', '2170-03-01'), sourceKeys.remap('AP', 'x', 'ap', '2170-04-01')]);
+    expect(((await loadPartyRoleMap(tx).catch((e: unknown) => e)) as BusinessError).code).toBe('PARTY_ROLE_AMBIGUOUS');
   });
 });
 
@@ -191,6 +210,23 @@ describe('roleAccountIds', () => {
     const { tx } = roleTx(BASE, [...remaps, sourceKeys.remap('AR', 'ar', 'ar', '2170-02-01')]);
     expect(await roleAccountIds(tx, 'AR', { includeFormer: true })).toEqual(['ar', 'old-ar']);
     expect(await roleAccountIds(tx, 'AP', { includeFormer: true })).toEqual(['ap', 'old-ap']);
+  });
+
+  it('never lists one account under two roles: it refuses the same conflicts as loadPartyRoleMap', async () => {
+    const formerDepositNowAr = roleTx([...BASE, { role: 'AR', accountId: 'x' }], [sourceKeys.remap('CUSTOMER_DEPOSIT', 'x', 'cdep', '2170-01-31')]);
+    for (const role of ['AR', 'CUSTOMER_DEPOSIT'] as const) {
+      const err = await roleAccountIds(formerDepositNowAr.tx, role, { includeFormer: true }).catch((e: unknown) => e);
+      expect((err as BusinessError).code, role).toBe('PARTY_ROLE_AMBIGUOUS');
+    }
+    const formerArThenAp = roleTx(BASE, [sourceKeys.remap('AR', 'x', 'ar', '2170-03-01'), sourceKeys.remap('AP', 'x', 'ap', '2170-04-01')]);
+    const err = await roleAccountIds(formerArThenAp.tx, 'AP', { includeFormer: true }).catch((e: unknown) => e);
+    expect((err as BusinessError).code).toBe('PARTY_ROLE_AMBIGUOUS');
+  });
+
+  it('a role remapped away and back lists the account once', async () => {
+    const { tx } = roleTx(BASE, [sourceKeys.remap('AR', 'ar', 'ar-tmp', '2170-01-31'), sourceKeys.remap('AR', 'ar-tmp', 'ar', '2170-02-28')]);
+    expect(await roleAccountIds(tx, 'AR', { includeFormer: true })).toEqual(['ar', 'ar-tmp']);
+    expect(await roleAccountIds(tx, 'CUSTOMER_DEPOSIT', { includeFormer: true })).toEqual(['cdep']);
   });
 });
 

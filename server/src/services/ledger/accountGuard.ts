@@ -7,6 +7,7 @@
 import type { Prisma, RootType } from '@prisma/client';
 import type { SystemAccountRole } from '../../types/systemAccounts';
 import { BusinessError } from '../../utils/errors';
+import { loadFormerRoleAccounts } from './partyRules';
 
 type Tx = Prisma.TransactionClient;
 
@@ -121,24 +122,29 @@ const ACCOUNT_LITE_SELECT = {
 /**
  * Account id -> restricted kinds for the control roles (plus extraRoles) and item inventory
  * accounts. One account can be mapped under several roles; it keeps all of them, in `roles`
- * order. Role mappings replace the item-account kind for the same account.
+ * order. Role mappings replace the item-account kind for the same account. An account that held
+ * a party role before a remap keeps that role as a kind too: its ALE still counts in the party
+ * subledger (roleAccountIds includeFormer), so a former deposit account stays closed to manual
+ * journals and a former AR/AP account still needs journal.control.
  */
 export async function loadControlAccountMap(
   tx: Tx,
   extraRoles: readonly SystemAccountRole[] = [],
 ): Promise<Map<string, readonly RestrictedKind[]>> {
   const roles = [...new Set<string>([...CONTROL_ACCOUNT_ROLES, ...extraRoles])];
-  const [mappings, items] = await Promise.all([
+  const [mappings, items, former] = await Promise.all([
     tx.systemAccountMapping.findMany({ where: { role: { in: roles } }, select: { role: true, accountId: true } }),
     tx.inventoryItem.findMany({
       where: { accountId: { not: null }, account: { rootType: 'ASSET' } },
       select: { accountId: true },
       distinct: ['accountId'],
     }),
+    loadFormerRoleAccounts(tx),
   ]);
+  const claims = [...mappings, ...former];
   const byRole = new Map<string, RestrictedKind[]>();
   for (const role of roles) {
-    const ids = mappings.filter((m) => m.role === role).map((m) => m.accountId);
+    const ids = claims.filter((m) => m.role === role).map((m) => m.accountId);
     for (const id of new Set(ids)) byRole.set(id, [...(byRole.get(id) ?? []), role as RestrictedKind]);
   }
   const map = new Map<string, readonly RestrictedKind[]>();
