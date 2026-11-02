@@ -18,6 +18,7 @@ import {
   usesListMode,
 } from '../../services/inventoryItemList';
 import { logger } from '../../lib/logger';
+import { assertItemAccountChange, assertItemAccountValid } from '../../services/inventory/itemAccount';
 
 const router = Router();
 
@@ -235,23 +236,24 @@ router.post('/', async (req: AuthRequest, res) => {
     const existing = await prisma.inventoryItem.findUnique({ where: { code: body.code } });
     if (existing) throw new BusinessError(`Kode item '${body.code}' sudah digunakan.`);
 
-    const item = await prisma.inventoryItem.create({
-      data: {
-        code: body.code,
-        name: body.name,
-        unit: body.unit,
-        category: body.category || null,
-        description: body.description || null,
-        minimumStock: body.minimumStock ?? 0,
-        accountId: body.accountId || null,
-      },
-      include: { account: { select: { id: true, name: true, accountNumber: true } } },
+    const item = await prisma.$transaction(async (tx) => {
+      await assertItemAccountValid(tx, body.accountId);
+      return tx.inventoryItem.create({
+        data: {
+          code: body.code,
+          name: body.name,
+          unit: body.unit,
+          category: body.category || null,
+          description: body.description || null,
+          minimumStock: body.minimumStock ?? 0,
+          accountId: body.accountId || null,
+        },
+        include: { account: { select: { id: true, name: true, accountNumber: true } } },
+      });
     });
     return res.status(201).json(item);
   } catch (error: any) {
-    if (error instanceof BusinessError) return res.status(400).json({ error: error.message });
-    logger.error({ error }, 'POST /inventory/items error');
-    return res.status(500).json({ error: 'Gagal membuat item stok.' });
+    return handleRouteError(res, error, 'POST /inventory/items error', 'Gagal membuat item stok.');
   }
 });
 
@@ -262,26 +264,31 @@ router.put('/:id', async (req: AuthRequest, res) => {
   if (!body) return;
 
   try {
-    const item = await prisma.inventoryItem.update({
-      where: { id },
-      data: {
-        ...(body.code && { code: body.code }),
-        ...(body.name && { name: body.name }),
-        ...(body.unit && { unit: body.unit }),
-        category: clearable(body.category),
-        description: clearable(body.description),
-        ...(body.minimumStock !== undefined && { minimumStock: body.minimumStock }),
-        ...(body.accountId !== undefined && { accountId: body.accountId || null }),
-        ...(body.isActive !== undefined && { isActive: body.isActive }),
-      },
-      include: { account: { select: { id: true, name: true, accountNumber: true } } },
+    const item = await prisma.$transaction(async (tx) => {
+      // The row lock keeps a stock movement from landing between the stock check and the update.
+      const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM inventory_items WHERE id = ${id} FOR UPDATE`;
+      if (locked.length === 0) return null;
+      if (body.accountId !== undefined) await assertItemAccountChange(tx, id, body.accountId || null);
+      return tx.inventoryItem.update({
+        where: { id },
+        data: {
+          ...(body.code && { code: body.code }),
+          ...(body.name && { name: body.name }),
+          ...(body.unit && { unit: body.unit }),
+          category: clearable(body.category),
+          description: clearable(body.description),
+          ...(body.minimumStock !== undefined && { minimumStock: body.minimumStock }),
+          ...(body.accountId !== undefined && { accountId: body.accountId || null }),
+          ...(body.isActive !== undefined && { isActive: body.isActive }),
+        },
+        include: { account: { select: { id: true, name: true, accountNumber: true } } },
+      });
     });
+    if (!item) return res.status(404).json({ error: 'Item stok tidak ditemukan.' });
     return res.json(item);
   } catch (error: any) {
     if (error.code === 'P2025') return res.status(404).json({ error: 'Item stok tidak ditemukan.' });
-    if (error instanceof BusinessError) return res.status(400).json({ error: error.message });
-    logger.error({ error }, 'PUT /inventory/items/:id error');
-    return res.status(500).json({ error: 'Gagal mengupdate item stok.' });
+    return handleRouteError(res, error, 'PUT /inventory/items/:id error', 'Gagal mengupdate item stok.');
   }
 });
 

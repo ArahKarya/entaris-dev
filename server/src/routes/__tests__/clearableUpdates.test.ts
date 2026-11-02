@@ -12,7 +12,9 @@ const { prismaMock } = vi.hoisted(() => ({
     party: { update: vi.fn() },
     salesInvoice: { findUnique: vi.fn(), update: vi.fn() },
     purchaseInvoice: { findUnique: vi.fn(), update: vi.fn() },
-    inventoryItem: { update: vi.fn() },
+    inventoryItem: { update: vi.fn(), findUnique: vi.fn() },
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
   },
 }));
 vi.mock('../../lib/prisma', () => ({ prisma: prismaMock }));
@@ -102,6 +104,13 @@ describe('PUT /sales/invoices/:id and /purchase/invoices/:id', () => {
 });
 
 describe('PUT /inventory/items/:id', () => {
+  beforeEach(() => {
+    // The route locks the item row inside a transaction; the stored item has no account yet.
+    prismaMock.$transaction.mockImplementation(async (fn: (tx: typeof prismaMock) => unknown) => fn(prismaMock));
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 'i1' }]);
+    prismaMock.inventoryItem.findUnique.mockResolvedValue({ accountId: null });
+  });
+
   it('clears category, description and the inventory account', async () => {
     expect((await put('/inventory/items/i1', { name: 'Beras', category: null, description: '', accountId: null })).status).toBe(200);
     expect(lastData(prismaMock.inventoryItem.update)).toMatchObject({ category: null, description: null, accountId: null });

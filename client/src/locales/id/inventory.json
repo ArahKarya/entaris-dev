@@ -38,6 +38,7 @@
     },
     "hints": {
       "account": "Pilih akun aset untuk jurnal otomatis saat stok masuk atau keluar.",
+      "accountLocked": "Akun tidak dapat diganti selama item masih memiliki stok.",
       "minimumStock": "Peringatan stok menipis akan muncul jika stok di bawah nilai ini."
     },
     "noAccount": "Tidak Dipilih",

@@ -521,7 +521,7 @@ Aturan wajib:
 
 ### inv_item_update
 
-**Ringkasan:** Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang; mengganti accountId hanya berlaku untuk transaksi berikutnya.
+**Ringkasan:** Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif (ITEM_ACCOUNT_HAS_STOCK).
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
