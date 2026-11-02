@@ -76,7 +76,10 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
       setNextRunDate(editTemplate.nextRunDate ? editTemplate.nextRunDate.substring(0, 10) : '');
       const td = editTemplate.templateData as any;
       setNarration(td?.narration || '');
-      setLines(td?.items?.length > 0 ? td.items : [defaultLine(), defaultLine()]);
+      setLines(td?.items?.length > 0
+        // Stored amounts are 2-decimal strings; the form works with numbers.
+        ? td.items.map((i: any) => ({ ...i, debit: Number(i.debit) || 0, credit: Number(i.credit) || 0 }))
+        : [defaultLine(), defaultLine()]);
     } else if (isOpen) {
       setName('');
       setTemplateType('journal');
@@ -134,7 +137,8 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
       templateType,
       frequency,
       dayOfMonth: dayOfMonth || null,
-      nextRunDate,
+      // An untouched date is not sent back: it may be stale after a run elsewhere.
+      ...(!editTemplate || nextRunDate !== editTemplate.nextRunDate?.substring(0, 10) ? { nextRunDate } : {}),
       templateData,
     });
   };

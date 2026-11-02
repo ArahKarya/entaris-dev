@@ -118,6 +118,23 @@ describe('PUT /api/recurring/:id', () => {
     expect(db._tx.recurringTemplate.update.mock.calls[0][0].data.templateData.items[0].debit).toBe('200.00');
   });
 
+  it('accepts the unchanged date of a scheduler-written next run (stored 19:00Z)', async () => {
+    db._tx.recurringTemplate.findUnique.mockResolvedValue(stored({ nextRunDate: new Date('2020-01-31T19:00:00.000Z') }));
+    // the form sends the UTC day: 2020-01-31, while the WIB day is 2020-02-01
+    const r = await call('PUT', `/api/recurring/${TMPL}`, { nextRunDate: '2020-01-31', templateData: journal(300, 300) });
+    expect(r.status).toBe(200);
+    expect(db._tx.recurringTemplate.update.mock.calls[0][0].data.nextRunDate).toEqual(new Date('2020-01-31T19:00:00.000Z'));
+  });
+
+  it('refuses a stale date equal to the day of the last run', async () => {
+    db._tx.recurringTemplate.findUnique.mockResolvedValue(stored({
+      lastRunDate: new Date('2099-03-10T00:00:00.000Z'), nextRunDate: new Date('2099-04-10T00:00:00.000Z'),
+    }));
+    const r = await call('PUT', `/api/recurring/${TMPL}`, { nextRunDate: '2099-03-10' });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('RECURRING_DATE_BEFORE_LAST_RUN');
+  });
+
   it('refuses yesterday as a new date', async () => {
     const r = await call('PUT', `/api/recurring/${TMPL}`, { nextRunDate: '2020-01-30' });
     expect(r.status).toBe(400);

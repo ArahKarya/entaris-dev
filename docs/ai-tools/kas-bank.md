@@ -95,7 +95,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - `splits` harus berjumlah sama persis (toleransi 0,01) dengan `amount`. Akun split boleh akun beban (mis. komisi), tetapi akun utama tanpa split harus akun kas.
 - `pay_list` hanya paging dasar; untuk laporan arus kas pakai `pay_ledger` + `pay_ledger_summary`. Perhatikan `pay_cash_journals` dibatasi 100 baris.
 - Uang jaminan: bagian hangus **harus** akun beban (EXPENSE); bagian dikembalikan **harus** akun kas/bank. Total return + hangus tidak boleh melebihi sisa jaminan.
-- `rec_create` / `rec_update` template jurnal: divalidasi saat disimpan (seimbang persis, minimal 2 baris, maksimal 2 desimal, tanpa pihak, tanpa akun kontrol/pajak, `nextRunDate` tidak boleh sudah lewat atau sebelum eksekusi terakhir) dan lagi saat dieksekusi. Perubahan template lewat AIRA (`rec_create`, `rec_update`, `rec_delete`) selalu menunggu persetujuan manusia, juga untuk aktor level Standar.
+- `rec_create` / `rec_update` template jurnal: divalidasi saat disimpan (seimbang persis, minimal 2 baris, maksimal 2 desimal, tanpa pihak, tanpa akun kontrol/pajak, `nextRunDate` tidak boleh sudah lewat atau sebelum eksekusi terakhir) dan lagi saat dieksekusi (manual maupun scheduler). Perubahan template lewat AIRA (`rec_create`, `rec_update`, `rec_delete`) menunggu persetujuan manusia, juga untuk aktor level Standar (aktor level direct dan alat yang dipin otomatis tetap dieksekusi langsung).
 - Rekonsiliasi `Completed` terkunci permanen; selesaikan hanya setelah semua item dicocokkan sesuai rekening koran.
 - **Draft Buku Kas**: jangan menebak kode akun, jangan mengisi `masuk` dan `keluar` sekaligus, jangan menganggap draft = sudah tercatat (belum ada jurnal sampai diposting), dan jangan menunggu `kas_draft_posting` langsung jalan (menunggu persetujuan). Jurnal dari draft yang salah dibatalkan lewat `je_cancel` (toolset akuntansi) pada nomor jurnal baris terkait.
 - Format tanggal `YYYY-MM-DD`; jumlah dalam Rupiah (angka, tanpa pemisah ribuan).
@@ -1564,7 +1564,6 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | `templateData.narration` | body | `string` | ya |  |
 | `templateData.items` | body | `array<object>` | ya |  |
 | `templateData.items[].accountId` | body | `uuid` | ya |  |
-| `templateData.items[].partyId` | body | `uuid` | tidak |  |
 | `templateData.items[].debit` | body | `number` | ya |  |
 | `templateData.items[].credit` | body | `number` | ya |  |
 | `templateData.items[].description` | body | `string` | tidak |  |
@@ -1598,7 +1597,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Template yang dibuat. HTTP 201.
 
-**Efek pembukuan/stok:** Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA selalu menunggu persetujuan. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).
+**Efek pembukuan/stok:** Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA menunggu persetujuan manusia untuk aktor level Standar (aktor level direct atau alat yang dipin otomatis mengeksekusinya segera). Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).
 
 **Teks konfirmasi:** Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?
 
@@ -1700,7 +1699,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** { success, result (jurnal) } atau { success: false, error }.
 
-**Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi. Tipe invoice: tidak ada efek.
+**Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi (manual maupun scheduler). Tipe invoice: tidak ada efek.
 
 **Teks konfirmasi:** Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.
 
@@ -1774,7 +1773,6 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | `templateData.narration` | body | `string` | ya |  |
 | `templateData.items` | body | `array<object>` | ya |  |
 | `templateData.items[].accountId` | body | `uuid` | ya |  |
-| `templateData.items[].partyId` | body | `uuid` | tidak |  |
 | `templateData.items[].debit` | body | `number` | ya |  |
 | `templateData.items[].credit` | body | `number` | ya |  |
 | `templateData.items[].description` | body | `string` | tidak |  |

@@ -25798,12 +25798,6 @@
                   "required": true
                 },
                 {
-                  "name": "partyId",
-                  "in": "body",
-                  "type": "uuid",
-                  "required": false
-                },
-                {
                   "name": "debit",
                   "in": "body",
                   "type": "number",
@@ -25837,7 +25831,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA selalu menunggu persetujuan. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).",
+      "postingEffect": "Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA menunggu persetujuan manusia untuk aktor level Standar (aktor level direct atau alat yang dipin otomatis mengeksekusinya segera). Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).",
       "confirm_template": "Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?",
       "errors": [
         "400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)",
@@ -25884,7 +25878,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi. Tipe invoice: tidak ada efek.",
+      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi (manual maupun scheduler). Tipe invoice: tidak ada efek.",
       "confirm_template": "Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.",
       "prerequisites": [
         "Template bertipe journal dengan items valid",
@@ -33408,12 +33402,6 @@
                   "in": "body",
                   "type": "uuid",
                   "required": true
-                },
-                {
-                  "name": "partyId",
-                  "in": "body",
-                  "type": "uuid",
-                  "required": false
                 },
                 {
                   "name": "debit",

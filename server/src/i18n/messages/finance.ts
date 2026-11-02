@@ -424,7 +424,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Tanggal berikutnya harus berupa tanggal kalender yang valid (YYYY-MM-DD).": "The next run date must be a valid calendar date (YYYY-MM-DD).",
   "Tanggal berikutnya harus berformat YYYY-MM-DD.": "The next run date must use the YYYY-MM-DD format.",
   "Tanggal berikutnya tidak boleh sudah lewat.": "The next run date cannot be in the past.",
-  "Tanggal berikutnya tidak boleh sebelum tanggal eksekusi terakhir.": "The next run date cannot be before the last run date.",
+  "Tanggal berikutnya harus setelah tanggal eksekusi terakhir.": "The next run date must be after the last run date.",
   "Template jurnal berulang tidak boleh membawa pihak; kosongkan pihak di semua baris.": "A recurring journal template cannot carry a party; clear the party on every line.",
   "Data template tidak sesuai dengan tipe {0}: {1}": "The template data does not match the {0} type: {1}",
   "Minimal 2 item jurnal.": "At least 2 journal items.",

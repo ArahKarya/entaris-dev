@@ -16,7 +16,7 @@ export interface NextRunDateInput {
   /** YYYY-MM-DD as sent by the client. */
   nextRunDate: string;
   now?: Date;
-  /** Stored last run; the next run cannot be earlier than the day of the last run. */
+  /** Stored last run; the next run must be after the day of the last run, so a posted period is never queued again. */
   lastRunDate?: Date | null;
   /** Stored next run; sending it back unchanged (an edit that leaves the date alone) is always accepted. */
   previousNextRunDate?: Date | null;
@@ -34,12 +34,15 @@ export function checkNextRunDate(input: NextRunDateInput): NextRunDateResult {
     return { ok: false, code: RECURRING_DATE_INVALID, message: 'Tanggal berikutnya harus berupa tanggal kalender yang valid (YYYY-MM-DD).' };
   }
   const date = new Date(`${day}T00:00:00.000Z`);
-  if (input.previousNextRunDate && businessDayOf(input.previousNextRunDate) === day) return { ok: true, date };
+  // The edit form sends back the UTC day of the stored instant, which is the day before the WIB day for
+  // runs the scheduler advanced at 02:00 WIB; either form of the stored value counts as unchanged.
+  const prev = input.previousNextRunDate;
+  if (prev && (businessDayOf(prev) === day || prev.toISOString().slice(0, 10) === day)) return { ok: true, date: prev };
   if (day < businessToday(input.now)) {
     return { ok: false, code: RECURRING_DATE_PAST, message: 'Tanggal berikutnya tidak boleh sudah lewat.' };
   }
-  if (input.lastRunDate && day < businessDayOf(input.lastRunDate)) {
-    return { ok: false, code: RECURRING_DATE_BEFORE_LAST_RUN, message: 'Tanggal berikutnya tidak boleh sebelum tanggal eksekusi terakhir.' };
+  if (input.lastRunDate && day <= businessDayOf(input.lastRunDate)) {
+    return { ok: false, code: RECURRING_DATE_BEFORE_LAST_RUN, message: 'Tanggal berikutnya harus setelah tanggal eksekusi terakhir.' };
   }
   return { ok: true, date };
 }

@@ -26,7 +26,25 @@ describe('checkNextRunDate', () => {
   it('refuses a day before the last run', () => {
     const r = checkNextRunDate({ nextRunDate: '2026-11-05', now: NOW, lastRunDate: new Date('2026-11-10T00:00:00.000Z') });
     expect(r).toMatchObject({ ok: false, code: 'RECURRING_DATE_BEFORE_LAST_RUN' });
-    expect(checkNextRunDate({ nextRunDate: '2026-11-10', now: NOW, lastRunDate: new Date('2026-11-10T00:00:00.000Z') }).ok).toBe(true);
+    // the day of the last run is already posted
+    expect(checkNextRunDate({ nextRunDate: '2026-11-10', now: NOW, lastRunDate: new Date('2026-11-10T00:00:00.000Z') })).toMatchObject({ ok: false, code: 'RECURRING_DATE_BEFORE_LAST_RUN' });
+    expect(checkNextRunDate({ nextRunDate: '2026-11-11', now: NOW, lastRunDate: new Date('2026-11-10T00:00:00.000Z') }).ok).toBe(true);
+  });
+
+  it('accepts the UTC-day form of a scheduler-written next run and keeps the stored instant', () => {
+    // 2026-12-02 02:00 WIB is 2026-12-01T19:00Z; the edit form sends back the UTC day.
+    const prev = new Date('2026-12-01T19:00:00.000Z');
+    const later = new Date('2026-12-02T03:00:00.000Z');
+    expect(checkNextRunDate({ nextRunDate: '2026-12-01', now: later, previousNextRunDate: prev })).toEqual({ ok: true, date: prev });
+    expect(checkNextRunDate({ nextRunDate: '2026-12-02', now: later, previousNextRunDate: prev })).toEqual({ ok: true, date: prev });
+  });
+
+  it('refuses a stale form date that falls on the last run day', () => {
+    const r = checkNextRunDate({
+      nextRunDate: '2026-11-02', now: NOW,
+      lastRunDate: new Date('2026-11-02T03:00:00.000Z'), previousNextRunDate: new Date('2026-12-02T00:00:00.000Z'),
+    });
+    expect(r).toMatchObject({ ok: false, code: 'RECURRING_DATE_BEFORE_LAST_RUN' });
   });
 
   it('refuses malformed and non-existent calendar days', () => {

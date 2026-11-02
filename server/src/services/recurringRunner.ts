@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { updateBalancesForItems } from '../utils/accountBalance';
+import { assertJournalLines } from '../utils/journalLineRules';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 
@@ -83,6 +84,7 @@ async function executeJournalTemplate(
         credit: item.credit || 0,
         description: item.description || data.narration || template.name,
       }));
+      assertJournalLines(items);
 
       const journalEntry = await tx.journalEntry.create({
         data: {
