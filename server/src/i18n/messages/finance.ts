@@ -427,4 +427,13 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Akun {0} hanya menerima {1}; mitra yang terdaftar sebagai Customer sekaligus Supplier belum bisa dipakai di jurnal manual.": "The {0} account only accepts a {1}; a partner registered as both Customer and Supplier cannot be used in a manual journal yet.",
   "Akun {0} {1} dipetakan ke dua peran pihak ({2} dan {3}). Perbaiki pemetaan di Pengaturan > Akun Sistem.": "Account {0} {1} is mapped to two party roles ({2} and {3}). Fix the mapping in Settings > System Accounts.",
   "Akun {0} {1} memegang dua peran pihak ({2} dan {3}) lewat pemindahan akun sistem. Satu akun hanya boleh memegang satu peran pihak; pilih akun lain di Pengaturan > Akun Sistem.": "Account {0} {1} has held two party roles ({2} and {3}) through a system account move. One account can hold only one party role; choose another account in Settings > System Accounts.",
+  // import journals (E7-R9, routes/import/journals.ts, services/journalImport.ts, utils/importDate.ts)
+  "File berisi {0} jurnal; maksimal {1} jurnal per file. Pecah file menjadi beberapa bagian.": "The file has {0} journals; the limit is {1} journals per file. Split the file into parts.",
+  "Baris dengan ref \"{0}\" harus memiliki tanggal dan narasi yang sama dengan baris pertama kelompok (baris {1}).": "Rows with ref \"{0}\" must have the same date and narration as the first row of the group (row {1}).",
+  "Tanggal tidak valid.": "The date is invalid.",
+  "Tanggal \"{0}\" tidak ada di kalender.": "The date \"{0}\" does not exist on the calendar.",
+  "Format tanggal \"{0}\" bisa dibaca dua cara. Tulis YYYY-MM-DD atau DD/MM/YYYY.": "The date format \"{0}\" can be read two ways. Write YYYY-MM-DD or DD/MM/YYYY.",
+  "Tanggal \"{0}\" tidak valid. Tulis YYYY-MM-DD atau DD/MM/YYYY.": "The date \"{0}\" is invalid. Write YYYY-MM-DD or DD/MM/YYYY.",
+  "Nilai \"{0}\" bukan angka dengan paling banyak 2 desimal.": "The value \"{0}\" is not a number with at most 2 decimals.",
+  "Nilai \"{0}\" bukan angka yang valid. Tulis angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal.": "The value \"{0}\" is not a valid number. Write the number without thousands separators, with a dot as the decimal mark.",
 };

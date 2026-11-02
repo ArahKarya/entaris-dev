@@ -51,9 +51,9 @@ const typeConfig = {
   },
   journals: {
     endpoint: '/import/journals',
-    columns: ['date', 'narration', 'accountNumber', 'debit', 'credit', 'description'],
-    templateHeaders: 'date,narration,accountNumber,debit,credit,description',
-    templateSample: '2026-03-22,Penjualan tunai,1100,1000000,0,Kas masuk',
+    columns: ['date', 'narration', 'accountNumber', 'debit', 'credit', 'description', 'ref'],
+    templateHeaders: 'date,narration,accountNumber,debit,credit,description,ref',
+    templateSample: '22/03/2026,Penjualan tunai,1.1.1,1000000,0,Kas masuk,J-001\n22/03/2026,Penjualan tunai,4.1,0,1000000,Pendapatan penjualan,J-001',
     queryKeys: ['journals', 'gl', 'coa', 'coa-all', 'balance-sheet', 'trial-balance', 'profit-loss', 'dashboard-metrics'],
   },
   inventory: {
