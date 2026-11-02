@@ -58,7 +58,7 @@ APPROVED/FULFILLED --(dibayar lewat Tagihan EAM, di luar toolset ini)--> PAID
 ### Aturan posting / efek
 
 - **Tidak ada jurnal GL** pada seluruh tool bagian ini. Stok GA hidup di tabel sendiri; Persediaan ERP (akun 1.4.0), HPP, dan WAC tidak tersentuh.
-- Satu-satunya jembatan ke keuangan: MR berstatus APPROVED atau FULFILLED yang belum dijurnal muncul di antrian **Tagihan EAM** (jenis `MATERIAL_REQUEST`; nilai = jumlah harga satuan x qty item) pada modul Pengajuan Pembayaran (`/payment-requests/eam`); setelah dibayar/dibukukan status MR menjadi `PAID`. Karena itu isi harga satuan (`gmr_procurement_update`) sebelum MR ditagihkan. Pembukuannya (JOURNAL: DR akun beban / CR Kas-Bank; atau PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha 2.1.1) dikerjakan di sana lewat `services/gaFinance.ts`, bukan di tool-tool ini. Lihat toolset **pengajuan-pembayaran**.
+- Satu-satunya jembatan ke keuangan: MR berstatus APPROVED atau FULFILLED yang belum dijurnal muncul di antrian **Tagihan EAM** (jenis `MATERIAL_REQUEST`; nilai = jumlah harga satuan x qty item) pada modul Pengajuan Pembayaran (`/payment-requests/eam`); setelah dibayar/dibukukan status MR menjadi `PAID`. Karena itu isi harga satuan (`gmr_procurement_update`) sebelum MR ditagihkan. Pembukuannya (JOURNAL: DR akun beban / CR Kas-Bank; atau PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha akun AP terpetakan) dikerjakan di sana lewat `services/gaFinance.ts`, bukan di tool-tool ini. Lihat toolset **pengajuan-pembayaran**.
 - Profil keuangan/penyusutan aset (relasi `fixedAsset` pada aset) dikelola di modul Aset Tetap (toolset **akuntansi**); mendaftarkan aset EAM tidak membuat aset tetap maupun jurnal. `acquisitionCost` pada aset EAM hanya informasi.
 - Mutasi stok GA (`gi_movement_create`, `gi_stock_set`, `gmr_receive_item`) dinaikkan ke risiko `critical` karena memindahkan/menimpa stok fisik dan tidak punya pembatalan (koreksi = mutasi lain).
 
@@ -163,7 +163,7 @@ Catat servis (ga_veh_add_service, source=EAM) ──▶ antrian Tagihan EAM ─�
 ```
 
 - `ga_veh_add_service` membuat log servis `source=EAM`. **Tanpa** `postJournal` tidak ada jurnal; log berbiaya > 0 muncul di *Pengajuan Pembayaran → Tagihan EAM* (jenis `SERVICE_LOG`) dan hanya Keuangan yang memposting/membayar lewat modul `payment_request`.
-- `postJournal=true` (atau `ga_veh_post_service_journal` belakangan) memposting langsung: **DR 6.7 Beban Pemeliharaan Kendaraan / CR 1.1.1 Petty Cash** (akun bisa dipilih). Satu log = maksimal satu jurnal. Pembatalan: `ga_veh_cancel_service_journal` (void jurnal).
+- `postJournal=true` (atau `ga_veh_post_service_journal` belakangan) memposting langsung: **DR 6.7 Beban Pemeliharaan Kendaraan / CR akun Kas terpetakan di Akun Sistem** (akun bisa dipilih; tanpa pemetaan CASH ditolak ACCOUNT_MAPPING_MISSING). Satu log = maksimal satu jurnal. Pembatalan: `ga_veh_cancel_service_journal` (void jurnal).
 - Log `source=IMPORT` (data historis, sudah di GL) dan `WORK_ORDER` **tidak** masuk antrian dan tidak bisa dijurnal.
 - Log yang sudah berjurnal tidak boleh diubah (tanggal/biaya/deskripsi) atau dihapus — batalkan jurnalnya dulu.
 
@@ -171,7 +171,7 @@ Catat servis (ga_veh_add_service, source=EAM) ──▶ antrian Tagihan EAM ─�
 
 ```
 Pengajuan pajak (SUBMITTED) ──approve──▶ GaVehicleTax IN_PROCESS ──▶ antrian Tagihan EAM (VEHICLE_TAX)
-                                          └─ dibayar Keuangan: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha 2.1.1)
+                                          └─ dibayar Keuangan: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha, akun AP terpetakan)
 ```
 
 - `ga_veh_create_tax_request` → `ga_veh_approve_tax_request` / `ga_veh_reject_tax_request` / `ga_veh_cancel_tax_request` (cancel hanya oleh pengaju).
@@ -1794,7 +1794,8 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 **Error umum**
 
 - 400: Biaya harus > 0 untuk diposting ke jurnal
-- 400: Akun 6.7/1.1.1 tidak ditemukan di COA
+- 400: Akun 6.7 tidak ditemukan di COA
+- 400 ACCOUNT_MAPPING_MISSING: peran CASH belum dipetakan di Akun Sistem (bila creditAccountId kosong)
 
 **Tool terkait:** [`ga_veh_post_service_journal`](#ga_veh_post_service_journal)
 
@@ -3222,7 +3223,7 @@ Modul `ga_equipment`: alat ukur/timbangan (kapasitas, satuan KG/GRAM/TON/LBS, ak
 | `id` | path | `string` | ya | ID aset kendaraan (GaAsset.id). |
 | `sid` | path | `string` | ya | ID log servis. |
 | `accountId` | body | `string` | tidak | Akun beban (debit); default 6.7. |
-| `creditAccountId` | body | `string` | tidak | Akun kas/bank/hutang (kredit); default 1.1.1. |
+| `creditAccountId` | body | `string` | tidak | Akun kas/bank (kredit); bila kosong dipakai akun CASH terpetakan di Akun Sistem. |
 
 **Contoh pemanggilan**
 

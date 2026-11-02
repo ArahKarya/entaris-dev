@@ -133,7 +133,7 @@
   },
   "invoiceRevisePriceDialog": {
     "title": "Revisi Harga Invoice",
-    "explainer": "Selisih harga diposting otomatis: porsi barang yang <strong>masih di stok</strong> menyesuaikan nilai Persediaan + harga rata-rata; porsi yang <strong>sudah keluar</strong> (produksi/jual) masuk akun <strong>5.11 Selisih Harga Pembelian</strong>. Hutang ke supplier ikut disesuaikan.",
+    "explainer": "Selisih harga diposting otomatis: porsi barang yang <strong>masih di stok</strong> menyesuaikan nilai Persediaan + harga rata-rata; porsi yang <strong>sudah keluar</strong> (produksi/jual) masuk akun <strong>Selisih Harga Pembelian</strong> (dipetakan di Akun Sistem). Hutang ke supplier ikut disesuaikan.",
     "oldRate": "Lama: {{value}}",
     "newRateAria": "Harga baru {{name}}",
     "newRatePlaceholder": "harga baru",

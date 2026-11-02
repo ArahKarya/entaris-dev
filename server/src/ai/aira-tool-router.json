@@ -20528,7 +20528,8 @@
       "confirm_template": "Catat servis {jenisService} kendaraan {id} tgl {tanggal}, biaya Rp {biaya}, posting jurnal: {postJournal}. Setujui?",
       "errors": [
         "400: Biaya harus > 0 untuk diposting ke jurnal",
-        "400: Akun 6.7/1.1.1 tidak ditemukan di COA"
+        "400: Akun 6.7 tidak ditemukan di COA",
+        "400 ACCOUNT_MAPPING_MISSING: peran CASH belum dipetakan di Akun Sistem (bila creditAccountId kosong)"
       ],
       "related": [
         "ga_veh_post_service_journal"
@@ -20577,7 +20578,7 @@
           "in": "body",
           "type": "string",
           "required": false,
-          "description": "Akun kas/bank/hutang (kredit); default 1.1.1."
+          "description": "Akun kas/bank (kredit); bila kosong dipakai akun CASH terpetakan di Akun Sistem."
         }
       ],
       "output": {
@@ -23862,7 +23863,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha 2.1.1 (butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.",
+      "postingEffect": "JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.",
       "confirm_template": "POSTING Tagihan EAM {kind} {id} dengan metode {method} senilai {amount}?",
       "accessNote": "Hanya Keuangan: izin payment_request edit pada seluruh endpoint /payment-requests/eam.",
       "prerequisites": [
@@ -23875,6 +23876,7 @@
         "400: akun debit = akun kredit",
         "400: vendor wajib untuk PURCHASE_INVOICE",
         "400: sudah diposting",
+        "400 ACCOUNT_MAPPING_MISSING: peran AP (PURCHASE_INVOICE) atau CASH (JOURNAL tanpa akun sumber) belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -25087,7 +25089,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "purchase_invoice",
-      "desc": "Merevisi harga baris Invoice Pembelian yang sudah diposting (pemasok mengoreksi harga). Selisih dipecah: porsi barang masih di stok masuk ke Persediaan + koreksi WAC, porsi yang sudah keluar masuk ke Selisih Harga Pembelian (5.11). Untuk role non-bypass hanya mengantrekan ApprovalRequest PurchaseInvoiceRevisePrice (HTTP 202).",
+      "desc": "Merevisi harga baris Invoice Pembelian yang sudah diposting (pemasok mengoreksi harga). Selisih dipecah: porsi barang masih di stok masuk ke Persediaan + koreksi WAC, porsi yang sudah keluar masuk ke akun Selisih Harga Pembelian (terpetakan di Akun Sistem, bawaan 5.11). Untuk role non-bypass hanya mengantrekan ApprovalRequest PurchaseInvoiceRevisePrice (HTTP 202).",
       "risk": "critical",
       "roles": [
         "Admin",

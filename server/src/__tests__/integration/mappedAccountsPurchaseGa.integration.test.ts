@@ -39,6 +39,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  vi.useRealTimers();
   if (prisma) await prisma.$disconnect();
   if (pool) await pool.end();
 });
@@ -65,6 +66,12 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
   }
 }
 
+/** Only the Date clock moves; the revision journal is dated now and must land in fiscal year 2163. */
+function clockAt(iso: string) {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(iso));
+}
+
 const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 /** Net ledger movement (debit - credit) of an account over the whole transaction. */
@@ -78,12 +85,6 @@ async function net(tx: Tx, accountId: string): Promise<number> {
 
 async function seedFixture(tx: Tx) {
   await createFiscalYear(tx, { year: 2163 });
-  // The revision journal is dated now, so the current year needs an open fiscal year as well.
-  const today = new Date();
-  const current = await tx.fiscalYear.findFirst({
-    where: { startDate: { lte: today }, endDate: { gte: today } },
-  });
-  if (!current) await createFiscalYear(tx, { year: today.getUTCFullYear() });
 
   const ap = await tx.account.create({
     data: { name: 'IT-GA Hutang Usaha Lain', accountNumber: `IT-GA-AP-${tag()}`, accountType: 'LIABILITY', rootType: 'LIABILITY' },
@@ -93,6 +94,11 @@ async function seedFixture(tx: Tx) {
   });
   await tx.systemAccountMapping.deleteMany({ where: { role: 'AP' } });
   await tx.systemAccountMapping.create({ data: { role: 'AP', accountId: ap.id } });
+  const variance = await tx.account.create({
+    data: { name: 'IT-GA Selisih Harga', accountNumber: `IT-GA-VAR-${tag()}`, accountType: 'EXPENSE', rootType: 'EXPENSE' },
+  });
+  await tx.systemAccountMapping.deleteMany({ where: { role: 'PURCHASE_PRICE_VARIANCE' } });
+  await tx.systemAccountMapping.create({ data: { role: 'PURCHASE_PRICE_VARIANCE', accountId: variance.id } });
   systemAccounts.invalidateCache();
 
   const defaultAp = await tx.account.findFirst({ where: { accountNumber: '2.1.1' } });
@@ -108,7 +114,7 @@ async function seedFixture(tx: Tx) {
     data: { assetId: asset.id, type: 'PAJAK_KENDARAAN', periodYear: 2163, amount: 1_000_000, dueDate: new Date('2163-03-01') },
   });
   const cash = await tx.account.findFirst({ where: { accountNumber: { startsWith: '1.1.' }, isGroup: false } });
-  return { ap, expense, defaultAp, supplier, tax, cash: cash! };
+  return { ap, variance, expense, defaultAp, supplier, tax, cash: cash! };
 }
 
 d('GA bills and PI revision post to mapped accounts', () => {
@@ -133,6 +139,7 @@ d('GA bills and PI revision post to mapped accounts', () => {
       const invoice = await tx.purchaseInvoice.findUnique({ where: { id: result.purchaseInvoiceId! }, include: { items: true } });
       expect(invoice!.status).toBe('Paid');
 
+      clockAt('2163-04-01T03:00:00Z');
       // Revision: the counter entry goes to the mapped AP, the service delta to the mapped variance account.
       await revisePurchaseInvoiceInTx(
         tx,
@@ -140,6 +147,7 @@ d('GA bills and PI revision post to mapped accounts', () => {
         userId,
       );
       expect(await net(tx, f.ap.id)).toBe(-250_000);
+      expect(await net(tx, f.variance.id)).toBe(250_000);
       if (f.defaultAp) expect(await net(tx, f.defaultAp.id)).toBe(defaultBefore);
     });
   });
@@ -153,6 +161,8 @@ d('GA bills and PI revision post to mapped accounts', () => {
       });
       const invoice = await tx.purchaseInvoice.findUnique({ where: { id: result.purchaseInvoiceId! }, include: { items: true } });
       await tx.systemAccountMapping.deleteMany({ where: { role: 'PURCHASE_PRICE_VARIANCE' } });
+      systemAccounts.invalidateCache();
+      clockAt('2163-04-01T03:00:00Z');
 
       await expect(
         revisePurchaseInvoiceInTx(
