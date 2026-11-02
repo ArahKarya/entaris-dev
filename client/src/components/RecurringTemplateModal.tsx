@@ -10,6 +10,7 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DateInput, Field } from '@/components/shared';
+import { todayLocal } from '@/lib/date';
 import { PinnedBody, PinnedFooter, PinnedHeader, pinnedDialogClass } from '@/components/overlays/dialog-parts';
 
 interface JournalLine {
@@ -121,7 +122,11 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
         return;
       }
 
-      templateData = { narration, items: validLines };
+      // A template carries no party; send only the fields the server accepts.
+      templateData = {
+        narration,
+        items: validLines.map(({ accountId, debit, credit, description }) => ({ accountId, debit, credit, description })),
+      };
     }
 
     createMutation.mutate({
@@ -215,7 +220,7 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
                 error={req(!!nextRunDate)}
                 className={monthly ? undefined : 'sm:col-span-2'}
               >
-                <DateInput value={nextRunDate} onChange={setNextRunDate} />
+                <DateInput value={nextRunDate} onChange={setNextRunDate} min={editTemplate ? undefined : todayLocal()} />
               </Field>
             </div>
 
