@@ -16,6 +16,7 @@ import {
 } from './health/checks';
 import { checkRequiredTriggers } from './health/schemaGuards';
 import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
+import { checkAleFiscalYear } from './health/fiscalYearChecks';
 import {
   previewAleSync,
   previewAccountBalanceDrift,
@@ -43,6 +44,7 @@ router.get('/', async (_req, res) => {
       checkRequiredTriggers(),
       checkArSubledgerVsGl(),
       checkCustomerDepositVsGl(),
+      checkAleFiscalYear(),
     ]);
 
     const overallStatus = checks.some((c) => c.status === 'error')

@@ -84,7 +84,7 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
 
         // Stock-in at a higher cost settles 40 kg → differential 40 × 2.000 = 80.000 (DR HPP / CR Persediaan).
         const settled = await settleCogsBackfillForItem(tx, {
-          itemId: item.id, qtyAvailable: 40, unitCostNow: 12_000, fiscalYearId: invoice.fiscalYearId,
+          itemId: item.id, qtyAvailable: 40, unitCostNow: 12_000,
           userId, settleDate: new Date(), source: { type: 'StockMovement', refId: `TEST-SM-${item.id}`, refNo: 'TEST-SM' },
         });
         expect(settled?.totalDifferential).toBe(80_000);
@@ -109,7 +109,7 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
 
         // Later stock-in must not settle the closed queue any more.
         const again = await settleCogsBackfillForItem(tx, {
-          itemId: item.id, qtyAvailable: 60, unitCostNow: 13_000, fiscalYearId: invoice.fiscalYearId,
+          itemId: item.id, qtyAvailable: 60, unitCostNow: 13_000,
           userId, settleDate: new Date(), source: { type: 'StockMovement', refId: `TEST-SM2-${item.id}` },
         });
         expect(again).toBeNull();
@@ -129,7 +129,7 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
         await tx.salesInvoice.update({ where: { id: invoice.id }, data: { status: 'Cancelled' } });
 
         const res = await settleCogsBackfillForItem(tx, {
-          itemId: item.id, qtyAvailable: 50, unitCostNow: 12_000, fiscalYearId: invoice.fiscalYearId,
+          itemId: item.id, qtyAvailable: 50, unitCostNow: 12_000,
           userId, settleDate: new Date(), source: { type: 'StockMovement', refId: `TEST-SM-${item.id}` },
         });
         expect(res).toBeNull();
@@ -149,7 +149,7 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
         const a = await seedInvoiceWithQueue(tx, 'REO', 30, 10_000);
         const refId = `TEST-PR-${a.item.id}`;
         await settleCogsBackfillForItem(tx, {
-          itemId: a.item.id, qtyAvailable: 30, unitCostNow: 11_000, fiscalYearId: a.invoice.fiscalYearId,
+          itemId: a.item.id, qtyAvailable: 30, unitCostNow: 11_000,
           userId, settleDate: new Date(), source: { type: 'ProductionRun', refId },
         });
         // Mark queue closed but keep settlement (shape of a JV shared with another invoice).
@@ -172,7 +172,7 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
         const a = await seedInvoiceWithQueue(tx, 'PIT', 20, 10_000);
         const refId = `TEST-PI-${a.item.id}`;
         const settled = await settleCogsBackfillForItem(tx, {
-          itemId: a.item.id, qtyAvailable: 20, unitCostNow: 11_000, fiscalYearId: a.invoice.fiscalYearId,
+          itemId: a.item.id, qtyAvailable: 20, unitCostNow: 11_000,
           userId, settleDate: new Date(), source: { type: 'PurchaseInvoice', refId },
         });
         const jeId = settled!.journalEntryId!;

@@ -187,7 +187,8 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
     expect(res.status).toBe(200);
     expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ fiscalYearId: 'fy-2027', date: new Date('2027-01-05') });
     expect(current.fn('journalEntry.create').mock.calls[0]![0].data.fiscalYearId).toBe('fy-2027');
-    expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).toMatchObject({ fiscalYearId: 'fy-2027', settleDate: new Date('2027-01-05') });
+    expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).toMatchObject({ settleDate: new Date('2027-01-05') });
+    expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).not.toHaveProperty('fiscalYearId');
   });
 
   it('PUT out of a closed year is rejected with PERIOD_CLOSED before any stock is reversed', async () => {
