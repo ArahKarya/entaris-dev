@@ -40,13 +40,14 @@ export interface RoleConflict {
 }
 
 /**
- * First changed pair whose account is also held, after the save, by a different exclusive role.
+ * First changed pair whose account is also held, after the save, by a different role when either of the two is exclusive.
  * Only changed pairs are examined, so an old shared mapping does not block unrelated edits.
  */
 export function findRoleConflict(changed: readonly MappingPair[], after: readonly MappingPair[]): RoleConflict | null {
   for (const pair of changed) {
-    if (!EXCLUSIVE.has(pair.role)) continue;
-    const other = after.find((p) => p.accountId === pair.accountId && p.role !== pair.role && EXCLUSIVE.has(p.role));
+    const other = after.find(
+      (p) => p.accountId === pair.accountId && p.role !== pair.role && (EXCLUSIVE.has(pair.role) || EXCLUSIVE.has(p.role)),
+    );
     if (other) {
       return {
         code: ACCOUNT_ROLE_CONFLICT,

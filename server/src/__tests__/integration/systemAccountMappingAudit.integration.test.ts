@@ -120,17 +120,21 @@ d('system account mapping validation and audit', () => {
       await tx.systemAccountMapping.deleteMany({ where: { role: 'COGS' } });
       await tx.systemAccountMapping.create({ data: { role: 'COGS', accountId: group.id } });
 
-      const ale = (accountId: string, debit: number, credit: number, isCancelled = false) =>
-        tx.accountingLedgerEntry.create({
-          data: {
-            date: new Date('2167-03-01'), accountId, debit, credit, referenceType: 'IT-SAM', referenceId: tag(),
-            fiscalYearId: fy.id, isCancelled,
-          },
-        });
-      await ale(group.id, 1500, 0);
-      await ale(counter.id, 0, 1500);
-      await ale(group.id, 0, 200);
-      await ale(group.id, 9999, 0, true);
+      // Every referenceType/referenceId group balances, so a deferred ledger-balance check passes.
+      const pair = async (ref: string, debitId: string, creditId: string, amount: number, isCancelled = false) => {
+        const row = (accountId: string, debit: number, credit: number) =>
+          tx.accountingLedgerEntry.create({
+            data: {
+              date: new Date('2167-03-01'), accountId, debit, credit, referenceType: 'IT-SAM', referenceId: ref,
+              fiscalYearId: fy.id, isCancelled,
+            },
+          });
+        await row(debitId, amount, 0);
+        await row(creditId, 0, amount);
+      };
+      await pair(`${tag()}-a`, group.id, counter.id, 1500);
+      await pair(`${tag()}-b`, counter.id, group.id, 200);
+      await pair(`${tag()}-c`, group.id, counter.id, 9999, true);
 
       const findings = await auditSystemAccounts(tx);
       const f = findings.find((x) => x.role === 'COGS' && x.issue === 'GROUP_ACCOUNT');

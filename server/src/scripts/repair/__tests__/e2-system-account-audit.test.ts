@@ -73,6 +73,14 @@ describe('buildSystemAccountAudit', () => {
     expect(f.find((x) => x.role === 'INVENTORY_VARIANCE')).toMatchObject({ otherRole: 'ROUNDING_ACCOUNT', posting: false });
   });
 
+  it('an exclusive role sharing with a non-exclusive one (CASH on the AR account) is a posting finding', () => {
+    const f = run({
+      mappings: [{ role: 'AR', accountId: 'ar' }, { role: 'CASH', accountId: 'ar' }, { role: 'TAX_INPUT', accountId: 'ar2' }, { role: 'INVENTORY', accountId: 'ar2' }],
+    }).filter((x) => x.issue === 'SHARED_ACCOUNT');
+    expect(f).toHaveLength(2);
+    expect(f.every((x) => x.posting)).toBe(true);
+  });
+
   it('missing required and missing posting roles are reported; optional unused roles are not', () => {
     const f = run({ mappings: healthyMappings().filter((m) => !['AR', 'PRODUCTION_CONVERSION', 'BANK_CHARGE'].includes(m.role)) });
     const missing = f.filter((x) => x.issue.startsWith('MISSING'));

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { BusinessError, handleRouteError } from '../utils/errors';
 import { systemAccounts } from '../services/systemAccounts';
 import { postableAccountProblem } from '../services/ledger/accountGuard';
 import { changedMappings, findRoleConflict, resultingMappings } from '../services/systemAccountMappingRules';
@@ -115,40 +116,16 @@ router.put('/', async (req: AuthRequest, res: Response) => {
   // checked further, so re-sending an unchanged legacy mapping (e.g. COGS on a group account)
   // alongside a real change is not rejected; the mapping audit reports those.
   const accountIds = [...new Set(inputMappings.map((m) => m.accountId))];
-  const [accounts, stored] = await Promise.all([
-    prisma.account.findMany({
-      where: { id: { in: accountIds } },
-      select: { id: true, accountNumber: true, name: true, isGroup: true, isActive: true, rootType: true },
-    }),
-    prisma.systemAccountMapping.findMany({ select: { role: true, accountId: true } }),
-  ]);
+  const accounts = await prisma.account.findMany({
+    where: { id: { in: accountIds } },
+    select: { id: true, accountNumber: true, name: true, isGroup: true, isActive: true, rootType: true },
+  });
   const accountMap = new Map(accounts.map((a) => [a.id, a]));
 
   for (const m of inputMappings) {
     if (!accountMap.has(m.accountId)) {
       return res.status(400).json({ error: `Akun dengan ID "${m.accountId}" tidak ditemukan.` });
     }
-  }
-
-  const changed = changedMappings(inputMappings, stored);
-  for (const m of changed) {
-    const meta = SYSTEM_ACCOUNT_ROLES[m.role as SystemAccountRole];
-    const problem = postableAccountProblem(
-      accountMap.get(m.accountId) ?? null,
-      { label: `Peran ${meta.label}`, rootTypes: [meta.expectedRootType], allowControl: true },
-      null,
-    );
-    if (problem) return res.status(400).json({ error: problem.message, code: problem.code });
-  }
-
-  const touchedRoles = new Set([...inputMappings.map((m) => m.role), ...clearRoles]);
-  const conflict = findRoleConflict(changed, resultingMappings(inputMappings, stored, touchedRoles));
-  if (conflict) {
-    const account = accountMap.get(conflict.accountId);
-    return res.status(400).json({
-      error: `Peran ${SYSTEM_ACCOUNT_ROLES[conflict.role].label} dan peran ${SYSTEM_ACCOUNT_ROLES[conflict.otherRole].label} tidak boleh memakai akun yang sama (${account?.accountNumber} ${account?.name}).`,
-      code: conflict.code,
-    });
   }
 
   // Validate single-account roles don't have multiple entries
@@ -168,21 +145,50 @@ router.put('/', async (req: AuthRequest, res: Response) => {
   // Determine which roles are being updated (mapped + dilepas)
   const rolesToUpdate = [...new Set([...inputMappings.map((m) => m.role), ...clearRoles])];
 
-  await prisma.$transaction(async (tx) => {
-    // Delete existing mappings for the submitted roles
-    await tx.systemAccountMapping.deleteMany({
-      where: { role: { in: rolesToUpdate } },
-    });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Serialise saves: the stored mappings the checks compare against must still be current at commit.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('system-accounts-remap'))`;
+      const stored = await tx.systemAccountMapping.findMany({ select: { role: true, accountId: true } });
 
-    // Create new mappings
-    await tx.systemAccountMapping.createMany({
-      data: inputMappings.map((m) => ({
-        role: m.role,
-        accountId: m.accountId,
-        sortOrder: m.sortOrder,
-      })),
+      const changed = changedMappings(inputMappings, stored);
+      for (const m of changed) {
+        const meta = SYSTEM_ACCOUNT_ROLES[m.role as SystemAccountRole];
+        const problem = postableAccountProblem(
+          accountMap.get(m.accountId) ?? null,
+          { label: `Peran ${meta.label}`, rootTypes: [meta.expectedRootType], allowControl: true },
+          null,
+        );
+        if (problem) throw new BusinessError(problem.message, problem.code);
+      }
+
+      const touchedRoles = new Set([...inputMappings.map((m) => m.role), ...clearRoles]);
+      const conflict = findRoleConflict(changed, resultingMappings(inputMappings, stored, touchedRoles));
+      if (conflict) {
+        const account = accountMap.get(conflict.accountId);
+        throw new BusinessError(
+          `Peran ${SYSTEM_ACCOUNT_ROLES[conflict.role].label} dan peran ${SYSTEM_ACCOUNT_ROLES[conflict.otherRole].label} tidak boleh memakai akun yang sama (${account?.accountNumber} ${account?.name}).`,
+          conflict.code,
+        );
+      }
+
+      // Delete existing mappings for the submitted roles
+      await tx.systemAccountMapping.deleteMany({
+        where: { role: { in: rolesToUpdate } },
+      });
+
+      // Create new mappings
+      await tx.systemAccountMapping.createMany({
+        data: inputMappings.map((m) => ({
+          role: m.role,
+          accountId: m.accountId,
+          sortOrder: m.sortOrder,
+        })),
+      });
     });
-  });
+  } catch (error) {
+    return handleRouteError(res, error, 'PUT /system-accounts', 'Gagal menyimpan konfigurasi akun sistem.');
+  }
 
   // Invalidate cache
   systemAccounts.invalidateCache();

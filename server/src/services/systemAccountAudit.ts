@@ -135,7 +135,7 @@ export function buildSystemAccountAudit(input: AuditInput): AuditFinding[] {
     for (let i = 0; i < sorted.length; i++) {
       for (let j = i + 1; j < sorted.length; j++) {
         const [a, b] = [sorted[i], sorted[j]];
-        const exclusive = EXCLUSIVE.has(a) && EXCLUSIVE.has(b);
+        const exclusive = EXCLUSIVE.has(a) || EXCLUSIVE.has(b);
         findings.push({
           issue: 'SHARED_ACCOUNT', role: a, otherRole: b, accountNumber: account.accountNumber, accountName: account.name,
           posting: exclusive, ...base(account.id), candidates: [],

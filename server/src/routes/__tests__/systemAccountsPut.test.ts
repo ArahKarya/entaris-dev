@@ -9,6 +9,7 @@ const db = vi.hoisted(() => ({
   accounts: [] as any[],
   stored: [] as Array<{ role: string; accountId: string }>,
   writes: { deleteMany: vi.fn(), createMany: vi.fn() },
+  lock: vi.fn(),
 }));
 vi.mock('../../lib/prisma', () => {
   const prisma = {
@@ -18,6 +19,7 @@ vi.mock('../../lib/prisma', () => {
       deleteMany: (...a: unknown[]) => db.writes.deleteMany(...a),
       createMany: (...a: unknown[]) => db.writes.createMany(...a),
     },
+    $executeRaw: (...a: unknown[]) => db.lock(...a),
     $transaction: (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
   };
   return { prisma };
@@ -48,6 +50,7 @@ beforeEach(() => {
   db.stored = [];
   db.writes.deleteMany.mockReset();
   db.writes.createMany.mockReset();
+  db.lock.mockReset();
   vi.spyOn(systemAccounts, 'invalidateCache').mockImplementation(() => undefined);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -132,10 +135,35 @@ describe('PUT /system-accounts validation', () => {
     expect(r.status).toBe(200);
   });
 
-  it('a non-exclusive role may share an account with an exclusive one', async () => {
-    db.stored = [{ role: 'AR', accountId: UUID(1) }];
-    const r = await put({ mappings: [{ role: 'PREPAID_EXPENSE', accountId: UUID(1) }] });
+  it('a non-exclusive role may share an account with another non-exclusive one', async () => {
+    db.stored = [{ role: 'INVENTORY_VARIANCE', accountId: UUID(7) }];
+    const r = await put({ mappings: [{ role: 'ROUNDING_ACCOUNT', accountId: UUID(7) }] });
     expect(r.status).toBe(200);
+  });
+
+  it.each([
+    ['CASH', 'AR'],
+    ['PREPAID_EXPENSE', 'AR'],
+    ['TAX_INPUT', 'INVENTORY'],
+    ['EMPLOYEE_ADVANCE', 'VENDOR_DEPOSIT'],
+  ])('non-exclusive %s onto the account held by exclusive %s: 400 ACCOUNT_ROLE_CONFLICT', async (role, holder) => {
+    db.stored = [{ role: holder, accountId: UUID(1) }];
+    const r = await put({ mappings: [{ role, accountId: UUID(1) }] });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('ACCOUNT_ROLE_CONFLICT');
+    expect(db.writes.createMany).not.toHaveBeenCalled();
+  });
+
+  it('exclusive AR onto an account a CASH role holds: 400 ACCOUNT_ROLE_CONFLICT', async () => {
+    db.stored = [{ role: 'CASH', accountId: UUID(1) }];
+    const r = await put({ mappings: [{ role: 'AR', accountId: UUID(1) }] });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('ACCOUNT_ROLE_CONFLICT');
+  });
+
+  it('the checks run after taking the remap advisory lock', async () => {
+    await put({ mappings: [{ role: 'AR', accountId: UUID(2) }] });
+    expect(db.lock).toHaveBeenCalledOnce();
   });
 
   it('an old shared mapping does not block an unrelated change', async () => {

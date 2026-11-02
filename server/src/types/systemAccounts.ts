@@ -376,11 +376,12 @@ export const POSTING_SYSTEM_ROLES = [
 /**
  * Roles that mean something different from every other role in this list: one account cannot
  * carry two of them (a subledger control account, the sales/COGS pair, the equity roll-forward
- * pair). Other roles may share an account (e.g. rounding and inventory variance).
+ * pair). An exclusive role also refuses to share with any other role (so CASH cannot sit on
+ * the AR account); only two non-exclusive roles may share (e.g. rounding and inventory variance).
  */
 export const EXCLUSIVE_MAPPING_ROLES = [
   'AR', 'AP', 'INVENTORY', 'VENDOR_DEPOSIT', 'CUSTOMER_DEPOSIT', 'ACCRUED_PAYABLE',
-  'SALES', 'COGS', 'TAX_OUTPUT', 'RETAINED_EARNINGS', 'CURRENT_PROFIT',
+  'SALES', 'COGS', 'TAX_INPUT', 'TAX_OUTPUT', 'RETAINED_EARNINGS', 'CURRENT_PROFIT',
 ] as const satisfies readonly SystemAccountRole[];
 
 export const ALL_SYSTEM_ROLES = Object.keys(SYSTEM_ACCOUNT_ROLES) as SystemAccountRole[];
