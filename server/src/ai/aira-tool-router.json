@@ -67,7 +67,8 @@
     "approval.view_all",
     "inventory.negative_stock",
     "rbac.manage",
-    "period.lock"
+    "period.lock",
+    "journal.control"
   ],
   "tools": [
     {

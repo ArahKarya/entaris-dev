@@ -73,6 +73,9 @@ export const CAPABILITIES: CapabilityDef[] = [
   { key: 'rbac.manage', label: 'Kelola Role & Hak Akses' },
   // Default Admin only (super-admin): not in DEFAULT_CAPS and no BACKFILL_CAPS entry. An Admin can grant it per role.
   { key: 'period.lock', label: 'Kunci / buka kunci periode bulanan' },
+  // Default Admin only, like period.lock (owner decision step 4 #1). Deposit accounts stay closed to
+  // manual journals even with this right (services/ledger/accountGuard.ts manualJournalRule).
+  { key: 'journal.control', label: 'Jurnal manual ke akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih)' },
 ];
 
 export const CAPABILITY_KEYS = CAPABILITIES.map((c) => c.key);
