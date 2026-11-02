@@ -3,9 +3,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { recalcPartyOutstanding, updateBalancesForItems } from '../utils/accountBalance';
-import { applyPartyImpact } from '../utils/partyBalance';
-import { generateDocumentNumber } from '../utils/documentNumber';
-import { getOpenFiscalYear } from '../utils/fiscalYear';
+import { reverseManualDepositLines } from '../utils/partyBalance';
+import { hasCap } from '../services/permissionService';
+import { createManualJournalInTx } from '../services/manualJournal';
 import { validateBody } from '../utils/validate';
 import { CancelReasonSchema, CreateJournalSchema } from '../utils/schemas';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
@@ -65,95 +65,29 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/journals — create journal entry
+// POST /api/journals — create a manual journal (MANUAL) through postJournal: one line validator
+// (Decimal, exact balance), detail active accounts, control/tax accounts only with journal.control,
+// never a deposit account, a party exactly on receivable/payable lines; outstanding recalculated.
 router.post('/', async (req: AuthRequest, res) => {
   const body = validateBody(CreateJournalSchema, req.body, res);
   if (!body) return;
 
-  // Validate: each line must have either debit OR credit, not both
-  for (const item of body.items) {
-    if ((item.debit || 0) > 0 && (item.credit || 0) > 0) {
-      return res.status(400).json({
-        error: 'Satu baris jurnal tidak boleh memiliki debit dan kredit sekaligus.',
-      });
-    }
-  }
-
-  const totalDebit = body.items.reduce((s, i) => s + (i.debit || 0), 0);
-  const totalCredit = body.items.reduce((s, i) => s + (i.credit || 0), 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    return res.status(400).json({
-      error: `Jurnal tidak seimbang. Total Debit (${totalDebit}) ≠ Total Kredit (${totalCredit}).`,
-    });
-  }
-
   try {
+    const canControl = await hasCap(req.user!.role, 'journal.control');
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const parsedDate = new Date(body.date);
-      const fiscalYear = await getOpenFiscalYear(tx, parsedDate);
-      const entryNumber = await generateDocumentNumber(tx, 'JV', parsedDate, fiscalYear.id);
-
-      const journalEntry = await tx.journalEntry.create({
-        data: {
-          entryNumber,
-          date: parsedDate,
-          narration: body.narration,
-          status: 'Submitted',
-          fiscalYearId: fiscalYear.id,
-          createdBy: req.user!.userId,
-          submittedAt: new Date(),
-          sourceType: 'MANUAL',
-          items: {
-            create: body.items.map((item) => ({
-              accountId: item.accountId,
-              partyId: item.partyId || null,
-              debit: item.debit || 0,
-              credit: item.credit || 0,
-              description: item.description || body.narration,
-            })),
-          },
-        },
+      const { journal } = await createManualJournalInTx(tx, body, {
+        userId: req.user!.userId,
+        sourceType: 'MANUAL',
+        canControl,
+      });
+      return tx.journalEntry.findUniqueOrThrow({
+        where: { id: journal.id },
         include: {
           items: {
             include: { account: { select: { accountNumber: true, rootType: true } } },
           },
         },
       });
-
-      // Post to immutable ledger
-      await tx.accountingLedgerEntry.createMany({
-        data: journalEntry.items.map((item) => ({
-          date: parsedDate,
-          accountId: item.accountId,
-          partyId: item.partyId,
-          debit: item.debit,
-          credit: item.credit,
-          referenceType: 'JournalEntry',
-          referenceId: journalEntry.id,
-          description: item.description || body.narration,
-          fiscalYearId: fiscalYear.id,
-        })),
-      });
-
-      // Update account balances with correct direction
-      await updateBalancesForItems(
-        tx,
-        journalEntry.items.map((i) => ({
-          accountId: i.accountId,
-          debit: i.debit,
-          credit: i.credit,
-        })),
-      );
-
-      // Update party denorm balances by the account's party role, so deposit lines hit
-      // customerDepositBalance/depositBalance instead of outstandingAmount.
-      await applyPartyImpact(
-        tx,
-        journalEntry.items.map((i) => ({ partyId: i.partyId, accountId: i.accountId, debit: i.debit, credit: i.credit })),
-        'apply',
-      );
-
-      return journalEntry;
     }, { timeout: 15000 });
 
     return res.status(201).json(result);
@@ -235,12 +169,15 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
         })),
       );
 
-      // Reverse party denorm balances — symmetric with POST classification.
-      await applyPartyImpact(
-        tx,
-        entry.items.map((i) => ({ partyId: i.partyId, accountId: i.accountId, debit: i.debit, credit: i.credit })),
-        'reverse',
-      );
+      // Deposit lines of an old manual or imported journal (before E2-R4 refused deposit accounts)
+      // moved the party's deposit balance at posting; undo that. Receivable and payable lines are
+      // covered by the recalculation below, and the other sources never moved a party balance.
+      if (entry.sourceType === 'MANUAL' || entry.sourceType === 'IMPORT') {
+        await reverseManualDepositLines(
+          tx,
+          entry.items.map((i) => ({ partyId: i.partyId, accountId: i.accountId, debit: i.debit, credit: i.credit })),
+        );
+      }
 
       // Soft-cancel the original ALE rows, like the other cancel handlers. Adding [BATAL]
       // reversal rows instead would double ALE totals vs JournalItem and fail the health check.
@@ -249,9 +186,10 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
         data: { isCancelled: true },
       });
 
-      // The reverse above follows today's party roles; a journal posted before them was applied by
-      // account number and root type, so the reverse may not undo it. Recalculate the outstanding of
-      // every party it touched from the documents and the remaining manual adjustments instead.
+      // Outstanding of every party on the journal, recalculated from the documents and the manual
+      // adjustments that remain (this journal's ledger rows are cancelled now), never decremented:
+      // a journal posted under an older rule (a party on an expense line, a recurring or cash book
+      // line that never moved the balance) cannot push it away from the recalculated value.
       const partyIds = [...new Set(entry.items.map((i) => i.partyId).filter((p): p is string => !!p))].sort();
       for (const partyId of partyIds) await recalcPartyOutstanding(tx, partyId);
       return true;

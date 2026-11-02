@@ -36,6 +36,8 @@ import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit'
 import { JOURNAL_NOT_MANUAL } from '../../services/journalCancelGuard';
 import { DEPOSIT_APPLICATION_JOURNAL_CANCELLED } from '../../services/depositApplicationCancel';
 import { voidJournalByIdInTx } from '../../utils/journalCancel';
+import { postJournal } from '../../services/ledger/postJournal';
+import { DOCUMENT_RULE } from '../../services/ledger/accountGuard';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 import journalsRouter from '../../routes/journals';
 import customerDepositsRouter from '../../routes/customerDeposits';
@@ -252,6 +254,34 @@ d('Journal menu cancel: hand-made journals', () => {
       const before = await journalState(tx, je.id);
       expectCode(await cancelFromMenu(je.id), PERIOD_CLOSED);
       expect(await journalState(tx, je.id)).toEqual(before);
+    });
+  });
+});
+
+d('Journal menu cancel: journals written by postJournal (PR-4.4b)', () => {
+  it('a POST /journals journal is MANUAL (through postJournal) and cancels', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: Y });
+      const je = await postedJournal(tx);
+      const posted = await tx.journalEntry.findUniqueOrThrow({ where: { id: je.id } });
+      expect(posted.sourceType).toBe('MANUAL');
+      expect(posted.status).toBe('Submitted');
+      const r = await cancelFromMenu(je.id);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await accountBalances(tx, je.accountIds)).toEqual(je.balancesBefore);
+    });
+  });
+
+  it('a SYSTEM_DOC journal from postJournal is refused with JOURNAL_NOT_MANUAL', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: Y });
+      const [a, b] = await tx.account.findMany({ where: { isGroup: false, isActive: true }, take: 2, orderBy: { accountNumber: 'asc' } });
+      const { journal } = await postJournal(tx, {
+        date: new Date(`${Y}-03-10T00:00:00.000Z`), narration: `Dokumen sistem ${tag()}`, createdBy: actor.userId,
+        sourceType: 'SYSTEM_DOC', accountRule: DOCUMENT_RULE, partyRule: 'off',
+        lines: [{ accountId: a.id, debit: 750_000 }, { accountId: b.id, credit: 750_000 }],
+      });
+      await expectMenuRefuses(tx, journal.id);
     });
   });
 });
