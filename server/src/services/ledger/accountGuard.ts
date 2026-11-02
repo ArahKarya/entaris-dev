@@ -4,7 +4,7 @@
 // Reads only through the caller's transaction, never the process-wide systemAccounts cache, so a
 // mapping changed in the same transaction (or by another instance) is always seen.
 
-import type { Prisma, RootType } from '@prisma/client';
+import { Prisma, type RootType } from '@prisma/client';
 import type { SystemAccountRole } from '../../types/systemAccounts';
 import { BusinessError } from '../../utils/errors';
 import { loadFormerRoleAccounts } from './partyRules';
@@ -199,13 +199,27 @@ export function postableAccountProblem(
   return null;
 }
 
+export interface AssertPostableOptions {
+  /**
+   * Lock the account rows (FOR UPDATE, in id order) before reading them, so a COA edit or a remap
+   * cannot deactivate or regroup an account between this check and the posting's writes; the lock
+   * is held until the caller's transaction ends. FOR UPDATE rather than FOR SHARE: two postings to
+   * the same account would both hold a share lock and then deadlock on the balance UPDATE.
+   */
+  lockRows?: boolean;
+}
+
 /** Loads the accounts and throws BusinessError (with an ACCOUNT_* code) on the first problem. */
 export async function assertPostableAccounts(
   tx: Tx,
   ids: readonly string[],
   rule: PostableRule,
+  opts: AssertPostableOptions = {},
 ): Promise<Map<string, AccountLite>> {
   const unique = [...new Set(ids)];
+  if (opts.lockRows && unique.length > 0) {
+    await tx.$queryRaw`SELECT id FROM accounts WHERE id IN (${Prisma.join([...unique].sort())}) ORDER BY id FOR UPDATE`;
+  }
   const needsControlMap = rule.allowControl !== true;
   const [accounts, control] = await Promise.all([
     tx.account.findMany({ where: { id: { in: unique } }, select: ACCOUNT_LITE_SELECT }),

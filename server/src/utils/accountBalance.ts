@@ -1,6 +1,9 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type RootType } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { logger } from '../lib/logger';
+import { manualPartyAdjustments } from '../services/ledger/partyAdjustments';
+import { PARTY_ROLE_AMBIGUOUS, type PartyRole } from '../services/ledger/partyRules';
+import { BusinessError } from './errors';
 
 /**
  * Returns the correct balance impact for a given account root type.
@@ -16,6 +19,58 @@ export function computeImpact(rootType: string, debit: number | Decimal, credit:
     return d.minus(c).toNumber();
   }
   return c.minus(d).toNumber();
+}
+
+/** computeImpact in Decimal: debit − credit for ASSET/EXPENSE, credit − debit otherwise. */
+export function computeImpactDecimal(
+  rootType: string,
+  debit: Prisma.Decimal.Value,
+  credit: Prisma.Decimal.Value,
+): Prisma.Decimal {
+  const d = new Prisma.Decimal(debit);
+  const c = new Prisma.Decimal(credit);
+  return rootType === 'ASSET' || rootType === 'EXPENSE' ? d.minus(c) : c.minus(d);
+}
+
+export interface AccountImpactLine {
+  accountId: string;
+  debit: Prisma.Decimal.Value;
+  credit: Prisma.Decimal.Value;
+}
+
+/**
+ * Applies the balance impact of journal lines: netted per account in Decimal, one UPDATE per
+ * account, in accountId order so concurrent postings take the account row locks in the same order.
+ * `rootTypes` (account id -> root type) saves the lookup when the caller already read the accounts;
+ * missing ones are loaded. An unknown account is skipped with a warning, like updateAccountBalance.
+ */
+export async function applyAccountImpacts(
+  tx: Prisma.TransactionClient,
+  lines: readonly AccountImpactLine[],
+  rootTypes: ReadonlyMap<string, RootType | string> = new Map(),
+): Promise<void> {
+  const totals = new Map<string, { debit: Prisma.Decimal; credit: Prisma.Decimal }>();
+  for (const l of lines) {
+    const t = totals.get(l.accountId) ?? { debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(0) };
+    totals.set(l.accountId, { debit: t.debit.plus(l.debit), credit: t.credit.plus(l.credit) });
+  }
+  const ids = [...totals.keys()].sort();
+  const missing = ids.filter((id) => !rootTypes.has(id));
+  const loaded = missing.length > 0
+    ? await tx.account.findMany({ where: { id: { in: missing } }, select: { id: true, rootType: true } })
+    : [];
+  const rootOf = new Map<string, string>([...rootTypes, ...loaded.map((a) => [a.id, a.rootType] as const)]);
+  for (const id of ids) {
+    const rootType = rootOf.get(id);
+    if (!rootType) {
+      logger.warn({ accountId: id }, 'applyAccountImpacts: account not found, balance not updated');
+      continue;
+    }
+    const t = totals.get(id)!;
+    const impact = computeImpactDecimal(rootType, t.debit, t.credit);
+    if (impact.isZero()) continue;
+    await tx.account.update({ where: { id }, data: { balance: { increment: impact } } });
+  }
 }
 
 /**
@@ -97,7 +152,31 @@ export async function recalculateAccountBalances(
 }
 
 /**
- * Recalculate party outstanding_amount from the sum of non-cancelled invoice outstanding.
+ * The party's manual adjustment on the role's accounts. When an account of the role also holds
+ * another party role (PARTY_ROLE_AMBIGUOUS) the adjustment cannot be told apart, so it is left out
+ * and logged: the documents still post, as they did before the adjustment existed, and the mapping
+ * is refused where a journal line actually touches that account (postJournal).
+ */
+async function partyAdjustmentOrNone(
+  tx: Prisma.TransactionClient,
+  role: PartyRole,
+  partyId: string,
+): Promise<Prisma.Decimal | undefined> {
+  try {
+    return (await manualPartyAdjustments(tx, role, [partyId])).get(partyId);
+  } catch (err) {
+    if (!(err instanceof BusinessError) || err.code !== PARTY_ROLE_AMBIGUOUS) throw err;
+    logger.error({ partyId, role, err: err.message }, 'recalcPartyOutstanding: party role mapping is ambiguous, manual adjustment left out');
+    return undefined;
+  }
+}
+
+/**
+ * Recalculate party outstanding_amount from the documents: opening outstanding plus the outstanding
+ * of non-cancelled invoices, plus the manual party adjustment (services/ledger/partyAdjustments.ts:
+ * hand-made journal lines with this party on the receivable or payable accounts). A Customer adds
+ * the receivable adjustment, a Supplier the payable one. A party typed Both keeps the old formula
+ * (no adjustment) until it gets separate receivable and payable columns (E2-PR9).
  * This is the source-of-truth approach that prevents drift from increment/decrement logic.
  */
 export async function recalcPartyOutstanding(
@@ -126,6 +205,11 @@ export async function recalcPartyOutstanding(
       _sum: { outstanding: true },
     });
     newOutstanding = newOutstanding.plus(new Decimal((siSum._sum.outstanding ?? 0).toString()));
+  }
+
+  if (party.partyType === 'Customer' || party.partyType === 'Supplier') {
+    const adjustment = await partyAdjustmentOrNone(tx, party.partyType === 'Customer' ? 'AR' : 'AP', partyId);
+    if (adjustment) newOutstanding = newOutstanding.plus(adjustment.toString());
   }
 
   const oldOutstanding = new Decimal(party.outstandingAmount.toString());

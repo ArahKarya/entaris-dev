@@ -154,6 +154,15 @@ describe('loadPartyRoleMap', () => {
     );
   });
 
+  it('with account ids, refuses a conflict only on those accounts', async () => {
+    const { tx } = roleTx([...BASE, { role: 'VENDOR_DEPOSIT', accountId: 'ap' }]);
+    const map = await loadPartyRoleMap(tx, ['ar', 'rev']);
+    expect(map.get('ar')).toBe('AR');
+    expect(map.get('ap')).toBe('AP');
+    expect(((await loadPartyRoleMap(tx, ['ar', 'ap']).catch((e: unknown) => e)) as BusinessError).code).toBe('PARTY_ROLE_AMBIGUOUS');
+    expect(((await loadPartyRoleMap(tx).catch((e: unknown) => e)) as BusinessError).code).toBe('PARTY_ROLE_AMBIGUOUS');
+  });
+
   it('two accounts under one role are fine', async () => {
     const { tx } = roleTx([...BASE, { role: 'AR', accountId: 'ar2' }]);
     expect((await loadPartyRoleMap(tx)).get('ar2')).toBe('AR');
@@ -221,6 +230,18 @@ describe('roleAccountIds', () => {
     const formerArThenAp = roleTx(BASE, [sourceKeys.remap('AR', 'x', 'ar', '2170-03-01'), sourceKeys.remap('AP', 'x', 'ap', '2170-04-01')]);
     const err = await roleAccountIds(formerArThenAp.tx, 'AP', { includeFormer: true }).catch((e: unknown) => e);
     expect((err as BusinessError).code).toBe('PARTY_ROLE_AMBIGUOUS');
+  });
+
+  it('a conflict between two other roles does not concern this one', async () => {
+    const apVdep = roleTx([...BASE, { role: 'VENDOR_DEPOSIT', accountId: 'ap' }]);
+    expect(await roleAccountIds(apVdep.tx, 'AR', { includeFormer: true })).toEqual(['ar']);
+    expect(await roleAccountIds(apVdep.tx, 'CUSTOMER_DEPOSIT', { includeFormer: true })).toEqual(['cdep']);
+    for (const role of ['AP', 'VENDOR_DEPOSIT'] as const) {
+      const err = await roleAccountIds(apVdep.tx, role, { includeFormer: true }).catch((e: unknown) => e);
+      expect((err as BusinessError).code, role).toBe('PARTY_ROLE_AMBIGUOUS');
+    }
+    const formerArThenAp = roleTx(BASE, [sourceKeys.remap('AR', 'x', 'ar', '2170-03-01'), sourceKeys.remap('AP', 'x', 'ap', '2170-04-01')]);
+    expect(await roleAccountIds(formerArThenAp.tx, 'CUSTOMER_DEPOSIT', { includeFormer: true })).toEqual(['cdep']);
   });
 
   it('a role remapped away and back lists the account once', async () => {

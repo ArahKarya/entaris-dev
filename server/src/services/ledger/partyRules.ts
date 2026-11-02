@@ -81,14 +81,23 @@ async function accountName(tx: Tx, accountId: string): Promise<{ accountNumber: 
   return acc ?? { accountNumber: accountId, name: '' };
 }
 
+interface PartyRoleResolution {
+  /** Account id -> party role; an account in conflict keeps the first role found. */
+  roles: Map<string, PartyRole>;
+  /** Account id -> the roles it holds and the error that names them, for accounts holding two or more. */
+  conflicts: Map<string, { roles: Set<PartyRole>; error: BusinessError }>;
+}
+
 /**
  * The one resolution rule for party roles: account id -> its single party role, from current
- * mappings plus (with includeFormer) accounts that held a party role before a remap. Throws
- * PARTY_ROLE_AMBIGUOUS when one account holds two party roles, current or former, since a line
- * there cannot tell whether its party is a customer or a supplier and the subledgers would count
- * it twice. A role remapped back to an account it held before is the same role, not a conflict.
+ * mappings plus (with includeFormer) accounts that held a party role before a remap. An account
+ * holding two party roles, current or former, is recorded as a conflict (PARTY_ROLE_AMBIGUOUS):
+ * a line there cannot tell whether its party is a customer or a supplier and the subledgers would
+ * count it twice. Callers throw it only when it touches what they read, so one bad mapping does
+ * not stop every document of the other roles. A role remapped back to an account it held before
+ * is the same role, not a conflict.
  */
-async function resolvePartyRoles(tx: Tx, opts: { includeFormer: boolean }): Promise<Map<string, PartyRole>> {
+async function resolvePartyRoles(tx: Tx, opts: { includeFormer: boolean }): Promise<PartyRoleResolution> {
   const [mappings, former] = await Promise.all([
     tx.systemAccountMapping.findMany({
       where: { role: { in: [...PARTY_ROLES] } },
@@ -96,48 +105,76 @@ async function resolvePartyRoles(tx: Tx, opts: { includeFormer: boolean }): Prom
     }),
     opts.includeFormer ? loadFormerRoleAccounts(tx) : Promise.resolve([]),
   ]);
-  const map = new Map<string, PartyRole>();
+  const roles = new Map<string, PartyRole>();
+  const conflicts: PartyRoleResolution['conflicts'] = new Map();
+  const note = (accountId: string, seen: PartyRole, role: PartyRole, error: () => BusinessError) => {
+    const known = conflicts.get(accountId);
+    if (known) known.roles.add(role);
+    else conflicts.set(accountId, { roles: new Set([seen, role]), error: error() });
+  };
   for (const m of mappings) {
     if (!isPartyRole(m.role)) continue;
-    const seen = map.get(m.accountId);
-    if (seen && seen !== m.role) {
-      throw new BusinessError(
-        `Akun ${m.account.accountNumber} ${m.account.name} dipetakan ke dua peran pihak (${ROLE_LABELS[seen]} dan ${ROLE_LABELS[m.role]}). Perbaiki pemetaan di Pengaturan > Akun Sistem.`,
+    const role = m.role;
+    const seen = roles.get(m.accountId);
+    if (seen && seen !== role) {
+      note(m.accountId, seen, role, () => new BusinessError(
+        `Akun ${m.account.accountNumber} ${m.account.name} dipetakan ke dua peran pihak (${ROLE_LABELS[seen]} dan ${ROLE_LABELS[role]}). Perbaiki pemetaan di Pengaturan > Akun Sistem.`,
         PARTY_ROLE_AMBIGUOUS,
-      );
+      ));
+      continue;
     }
-    map.set(m.accountId, m.role);
+    roles.set(m.accountId, role);
   }
   for (const f of former) {
-    const seen = map.get(f.accountId);
+    const seen = roles.get(f.accountId);
     if (seen && seen !== f.role) {
+      if (conflicts.has(f.accountId)) {
+        conflicts.get(f.accountId)!.roles.add(f.role);
+        continue;
+      }
       const acc = await accountName(tx, f.accountId);
-      throw new BusinessError(
+      note(f.accountId, seen, f.role, () => new BusinessError(
         `Akun ${acc.accountNumber} ${acc.name} memegang dua peran pihak (${ROLE_LABELS[seen]} dan ${ROLE_LABELS[f.role]}) lewat pemindahan akun sistem. Satu akun hanya boleh memegang satu peran pihak; pilih akun lain di Pengaturan > Akun Sistem.`,
         PARTY_ROLE_AMBIGUOUS,
-      );
+      ));
+      continue;
     }
-    map.set(f.accountId, f.role);
+    roles.set(f.accountId, f.role);
   }
-  return map;
+  return { roles, conflicts };
 }
 
-/** Account id -> party role: current mappings plus accounts that held a party role before a remap. */
-export async function loadPartyRoleMap(tx: Tx): Promise<ReadonlyMap<string, PartyRole>> {
-  return resolvePartyRoles(tx, { includeFormer: true });
+/**
+ * Account id -> party role: current mappings plus accounts that held a party role before a remap.
+ * Throws PARTY_ROLE_AMBIGUOUS when one of `accountIds` holds two party roles; without `accountIds`,
+ * when any account does.
+ */
+export async function loadPartyRoleMap(tx: Tx, accountIds?: readonly string[]): Promise<ReadonlyMap<string, PartyRole>> {
+  const { roles, conflicts } = await resolvePartyRoles(tx, { includeFormer: true });
+  const ids = accountIds ?? [...conflicts.keys()];
+  for (const id of ids) {
+    const conflict = conflicts.get(id);
+    if (conflict) throw conflict.error;
+  }
+  return roles;
 }
 
 /**
  * Account ids of one party role: current mappings, plus former ones with includeFormer. Built from
- * the same resolution as loadPartyRoleMap, so an account is never listed under two roles.
+ * the same resolution as loadPartyRoleMap, so an account is never listed under two roles. Throws
+ * PARTY_ROLE_AMBIGUOUS only when an account of this role also holds another one; a conflict
+ * between other roles does not concern it.
  */
 export async function roleAccountIds(
   tx: Tx,
   role: PartyRole,
   opts: { includeFormer?: boolean } = {},
 ): Promise<string[]> {
-  const map = await resolvePartyRoles(tx, { includeFormer: !!opts.includeFormer });
-  return [...map].filter(([, r]) => r === role).map(([id]) => id);
+  const { roles, conflicts } = await resolvePartyRoles(tx, { includeFormer: !!opts.includeFormer });
+  for (const conflict of conflicts.values()) {
+    if (conflict.roles.has(role)) throw conflict.error;
+  }
+  return [...roles].filter(([, r]) => r === role).map(([id]) => id);
 }
 
 /** Party id -> party type for the given ids (missing ids are absent). */
