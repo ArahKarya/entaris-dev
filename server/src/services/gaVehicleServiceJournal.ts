@@ -4,9 +4,10 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { updateBalancesForItems } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
 import { voidJournalInTx } from '../utils/journalCancel';
+import { mappedAccount } from './systemAccounts';
 
 /**
- * Post EAM vehicle service cost: DR expense (default 6.7) / CR cash-bank (default 1.1.1) or 2.1.1.
+ * Post EAM vehicle service cost: DR expense (default 6.7) / CR cash-bank (mapped CASH) or the mapped AP account.
  * One journal per service log (unique journal_entry_id); imported logs (source != 'EAM') are
  * never posted because they are already in the GL.
  */
@@ -77,12 +78,7 @@ export async function postVehicleServiceJournalInTx(
   // Akun kredit (sumber dana)
   let creditAccountId = args.creditAccountId ?? null;
   if (!creditAccountId) {
-    const cashMapping = await tx.systemAccountMapping.findFirst({
-      where: { role: 'CASH' },
-      orderBy: { sortOrder: 'asc' },
-      select: { accountId: true },
-    });
-    creditAccountId = cashMapping?.accountId ?? (await resolveAccountByNumber(tx, '1.1.1')).id;
+    creditAccountId = (await mappedAccount(tx, 'CASH')).id;
   }
 
   if (debitAccountId === creditAccountId) {

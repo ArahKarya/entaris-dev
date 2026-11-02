@@ -235,7 +235,7 @@ export async function submitPurchaseInvoiceInTx(
   // DR Persediaan per item account for non-linked lines. STT-linked lines were accrued at STT
   // submit; PI reverses the accrual and posts the landed-cost delta to Persediaan, not 5.11, so
   // the movement unit cost reflects the full PI cost (incl. "Resiko Macan" and header biaya_lain).
-  const debitByAccount = new Map<string, { amount: number; names: string[] }>();
+  const debitByAccount = new Map<string, { amount: Decimal; names: string[] }>();
   let accruedReversal = new Decimal(0); // DR Hutang Belum Tagih (provisional total)
 
   // Track landed cost adjustment per STT-linked line untuk update
@@ -251,7 +251,7 @@ export async function submitPurchaseInvoiceInTx(
 
   for (const invItem of invoice.items) {
     const effective = effectiveAmountMap.get(invItem.id);
-    const amt = effective ? effective.toNumber() : Number(invItem.amount);
+    const amt = effective ?? new Decimal(invItem.amount.toString());
 
     if (invItem.goodsReceiptItemId) {
       // STT booked stock at sttQty (physical qty before refaksi); the paid qty may be smaller but
@@ -262,7 +262,7 @@ export async function submitPurchaseInvoiceInTx(
       const sttQty = new Decimal(grItem.quantity.toString());
       const provisionalCost = new Decimal(grItem.lockedUnitCost.toString());
       const provisionalTotal = sttQty.times(provisionalCost).toDecimalPlaces(2);
-      const effectiveAmount = new Decimal(amt);
+      const effectiveAmount = amt;
       const delta = effectiveAmount.minus(provisionalTotal);
       accruedReversal = accruedReversal.plus(provisionalTotal);
       landedAdjustments.push({ invItem, grItem, qty: sttQty, provisionalTotal, effectiveAmount, delta });
@@ -275,14 +275,14 @@ export async function submitPurchaseInvoiceInTx(
           const linkedItem = invItemMap.get(invItem.inventoryItemId);
           if (linkedItem?.accountId) drAccountId = linkedItem.accountId;
         }
-        const deltaNum = delta.toDecimalPlaces(2).toNumber();
+        const deltaAmt = delta.toDecimalPlaces(2);
         const existing = debitByAccount.get(drAccountId);
         // A negative delta (inventory down) becomes a CR when the journal is built.
         if (existing) {
-          existing.amount += deltaNum;
+          existing.amount = existing.amount.plus(deltaAmt);
           existing.names.push(`adj-landed ${invItem.itemName}`);
         } else {
-          debitByAccount.set(drAccountId, { amount: deltaNum, names: [`adj-landed ${invItem.itemName}`] });
+          debitByAccount.set(drAccountId, { amount: deltaAmt, names: [`adj-landed ${invItem.itemName}`] });
         }
       }
       continue;
@@ -297,7 +297,7 @@ export async function submitPurchaseInvoiceInTx(
     }
     const existing = debitByAccount.get(drAccountId);
     if (existing) {
-      existing.amount += amt;
+      existing.amount = existing.amount.plus(amt);
       existing.names.push(invItem.itemName);
     } else {
       debitByAccount.set(drAccountId, { amount: amt, names: [invItem.itemName] });
@@ -305,10 +305,9 @@ export async function submitPurchaseInvoiceInTx(
   }
   // Fallback when no linked items: biayaLain → generic inventory account.
   if (!canDistribute && !adjustmentRemainder.isZero()) {
-    const adjNum = adjustmentRemainder.toNumber();
     const existing = debitByAccount.get(inventoryAccount.id);
-    if (existing) existing.amount += adjNum;
-    else debitByAccount.set(inventoryAccount.id, { amount: adjNum, names: ['Biaya tambahan'] });
+    if (existing) existing.amount = existing.amount.plus(adjustmentRemainder);
+    else debitByAccount.set(inventoryAccount.id, { amount: new Decimal(adjustmentRemainder), names: ['Biaya tambahan'] });
   }
 
   // Accrual account is needed only for STT-linked lines; landed cost goes to Persediaan, not 5.11.
@@ -320,11 +319,11 @@ export async function submitPurchaseInvoiceInTx(
   // creditJournalItems so the JE stays balanced.
   const creditJournalItems: { accountId: string; partyId?: string | null; debit: number; credit: number; description: string }[] = [];
   for (const [accountId, data] of Array.from(debitByAccount.entries())) {
-    if (data.amount < 0) {
+    if (data.amount.isNegative()) {
       creditJournalItems.push({
         accountId,
         debit: 0,
-        credit: Math.abs(data.amount),
+        credit: data.amount.abs().toDecimalPlaces(2).toNumber(),
         description: `Persediaan adj. landed cost ${data.names.join(', ')}: ${invoice.invoiceNumber}`,
       });
       debitByAccount.delete(accountId);
@@ -335,7 +334,7 @@ export async function submitPurchaseInvoiceInTx(
   const debitJournalItems: { accountId: string; partyId?: string | null; debit: number; credit: number; description: string }[] =
     Array.from(debitByAccount.entries()).map(([accountId, data]) => ({
       accountId,
-      debit: data.amount,
+      debit: data.amount.toDecimalPlaces(2).toNumber(),
       credit: 0,
       description: `Persediaan ${data.names.join(', ')}: ${invoice.invoiceNumber}`,
     }));
