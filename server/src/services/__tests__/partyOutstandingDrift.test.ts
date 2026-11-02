@@ -5,7 +5,10 @@ import { buildDriftRows, type DriftSums } from '../partyOutstandingDrift';
 const D = (v: number) => new Prisma.Decimal(v);
 const sums = (s: Partial<Record<keyof DriftSums, Record<string, number>>>): DriftSums => {
   const m = (r?: Record<string, number>) => new Map(Object.entries(r ?? {}).map(([k, v]) => [k, D(v)]));
-  return { salesOutstanding: m(s.salesOutstanding), purchaseOutstanding: m(s.purchaseOutstanding), arLedger: m(s.arLedger), apLedger: m(s.apLedger) };
+  return {
+    salesOutstanding: m(s.salesOutstanding), purchaseOutstanding: m(s.purchaseOutstanding), arLedger: m(s.arLedger), apLedger: m(s.apLedger),
+    arManual: m(s.arManual), apManual: m(s.apManual),
+  };
 };
 const party = (id: string, partyType: string, outstandingAmount: number, openingOutstanding: number) => ({ id, name: id, partyType, outstandingAmount, openingOutstanding });
 
@@ -32,5 +35,13 @@ describe('buildDriftRows', () => {
       sums({ salesOutstanding: { c1: 100, b1: 100 }, purchaseOutstanding: { c1: 999, b1: 200 }, arLedger: { c1: 100, b1: 100 }, apLedger: { b1: 150 } }),
     );
     expect(rows).toEqual([expect.objectContaining({ partyId: 'b1', stored: '300.00', expected: '300.00', ledger: '250.00', expectedMinusLedger: '50.00' })]);
+  });
+
+  it('adds the manual party adjustment like recalcPartyOutstanding: AR for a Customer, AP for a Supplier, none for Both', () => {
+    const rows = buildDriftRows(
+      [party('c1', 'Customer', 5_000_000, 0), party('s1', 'Supplier', 300, 0), party('b1', 'Both', 0, 0)],
+      sums({ arManual: { c1: 5_000_000, b1: 70 }, arLedger: { c1: 5_000_000, b1: 70 }, apManual: { s1: 300 }, apLedger: { s1: 300 } }),
+    );
+    expect(rows).toEqual([expect.objectContaining({ partyId: 'b1', stored: '0.00', expected: '0.00', ledger: '70.00' })]);
   });
 });

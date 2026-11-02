@@ -4,7 +4,7 @@
 // Reads only through the caller's transaction, never the process-wide systemAccounts cache, so a
 // mapping changed in the same transaction (or by another instance) is always seen.
 
-import type { Prisma, RootType } from '@prisma/client';
+import { Prisma, type RootType } from '@prisma/client';
 import type { SystemAccountRole } from '../../types/systemAccounts';
 import { BusinessError } from '../../utils/errors';
 import { loadFormerRoleAccounts } from './partyRules';
@@ -75,6 +75,7 @@ export const MANUAL_CONTROL_KINDS = [
 
 const DEPOSIT_HINT = 'Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.';
 const NO_CONTROL_RIGHT_HINT = 'Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.';
+const CANCEL_CONTROL_HINT = 'Membatalkan jurnal yang memuat akun kontrol butuh hak Jurnal ke akun kontrol (journal.control).';
 
 /**
  * Lines a person enters (manual journal, journal import, cash book). Control and tax accounts need
@@ -87,6 +88,21 @@ export function manualJournalRule(canControl: boolean): PostableRule {
     allowControl: canControl ? MANUAL_CONTROL_KINDS : false,
     alsoRestrict: TAX_ACCOUNT_ROLES,
     controlHint: canControl ? DEPOSIT_HINT : NO_CONTROL_RIGHT_HINT,
+  };
+}
+
+/**
+ * Cancelling a hand-made journal from the Journal menu reverses its lines, which moves the same
+ * balances a posting would. Control and tax accounts therefore need journal.control here too.
+ * With it every kind may be reversed, deposit accounts included: an old manual or imported
+ * journal (before E2-R4) may hold deposit lines, and undoing them is the correction.
+ */
+export function manualCancelRule(canControl: boolean): PostableRule {
+  return {
+    label: 'Batal jurnal',
+    allowControl: canControl,
+    alsoRestrict: TAX_ACCOUNT_ROLES,
+    controlHint: CANCEL_CONTROL_HINT,
   };
 }
 
@@ -187,6 +203,19 @@ export function postableAccountProblem(
       message: `${rule.label}: akun ${acc.accountNumber} ${acc.name} bertipe ${acc.rootType}, seharusnya ${rule.rootTypes.join('/')}.`,
     };
   }
+  return restrictedKindProblem(acc, rule, restricted);
+}
+
+/**
+ * The control part of postableAccountProblem alone: why the rule does not allow one of the
+ * account's restricted kinds, or null. Used where the account's group or active state does not
+ * matter, e.g. reversing an existing journal (manualCancelRule).
+ */
+export function restrictedKindProblem(
+  acc: Pick<AccountLite, 'accountNumber' | 'name'>,
+  rule: PostableRule,
+  restricted: readonly RestrictedKind[] | null,
+): AccountProblem | null {
   const blocked = restricted?.find((kind) => !controlAllowed(kind, rule.allowControl));
   if (blocked) {
     const kindLabel = KIND_LABELS[blocked] ?? blocked;
@@ -199,13 +228,27 @@ export function postableAccountProblem(
   return null;
 }
 
+export interface AssertPostableOptions {
+  /**
+   * Lock the account rows (FOR UPDATE, in id order) before reading them, so a COA edit or a remap
+   * cannot deactivate or regroup an account between this check and the posting's writes; the lock
+   * is held until the caller's transaction ends. FOR UPDATE rather than FOR SHARE: two postings to
+   * the same account would both hold a share lock and then deadlock on the balance UPDATE.
+   */
+  lockRows?: boolean;
+}
+
 /** Loads the accounts and throws BusinessError (with an ACCOUNT_* code) on the first problem. */
 export async function assertPostableAccounts(
   tx: Tx,
   ids: readonly string[],
   rule: PostableRule,
+  opts: AssertPostableOptions = {},
 ): Promise<Map<string, AccountLite>> {
   const unique = [...new Set(ids)];
+  if (opts.lockRows && unique.length > 0) {
+    await tx.$queryRaw`SELECT id FROM accounts WHERE id IN (${Prisma.join([...unique].sort())}) ORDER BY id FOR UPDATE`;
+  }
   const needsControlMap = rule.allowControl !== true;
   const [accounts, control] = await Promise.all([
     tx.account.findMany({ where: { id: { in: unique } }, select: ACCOUNT_LITE_SELECT }),

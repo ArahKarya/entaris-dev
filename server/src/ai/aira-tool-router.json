@@ -2450,7 +2450,7 @@
       "output": {
         "accounts": "array"
       },
-      "outputSummary": "Array akun aktif tanpa hierarki.",
+      "outputSummary": "Array akun aktif tanpa hierarki; tiap akun: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, partyRole (AR/AP/CUSTOMER_DEPOSIT/VENDOR_DEPOSIT atau null: baris jurnal manual di akun ber-partyRole wajib partyId, akun lain menolak partyId).",
       "handler": "GET /api/coa/flat",
       "permAction": "view",
       "enabled": true,
@@ -6571,7 +6571,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Jalankan 9 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), dan trigger database wajib (jejak audit hanya-tambah). Cek AR dan Uang Muka Customer hanya deteksi (status warning, tanpa perbaikan otomatis) dan memakai saldo hari ini. Hanya membaca.",
+      "desc": "Jalankan 10 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, dan Tahun Buku hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -14252,7 +14252,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal GL langsung; menambah stok GA (GaStockByLocation) + mutasi IN. MR berstatus APPROVED/FULFILLED yang belum dijurnal tampil di antrian Tagihan EAM (MATERIAL_REQUEST) di Pengajuan Pembayaran; pembukuan (DR beban / CR Kas atau Hutang 2.1.1) terjadi di sana, bukan di tool ini.",
+      "postingEffect": "Tidak ada jurnal GL langsung; menambah stok GA (GaStockByLocation) + mutasi IN. MR berstatus APPROVED/FULFILLED yang belum dijurnal tampil di antrian Tagihan EAM (MATERIAL_REQUEST) di Pengajuan Pembayaran; pembukuan (DR beban / CR Kas atau Hutang Usaha, akun terpetakan di Akun Sistem) terjadi di sana, bukan di tool ini.",
       "confirm_template": "Terima {receivedQty} barang item {itemId} MR {id} ke lokasi {locationId}. Setujui?",
       "prerequisites": [
         "MR berstatus APPROVED.",
@@ -15153,7 +15153,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada jurnal langsung. Membuat GaVehicleTax IN_PROCESS → tagihan VEHICLE_TAX; posting nanti: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha 2.1.1).",
+      "postingEffect": "Tidak ada jurnal langsung. Membuat GaVehicleTax IN_PROCESS → tagihan VEHICLE_TAX; posting nanti: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau akun Hutang Usaha terpetakan).",
       "confirm_template": "SETUJUI pengajuan pajak {id} (masuk antrian Tagihan EAM). Setujui?",
       "accessNote": "Siapa pun dengan izin edit modul ga_vehicle; pembayaran/posting tetap butuh izin payment_request edit (fork D).",
       "errors": [
@@ -15356,7 +15356,7 @@
       "prerequisites": [
         "Jurnal bersumber MANUAL, IMPORT, RECURRING, atau CASH_BOOK yang belum dibatalkan, tidak terhubung ke dokumen modul lain.",
         "Tahun buku dokumen dan jurnalnya masih terbuka.",
-        "User memiliki capability doc.cancel."
+        "User memiliki capability doc.cancel; bila jurnal memuat akun kontrol atau PPN, juga journal.control."
       ],
       "errors": [
         "404: tidak ditemukan",
@@ -15366,6 +15366,7 @@
         "400 JOURNAL_USE_DEPOSIT_REFUND_CANCEL: jurnal refund uang muka; batalkan lewat cdep_refund_cancel/vdep_refund_cancel (tombol \"Batalkan refund\" di menu Uang Muka)",
         "400 JOURNAL_NOT_MANUAL: jurnal bukan buatan manusia (sumber modul/sistem, atau jurnal lama yang sumbernya tidak tercatat), atau terhubung ke dokumen modul (pembayaran, stok, aplikasi/offset uang muka, tutup buku, penyusutan, revisi harga, GA, pengajuan dana, uang jaminan); batalkan dari dokumen sumbernya atau buat jurnal balik manual",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "400 ACCOUNT_CONTROL: jurnal memuat akun kontrol (Piutang, Hutang, Uang Muka, Persediaan, Hutang Belum Tagih) atau akun PPN dan user tidak memegang journal.control; minta Admin membatalkannya",
         "403: tanpa capability doc.cancel",
         "400: alasan pembatalan maksimal 500 karakter"
       ],
@@ -20525,11 +20526,12 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Default: tidak ada GL (menunggu antrian Tagihan EAM). Bila postJournal=true: DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan atau accountId) / CR Kas-Bank (default 1.1.1 Petty Cash atau creditAccountId).",
+      "postingEffect": "Default: tidak ada GL (menunggu antrian Tagihan EAM). Bila postJournal=true: DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan atau accountId) / CR Kas-Bank (default akun Kas terpetakan di Akun Sistem atau creditAccountId).",
       "confirm_template": "Catat servis {jenisService} kendaraan {id} tgl {tanggal}, biaya Rp {biaya}, posting jurnal: {postJournal}. Setujui?",
       "errors": [
         "400: Biaya harus > 0 untuk diposting ke jurnal",
-        "400: Akun 6.7/1.1.1 tidak ditemukan di COA"
+        "400: Akun 6.7 tidak ditemukan di COA",
+        "400 ACCOUNT_MAPPING_MISSING: peran CASH belum dipetakan di Akun Sistem (bila creditAccountId kosong)"
       ],
       "related": [
         "ga_veh_post_service_journal"
@@ -20578,7 +20580,7 @@
           "in": "body",
           "type": "string",
           "required": false,
-          "description": "Akun kas/bank/hutang (kredit); default 1.1.1."
+          "description": "Akun kas/bank (kredit); bila kosong dipakai akun CASH terpetakan di Akun Sistem."
         }
       ],
       "output": {
@@ -20591,7 +20593,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan) / CR Kas-Bank (default 1.1.1 Petty Cash) senilai biaya log. Jalur resmi pembayaran tetap lewat Pengajuan Pembayaran > Tagihan EAM.",
+      "postingEffect": "DR akun beban (default 6.7 Beban Pemeliharaan Kendaraan) / CR Kas-Bank (default akun Kas terpetakan di Akun Sistem) senilai biaya log. Jalur resmi pembayaran tetap lewat Pengajuan Pembayaran > Tagihan EAM.",
       "confirm_template": "Posting jurnal biaya servis {sid} kendaraan {id}. Setujui?",
       "errors": [
         "400: Service log sudah memiliki jurnal",
@@ -22319,7 +22321,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "journal",
-      "desc": "Membuat jurnal manual langsung berstatus Submitted (tidak ada draft) pada tahun buku terbuka sesuai tanggal. Total debit harus sama dengan total kredit dan satu baris tidak boleh berisi debit sekaligus kredit.",
+      "desc": "Membuat jurnal manual langsung berstatus Submitted (tidak ada draft) pada tahun buku terbuka sesuai tanggal. Minimal 2 baris bernilai, total debit harus tepat sama dengan total kredit (tanpa toleransi), maksimal 2 angka desimal, dan satu baris tidak boleh berisi debit sekaligus kredit. Akun harus akun detail aktif; akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) butuh journal.control; akun uang muka tidak pernah bisa dijurnal manual.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -22361,13 +22363,13 @@
               "name": "debit",
               "in": "body",
               "type": "number",
-              "required": true
+              "required": false
             },
             {
               "name": "credit",
               "in": "body",
               "type": "number",
-              "required": true
+              "required": false
             },
             {
               "name": "partyId",
@@ -22382,7 +22384,7 @@
               "required": false
             }
           ],
-          "description": "Baris jurnal: accountId*, debit, credit (salah satu > 0), partyId (opsional untuk akun piutang/hutang), description."
+          "description": "Minimal 2 baris: accountId*, debit, credit (tepat satu > 0, maksimal 2 desimal), partyId (wajib di akun Piutang Usaha = Customer dan Hutang Usaha = Supplier; dilarang di akun lain), description."
         }
       ],
       "output": {
@@ -22396,16 +22398,28 @@
       "level": 1,
       "phase": 4,
       "draftCapable": false,
-      "postingEffect": "Jurnal JV-… langsung diposting ke buku besar tak-terhapus; saldo akun diperbarui, saldo piutang/hutang pihak ikut berubah bila baris memakai partyId pada akun piutang/hutang. Tidak ada efek stok.",
+      "postingEffect": "Jurnal JV-… (sumber MANUAL) langsung diposting ke buku besar tak-terhapus; saldo akun diperbarui, saldo piutang/hutang pihak pada baris berpihak dihitung ulang dari dokumen ditambah penyesuaian manual. Tidak ada efek stok.",
       "confirm_template": "Posting jurnal manual tanggal {date} ({narration}) dengan {items} baris?",
       "prerequisites": [
         "Tahun buku untuk tanggal tersebut terbuka.",
-        "Akun pada baris adalah akun detail aktif."
+        "Akun pada baris adalah akun detail aktif.",
+        "Baris ke akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) hanya untuk pemegang journal.control (Admin)."
       ],
+      "accessNote": "Baris ke akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability journal.control (default hanya Admin). Akun Uang Muka Customer/Supplier ditolak walau punya journal.control; koreksi uang muka lewat modul Uang Muka.",
       "errors": [
-        "400: Jurnal tidak seimbang",
-        "400: debit dan kredit sekaligus dalam satu baris",
-        "400: tahun buku ditutup/tidak ada",
+        "400 JOURNAL_UNBALANCED: total debit tidak tepat sama dengan total kredit (tanpa toleransi)",
+        "400 LINES_TOO_FEW: kurang dari 2 baris bernilai",
+        "400 LINE_BOTH_SIDES: debit dan kredit sekaligus dalam satu baris",
+        "400 LINE_EMPTY: baris tanpa debit maupun kredit",
+        "400 LINE_AMOUNT_INVALID / LINE_AMOUNT_NEGATIVE / LINE_AMOUNT_PRECISION / LINE_AMOUNT_TOO_LARGE: nilai bukan angka, negatif, lebih dari 2 desimal, atau melebihi 9999999999999.99",
+        "400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun tidak ada, akun grup, atau tidak aktif",
+        "400 ACCOUNT_CONTROL: akun kontrol tanpa journal.control, atau akun uang muka (selalu ditolak)",
+        "400 PARTY_REQUIRED: baris akun Piutang/Hutang Usaha tanpa pihak",
+        "400 PARTY_NOT_ALLOWED: pihak diisi di baris akun selain Piutang/Hutang Usaha",
+        "400 PARTY_TYPE_MISMATCH: Piutang hanya Customer, Hutang hanya Supplier; mitra Both belum bisa dipakai",
+        "400 PARTY_NOT_FOUND: pihak tidak ditemukan",
+        "400 PARTY_ROLE_AMBIGUOUS: akun dipetakan ke dua peran pihak; perbaiki pemetaan Akun Sistem",
+        "400 PERIOD_CLOSED / FISCAL_YEAR_MISSING: tahun buku untuk tanggal itu ditutup atau tidak ada",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -23863,7 +23877,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha 2.1.1 (butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.",
+      "postingEffect": "JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.",
       "confirm_template": "POSTING Tagihan EAM {kind} {id} dengan metode {method} senilai {amount}?",
       "accessNote": "Hanya Keuangan: izin payment_request edit pada seluruh endpoint /payment-requests/eam.",
       "prerequisites": [
@@ -23876,6 +23890,7 @@
         "400: akun debit = akun kredit",
         "400: vendor wajib untuk PURCHASE_INVOICE",
         "400: sudah diposting",
+        "400 ACCOUNT_MAPPING_MISSING: peran AP (PURCHASE_INVOICE) atau CASH (JOURNAL tanpa akun sumber) belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -25088,7 +25103,7 @@
       "group": "Pembelian",
       "toolset": "pembelian",
       "module": "purchase_invoice",
-      "desc": "Merevisi harga baris Invoice Pembelian yang sudah diposting (pemasok mengoreksi harga). Selisih dipecah: porsi barang masih di stok masuk ke Persediaan + koreksi WAC, porsi yang sudah keluar masuk ke Selisih Harga Pembelian (5.11). Untuk role non-bypass hanya mengantrekan ApprovalRequest PurchaseInvoiceRevisePrice (HTTP 202).",
+      "desc": "Merevisi harga baris Invoice Pembelian yang sudah diposting (pemasok mengoreksi harga). Selisih dipecah: porsi barang masih di stok masuk ke Persediaan + koreksi WAC, porsi yang sudah keluar masuk ke akun Selisih Harga Pembelian (terpetakan di Akun Sistem, bawaan 5.11). Untuk role non-bypass hanya mengantrekan ApprovalRequest PurchaseInvoiceRevisePrice (HTTP 202).",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -25147,7 +25162,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (2.1.1) / DR Persediaan (porsi stok) + DR 5.11 (porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
+      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
       "confirm_template": "Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?",
       "prerequisites": [
         "PI berstatus Submitted/Paid (belum dibatalkan)",
@@ -25159,7 +25174,8 @@
         "400: alasan minimal 10 karakter",
         "400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup",
         "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan"
       ],
       "related": [
         "pi_get",
@@ -33983,12 +33999,14 @@
       "postingEffect": "Tidak memposting jurnal, tetapi menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.",
       "confirm_template": "Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles})? Berdampak pada semua posting otomatis.",
       "prerequisites": [
-        "Akun tujuan aktif dan bukan akun grup.",
+        "Akun tujuan aktif, bukan akun grup, dan bertipe akar sesuai role (hanya pasangan role-akun yang berubah diperiksa).",
         "Role wajib tidak boleh dikosongkan."
       ],
       "errors": [
         "403: hanya Admin",
-        "400: role tidak valid / akun tidak aktif / role wajib dilepas"
+        "400: role tidak valid / role wajib dilepas",
+        "400 ACCOUNT_GROUP / ACCOUNT_INACTIVE / ACCOUNT_ROOT_TYPE: akun baru untuk sebuah role adalah akun grup, nonaktif, atau bertipe akar berbeda dari yang diharapkan role",
+        "400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun"
       ],
       "related": [
         "sysacct_get",

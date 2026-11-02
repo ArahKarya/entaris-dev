@@ -1,6 +1,10 @@
 // Receivable and customer deposit balances per Customer: the general ledger (active ledger rows on
 // the AR / CUSTOMER_DEPOSIT accounts, by party_id) against the subledger the documents keep
-// (invoice outstanding plus opening outstanding; deposit amount less applications and refunds).
+// (invoice outstanding plus opening outstanding plus the manual party adjustment of
+// services/ledger/partyAdjustments.ts; deposit amount less applications and refunds). The ledger
+// side reads the role's accounts through the caller's transaction, including the accounts the role
+// held before a remap (roleAccountIds includeFormer), so a document voided after a remap still
+// lands on the party.
 // Used by the health check (routes/health/arChecks.ts, every party) and the year-close checklist
 // (services/ledger/arSubledgerCloseChecks.ts, parties active in the year: a ledger row or a document
 // dated in it, so a document whose ledger row is missing is still checked). Takes the caller's
@@ -10,7 +14,8 @@
 // history per date (an invoice only keeps its current outstanding), so closing an earlier year also
 // counts what later transactions did to the same Customer.
 import { Prisma } from '@prisma/client';
-import { systemAccounts } from '../systemAccounts';
+import { ADJUSTMENT_SIGN, manualPartyAdjustmentSql } from './partyAdjustments';
+import { roleAccountIds } from './partyRules';
 
 type Tx = Prisma.TransactionClient;
 
@@ -132,19 +137,21 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
 }
 
 /**
- * Receivable per party: ledger debit - credit on the AR accounts against the outstanding of its
- * sales invoices (not Draft or Cancelled) plus its opening outstanding. Opening outstanding counts
+ * Receivable per party: ledger debit - credit on the AR accounts (current and former) against the
+ * outstanding of its sales invoices (not Draft or Cancelled), plus its manual party adjustment on
+ * those accounts (hand-made journals, whatever the party type), plus its opening outstanding. A
+ * ledger row without a source type is not an adjustment and still shows up. Opening outstanding counts
  * for Customers only; a party typed Both shares it with payables, so it is left out and reported in
  * `openingIgnored`. In a year-scoped run a party with such an invoice dated in the year is active.
  * [] while AR is not mapped. Largest difference first.
  */
 export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
-  const accountIds = await systemAccounts.getAccountIds('AR');
+  const accountIds = await roleAccountIds(tx, 'AR', { includeFormer: true });
   if (accountIds.length === 0 || scope.partyIds?.length === 0) return [];
   const gl = glCte(accountIds, Prisma.sql`ale.debit - ale.credit`, scope);
   const sub = Prisma.sql`
     SELECT p.id AS party_id,
-           COALESCE(inv.outstanding, 0)
+           COALESCE(inv.outstanding, 0) + COALESCE(adj.amount, 0)
              + CASE WHEN p."partyType" = 'Customer' THEN p.opening_outstanding ELSE 0 END AS amount,
            CASE WHEN p."partyType" = 'Both' THEN p.opening_outstanding END AS opening_ignored
       FROM parties p
@@ -154,7 +161,9 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
          WHERE status NOT IN ('Draft', 'Cancelled')
          GROUP BY party_id
       ) inv ON inv.party_id = p.id
-     WHERE inv.party_id IS NOT NULL OR (p."partyType" IN ('Customer', 'Both') AND p.opening_outstanding <> 0)`;
+      LEFT JOIN (${manualPartyAdjustmentSql(accountIds, ADJUSTMENT_SIGN.AR)}) adj ON adj.party_id = p.id
+     WHERE inv.party_id IS NOT NULL OR adj.party_id IS NOT NULL
+        OR (p."partyType" IN ('Customer', 'Both') AND p.opening_outstanding <> 0)`;
   const active = scope.fiscalYear
     ? activeCte(accountIds, scope.fiscalYear, Prisma.sql`
         SELECT party_id FROM sales_invoices
@@ -164,14 +173,15 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
 }
 
 /**
- * Customer deposit per party: ledger credit - debit on the CUSTOMER_DEPOSIT accounts against what
- * is left of its Submitted deposits (amount - active applications - refunded, as depositFigures in
- * services/customerDepositList.ts). In a year-scoped run a party with a Submitted deposit, or an
- * active application, dated in the year is active. [] while the account is not mapped. Largest
- * difference first.
+ * Customer deposit per party: ledger credit - debit on the CUSTOMER_DEPOSIT accounts (current and
+ * former) against what is left of its Submitted deposits (amount - active applications - refunded,
+ * as depositFigures in services/customerDepositList.ts). No manual adjustment: manual journals to a
+ * deposit account are refused (manualJournalRule), so an old one shows up as a difference. In a
+ * year-scoped run a party with a Submitted deposit, or an active application, dated in the year is
+ * active. [] while the account is not mapped. Largest difference first.
  */
 export async function findCustomerDepositDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
-  const accountIds = await systemAccounts.getAccountIds('CUSTOMER_DEPOSIT');
+  const accountIds = await roleAccountIds(tx, 'CUSTOMER_DEPOSIT', { includeFormer: true });
   if (accountIds.length === 0 || scope.partyIds?.length === 0) return [];
   const gl = glCte(accountIds, Prisma.sql`ale.credit - ale.debit`, scope);
   const sub = Prisma.sql`

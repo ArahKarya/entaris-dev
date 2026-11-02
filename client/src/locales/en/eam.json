@@ -1962,7 +1962,7 @@
       "preview": "Journal preview",
       "pickExpense": "(select expense account)",
       "pickCash": "(select cash/bank)",
-      "payables": "Accounts payable",
+      "payables": "Accounts payable (mapped account)",
       "postJournal": "Post journal",
       "createInvoice": "Create invoice"
     }

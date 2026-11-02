@@ -9,9 +9,9 @@
 //   Cancel     : soft-cancel (JE Cancelled + ALE isCancelled + reverse saldo), voidJournalInTx;
 //                ditolak bila tahun buku sudah ditutup
 //
-// PENTING: semua baris JE/ALE modul ini TANPA partyId — applyPartyImpact
-// menaikkan party.outstandingAmount utk baris ASSET ber-party (tidak ada
-// special-case akun 1.8 seperti akun UM) sehingga piutang pihak terdistorsi.
+// PENTING: semua baris JE/ALE modul ini TANPA partyId — pihak hanya boleh di
+// baris akun Piutang/Hutang/Uang Muka (services/ledger/partyRules.ts); baris
+// ber-party di akun lain mendistorsi saldo pihak dan ditolak jurnal manual.
 // Link pihak cukup di row ProjectGuarantee. Mount dgn requirePerm('project_guarantee').
 
 import { Router, type Response } from 'express';

@@ -43,9 +43,7 @@ export function ServiceLogModal({ assetId, onClose, onSaved }: ModalProps) {
   );
   const sourceOptions = useMemo(
     () =>
-      coaFlat.filter(
-        (a) => !a.isGroup && (String(a.accountNumber).startsWith('1.1.') || String(a.accountNumber) === '2.1.1'),
-      ),
+      coaFlat.filter((a) => !a.isGroup && String(a.accountNumber).startsWith('1.1.')),
     [coaFlat],
   );
 

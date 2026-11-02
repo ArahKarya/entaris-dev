@@ -2236,7 +2236,7 @@ model GoodsReceiptItem {
   unit                String
   // Harga kontrak/estimasi saat barang diterima. Locked ke movement supaya
   // average cost & COGS proper. PI nanti bisa kasih harga berbeda → variance
-  // posted ke "Selisih Harga Pembelian".
+  // posted ke akun yang dipetakan pada role PURCHASE_PRICE_VARIANCE (bawaan 5.11).
   lockedUnitCost      Decimal              @default(0) @map("locked_unit_cost") @db.Decimal(20, 2)
   description         String?
   // Optional link ke baris PO yang dipenuhi.

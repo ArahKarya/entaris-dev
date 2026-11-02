@@ -53,7 +53,7 @@ Catat servis (ga_veh_add_service, source=EAM) ──▶ antrian Tagihan EAM ─�
 ```
 
 - `ga_veh_add_service` membuat log servis `source=EAM`. **Tanpa** `postJournal` tidak ada jurnal; log berbiaya > 0 muncul di *Pengajuan Pembayaran → Tagihan EAM* (jenis `SERVICE_LOG`) dan hanya Keuangan yang memposting/membayar lewat modul `payment_request`.
-- `postJournal=true` (atau `ga_veh_post_service_journal` belakangan) memposting langsung: **DR 6.7 Beban Pemeliharaan Kendaraan / CR 1.1.1 Petty Cash** (akun bisa dipilih). Satu log = maksimal satu jurnal. Pembatalan: `ga_veh_cancel_service_journal` (void jurnal).
+- `postJournal=true` (atau `ga_veh_post_service_journal` belakangan) memposting langsung: **DR 6.7 Beban Pemeliharaan Kendaraan / CR akun Kas terpetakan di Akun Sistem** (akun bisa dipilih; tanpa pemetaan CASH ditolak ACCOUNT_MAPPING_MISSING). Satu log = maksimal satu jurnal. Pembatalan: `ga_veh_cancel_service_journal` (void jurnal).
 - Log `source=IMPORT` (data historis, sudah di GL) dan `WORK_ORDER` **tidak** masuk antrian dan tidak bisa dijurnal.
 - Log yang sudah berjurnal tidak boleh diubah (tanggal/biaya/deskripsi) atau dihapus — batalkan jurnalnya dulu.
 
@@ -61,7 +61,7 @@ Catat servis (ga_veh_add_service, source=EAM) ──▶ antrian Tagihan EAM ─�
 
 ```
 Pengajuan pajak (SUBMITTED) ──approve──▶ GaVehicleTax IN_PROCESS ──▶ antrian Tagihan EAM (VEHICLE_TAX)
-                                          └─ dibayar Keuangan: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha 2.1.1)
+                                          └─ dibayar Keuangan: DR 6.41 Beban Pajak & Perizinan Kendaraan / CR Kas-Bank (atau Hutang Usaha, akun AP terpetakan)
 ```
 
 - `ga_veh_create_tax_request` → `ga_veh_approve_tax_request` / `ga_veh_reject_tax_request` / `ga_veh_cancel_tax_request` (cancel hanya oleh pengaju).

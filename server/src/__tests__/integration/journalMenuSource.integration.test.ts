@@ -3,7 +3,9 @@
  *
  * - PATCH /journals/:id/cancel needs doc.cancel (403 without it).
  * - MANUAL, IMPORT, RECURRING and CASH_BOOK journals cancel (200): status Cancelled, ledger rows
- *   cancelled, account balances back to what they were before the journal.
+ *   cancelled, account balances back to what they were before the journal. The outstanding of
+ *   every party on the journal is recalculated, so a journal posted under the old classification
+ *   (a party on an expense line) does not leave it too high.
  * - Every other source type, and a NULL (unknown legacy) source, gets 400 JOURNAL_NOT_MANUAL and
  *   stays as it was: CLOSE-, DEP-, JV-STT-, deposit offsets (customer and supplier, made by the
  *   deposit refund route), opening and system journals. A hand-made source type on a journal
@@ -34,6 +36,8 @@ import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit'
 import { JOURNAL_NOT_MANUAL } from '../../services/journalCancelGuard';
 import { DEPOSIT_APPLICATION_JOURNAL_CANCELLED } from '../../services/depositApplicationCancel';
 import { voidJournalByIdInTx } from '../../utils/journalCancel';
+import { postJournal } from '../../services/ledger/postJournal';
+import { DOCUMENT_RULE } from '../../services/ledger/accountGuard';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 import journalsRouter from '../../routes/journals';
 import customerDepositsRouter from '../../routes/customerDeposits';
@@ -204,6 +208,44 @@ d('Journal menu cancel: hand-made journals', () => {
     });
   });
 
+  it('recalculates the outstanding of a party on a journal posted under the old rule (party on an expense line)', async () => {
+    await inRollback(async (tx) => {
+      const fy = await createFiscalYear(tx, { year: Y });
+      const supplier = await tx.party.create({ data: { name: `IT-JMS Supplier ${tag()}`, partyType: 'Supplier' } });
+      const expense = await tx.account.create({
+        data: { name: 'IT-JMS Beban', accountNumber: `IT-JMS-${tag()}`, accountType: 'EXPENSE', rootType: 'EXPENSE' },
+      });
+      const date = new Date(`${Y}-03-10T00:00:00+07:00`);
+      // Stored the way the old expense form posted it: Dr Beban with the Supplier, Cr Kas. The old
+      // apply raised the Supplier's outstanding by the debit (EXPENSE is debit-normal).
+      const je = await tx.journalEntry.create({
+        data: {
+          entryNumber: `IT-JMS-${short()}`, date, narration: 'Beban lama', status: 'Submitted', fiscalYearId: fy.id,
+          createdBy: actor.userId, submittedAt: date, sourceType: 'MANUAL',
+          items: {
+            create: [
+              { accountId: expense.id, partyId: supplier.id, debit: 1_000_000, credit: 0 },
+              { accountId: cashAccountId, debit: 0, credit: 1_000_000 },
+            ],
+          },
+        },
+        include: { items: true },
+      });
+      await tx.accountingLedgerEntry.createMany({
+        data: je.items.map((i) => ({
+          date, accountId: i.accountId, partyId: i.partyId, debit: i.debit, credit: i.credit,
+          referenceType: 'JournalEntry', referenceId: je.id, description: 'Beban lama', fiscalYearId: fy.id,
+        })),
+      });
+      await tx.party.update({ where: { id: supplier.id }, data: { outstandingAmount: 1_000_000 } });
+
+      const r = await cancelFromMenu(je.id);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const after = await tx.party.findUniqueOrThrow({ where: { id: supplier.id } });
+      expect(after.outstandingAmount.toFixed(2)).toBe('0.00');
+    });
+  });
+
   it('a closed year answers PERIOD_CLOSED before the source check', async () => {
     await inRollback(async (tx) => {
       const fy = await createFiscalYear(tx, { year: Y });
@@ -212,6 +254,34 @@ d('Journal menu cancel: hand-made journals', () => {
       const before = await journalState(tx, je.id);
       expectCode(await cancelFromMenu(je.id), PERIOD_CLOSED);
       expect(await journalState(tx, je.id)).toEqual(before);
+    });
+  });
+});
+
+d('Journal menu cancel: journals written by postJournal (PR-4.4b)', () => {
+  it('a POST /journals journal is MANUAL (through postJournal) and cancels', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: Y });
+      const je = await postedJournal(tx);
+      const posted = await tx.journalEntry.findUniqueOrThrow({ where: { id: je.id } });
+      expect(posted.sourceType).toBe('MANUAL');
+      expect(posted.status).toBe('Submitted');
+      const r = await cancelFromMenu(je.id);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await accountBalances(tx, je.accountIds)).toEqual(je.balancesBefore);
+    });
+  });
+
+  it('a SYSTEM_DOC journal from postJournal is refused with JOURNAL_NOT_MANUAL', async () => {
+    await inRollback(async (tx) => {
+      await createFiscalYear(tx, { year: Y });
+      const [a, b] = await tx.account.findMany({ where: { isGroup: false, isActive: true }, take: 2, orderBy: { accountNumber: 'asc' } });
+      const { journal } = await postJournal(tx, {
+        date: new Date(`${Y}-03-10T00:00:00.000Z`), narration: `Dokumen sistem ${tag()}`, createdBy: actor.userId,
+        sourceType: 'SYSTEM_DOC', accountRule: DOCUMENT_RULE, partyRule: 'off',
+        lines: [{ accountId: a.id, debit: 750_000 }, { accountId: b.id, credit: 750_000 }],
+      });
+      await expectMenuRefuses(tx, journal.id);
     });
   });
 });

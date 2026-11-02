@@ -39,7 +39,6 @@ Toolset **kas-bank** memungkinkan AIRA membaca dan mengoperasikan arus kas Entar
 **Transaksi Berulang**
 - Template (`rec_create`) dengan frekuensi `daily/weekly/monthly/quarterly/yearly`. Hanya tipe **`journal`** yang bisa dieksekusi; tipe `sales_invoice`/`purchase_invoice` tersimpan tetapi eksekusi mengembalikan `success=false`.
 - Eksekusi otomatis dilakukan scheduler harian 02:00. `rec_execute` menjalankan **satu** template sekarang (bertanggal hari ini). Endpoint massal `POST /api/recurring/run-due` sengaja **tidak** menjadi tool (lihat DENYLIST).
-- `rec_create`, `rec_update` dan `rec_delete` tidak draft-capable: selalu masuk antrean persetujuan.
 - `rec_delete` hanyalah soft delete (`isActive=false`); aktifkan lagi lewat `rec_update`.
 
 ### Buku kas dari nota (Draft Buku Kas)
@@ -95,7 +94,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - `splits` harus berjumlah sama persis (toleransi 0,01) dengan `amount`. Akun split boleh akun beban (mis. komisi), tetapi akun utama tanpa split harus akun kas.
 - `pay_list` hanya paging dasar; untuk laporan arus kas pakai `pay_ledger` + `pay_ledger_summary`. Perhatikan `pay_cash_journals` dibatasi 100 baris.
 - Uang jaminan: bagian hangus **harus** akun beban (EXPENSE); bagian dikembalikan **harus** akun kas/bank. Total return + hangus tidak boleh melebihi sisa jaminan.
-- `rec_create` / `rec_update` template jurnal: divalidasi saat disimpan (seimbang persis, minimal 2 baris, maksimal 2 desimal, tanpa pihak, tanpa akun kontrol/pajak, `nextRunDate` tidak boleh sudah lewat atau sebelum eksekusi terakhir) dan lagi saat dieksekusi (manual maupun scheduler). Perubahan template lewat AIRA (`rec_create`, `rec_update`, `rec_delete`) menunggu persetujuan manusia, juga untuk aktor level Standar (aktor level direct dan alat yang dipin otomatis tetap dieksekusi langsung).
+- `rec_create` template jurnal: eksekusi **tidak memvalidasi** debit = kredit dan tidak mengecek `isActive`; pastikan template seimbang sebelum eksekusi.
 - Rekonsiliasi `Completed` terkunci permanen; selesaikan hanya setelah semua item dicocokkan sesuai rekening koran.
 - **Draft Buku Kas**: jangan menebak kode akun, jangan mengisi `masuk` dan `keluar` sekaligus, jangan menganggap draft = sudah tercatat (belum ada jurnal sampai diposting), dan jangan menunggu `kas_draft_posting` langsung jalan (menunggu persetujuan). Jurnal dari draft yang salah dibatalkan lewat `je_cancel` (toolset akuntansi) pada nomor jurnal baris terkait.
 - Format tanggal `YYYY-MM-DD`; jumlah dalam Rupiah (angka, tanpa pemisah ribuan).
@@ -150,11 +149,11 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | [`pg_settle`](#pg_settle) | critical | tidak | `POST /api/project-guarantees/:id/settle` |
 | [`pg_settlement_cancel`](#pg_settlement_cancel) | critical | tidak | `POST /api/project-guarantees/settlements/:id/cancel` |
 | [`pg_summary`](#pg_summary) | read | - | `GET /api/project-guarantees/summary` |
-| [`rec_create`](#rec_create) | write | tidak | `POST /api/recurring` |
-| [`rec_delete`](#rec_delete) | write | tidak | `DELETE /api/recurring/:id` |
+| [`rec_create`](#rec_create) | write | ya | `POST /api/recurring` |
+| [`rec_delete`](#rec_delete) | write | ya | `DELETE /api/recurring/:id` |
 | [`rec_execute`](#rec_execute) | critical | tidak | `POST /api/recurring/:id/execute` |
 | [`rec_list`](#rec_list) | read | - | `GET /api/recurring` |
-| [`rec_update`](#rec_update) | write | tidak | `PUT /api/recurring/:id` |
+| [`rec_update`](#rec_update) | write | ya | `PUT /api/recurring/:id` |
 | [`recon_add_items`](#recon_add_items) | write | ya | `POST /api/reconciliation/:id/items` |
 | [`recon_complete`](#recon_complete) | critical | tidak | `POST /api/reconciliation/:id/complete` |
 | [`recon_create`](#recon_create) | write | ya | `POST /api/reconciliation` |
@@ -1546,7 +1545,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 **Ringkasan:** Membuat template transaksi berulang. Hanya templateType journal yang dapat dieksekusi otomatis; tipe sales_invoice/purchase_invoice tersimpan tetapi eksekusinya belum didukung. templateData journal berisi narration dan items (accountId, debit, credit, partyId, description).
 
 - **Risk / tier:** `write` / Draft/Approve
-- **Draft-capable:** tidak (efek langsung)
+- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)
 - **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)
 - **Handler:** `POST /api/recurring` (src/routes/recurring.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
@@ -1559,11 +1558,12 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | `templateType` | body | enum: `journal`, `sales_invoice`, `purchase_invoice` | ya | journal \| sales_invoice \| purchase_invoice (hanya journal yang bisa dieksekusi). |
 | `frequency` | body | enum: `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | ya | daily \| weekly \| monthly \| quarterly \| yearly. |
 | `dayOfMonth` | body | `number` | tidak | Tanggal jalan dalam bulan untuk monthly/quarterly (opsional). |
-| `nextRunDate` | body | `date` | ya | YYYY-MM-DD, tidak boleh sudah lewat. |
-| `templateData` | body | `object` | ya | Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan. |
+| `nextRunDate` | body | `date` | ya | Tanggal eksekusi berikutnya (YYYY-MM-DD). |
+| `templateData` | body | `object` | ya | Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, partyId?, description? }] }; harus seimbang karena eksekusi tidak memvalidasi balance. |
 | `templateData.narration` | body | `string` | ya |  |
 | `templateData.items` | body | `array<object>` | ya |  |
 | `templateData.items[].accountId` | body | `uuid` | ya |  |
+| `templateData.items[].partyId` | body | `uuid` | tidak |  |
 | `templateData.items[].debit` | body | `number` | ya |  |
 | `templateData.items[].credit` | body | `number` | ya |  |
 | `templateData.items[].description` | body | `string` | tidak |  |
@@ -1597,17 +1597,13 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Template yang dibuat. HTTP 201.
 
-**Efek pembukuan/stok:** Tidak ada efek GL/stok saat template disimpan. Perubahan template lewat AIRA menunggu persetujuan manusia untuk aktor level Standar (aktor level direct atau alat yang dipin otomatis mengeksekusinya segera). Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).
+**Efek pembukuan/stok:** Tidak ada efek GL/stok saat template dibuat. Jurnal baru dibuat nanti oleh eksekusi template (scheduler harian 02:00 atau rec_execute).
 
 **Teks konfirmasi:** Buat template berulang {name} ({templateType}, {frequency}) mulai {nextRunDate}. Setujui?
 
 **Error umum**
 
-- 400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)
-- 400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid
-- 400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak
-- 400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak
-- 400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid
+- 400: validasi skema (tipe/frekuensi tidak dikenal)
 
 **Tool terkait:** [`rec_execute`](#rec_execute), [`rec_update`](#rec_update)
 
@@ -1616,7 +1612,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 **Ringkasan:** Menonaktifkan template transaksi berulang (soft delete: isActive=false). Data template dan jurnal yang sudah dibuat tidak dihapus.
 
 - **Risk / tier:** `write` / Draft/Approve
-- **Draft-capable:** tidak (efek langsung)
+- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)
 - **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)
 - **Handler:** `DELETE /api/recurring/:id` (src/routes/recurring.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
@@ -1699,7 +1695,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** { success, result (jurnal) } atau { success: false, error }.
 
-**Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi (manual maupun scheduler). Tipe invoice: tidak ada efek.
+**Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Tidak memvalidasi total debit = kredit, jadi template harus seimbang. Tipe invoice: tidak ada efek.
 
 **Teks konfirmasi:** Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.
 
@@ -1754,7 +1750,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 **Ringkasan:** Mengubah template transaksi berulang (nama, tipe, frekuensi, tanggal berikutnya, data template) atau mengaktifkan/menonaktifkannya lewat isActive. Semua field opsional (parsial).
 
 - **Risk / tier:** `write` / Draft/Approve
-- **Draft-capable:** tidak (efek langsung)
+- **Draft-capable:** ya (hanya membuat draft / pengajuan pending)
 - **Roles & izin:** Admin, Accountant (modul `recurring` / `edit`)
 - **Handler:** `PUT /api/recurring/:id` (src/routes/recurring.ts)
 - **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
@@ -1769,10 +1765,11 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | `frequency` | body | enum: `daily`, `weekly`, `monthly`, `quarterly`, `yearly` | tidak |  |
 | `dayOfMonth` | body | `number` | tidak |  |
 | `nextRunDate` | body | `date` | tidak |  |
-| `templateData` | body | `object` | tidak | Data template. Untuk journal: { narration, items: [{ accountId, debit, credit, description? }] } (minimal 2 baris, seimbang persis, angka 2 desimal; tanpa partyId; akun kontrol/pajak ditolak). Divalidasi saat disimpan. |
+| `templateData` | body | `object` | tidak |  |
 | `templateData.narration` | body | `string` | ya |  |
 | `templateData.items` | body | `array<object>` | ya |  |
 | `templateData.items[].accountId` | body | `uuid` | ya |  |
+| `templateData.items[].partyId` | body | `uuid` | tidak |  |
 | `templateData.items[].debit` | body | `number` | ya |  |
 | `templateData.items[].credit` | body | `number` | ya |  |
 | `templateData.items[].description` | body | `string` | tidak |  |
@@ -1803,18 +1800,13 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Template setelah diubah.
 
-**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya. Selalu menunggu persetujuan (tidak draft-capable).
+**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; mengubah apa yang akan dibukukan pada eksekusi berikutnya.
 
 **Teks konfirmasi:** Ubah template berulang {id}. Setujui?
 
 **Error umum**
 
-- 400: validasi skema (tipe/frekuensi/bentuk data tidak cocok)
-- 400 JOURNAL_UNBALANCED / LINES_TOO_FEW / LINE_*: baris jurnal template tidak valid
-- 400 ACCOUNT_CONTROL / ACCOUNT_*: akun kontrol/pajak/grup/nonaktif ditolak
-- 400 PARTY_NOT_ALLOWED: template tidak boleh membawa pihak
-- 400 RECURRING_DATE_PAST / RECURRING_DATE_BEFORE_LAST_RUN: tanggal berikutnya tidak valid
-- 404: template tidak ditemukan (rec_update)
+- 404/500: template tidak ditemukan
 
 **Tool terkait:** [`rec_list`](#rec_list), [`rec_delete`](#rec_delete)
 

@@ -18,8 +18,10 @@ import {
   assertPostableAccount,
   assertPostableAccounts,
   isControlAccount,
+  manualCancelRule,
   manualJournalRule,
   postableAccountProblem,
+  restrictedKindProblem,
   type AccountLite,
 } from '../accountGuard';
 
@@ -222,6 +224,19 @@ describe('named rules', () => {
     for (const kind of MANUAL_CONTROL_KINDS) expect(kindsOk(r, [kind]), kind).toBe(true);
     expect(kindsOk(r, ['CUSTOMER_DEPOSIT'])).toBe(false);
     expect(kindsOk(r, ['VENDOR_DEPOSIT'])).toBe(false);
+  });
+
+  it('manualCancelRule: without journal.control every control, deposit and tax kind is refused; with it all may be reversed', () => {
+    const all = [...MANUAL_CONTROL_KINDS, 'CUSTOMER_DEPOSIT', 'VENDOR_DEPOSIT'] as const;
+    for (const kind of all) expect(restrictedKindProblem(ar, manualCancelRule(false), [kind])?.code, kind).toBe(ACCOUNT_CONTROL);
+    for (const kind of all) expect(restrictedKindProblem(ar, manualCancelRule(true), [kind]), kind).toBeNull();
+    expect(manualCancelRule(false).alsoRestrict).toEqual(TAX_ACCOUNT_ROLES);
+    expect(restrictedKindProblem(ar, manualCancelRule(false), null)).toBeNull();
+    // Only the control part: an inactive or group account does not stop a reversal.
+    expect(restrictedKindProblem(acc({ isActive: false, isGroup: true }), manualCancelRule(false), null)).toBeNull();
+    expect(translateMessage(restrictedKindProblem(ar, manualCancelRule(false), ['INVENTORY'])!.message, 'en')).toBe(
+      'Journal cancel: account 1.2.1 Piutang Usaha (Dagang) is a control account (Inventory) and cannot be posted to directly. Cancelling a journal that holds a control account requires the Journal to control accounts right (journal.control).',
+    );
   });
 
   it('TEMPLATE_RULE refuses every control and tax account', () => {
