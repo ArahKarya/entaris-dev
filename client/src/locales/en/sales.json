@@ -133,7 +133,7 @@
   },
   "invoiceRevisePriceDialog": {
     "title": "Revise invoice prices",
-    "explainer": "The price variance is posted automatically: the share of goods <strong>still in stock</strong> adjusts the Inventory value and average cost; the share <strong>already used</strong> (production/sales) goes to account <strong>5.11 Purchase Price Variance</strong>. The payable to the supplier is adjusted too.",
+    "explainer": "The price variance is posted automatically: the share of goods <strong>still in stock</strong> adjusts the Inventory value and average cost; the share <strong>already used</strong> (production/sales) goes to the <strong>Purchase Price Variance</strong> account (mapped in System Accounts). The payable to the supplier is adjusted too.",
     "oldRate": "Old: {{value}}",
     "newRateAria": "New price for {{name}}",
     "newRatePlaceholder": "new price",
