@@ -12,6 +12,9 @@ const db = vi.hoisted(() => {
     rows: [] as Record<string, string>[],
     numeric: [] as Array<Record<string, boolean>>,
     canControl: false,
+    parseError: null as Error | null,
+    periodBusyDay: null as string | null,
+    calls: [] as string[],
     closedDays: new Set<string>(),
     journals: [] as Array<{ id: string; sourceKey: string | null; status: string; date: Date; items: any[] }>,
   };
@@ -24,10 +27,13 @@ const db = vi.hoisted(() => {
   ];
   let seq = 0;
   const tx: any = {
+    $executeRaw: vi.fn(async () => { state.calls.push('lock'); return 1; }),
     account: { findMany: vi.fn(async ({ where }: any) => accounts.filter((a) => where.accountNumber.in.includes(a.accountNumber))) },
     journalEntry: {
-      findMany: vi.fn(async ({ where }: any) =>
-        state.journals.filter((j) => where.sourceKey.in.includes(j.sourceKey) && j.status !== 'Cancelled').map((j) => ({ sourceKey: j.sourceKey }))),
+      findMany: vi.fn(async ({ where }: any) => {
+        state.calls.push('lookup');
+        return state.journals.filter((j) => where.sourceKey.in.includes(j.sourceKey) && j.status !== 'Cancelled').map((j) => ({ sourceKey: j.sourceKey }));
+      }),
       create: vi.fn(async ({ data }: any) => {
         const items = data.items.create.map((c: any, i: number) => ({ id: `ji-${seq}-${i}`, partyId: null, ...c }));
         const row = { id: `je-${++seq}`, sourceKey: data.sourceKey, status: data.status, date: data.date, items };
@@ -54,14 +60,19 @@ vi.mock('../../lib/prisma', () => ({ prisma: db }));
 vi.mock('../../middleware/auth', () => ({ requirePerm: () => (_req: any, _res: any, next: any) => next() }));
 vi.mock('../import/shared', () => ({
   upload: { single: () => (req: any, _res: any, next: any) => { req.file = { buffer: Buffer.from(''), originalname: 'x.csv' }; next(); } },
-  parseFileDetailed: vi.fn(async () => ({ rows: db.state.rows, numericCells: db.state.numeric })),
+  parseFileDetailed: vi.fn(async () => {
+    if (db.state.parseError) throw db.state.parseError;
+    return { rows: db.state.rows, numericCells: db.state.numeric };
+  }),
   sanitizeCellValue: (v: unknown) => String(v ?? ''),
 }));
 vi.mock('../../services/permissionService', () => ({ hasCap: vi.fn(async () => db.state.canControl) }));
 vi.mock('../../utils/documentNumber', () => ({ generateDocumentNumber: vi.fn(async () => `JV-${db.state.journals.length + 1}`) }));
 vi.mock('../../utils/accountBalance', () => ({ updateBalancesForItems: vi.fn(async () => undefined) }));
 vi.mock('../../utils/periodGuard', () => ({
+  PERIOD_BUSY: 'PERIOD_BUSY',
   assertPeriodOpen: vi.fn(async (_tx: any, ref: { date: Date }) => {
+    if (db.state.periodBusyDay === businessDayOf(ref.date)) throw new BusinessError('Periode sibuk.', 'PERIOD_BUSY');
     if (db.state.closedDays.has(businessDayOf(ref.date))) throw new BusinessError('Tahun buku 2026 sudah ditutup.', 'PERIOD_CLOSED');
     return { id: 'fy-1' };
   }),
@@ -108,6 +119,9 @@ beforeEach(() => {
   db.reset();
   db.state.canControl = false;
   db.state.closedDays.clear();
+  db.state.parseError = null;
+  db.state.periodBusyDay = null;
+  db.state.calls = [];
 });
 
 describe('POST /api/import/journals line checks', () => {
@@ -307,5 +321,54 @@ describe('POST /api/import/journals idempotent re-upload', () => {
     const again = await post();
     expect(again.body.success).toBe(0);
     expect(again.body.alreadyImported).toHaveLength(2);
+  });
+});
+
+describe('POST /api/import/journals review fixes', () => {
+  it('takes the import lock before looking up existing keys', async () => {
+    setFile(sale('Satu'));
+    await post();
+    expect(db.state.calls.slice(0, 2)).toEqual(['lock', 'lookup']);
+  });
+
+  it('an unreadable file answers 400 with the reader message', async () => {
+    db.state.parseError = new Error('Invalid Record Length');
+    const res = await post();
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid Record Length');
+  });
+
+  it('PERIOD_BUSY stops the import with its own code instead of becoming a row error', async () => {
+    setFile([...sale('A', '10', '2026-03-05'), ...sale('B', '10', '2026-03-06')]);
+    db.state.periodBusyDay = '2026-03-05';
+    const res = await post();
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('PERIOD_BUSY');
+    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('a numeric accountNumber cell is refused instead of read as another account', async () => {
+    setFile(sale('Angka'), [{ accountNumber: true }]);
+    const res = await post();
+    expect(res.body.success).toBe(0);
+    expect(res.body.errors[0]).toMatchObject({ row: 2, message: expect.stringContaining('berformat teks') });
+    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('a large formula amount with float noise is accepted', async () => {
+    setFile(sale('Besar', '10000000000.300001'), [{ debit: true }, { credit: true }]);
+    const res = await post('?preview=true');
+    expect(res.body.errors).toEqual([]);
+    expect(res.body.journalCount).toBe(1);
+  });
+
+  it('a bad date on a ref row does not make the good rows of its journal unbalanced', async () => {
+    setFile([
+      row('2026-03-05', 'Ref', '1.1.1', '5000000', '0', { ref: '7' }),
+      row('31/02/2026', 'Ref', '4.1', '0', '5000000', { ref: '7' }),
+    ]);
+    const res = await post();
+    expect(res.body.errors).toHaveLength(1);
+    expect(res.body.errors[0].row).toBe(3);
   });
 });

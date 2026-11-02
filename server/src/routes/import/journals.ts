@@ -4,7 +4,7 @@ import { prisma } from '../../lib/prisma';
 import { AuthRequest, requirePerm } from '../../middleware/auth';
 import { updateBalancesForItems } from '../../utils/accountBalance';
 import { generateDocumentNumber } from '../../utils/documentNumber';
-import { assertPeriodOpen } from '../../utils/periodGuard';
+import { assertPeriodOpen, PERIOD_BUSY } from '../../utils/periodGuard';
 import { importDateToInstant } from '../../utils/importDate';
 import { BusinessError, handleRouteError } from '../../utils/errors';
 import { hasCap } from '../../services/permissionService';
@@ -56,7 +56,13 @@ router.post(
     if (!req.file) return res.status(400).json({ error: 'File wajib diunggah.' });
 
     try {
-      const { rows, numericCells } = await parseFileDetailed(req.file.buffer, req.file.originalname);
+      let parsedFile;
+      try {
+        parsedFile = await parseFileDetailed(req.file.buffer, req.file.originalname);
+      } catch (parseError: any) {
+        throw new BusinessError(`File tidak bisa dibaca: ${parseError?.message ?? 'format tidak dikenali'}`);
+      }
+      const { rows, numericCells } = parsedFile;
       const isPreview = req.query.preview === 'true';
       const userId = req.user!.userId;
 
@@ -76,6 +82,10 @@ router.post(
           ...c,
           sourceKey: sourceKeys.importGroup(parts[i].hash, parts[i].occurrence),
         }));
+
+        // One import at a time: keys are not unique in the database, so two uploads of the same file
+        // would both see no existing key and post twice.
+        if (!isPreview) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('IMPORT_JOURNALS'))`;
 
         // A journal already imported (same content, not cancelled) is skipped, not posted twice.
         const existing = keyed.length === 0
@@ -224,7 +234,8 @@ async function periodErrors(tx: Prisma.TransactionClient, groups: readonly Check
         await assertPeriodOpen(tx, { date: importDateToInstant(group.day) }, 'jurnal');
         problems.set(group.day, null);
       } catch (err) {
-        if (!(err instanceof BusinessError)) throw err;
+        // A lock timeout aborts the transaction: stop and let the route answer with the retryable code.
+        if (!(err instanceof BusinessError) || err.code === PERIOD_BUSY) throw err;
         problems.set(group.day, err.message);
       }
     }

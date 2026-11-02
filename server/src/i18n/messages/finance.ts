@@ -430,6 +430,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // import journals (E7-R9, routes/import/journals.ts, services/journalImport.ts, utils/importDate.ts)
   "File berisi {0} jurnal; maksimal {1} jurnal per file. Pecah file menjadi beberapa bagian.": "The file has {0} journals; the limit is {1} journals per file. Split the file into parts.",
   "Baris dengan ref \"{0}\" harus memiliki tanggal dan narasi yang sama dengan baris pertama kelompok (baris {1}).": "Rows with ref \"{0}\" must have the same date and narration as the first row of the group (row {1}).",
+  "File tidak bisa dibaca: {0}": "The file could not be read: {0}",
+  "Kolom \"accountNumber\" harus berformat teks: angka di sel Excel kehilangan nol di belakang (5.10 terbaca {0}). Ubah format sel menjadi Text.": "Column \"accountNumber\" must be text: a number in an Excel cell loses trailing zeros (5.10 reads as {0}). Set the cell format to Text.",
   "Tanggal tidak valid.": "The date is invalid.",
   "Tanggal \"{0}\" tidak ada di kalender.": "The date \"{0}\" does not exist on the calendar.",
   "Format tanggal \"{0}\" bisa dibaca dua cara. Tulis YYYY-MM-DD atau DD/MM/YYYY.": "The date format \"{0}\" can be read two ways. Write YYYY-MM-DD or DD/MM/YYYY.",

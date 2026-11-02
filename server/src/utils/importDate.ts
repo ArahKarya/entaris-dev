@@ -54,7 +54,7 @@ export function importDateToInstant(day: string): Date {
  * An amount as a plain decimal string for the journal line validator.
  * Text cells: only -?digits with up to 2 decimals ("5.000.000" is refused, it is not 5 million
  * in every locale). Number and formula cells (`fromNumberCell`): a float such as 110000.00000000001
- * is rounded to 2 decimals when it is within 1e-6 of that value, anything else is refused.
+ * is rounded to 2 decimals when it is within 1e-6 (or 1e-12 relative, for very large values) of that value, anything else is refused.
  */
 export function parseImportAmount(raw: string | null | undefined, opts: { fromNumberCell?: boolean } = {}): ImportAmountResult {
   const text = (raw ?? '').trim();
@@ -62,7 +62,7 @@ export function parseImportAmount(raw: string | null | undefined, opts: { fromNu
   if (opts.fromNumberCell) {
     const n = Number(text);
     const rounded = Math.round(n * 100) / 100;
-    if (!Number.isFinite(n) || Math.abs(n - rounded) >= NUMBER_CELL_TOLERANCE) {
+    if (!Number.isFinite(n) || Math.abs(n - rounded) >= Math.max(NUMBER_CELL_TOLERANCE, Math.abs(n) * 1e-12)) {
       return { ok: false, message: `Nilai "${text}" bukan angka dengan paling banyak 2 desimal.` };
     }
     return { ok: true, value: (Object.is(rounded, -0) ? 0 : rounded).toFixed(2) };

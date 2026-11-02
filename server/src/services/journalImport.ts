@@ -60,29 +60,35 @@ export function parseJournalRows(
     const description = sanitize(r.description);
     const ref = sanitize(r.ref);
 
-    if (!rawDate) { errors.push({ row: rowNum, message: 'Kolom "date" wajib diisi.' }); return; }
-    if (!narration) { errors.push({ row: rowNum, message: 'Kolom "narration" wajib diisi.' }); return; }
-    if (!accountNumber) { errors.push({ row: rowNum, message: 'Kolom "accountNumber" wajib diisi.' }); return; }
+    const date = rawDate ? parseImportDate(rawDate) : null;
+    // A bad row still taints its journal: judging the balance of the leftover lines would mislead.
+    const taint = () => {
+      const key = ref ? `ref:${ref}` : date?.ok && narration ? `${date.day}||${narration}` : null;
+      if (!key) return;
+      const existing = groups.get(key);
+      if (existing) existing.broken = true;
+      else {
+        groups.set(key, { groupKey: key, ref, day: date?.ok ? date.day : '', narration, items: [], broken: true });
+        firstRow.set(key, rowNum);
+      }
+    };
 
-    const date = parseImportDate(rawDate);
+    if (!date) { errors.push({ row: rowNum, message: 'Kolom "date" wajib diisi.' }); taint(); return; }
+    if (!narration) { errors.push({ row: rowNum, message: 'Kolom "narration" wajib diisi.' }); taint(); return; }
+    if (!accountNumber) { errors.push({ row: rowNum, message: 'Kolom "accountNumber" wajib diisi.' }); taint(); return; }
+    if (numeric.accountNumber || numeric.account_number) {
+      // Excel keeps 5.10 as the number 5.1, which is a different account.
+      errors.push({ row: rowNum, message: `Kolom "accountNumber" harus berformat teks: angka di sel Excel kehilangan nol di belakang (5.10 terbaca ${accountNumber}). Ubah format sel menjadi Text.` });
+      taint();
+      return;
+    }
+
     const debit = parseImportAmount(r.debit, { fromNumberCell: numeric.debit });
     const credit = parseImportAmount(r.credit, { fromNumberCell: numeric.credit });
     if (!date.ok) errors.push({ row: rowNum, message: date.message });
     if (!debit.ok) errors.push({ row: rowNum, message: debit.message });
     if (!credit.ok) errors.push({ row: rowNum, message: credit.message });
-    if (!date.ok || !debit.ok || !credit.ok) {
-      // A row with a readable date still taints its group: judging the balance without it would mislead.
-      if (date.ok) {
-        const key = ref ? `ref:${ref}` : `${date.day}||${narration}`;
-        const existing = groups.get(key);
-        if (existing) existing.broken = true;
-        else {
-          groups.set(key, { groupKey: key, ref, day: date.day, narration, items: [], broken: true });
-          firstRow.set(key, rowNum);
-        }
-      }
-      return;
-    }
+    if (!date.ok || !debit.ok || !credit.ok) { taint(); return; }
 
     const groupKey = ref ? `ref:${ref}` : `${date.day}||${narration}`;
     let group = groups.get(groupKey);
@@ -90,7 +96,7 @@ export function parseJournalRows(
       group = { groupKey, ref, day: date.day, narration, items: [], broken: false };
       groups.set(groupKey, group);
       firstRow.set(groupKey, rowNum);
-    } else if (ref && (group.day !== date.day || group.narration !== narration)) {
+    } else if (ref && group.day && (group.day !== date.day || group.narration !== narration)) {
       errors.push({
         row: rowNum,
         message: `Baris dengan ref "${ref}" harus memiliki tanggal dan narasi yang sama dengan baris pertama kelompok (baris ${firstRow.get(groupKey)}).`,
