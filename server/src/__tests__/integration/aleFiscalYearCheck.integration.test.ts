@@ -153,8 +153,8 @@ d('findAleFiscalYearMismatches', () => {
 
   it('expectedYear is null when no fiscal year holds the day', async () => {
     await inRollback(async (tx) => {
-      const { a } = await years(tx);
-      const je = await journalWithAle(tx, { fiscalYearId: a.id, aleDate: '2179-06-01T03:00:00Z' });
+      const a = await createFiscalYear(tx, { year: 2173 });
+      const je = await journalWithAle(tx, { fiscalYearId: a.id, aleDate: '2174-06-01T03:00:00Z' });
       const res = await findAleFiscalYearMismatches(tx, { journalIds: [je.id] });
       expect(res.rows[0]).toMatchObject({ expectedYear: null, expectedYearClosed: null, storedYear: a.name });
     });
