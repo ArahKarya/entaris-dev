@@ -42,8 +42,17 @@ export const NOT_EDITABLE = 'Draft hanya bisa diubah selama berstatus Draft atau
 
 /** One or more rows failed validation. `rowErrors` lists every problem (row-indexed). */
 export class RowErrorsError extends BusinessError {
-  constructor(public readonly rowErrors: string[]) {
-    super(`Ada ${rowErrors.length} kesalahan pada baris: ${rowErrors.slice(0, 5).join(' | ')}${rowErrors.length > 5 ? ' | …' : ''}`);
+  /**
+   * `code`: set when every row failed for the same coded reason (e.g. ACCOUNT_CONTROL), so the
+   * client and an approved AIRA call can branch on it. `failed`: the per-row failures with their
+   * codes, as in the partial-mode result.
+   */
+  constructor(
+    public readonly rowErrors: string[],
+    code?: string,
+    public readonly failed?: ReadonlyArray<{ idx: number; error: string; code?: string }>,
+  ) {
+    super(`Ada ${rowErrors.length} kesalahan pada baris: ${rowErrors.slice(0, 5).join(' | ')}${rowErrors.length > 5 ? ' | …' : ''}`, code);
     this.name = 'RowErrorsError';
   }
 }

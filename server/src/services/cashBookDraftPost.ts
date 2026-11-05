@@ -3,6 +3,9 @@
  * utils/cashBookRules.ts), all inside one transaction per draft. The draft is claimed
  * atomically (row lock via updateMany + status guard) so a double post is impossible.
  * Human corrections are learned (pattern → account) after the journals are written.
+ * Cash book lines are user input, so the counter account follows the manual journal rule: control
+ * and tax accounts need journal.control, deposit accounts are never allowed (plan §1.11). A row
+ * that breaks it fails on its own (with `partial`, the other rows are still posted).
  */
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { logger } from '../lib/logger';
@@ -11,6 +14,7 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { PERIOD_BUSY } from '../utils/periodGuard';
 import { buildRowJournalLines, descriptionPattern, isAdvanceType, isTxnType, type JournalLineDraft } from '../utils/cashBookRules';
 import { assertCashAccount, postJournalInTx } from './paymentRequestService';
+import { loadControlAccountMap, manualJournalRule, postableAccountProblem } from './ledger/accountGuard';
 import { EDITABLE_STATUSES, RowErrorsError, dayString } from './cashBookDraft';
 
 type Tx = Prisma.TransactionClient;
@@ -18,6 +22,8 @@ type Tx = Prisma.TransactionClient;
 export interface PostFailure {
   idx: number;
   error: string;
+  /** Set for account problems (ACCOUNT_CONTROL, ACCOUNT_GROUP, ...). */
+  code?: string;
 }
 
 export interface PostResult {
@@ -66,7 +72,13 @@ async function learnFromRows(
   return touched;
 }
 
-async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): Promise<PostResult> {
+interface PostOptions {
+  partial: boolean;
+  /** The poster holds journal.control (for an approved AIRA request: the requester). */
+  canControl: boolean;
+}
+
+async function postInTx(tx: Tx, id: string, userId: string, { partial, canControl }: PostOptions): Promise<PostResult> {
   // Atomic claim: the UPDATE takes the row lock; a concurrent post waits, then fails the status guard.
   const claim = await tx.cashBookDraft.updateMany({ where: { id, status: { in: [...EDITABLE_STATUSES] } }, data: { lastError: null } });
   if (claim.count === 0) {
@@ -85,8 +97,15 @@ async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): P
     return { draftId: id, draftNumber: draft.draftNumber, status: 'Posted', postedCount: 0, failed: [], journals: [], learned: 0, totalAmount: 0 };
   }
 
+  const rule = manualJournalRule(canControl);
   const accountIds = [...new Set(todo.map((r) => r.accountId).filter((a): a is string => !!a))];
-  const accounts = await tx.account.findMany({ where: { id: { in: accountIds } }, select: { id: true, isGroup: true, isActive: true, accountNumber: true } });
+  const [accounts, control] = await Promise.all([
+    tx.account.findMany({
+      where: { id: { in: accountIds } },
+      select: { id: true, accountNumber: true, name: true, rootType: true, isGroup: true, isActive: true },
+    }),
+    loadControlAccountMap(tx, rule.alsoRestrict),
+  ]);
   const accMap = new Map(accounts.map((a) => [a.id, a]));
   const fyCache = new Map<string, { id: string } | { error: string }>();
 
@@ -94,9 +113,9 @@ async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): P
   const valid: Array<{ row: (typeof todo)[number]; lines: JournalLineDraft[]; narration: string; fiscalYearId: string }> = [];
   for (const row of todo) {
     const narration = `Buku Kas ${draft.draftNumber} #${row.idx}: ${row.description}`.slice(0, 250);
-    const acc = row.accountId ? accMap.get(row.accountId) : undefined;
-    if (row.accountId && (!acc || acc.isGroup || !acc.isActive)) {
-      failed.push({ idx: row.idx, error: 'Akun lawan tidak valid (tidak ditemukan, akun grup, atau tidak aktif).' });
+    const problem = row.accountId ? postableAccountProblem(accMap.get(row.accountId) ?? null, rule, control.get(row.accountId) ?? null) : null;
+    if (problem) {
+      failed.push({ idx: row.idx, error: problem.message, code: problem.code });
       continue;
     }
     const built = buildRowJournalLines(row, draft.cashAccountId, narration);
@@ -127,7 +146,10 @@ async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): P
   const journals: PostResult['journals'] = [];
   let totalAmount = 0;
   for (const v of valid) {
-    const journal = await postJournalInTx(tx, { date: v.row.rowDate, narration: v.narration, fiscalYearId: v.fiscalYearId, actorId: userId, now, lines: v.lines, sourceType: 'CASH_BOOK' });
+    const journal = await postJournalInTx(tx, {
+      date: v.row.rowDate, narration: v.narration, fiscalYearId: v.fiscalYearId, actorId: userId, now, lines: v.lines,
+      sourceType: 'CASH_BOOK', accountRule: rule,
+    });
     await tx.cashBookDraftRow.update({ where: { id: v.row.id }, data: { journalEntryId: journal.id, postedAt: now, error: null } });
     journals.push({ rowIdx: v.row.idx, journalEntryId: journal.id, entryNumber: journal.entryNumber });
     totalAmount += Number(v.row.amount);
@@ -154,14 +176,22 @@ async function postInTx(tx: Tx, id: string, userId: string, partial: boolean): P
 /**
  * Post a draft. Default is all-or-nothing (any invalid row aborts, nothing is written except the
  * recorded errors); `partial` posts the valid rows and records per-row errors (PartiallyPosted).
+ * `canControl` = the poster holds journal.control; without it rows to control or tax accounts fail.
  */
-export async function postCashBookDraft(db: PrismaClient, id: string, userId: string, opts: { partial?: boolean } = {}): Promise<PostResult> {
+export async function postCashBookDraft(
+  db: PrismaClient,
+  id: string,
+  userId: string,
+  opts: { partial?: boolean; canControl?: boolean } = {},
+): Promise<PostResult> {
   try {
-    return await db.$transaction((tx) => postInTx(tx, id, userId, !!opts.partial), TX_OPTIONS);
+    return await db.$transaction((tx) => postInTx(tx, id, userId, { partial: !!opts.partial, canControl: !!opts.canControl }), TX_OPTIONS);
   } catch (err) {
     if (err instanceof PostBlockedError) {
       await recordPostErrors(db, id, err.failed);
-      throw new RowErrorsError(err.failed.map(fmt));
+      const codes = new Set(err.failed.map((f) => f.code));
+      const shared = codes.size === 1 ? [...codes][0] : undefined;
+      throw new RowErrorsError(err.failed.map(fmt), shared, err.failed);
     }
     throw err;
   }

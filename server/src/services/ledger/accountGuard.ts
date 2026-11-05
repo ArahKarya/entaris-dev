@@ -114,7 +114,20 @@ export const TEMPLATE_RULE: PostableRule = {
   controlHint: 'Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.',
 };
 
-/** System journals whose accounts are chosen by code (year-end close, payment request, settlement). Not the cash book. */
+/**
+ * Payment request and settlement journals. Their expense accounts are picked by the requester and
+ * finance, not by code, so control and tax accounts are refused like a manual journal without
+ * journal.control (there is no right that opens them here). The advance and cash accounts are not
+ * restricted.
+ */
+export const PAYMENT_REQUEST_RULE: PostableRule = {
+  label: 'Akun biaya',
+  allowControl: false,
+  alsoRestrict: TAX_ACCOUNT_ROLES,
+  controlHint: 'Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.',
+};
+
+/** System journals whose accounts are all chosen by code (year-end close, reclass target side). Not the cash book or payment requests. */
 export const DOCUMENT_RULE: PostableRule = { label: 'Akun posting', allowControl: true };
 
 export interface AccountLite {

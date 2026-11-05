@@ -10,10 +10,11 @@ import { z } from 'zod';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodOpen } from '../utils/periodGuard';
-import { updateBalancesForItems } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
 import { PaymentRequestInputSchema } from '../utils/schemas';
 import { cancelJournalInTx } from './gaFinance';
+import { PAYMENT_REQUEST_RULE, assertPostableAccounts, loadControlAccountMap, type PostableRule } from './ledger/accountGuard';
+import { postJournal } from './ledger/postJournal';
 import { checkLineRate, validateTravel } from './paymentRequestTravel';
 import { initialSettlementStatus } from './paymentRequestSettlementRules';
 import {
@@ -137,6 +138,17 @@ export async function assertDetailAccount(tx: Tx, accountId: string, label: stri
   return acc;
 }
 
+/**
+ * Expense line account picked by the requester or finance: an active detail account that is not a
+ * control or tax account (PAYMENT_REQUEST_RULE), checked when chosen so the error does not wait
+ * for Bayar / settlement posting, where postJournal applies the same rule again.
+ */
+export async function assertExpenseAccount(tx: Tx, accountId: string, label: string) {
+  await assertDetailAccount(tx, accountId, label);
+  const control = await loadControlAccountMap(tx, PAYMENT_REQUEST_RULE.alsoRestrict);
+  if (control.has(accountId)) await assertPostableAccounts(tx, [accountId], PAYMENT_REQUEST_RULE);
+}
+
 // Draft create / update
 
 async function normalizeInput(tx: Tx, input: PaymentRequestInput) {
@@ -154,7 +166,7 @@ async function normalizeInput(tx: Tx, input: PaymentRequestInput) {
     if (!cc) throw new BusinessError('Cost center tidak ditemukan.');
   }
   for (const [i, l] of input.lines.entries()) {
-    if (l.expenseAccountId) await assertDetailAccount(tx, l.expenseAccountId, `Akun biaya baris ${i + 1}`);
+    if (l.expenseAccountId) await assertExpenseAccount(tx, l.expenseAccountId, `Akun biaya baris ${i + 1}`);
     assertCheck(checkLineRate(l, `Baris ${i + 1}`));
   }
   assertCheck(validateTravel(type.kind, input, false));
@@ -264,7 +276,7 @@ async function applyLineAccounts(
   lineAccounts: ReadonlyArray<{ id: string; expenseAccountId: string | null }>,
 ) {
   for (const la of lineAccounts) {
-    if (la.expenseAccountId) await assertDetailAccount(tx, la.expenseAccountId, 'Akun biaya');
+    if (la.expenseAccountId) await assertExpenseAccount(tx, la.expenseAccountId, 'Akun biaya');
     const res = await tx.paymentRequestLine.updateMany({
       where: { id: la.id, paymentRequestId: requestId },
       data: { expenseAccountId: la.expenseAccountId },
@@ -372,7 +384,13 @@ export async function assertCashAccount(tx: Tx, accountId: string) {
   return acc;
 }
 
-/** Create a Submitted journal + ledger rows + balance updates for already-balanced lines. */
+/**
+ * Posts a document journal through the one posting function (services/ledger/postJournal.ts) and
+ * keeps this signature for its callers (payment, settlement, cash book). `fiscalYearId` is only
+ * verified against the year of `date` (JOURNAL_FY_MISMATCH), never used to choose it. The party,
+ * when given, goes on every journal item (Kas & Bank "Pihak" column) and is not checked; ledger
+ * rows stay party-less, as before.
+ */
 export async function postJournalInTx(
   tx: Tx,
   input: {
@@ -385,49 +403,26 @@ export async function postJournalInTx(
     partyId?: string | null;
     /** Journal origin; document-backed postings (payment request, settlement) by default. */
     sourceType?: JournalSourceType;
+    /**
+     * Default PAYMENT_REQUEST_RULE: payment request and settlement lines carry expense accounts that
+     * people pick, so no control or tax accounts. The cash book passes manualJournalRule.
+     */
+    accountRule?: PostableRule;
   },
 ) {
-  const { date, narration, fiscalYearId } = input;
-  const entryNumber = await generateDocumentNumber(tx, 'JV', date, fiscalYearId);
-  const journal = await tx.journalEntry.create({
-    data: {
-      entryNumber,
-      date,
-      narration,
-      status: 'Submitted',
-      fiscalYearId,
-      createdBy: input.actorId,
-      submittedAt: input.now,
-      sourceType: input.sourceType ?? 'SYSTEM_DOC',
-      items: {
-        create: input.lines.map((l) => ({
-          accountId: l.accountId,
-          debit: l.debit,
-          credit: l.credit,
-          description: l.description,
-          // Journal-item party only (Kas & Bank "Pihak" column); ledger rows stay party-less.
-          ...(input.partyId ? { partyId: input.partyId } : {}),
-        })),
-      },
-    },
-    include: { items: true },
+  const partyId = input.partyId ?? null;
+  const { journal } = await postJournal(tx, {
+    date: input.date,
+    narration: input.narration,
+    lines: input.lines.map((l) => ({ ...l, partyId })),
+    sourceType: input.sourceType ?? 'SYSTEM_DOC',
+    createdBy: input.actorId,
+    now: input.now,
+    accountRule: input.accountRule ?? PAYMENT_REQUEST_RULE,
+    partyRule: 'off',
+    ledgerPartyless: true,
+    expectFiscalYearId: input.fiscalYearId,
   });
-  await tx.accountingLedgerEntry.createMany({
-    data: journal.items.map((item) => ({
-      date,
-      accountId: item.accountId,
-      debit: item.debit,
-      credit: item.credit,
-      referenceType: 'JournalEntry',
-      referenceId: journal.id,
-      description: item.description ?? narration,
-      fiscalYearId,
-    })),
-  });
-  await updateBalancesForItems(
-    tx,
-    journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) })),
-  );
   return journal;
 }
 

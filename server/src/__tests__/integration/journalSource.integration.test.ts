@@ -20,7 +20,6 @@ const MIGRATION = join(__dirname, '../../../prisma/migrations/2026102700000_jour
 let prisma: PrismaClient;
 let pool: Pool;
 let userId: string;
-let accounts: { id: string }[];
 
 beforeAll(async () => {
   if (!hasDb) return;
@@ -29,8 +28,6 @@ beforeAll(async () => {
   const user = await prisma.user.findFirst({ where: { role: 'Admin', isActive: true } });
   if (!user) throw new Error('No admin user.');
   userId = user.id;
-  accounts = await prisma.account.findMany({ where: { isGroup: false, isActive: true }, select: { id: true }, take: 2 });
-  if (accounts.length < 2) throw new Error('Need two detail accounts.');
 });
 
 afterAll(async () => {
@@ -88,10 +85,20 @@ d('journal_entry_source migration', () => {
 
 d('journal source tagging', () => {
   async function post(tx: Tx, sourceType?: 'CASH_BOOK') {
-    const fy = await tx.fiscalYear.create({
-      data: { name: `IT-${Math.random().toString(36).slice(2, 8)}`, startDate: new Date('2099-01-01'), endDate: new Date('2099-12-31') },
-    });
+    // One fixture year per transaction: the posting takes the year from the date, so a second
+    // year over the same dates would make the passed id a mismatch (JOURNAL_FY_MISMATCH).
+    const fy =
+      (await tx.fiscalYear.findFirst({ where: { name: { startsWith: 'IT-' }, startDate: new Date('2099-01-01') } })) ??
+      (await tx.fiscalYear.create({
+        data: { name: `IT-${Math.random().toString(36).slice(2, 8)}`, startDate: new Date('2099-01-01'), endDate: new Date('2099-12-31') },
+      }));
     const now = new Date('2099-03-01T03:00:00Z');
+    // Own expense and cash accounts: the default rule refuses control accounts, and any existing
+    // detail account could be one.
+    const account = (rootType: 'EXPENSE' | 'ASSET') => tx.account.create({
+      data: { name: `IT-SRC ${rootType}`, accountNumber: `IT-SRC-${Math.random().toString(36).slice(2, 10)}`, accountType: rootType, rootType },
+    });
+    const accounts = [await account('EXPENSE'), await account('ASSET')];
     return postJournalInTx(tx, {
       date: now, narration: 'Uji asal jurnal', fiscalYearId: fy.id, actorId: userId, now,
       lines: [
