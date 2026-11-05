@@ -407,6 +407,33 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Persediaan item": "item inventory",
   "PPN Masukan": "Input VAT",
   "PPN Keluaran": "Output VAT",
+  // coa structure (E2-R6): services/coa/accountRules.ts, utils/schemas.ts
+  "Nomor akun tidak valid. Gunakan angka bertitik dengan digit pertama 1-8, mis. 1.1.6.": "Invalid account number. Use dotted digits starting with 1-8, e.g. 1.1.6.",
+  "Nomor akun {0} tidak valid. Gunakan angka bertitik dengan digit pertama 1-8, mis. 1.1.6.": "Invalid account number {0}. Use dotted digits starting with 1-8, e.g. 1.1.6.",
+  "Induk {0} bukan akun grup.": "Parent {0} is not a group account.",
+  "Akun {0} bertipe {1}, tetapi induk {2} bertipe {3}.": "Account {0} is of type {1}, but its parent {2} is of type {3}.",
+  "Nomor akun {0} harus diawali nomor induk {1}.": "Account number {0} must start with the parent number {1}.",
+  "Akun induk tidak ditemukan.": "Parent account not found.",
+  "Nomor akun {0} bertipe {1}, bukan {2}. Tipe akun ditentukan oleh digit pertama nomor.": "Account number {0} is of type {1}, not {2}. The account type is set by the first digit of the number.",
+  "Akun {0} sudah memiliki transaksi; awalan nomor (golongan akun) tidak dapat diubah.": "Account {0} already has transactions; the number prefix (account class) cannot be changed.",
+  "Akun {0} sudah memiliki transaksi; status grup tidak dapat diubah.": "Account {0} already has transactions; the group status cannot be changed.",
+  "Akun {0} memiliki sub-akun; awalan nomor (golongan akun) tidak dapat diubah.": "Account {0} has sub-accounts; the number prefix (account class) cannot be changed.",
+  "Akun {0} masih bersaldo; kosongkan saldonya sebelum dinonaktifkan.": "Account {0} still has a balance; clear it before deactivating.",
+  "Akun {0} dipakai sebagai Akun Sistem ({1}); lepaskan pemetaannya sebelum dinonaktifkan.": "Account {0} is used as a System Account ({1}); remove the mapping before deactivating.",
+  "Akun {0} masih memiliki sub-akun aktif; nonaktifkan sub-akun terlebih dahulu.": "Account {0} still has active sub-accounts; deactivate them first.",
+  "Akun {0} masih memiliki saldo di buku besar; nonaktifkan setelah saldonya nol.": "Account {0} still has a ledger balance; deactivate it once the balance is zero.",
+  // coa import (E2-R6): services/coa/coaImport.ts, routes/import/coa.ts
+  "Induk {0} tidak ditemukan atau barisnya ditolak.": "Parent {0} was not found or its row was rejected.",
+  "Akun {0} sudah memiliki transaksi; tipe, induk, dan status grup tidak dapat diubah lewat impor.": "Account {0} already has transactions; its type, parent and group status cannot be changed by an import.",
+  "Nomor akun {0} muncul lebih dari sekali di file; baris ini dilewati.": "Account number {0} appears more than once in the file; this row was skipped.",
+  "Baris {0}: gagal menyimpan akun \"{1}\": {2}": "Row {0}: failed to save account \"{1}\": {2}",
+  "Akun {0} memiliki sub-akun; tipenya tidak dapat diubah lewat impor. Gunakan skrip e2-coa-structure-check untuk koreksi tipe.": "Account {0} has sub-accounts; its type cannot be changed by an import. Use the e2-coa-structure-check script to correct the type.",
+  "Data akun {0} berubah saat impor berjalan; baris ini dilewati. Unggah ulang file.": "Account {0} changed while the import was running; this row was skipped. Upload the file again.",
+  // item account (E2-R6): services/inventory/itemAccount.ts
+  "Akun persediaan item": "Item inventory account",
+  "Akun pendapatan layanan": "Service revenue account",
+  "Akun persediaan item tidak dapat diganti selama item masih memiliki stok (termasuk stok negatif). Kosongkan stok di semua gudang terlebih dahulu.": "The item's inventory account cannot be changed while the item still has stock (negative stock included). Empty the stock in every warehouse first.",
+  "Baris {0}: gagal membuat jurnal saldo awal akun \"{1}\": {2}": "Row {0}: failed to create the opening balance journal of account \"{1}\": {2}",
   // Account guard rules (services/ledger/accountGuard.ts manualJournalRule / TEMPLATE_RULE / manualCancelRule); hints keep their leading space.
   "Akun jurnal": "Journal account",
   "Akun template": "Template account",
@@ -416,6 +443,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   " Butuh hak Jurnal ke akun kontrol (journal.control); akun uang muka hanya lewat modul Uang Muka.": " Requires the Journal to control accounts right (journal.control); deposit accounts only through the Deposits module.",
   " Akun uang muka hanya bisa dikoreksi lewat modul Uang Muka.": " Deposit accounts can only be corrected through the Deposits module.",
   " Template jurnal berulang tidak boleh memakai akun kontrol atau pajak.": " Recurring journal templates cannot use control or tax accounts.",
+  // PAYMENT_REQUEST_RULE (payment request and settlement expense lines)
+  "Akun biaya": "Expense account",
+  " Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.": " Payment requests cannot use control or tax accounts; use the Payments or Deposits module.",
   // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
   "Baris {0}: {1}": "Line {0}: {1}",
   "kredit": "credit",

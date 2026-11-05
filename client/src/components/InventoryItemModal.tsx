@@ -70,8 +70,11 @@ export function InventoryItemModal({ isOpen, onClose, editItem }: InventoryItemM
     enabled: isOpen,
   });
 
+  // The server refuses to move an item's stock value to another account; mirror that in the form.
+  const accountLocked = !!editItem && Number(editItem.currentStock) !== 0;
+
   const assetAccounts = (coaData ?? []).filter(
-    (a: any) => a.accountType === 'ASSET' && !a.isGroup
+    (a: any) => a.rootType === 'ASSET' && !a.isGroup
   );
 
   const mutation = useMutation({
@@ -175,11 +178,12 @@ export function InventoryItemModal({ isOpen, onClose, editItem }: InventoryItemM
             </Field>
             <Field
               label={t('inventoryItemModal.fields.account')}
-              hint={t('inventoryItemModal.hints.account')}
+              hint={t(accountLocked ? 'inventoryItemModal.hints.accountLocked' : 'inventoryItemModal.hints.account')}
             >
               {(control) => (
                 <Select
                   value={form.accountId || NO_ACCOUNT}
+                  disabled={accountLocked}
                   onValueChange={v => setForm(f => ({ ...f, accountId: v === NO_ACCOUNT ? '' : v }))}
                 >
                   <SelectTrigger {...control}>

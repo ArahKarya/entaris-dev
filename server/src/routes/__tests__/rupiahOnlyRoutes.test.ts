@@ -48,6 +48,9 @@ describe('COA currency', () => {
   });
 
   it('POST with IDR or without currency creates the account', async () => {
+    // POST runs inside a transaction; hand the callback a client that shares the account mock.
+    const txClient = { $queryRaw: vi.fn(), account: { findUnique: db.account.findUnique, create: db.account.create } };
+    db.$transaction.mockImplementation(async (fn: (tx: typeof txClient) => unknown) => fn(txClient));
     for (const body of [{ ...ACCOUNT, currency: 'idr' }, ACCOUNT]) {
       const r = await callRoute(coaRouter, 'post', '/', { ...actor, body });
       expect(r.status).toBe(201);

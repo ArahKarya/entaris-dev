@@ -280,7 +280,8 @@ describe('rootTypeFromNumber', () => {
     expect(rootTypeFromNumber('2')).toBe('LIABILITY');
     expect(rootTypeFromNumber(' 3.9')).toBe('EQUITY');
     expect(rootTypeFromNumber('4.5')).toBe('REVENUE');
-    expect(rootTypeFromNumber('7.1')).toBe('EXPENSE');
+    expect(rootTypeFromNumber('6.19')).toBe('EXPENSE');
+    expect(rootTypeFromNumber('7.1')).toBe('REVENUE');
     expect(rootTypeFromNumber('8')).toBe('EXPENSE');
     expect(rootTypeFromNumber('9.1')).toBeNull();
     expect(rootTypeFromNumber('')).toBeNull();

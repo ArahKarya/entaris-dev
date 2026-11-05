@@ -17,6 +17,7 @@ import {
 } from '../utils/cashBookSchemas';
 import { REVIEW_THRESHOLD, ROW_LIMIT } from '../utils/cashBookRules';
 import { notifyAdmins } from '../services/notificationService';
+import { hasCap } from '../services/permissionService';
 import {
   RowErrorsError,
   appendDraftRows,
@@ -41,7 +42,14 @@ const router = Router();
 const TX_OPTS = { timeout: 60_000, maxWait: 10_000 } as const;
 
 function fail(res: Response, error: unknown, context: string, fallback: string) {
-  if (error instanceof RowErrorsError) return res.status(400).json({ error: error.message, rowErrors: error.rowErrors });
+  if (error instanceof RowErrorsError) {
+    return res.status(400).json({
+      error: error.message,
+      rowErrors: error.rowErrors,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.failed ? { failed: error.failed } : {}),
+    });
+  }
   return handleRouteError(res, error, context, fallback);
 }
 
@@ -184,7 +192,9 @@ router.post('/:id/post', async (req: AuthRequest, res) => {
   const body = validateBody(PostCashBookDraftSchema, req.body ?? {}, res);
   if (!body) return;
   try {
-    const result = await postCashBookDraft(prisma, req.params.id as string, req.user!.userId, { partial: body.partial });
+    // An approved AIRA request runs as its requester, so this is the requester's right then.
+    const canControl = await hasCap(req.user!.role, 'journal.control');
+    const result = await postCashBookDraft(prisma, req.params.id as string, req.user!.userId, { partial: body.partial, canControl });
     return res.json(result);
   } catch (error) {
     return fail(res, error, 'POST /cash-book-drafts/:id/post', 'Gagal memposting draft buku kas.');

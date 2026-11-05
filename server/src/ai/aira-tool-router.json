@@ -15877,7 +15877,10 @@
       "phase": 1,
       "draftCapable": false,
       "postingEffect": "Tidak ada efek GL/stok. Invoice lama tidak berubah; perubahan akun hanya berlaku untuk invoice berikutnya.",
-      "confirm_template": "Ubah item jasa {id}?"
+      "confirm_template": "Ubah item jasa {id}?",
+      "errors": [
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE: akun pendapatan harus akun REVENUE detail aktif"
+      ]
     },
     {
       "name": "stf_update",
@@ -16638,7 +16641,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Membuat akun baru di bagan akun (akun detail atau akun grup). rootType/accountType harus selaras dengan digit pertama nomor akun (1 aset, 2 kewajiban, 3 ekuitas, 4 pendapatan, 5-8 beban).",
+      "desc": "Membuat akun baru di bagan akun (akun detail atau akun grup). Nomor akun harus angka bertitik dengan digit pertama 1-8; rootType/accountType diturunkan dari digit pertama (1 aset, 2 kewajiban, 3 ekuitas, 4 dan 7 pendapatan, 5, 6, dan 8 beban) dan boleh dikosongkan; nilai yang berbeda ditolak 400. Bila parentId diisi, induk harus akun grup bertipe sama dan nomor akun baru harus diawali nomor induk.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -16658,7 +16661,7 @@
           "in": "body",
           "type": "string",
           "required": true,
-          "description": "Nomor akun unik, format bertitik (mis. 1.1.6). Digit pertama menentukan golongan."
+          "description": "Nomor akun unik, angka bertitik dengan digit pertama 1-8 (mis. 1.1.6). Digit pertama menentukan golongan."
         },
         {
           "name": "name",
@@ -16671,7 +16674,7 @@
           "name": "accountType",
           "in": "body",
           "type": "enum",
-          "required": true,
+          "required": false,
           "enum": [
             "ASSET",
             "LIABILITY",
@@ -16679,13 +16682,13 @@
             "REVENUE",
             "EXPENSE"
           ],
-          "description": "Jenis akun: ASSET, LIABILITY, EQUITY, REVENUE atau EXPENSE."
+          "description": "Opsional; diturunkan dari digit pertama nomor akun. Nilai yang berbeda ditolak 400 (ACCOUNT_TYPE_MISMATCH)."
         },
         {
           "name": "rootType",
           "in": "body",
           "type": "enum",
-          "required": true,
+          "required": false,
           "enum": [
             "ASSET",
             "LIABILITY",
@@ -16693,14 +16696,14 @@
             "REVENUE",
             "EXPENSE"
           ],
-          "description": "Golongan induk; samakan dengan accountType."
+          "description": "Opsional; diturunkan dari digit pertama nomor akun. Nilai yang berbeda ditolak 400 (ACCOUNT_TYPE_MISMATCH)."
         },
         {
           "name": "parentId",
           "in": "body",
           "type": "string",
           "required": false,
-          "description": "ID akun induk (grup) atau null untuk akun akar."
+          "description": "ID akun induk (harus akun grup bertipe sama) atau null untuk akun akar."
         },
         {
           "name": "isGroup",
@@ -16737,7 +16740,11 @@
       ],
       "errors": [
         "409: Nomor akun sudah digunakan.",
-        "400: induk bukan akun grup / tidak ditemukan.",
+        "400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.",
+        "400 ACCOUNT_TYPE_MISMATCH: rootType/accountType berbeda dari digit pertama nomor akun.",
+        "400 ACCOUNT_PARENT_NOT_FOUND: akun induk tidak ditemukan.",
+        "400 ACCOUNT_PARENT_NOT_GROUP: induk bukan akun grup.",
+        "400 ACCOUNT_PARENT_MISMATCH: tipe induk berbeda atau nomor tidak diawali nomor induk.",
         "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
       "related": [
@@ -21468,7 +21475,8 @@
       "postingEffect": "Tidak ada efek GL/stok (hanya master; stok 0, WAC 0).",
       "confirm_template": "Buat item persediaan {code} - {name} (satuan {unit})?",
       "errors": [
-        "400: Kode item sudah digunakan"
+        "400: Kode item sudah digunakan",
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan bukan akun ASSET detail aktif non-kontrol"
       ],
       "related": [
         "inv_item_update",
@@ -22872,7 +22880,8 @@
         "400: jenis tidak aktif",
         "400: pilih vendor",
         "400: akun biaya tidak valid",
-        "400: Pengajuan hanya rupiah (currency selain IDR)"
+        "400: Pengajuan hanya rupiah (currency selain IDR)",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "payreqtype_list",
@@ -22951,7 +22960,8 @@
       "errors": [
         "400: tidak sedang menunggu persetujuan",
         "400: tidak dapat memproses pengajuan sendiri",
-        "400: bukan atasan/Keuangan/direktur yang berwenang"
+        "400: bukan atasan/Keuangan/direktur yang berwenang",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "payreq_reject",
@@ -23142,7 +23152,8 @@
         "400: akun biaya baris N belum diisi",
         "400: akun kas sama dengan akun biaya",
         "400: tahun buku ditutup",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "payreq_set_accounts",
@@ -23490,7 +23501,8 @@
         "400: pertanggungjawaban belum disetujui atasan",
         "400: tanggal sebelum tanggal bayar",
         "400: tahun buku ditutup",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "payreq_settlement_preview",
@@ -26866,7 +26878,8 @@
       "postingEffect": "Tidak ada efek GL/stok. Hanya master data.",
       "confirm_template": "Buat item jasa {code} - {name}?",
       "errors": [
-        "409/400: kode sudah dipakai."
+        "409/400: kode sudah dipakai.",
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE: akun pendapatan harus akun REVENUE detail aktif"
       ]
     },
     {
@@ -27987,7 +28000,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. Catatan kode: hanya accountNumber, name, isGroup, isActive yang benar-benar disimpan; accountType/rootType diturunkan ulang dari nomor akun, parentId diabaikan; currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"
@@ -27996,9 +28009,6 @@
         "id": "string",
         "accountNumber": "string",
         "name": "string",
-        "accountType": "enum",
-        "rootType": "enum",
-        "parentId": "string",
         "isGroup": "boolean",
         "currency": "enum",
         "isActive": "boolean"
@@ -28023,38 +28033,6 @@
           "type": "string",
           "required": false,
           "description": "Nama."
-        },
-        {
-          "name": "accountType",
-          "in": "body",
-          "type": "enum",
-          "required": false,
-          "enum": [
-            "ASSET",
-            "LIABILITY",
-            "EQUITY",
-            "REVENUE",
-            "EXPENSE"
-          ]
-        },
-        {
-          "name": "rootType",
-          "in": "body",
-          "type": "enum",
-          "required": false,
-          "enum": [
-            "ASSET",
-            "LIABILITY",
-            "EQUITY",
-            "REVENUE",
-            "EXPENSE"
-          ]
-        },
-        {
-          "name": "parentId",
-          "in": "body",
-          "type": "string",
-          "required": false
         },
         {
           "name": "isGroup",
@@ -28093,12 +28071,18 @@
       "postingEffect": "Tidak ada efek GL/stok; mengubah label/status master akun. Menonaktifkan akun menyembunyikannya dari dropdown tetapi riwayat jurnal tetap.",
       "confirm_template": "Ubah akun {id}: nomor/nama/status sesuai input?",
       "prerequisites": [
-        "Akun bukan akun sistem bila nomor diganti.",
-        "Akun grup yang masih punya sub-akun tidak bisa diubah menjadi akun detail."
+        "Akun bukan akun sistem bila nomor diganti atau akun dinonaktifkan.",
+        "Akun grup yang masih punya sub-akun tidak bisa diubah menjadi akun detail.",
+        "Akun yang sudah punya transaksi: digit pertama nomor dan status grup terkunci."
       ],
       "errors": [
         "409: nomor akun dipakai akun lain",
         "400: akun sistem tidak boleh diganti nomor",
+        "400 ACCOUNT_NUMBER_FORMAT: nomor akun bukan angka bertitik dengan digit pertama 1-8.",
+        "400 ACCOUNT_STRUCTURE_LOCKED: awalan nomor atau status grup terkunci (ada transaksi), atau nomor akun yang punya sub-akun.",
+        "400 ACCOUNT_HAS_CHILDREN: akun grup masih punya sub-akun.",
+        "400 ACCOUNT_PARENT_MISMATCH: nomor baru tidak diawali nomor induk.",
+        "400 ACCOUNT_DEACTIVATE_BLOCKED: saldo tidak nol, Akun Sistem, sub-akun aktif, atau saldo buku besar.",
         "404: akun tidak ditemukan",
         "400: Pembukuan hanya rupiah: mata uang akun harus IDR."
       ],
@@ -29926,7 +29910,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang; mengganti accountId hanya berlaku untuk transaksi berikutnya.",
+      "desc": "Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif (ITEM_ACCOUNT_HAS_STOCK).",
       "risk": "write",
       "roles": [
         "Admin",
@@ -30021,7 +30005,9 @@
       "postingEffect": "Tidak ada efek GL/stok langsung. Catatan: mengganti accountId membuat transaksi baru memakai akun lain (jurnal lama tidak dipindah).",
       "confirm_template": "Ubah master item {id}?",
       "errors": [
-        "404: item tidak ditemukan"
+        "404: item tidak ditemukan",
+        "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan tidak valid",
+        "400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok"
       ],
       "related": [
         "inv_items_list"
@@ -31823,7 +31809,8 @@
       "errors": [
         "400: hanya pengaju",
         "400: hanya bisa diubah saat Draf/Perlu Revisi",
-        "400: Pengajuan hanya rupiah (currency selain IDR)"
+        "400: Pengajuan hanya rupiah (currency selain IDR)",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "payreq_create",
@@ -31891,7 +31878,8 @@
       "errors": [
         "400: hanya Keuangan",
         "400: tahap tidak sesuai",
-        "400: akun bukan akun detail aktif"
+        "400: akun bukan akun detail aktif",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "coa_flat",
@@ -32012,7 +32000,8 @@
       "errors": [
         "400: hanya pengaju",
         "400: hanya untuk uang muka yang sudah dibayar",
-        "400: hanya bisa diubah saat Belum Dipertanggungjawabkan/Perlu Revisi"
+        "400: hanya bisa diubah saat Belum Dipertanggungjawabkan/Perlu Revisi",
+        "400 ACCOUNT_CONTROL: akun biaya adalah akun kontrol (Piutang/Hutang Usaha, Persediaan, Hutang Belum Tagih, Uang Muka Customer/Supplier) atau akun PPN; pengajuan dana tidak pernah boleh memakai akun itu, juga untuk Admin. Pilih akun beban; bayar Supplier lewat pay_record, uang muka lewat modul Uang Muka"
       ],
       "related": [
         "payreq_settlement_submit",
@@ -35179,7 +35168,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "{ status, postedCount, totalAmount, journals[{rowIdx, journalEntryId, entryNumber}], failed[{idx, error}], learned }.",
+      "outputSummary": "{ status, postedCount, totalAmount, journals[{rowIdx, journalEntryId, entryNumber}], failed[{idx, error, code?}], learned }. code diisi untuk masalah akun (mis. ACCOUNT_CONTROL).",
       "handler": "POST /api/cash-book-drafts/:id/post",
       "permAction": "edit",
       "enabled": true,
@@ -35188,14 +35177,17 @@
       "draftCapable": false,
       "postingEffect": "Jurnal JV-… (Submitted) per baris ke buku besar tak-terhapus; saldo akun kas dan akun lawan berubah. pengeluaran/lainnya keluar = DR akun lawan / CR kas; pemasukan/lainnya masuk = DR kas / CR akun lawan; uang_muka = DR Uang Muka Karyawan (1.5.6) / CR kas; terima_kasbon = DR kas / CR Uang Muka Karyawan. Tidak ada efek stok.",
       "confirm_template": "POSTING draft buku kas {id} menjadi jurnal (satu jurnal per baris)? Saldo kas dan akun lawan akan berubah.",
-      "accessNote": "Pemegang izin edit modul Jurnal (sama dengan membuat jurnal manual). Aktor AIRA level Standar selalu lewat antrian persetujuan.",
+      "accessNote": "Pemegang izin edit modul Jurnal (sama dengan membuat jurnal manual). Akun lawan mengikuti aturan jurnal manual: akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability journal.control (default hanya Admin); akun Uang Muka Customer/Supplier selalu ditolak. Untuk pengajuan yang disetujui, hak yang dipakai adalah hak pengaju. Aktor AIRA level Standar selalu lewat antrian persetujuan.",
       "prerequisites": [
         "Draft berstatus Draft atau Sebagian Diposting.",
         "Setiap baris non-skip punya akun lawan valid (detail, aktif, bukan akun kas).",
+        "Baris ke akun kontrol (piutang, hutang, persediaan, PPN, hutang belum ditagih) hanya untuk pemegang journal.control (Admin); akun uang muka Customer/Supplier tidak pernah bisa.",
         "Tahun buku terbuka untuk tanggal tiap baris."
       ],
       "errors": [
-        "400: baris bermasalah (rowErrors) - tidak ada yang diposting",
+        "400: baris bermasalah - tidak ada yang diposting; body { error, rowErrors[], failed[{idx, error, code?}], code? }. code hanya diisi bila semua baris gagal dengan kode yang sama (mis. ACCOUNT_CONTROL)",
+        "400 ACCOUNT_CONTROL (per baris): akun lawan adalah akun kontrol dan pemosting tidak punya journal.control, atau akun uang muka (selalu ditolak). Tanpa partial: tidak ada yang diposting, kode ada di failed[].code (dan di code bila semua baris gagal karena ini). Mode partial: baris itu gagal dengan failed[].code = ACCOUNT_CONTROL di respons 200, baris lain tetap diposting",
+        "400 ACCOUNT_NOT_FOUND / ACCOUNT_GROUP / ACCOUNT_INACTIVE (per baris): akun lawan tidak ada, akun grup, atau tidak aktif; kode di failed[].code seperti ACCOUNT_CONTROL",
         "400: draft sudah diposting",
         "400: tahun buku ditutup untuk tanggal baris",
         "400 PERIOD_LOCKED: tanggal baris pada atau sebelum tanggal kunci periode bulanan (mode partial: baris itu gagal, baris lain tetap diposting)",

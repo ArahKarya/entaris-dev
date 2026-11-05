@@ -18,7 +18,7 @@ import type { PaymentRequestSettlementDraftSchema } from '../utils/schemas';
 import { cancelJournalInTx } from './gaFinance';
 import {
   assertCashAccount,
-  assertDetailAccount,
+  assertExpenseAccount,
   addHistory,
   eventOf,
   loadRequest,
@@ -72,7 +72,7 @@ export async function saveSettlementDraftInTx(tx: Tx, id: string, actor: Actor, 
   const plannedById = new Map(planned.map((p) => [p.id, p]));
   for (const [i, l] of input.lines.entries()) {
     if (l.plannedLineId && !plannedById.has(l.plannedLineId)) throw new BusinessError(`Baris realisasi ${i + 1}: baris rencana tidak ditemukan.`);
-    if (l.expenseAccountId) await assertDetailAccount(tx, l.expenseAccountId, `Akun biaya baris ${i + 1}`);
+    if (l.expenseAccountId) await assertExpenseAccount(tx, l.expenseAccountId, `Akun biaya baris ${i + 1}`);
   }
   const deadline = toDay(input.deadline);
   if (deadline && pr.paymentDate && deadline < pr.paymentDate) throw new BusinessError('Batas waktu tidak boleh sebelum tanggal pembayaran uang muka.');
@@ -170,7 +170,7 @@ async function loadPostingContext(tx: Tx, id: string, lineAccounts: LineAccounts
   const overrides = new Map((lineAccounts ?? []).map((la) => [la.id, la.expenseAccountId]));
   for (const la of lineAccounts ?? []) {
     if (!rows.some((r) => r.id === la.id)) throw new BusinessError('Baris realisasi tidak ditemukan pada pengajuan ini.');
-    if (la.expenseAccountId) await assertDetailAccount(tx, la.expenseAccountId, 'Akun biaya');
+    if (la.expenseAccountId) await assertExpenseAccount(tx, la.expenseAccountId, 'Akun biaya');
   }
   const lines = rows.map((r) => ({
     id: r.id,

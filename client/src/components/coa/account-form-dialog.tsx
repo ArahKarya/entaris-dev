@@ -20,7 +20,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Field } from '@/components/shared';
-import { ROOT_TYPES, apiErrorMessage, rootTypeFromNumber, rootTypeLabel, walkTree, type CoaNode } from './coa-tree';
+import { isValidAccountNumber, normalizeAccountNumber, prefixChanged } from '@/lib/accountRules';
+import { apiErrorMessage, rootTypeFromNumber, rootTypeLabel, walkTree, type CoaNode } from './coa-tree';
 import { SystemAccountBadge } from './coa-tree-table';
 
 const NO_PARENT = '__root__';
@@ -39,17 +40,22 @@ function Checkbox({
   onChange,
   label,
   hint,
+  disabled,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-muted/40 p-3 text-sm">
+    <label
+      className={`flex items-start gap-2.5 rounded-md border border-border bg-muted/40 p-3 text-sm ${disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+    >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         className="mt-0.5 size-4 shrink-0 rounded accent-primary"
       />
@@ -74,7 +80,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
   const [accountNumber, setAccountNumber] = useState('');
   const [name, setName] = useState('');
   const [rootType, setRootType] = useState<string>('ASSET');
-  const [accountType, setAccountType] = useState<string>('ASSET');
   const [isGroup, setIsGroup] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState('');
@@ -101,7 +106,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
       setAccountNumber(p ? `${p.accountNumber}.` : '');
       setName('');
       setRootType(p?.rootType ?? 'ASSET');
-      setAccountType(p?.account.accountType ?? 'ASSET');
       setIsGroup(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,7 +121,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
     if (accountNumber === '' || accountNumber === prevPrefix) setAccountNumber(next ? `${next.accountNumber}.` : '');
     if (next) {
       setRootType(next.rootType);
-      setAccountType(next.account.accountType);
     }
   };
 
@@ -127,7 +130,6 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
       const derived = rootTypeFromNumber(value);
       if (derived) {
         setRootType(derived);
-        setAccountType(derived);
       }
     }
   };
@@ -146,27 +148,40 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    const number = normalizeAccountNumber(accountNumber);
     const next = {
-      accountNumber: accountNumber.trim() ? undefined : t('accountFormDialog.errors.accountNumber'),
+      accountNumber: !number
+        ? t('accountFormDialog.errors.accountNumber')
+        : changesNumber && !isValidAccountNumber(number)
+          ? t('accountFormDialog.errors.accountNumberFormat')
+          : locked && editNode && prefixChanged(editNode.accountNumber, number)
+            ? t('accountFormDialog.errors.prefixLocked')
+            : undefined,
       name: name.trim() ? undefined : t('accountFormDialog.errors.name'),
     };
     setFieldErrors(next);
     if (next.accountNumber || next.name) return;
-    if (isEdit) {
-      mutation.mutate({ accountNumber, name, isGroup, isActive });
+    if (isEdit && editNode) {
+      // Only the fields that changed, so a rename never re-sends (or re-derives) the structure.
+      const changes: Record<string, unknown> = {};
+      if (number !== editNode.accountNumber) changes.accountNumber = number;
+      if (name !== editNode.name) changes.name = name;
+      if (isGroup !== editNode.isGroup) changes.isGroup = isGroup;
+      if (isActive !== editNode.isActive) changes.isActive = isActive;
+      if (Object.keys(changes).length === 0) return onClose();
+      mutation.mutate(changes);
     } else {
       mutation.mutate({
-        accountNumber,
+        accountNumber: number,
         name,
-        accountType,
-        rootType,
         isGroup,
-        description: '',
         parentId: parent?.id || null,
       });
     }
   };
 
+  const locked = !!editNode?.account.locked;
+  const changesNumber = !isEdit || normalizeAccountNumber(accountNumber) !== editNode?.accountNumber;
   const editRoles = editNode ? systemRoles.get(editNode.id) : undefined;
 
   return (
@@ -231,41 +246,26 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
                 label={t('accountFormDialog.rootType')}
                 hint={
                   isEdit
-                    ? t('accountFormDialog.rootTypeHint.edit')
+                    ? locked
+                      ? t('accountFormDialog.rootTypeHint.locked')
+                      : t('accountFormDialog.rootTypeHint.edit')
                     : parent
                       ? t('accountFormDialog.rootTypeHint.parent')
                       : t('accountFormDialog.rootTypeHint.auto')
                 }
               >
-                {(ctl) =>
-                  isEdit || parent ? (
-                    <Input
-                      {...ctl}
-                      value={rootTypeLabel(isEdit ? (rootTypeFromNumber(accountNumber) ?? rootType) : rootType)}
-                      disabled
-                      readOnly
-                    />
-                  ) : (
-                    <Select
-                      value={rootType}
-                      onValueChange={(v) => {
-                        setRootType(v);
-                        setAccountType(v);
-                      }}
-                    >
-                      <SelectTrigger {...ctl}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROOT_TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {rootTypeLabel(type)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )
-                }
+                {(ctl) => (
+                  <Input
+                    {...ctl}
+                    value={rootTypeLabel(
+                      isEdit && !locked && editNode && prefixChanged(editNode.accountNumber, normalizeAccountNumber(accountNumber))
+                        ? (rootTypeFromNumber(accountNumber) ?? rootType)
+                        : rootType,
+                    )}
+                    disabled
+                    readOnly
+                  />
+                )}
               </Field>
             </div>
 
@@ -277,7 +277,8 @@ export function AccountFormDialog({ state, onClose, tree, systemRoles }: Account
               checked={isGroup}
               onChange={setIsGroup}
               label={t('accountFormDialog.isGroup')}
-              hint={t('accountFormDialog.isGroupHint')}
+              hint={locked ? t('accountFormDialog.lockedHint') : t('accountFormDialog.isGroupHint')}
+              disabled={locked}
             />
             {isEdit && (
               <Checkbox

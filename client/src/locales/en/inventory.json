@@ -38,6 +38,7 @@
     },
     "hints": {
       "account": "Select an asset account for automatic journals when stock goes in or out.",
+      "accountLocked": "The account cannot be changed while the item still has stock.",
       "minimumStock": "A low stock warning appears when stock falls below this value."
     },
     "noAccount": "Not selected",

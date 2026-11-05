@@ -6,6 +6,7 @@
  */
 import { toNumber } from '@/lib/format';
 import i18n from '@/i18n';
+import { deriveRootType } from '@/lib/accountRules';
 
 export const ROOT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'] as const;
 export type RootType = (typeof ROOT_TYPES)[number];
@@ -27,28 +28,12 @@ export function isRootType(value: string): value is RootType {
 }
 
 /**
- * Root type implied by the first segment of an account number (mirrors the
- * server's deriveRootType, which overrides the submitted value): 1 Aset,
- * 2 Kewajiban, 3 Ekuitas, 4 Pendapatan, 5–8 Beban. Null when not derivable.
+ * Root type implied by the first segment of an account number (the server derives it from the
+ * same table, lib/accountRules.ts): 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 + 7 Pendapatan, 5, 6, 8 Beban.
+ * Null when not derivable.
  */
 export function rootTypeFromNumber(accountNumber: string): RootType | null {
-  switch (accountNumber.trim().split('.')[0]) {
-    case '1':
-      return 'ASSET';
-    case '2':
-      return 'LIABILITY';
-    case '3':
-      return 'EQUITY';
-    case '4':
-      return 'REVENUE';
-    case '5':
-    case '6':
-    case '7':
-    case '8':
-      return 'EXPENSE';
-    default:
-      return null;
-  }
+  return deriveRootType(accountNumber);
 }
 
 /** Account as returned by GET /api/coa (balance is a Prisma Decimal string). */
@@ -63,6 +48,8 @@ export interface CoaAccount {
   balance: number | string | null;
   parentId: string | null;
   description?: string | null;
+  /** An active ledger row freezes the number prefix and the group flag. */
+  locked?: boolean;
   children?: CoaAccount[];
 }
 

@@ -31,7 +31,7 @@
   },
   "src/routes/coa.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 5
     }
   },
   "src/routes/customerDeposits.ts": {
@@ -56,7 +56,7 @@
   },
   "src/routes/import/coa.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 5
     }
   },
   "src/routes/import/inventory.ts": {
