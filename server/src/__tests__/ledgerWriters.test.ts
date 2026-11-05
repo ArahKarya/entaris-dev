@@ -27,7 +27,7 @@ const ALLOWLIST: Record<string, Counts> = {
   'routes/import/journals.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/import/parties.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
   'routes/inventory/movements.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2, 'accountingLedgerEntry.updateMany': 2, 'journalEntry.update': 2 },
-  'routes/journals.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1, 'accountingLedgerEntry.updateMany': 1 },
+  'routes/journals.ts': { 'accountingLedgerEntry.updateMany': 1 },
   'routes/projectGuarantees.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'routes/recurring.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/settings/dummyData.ts': { 'accountingLedgerEntry.deleteMany': 1, 'journalItem.deleteMany': 1, 'journalEntry.deleteMany': 1 },
