@@ -58,7 +58,7 @@ Langkah: `payreq_settlement_save` (draf realisasi) → `payreq_settlement_submit
 | R = A | tanpa baris kas | — |
 | `payreq_settlement_cancel_posting` | (void jurnal pertanggungjawaban) | (void jurnal pertanggungjawaban) |
 | `eambill_pay` method JOURNAL | Akun beban | Kas/Bank (lunas) |
-| `eambill_pay` method PURCHASE_INVOICE | Akun beban | Hutang Usaha 2.1.1 (dilunasi lewat modul Pembayaran) |
+| `eambill_pay` method PURCHASE_INVOICE | Akun beban | Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; dilunasi lewat modul Pembayaran) |
 | `eambill_cancel` | void jurnal / batalkan faktur | — |
 
 Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal; akun kas/bank tidak boleh sama dengan akun biaya; tahun buku harus terbuka. Posting uang muka mengikuti `kind` jenis (akun 1.5.6), tetapi wajib-tidaknya pertanggungjawaban hanya mengikuti `type.requiresSettlement`; jenis uang muka yang tidak mewajibkan pertanggungjawaban tidak dilacak (bersihkan 1.5.6 lewat jurnal manual). Persetujuan, pengajuan, dan pengembalian TIDAK membuat jurnal; hanya `pay`, `settlement/post`, dan `eambill_pay` yang membuat jurnal.
@@ -307,7 +307,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 
 **Isi hasil:** { success, data: hasil posting (jurnal/faktur) }.
 
-**Efek pembukuan/stok:** JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha 2.1.1 (butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.
+**Efek pembukuan/stok:** JOURNAL: DR akun beban (accountId atau default per jenis) / CR Kas/Bank (creditAccountId atau pemetaan default) — lunas. PURCHASE_INVOICE: DR akun beban / CR Hutang Usaha (akun AP terpetakan di Akun Sistem, bawaan 2.1.1; butuh partyId vendor), hutang dilunasi kemudian via Pembayaran. Dokumen EAM ditandai sudah diposting.
 
 **Teks konfirmasi:** POSTING Tagihan EAM {kind} {id} dengan metode {method} senilai {amount}?
 
@@ -323,6 +323,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: akun debit = akun kredit
 - 400: vendor wajib untuk PURCHASE_INVOICE
 - 400: sudah diposting
+- 400 ACCOUNT_MAPPING_MISSING: peran AP (PURCHASE_INVOICE) atau CASH (JOURNAL tanpa akun sumber) belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`eambill_list`](#eambill_list), [`eambill_cancel`](#eambill_cancel)

@@ -40,20 +40,32 @@ export const CancelReasonSchema = z.object({
   reason: z.string().trim().max(500, 'Alasan pembatalan maksimal 500 karakter.').nullable().optional(),
 });
 
-// Journal Entry
+// Journal Entry. Shape only: amounts stay as sent (number or plain numeric string) and are checked
+// by the one line validator (utils/journalLineRules.ts: Decimal, no negatives, at most 2 decimals,
+// one side per line, balanced), so the schema never rounds or re-checks them.
+const JournalAmountSchema = z
+  .union([z.number(), z.string()], { error: 'Jumlah harus berupa angka.' })
+  .nullable()
+  .optional();
+
 const JournalItemSchema = z.object({
   accountId: z.string().min(1, 'Akun wajib dipilih.'),
-  debit: z.coerce.number().min(0),
-  credit: z.coerce.number().min(0),
+  debit: JournalAmountSchema,
+  credit: JournalAmountSchema,
   partyId: z.string().nullable().optional(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
 });
 
 export const CreateJournalSchema = z.object({
-  date: z.string().min(1, 'Tanggal wajib diisi.'),
+  date: z
+    .string()
+    .min(1, 'Tanggal wajib diisi.')
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD.')
+    .refine((d) => !Number.isNaN(Date.parse(`${d}T00:00:00.000Z`)) && new Date(`${d}T00:00:00.000Z`).toISOString().startsWith(d), 'Format tanggal harus YYYY-MM-DD.'),
   narration: z.string().min(1, 'Keterangan wajib diisi.'),
-  items: z.array(JournalItemSchema).min(1, 'Minimal satu baris jurnal.'),
+  items: z.array(JournalItemSchema).min(2, 'Jurnal minimal memiliki 2 baris bernilai.'),
 });
+export type CreateJournalInput = z.infer<typeof CreateJournalSchema>;
 
 // Sales Invoice
 const InvoiceItemSchema = z.object({

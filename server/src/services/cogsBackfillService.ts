@@ -4,6 +4,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
 import { logger } from '../lib/logger';
+import { resolveJournalFiscalYear } from '../utils/periodGuard';
 
 type Tx = Prisma.TransactionClient;
 
@@ -34,13 +35,12 @@ export async function settleCogsBackfillForItem(
     itemId: string;
     qtyAvailable: number;       // qty of the stock-in available to settle deficit
     unitCostNow: number;        // cost basis per unit for this stock-in
-    fiscalYearId: string;
     userId: string;
     settleDate: Date;
     source: SettleSource;
   },
 ): Promise<SettleResult | null> {
-  const { itemId, qtyAvailable, unitCostNow, fiscalYearId, userId, settleDate, source } = params;
+  const { itemId, qtyAvailable, unitCostNow, userId, settleDate, source } = params;
   if (qtyAvailable <= NEAR_ZERO_QTY) return null;
 
   const pendings = await tx.cogsBackfillQueue.findMany({
@@ -98,6 +98,8 @@ export async function settleCogsBackfillForItem(
     const creditAccountId = isPositive ? invAccountId : cogsAccount.id;
     const amt = Math.abs(diffNum);
 
+    // The settlement journal belongs to the year of its own date, never to the triggering document's year.
+    const fiscalYearId = (await resolveJournalFiscalYear(tx, settleDate)).id;
     const entryNumber = await generateDocumentNumber(tx, 'JV', settleDate, fiscalYearId);
     const narration = `Auto-settle COGS ${item.name}: ${settlements.length} entry, trigger ${source.type}${source.refNo ? ' ' + source.refNo : ''}`;
 

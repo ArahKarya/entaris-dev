@@ -4,12 +4,13 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { updateBalancesForItems, recalcPartyOutstanding } from '../utils/accountBalance';
 import { BusinessError } from '../utils/errors';
+import { mappedAccount } from './systemAccounts';
 import { voidJournalInTx } from '../utils/journalCancel';
 
 /**
  * GA/EAM bill posting (vehicle tax, EAM service logs, spare-part MRs). Two paths:
  *   Journal (paid now):          DR expense / CR cash-bank
- *   Purchase invoice (billed):   DR expense / CR 2.1.1 Hutang Usaha, settled via Payments
+ *   Purchase invoice (billed):   DR expense / CR the mapped AP account, settled via Payments
  * Each GA document has at most one journal (unique journal_entry_id); cancel before re-posting.
  */
 
@@ -17,8 +18,6 @@ type Tx = Prisma.TransactionClient;
 
 export const ACC_VEHICLE_TAX = '6.41'; // Vehicle tax & licensing expense. 6.17 is income tax expense, not vehicle tax; entries before Aug 2026 sit in 6.7.
 export const ACC_VEHICLE_MAINTENANCE = '6.7'; // Beban Pemeliharaan Kendaraan
-export const ACC_AP = '2.1.1'; // Hutang Usaha
-export const ACC_CASH_FALLBACK = '1.1.1';
 
 export type GaBillKind = 'VEHICLE_TAX' | 'SERVICE_LOG' | 'MATERIAL_REQUEST';
 export type GaPayMethod = 'JOURNAL' | 'PURCHASE_INVOICE';
@@ -64,13 +63,8 @@ async function assertDetailAccount(tx: Tx, accountId: string, label: string) {
 
 async function resolveCashAccount(tx: Tx, creditAccountId?: string | null) {
   if (creditAccountId) return assertDetailAccount(tx, creditAccountId, 'Akun sumber dana');
-  const mapping = await tx.systemAccountMapping.findFirst({
-    where: { role: 'CASH' },
-    orderBy: { sortOrder: 'asc' },
-    select: { accountId: true },
-  });
-  if (mapping?.accountId) return assertDetailAccount(tx, mapping.accountId, 'Akun sumber dana');
-  return accountByNumber(tx, ACC_CASH_FALLBACK);
+  const cash = await mappedAccount(tx, 'CASH');
+  return assertDetailAccount(tx, cash.id, 'Akun sumber dana');
 }
 
 /** Bikin JE 2 baris + ledger + update saldo. Dipakai jalur JOURNAL. */
@@ -170,7 +164,7 @@ async function createExpensePurchaseInvoice(
   if (!party.isActive) throw new BusinessError('Supplier sudah tidak aktif.');
 
   const fiscalYear = await getOpenFiscalYear(tx, opts.date);
-  const apAccount = await accountByNumber(tx, ACC_AP);
+  const apAccount = await mappedAccount(tx, 'AP');
   const invoiceNumber = await generateDocumentNumber(tx, 'PI', opts.date, fiscalYear.id);
   const total = new Decimal(opts.amount).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 
@@ -331,7 +325,7 @@ export async function payVehicleTaxInTx(tx: Tx, args: PayGaBillArgs) {
     });
     journalEntryId = journalEntry.id;
     purchaseInvoiceId = invoice.id;
-    creditAccountId = (await accountByNumber(tx, ACC_AP)).id;
+    creditAccountId = (await mappedAccount(tx, 'AP')).id;
   } else {
     const cashAcc = await resolveCashAccount(tx, args.creditAccountId);
     const je = await createSimpleJournal(tx, {
@@ -441,7 +435,7 @@ export async function payServiceLogViaInvoiceInTx(tx: Tx, args: PayGaBillArgs) {
     userId: args.userId,
   });
 
-  const apAccount = await accountByNumber(tx, ACC_AP);
+  const apAccount = await mappedAccount(tx, 'AP');
 
   return tx.gaVehicleServiceLog.update({
     where: { id: log.id },
@@ -542,7 +536,7 @@ export async function payMaterialRequestInTx(tx: Tx, args: PayGaBillArgs) {
     });
     journalEntryId = journalEntry.id;
     purchaseInvoiceId = invoice.id;
-    creditAccountId = (await accountByNumber(tx, ACC_AP)).id;
+    creditAccountId = (await mappedAccount(tx, 'AP')).id;
   } else {
     const cashAcc = await resolveCashAccount(tx, args.creditAccountId);
     const je = await createSimpleJournal(tx, {

@@ -106,11 +106,12 @@ function holdNextCommit() {
 }
 
 /**
- * A committed user whose role holds only doc.cancel (the Journal menu cancel needs it; CI has no
- * built-in roles). Both racing connections must see it, so it is committed; `remove` deletes it.
+ * A committed user whose role holds doc.cancel (the Journal menu cancel needs it; CI has no
+ * built-in roles) and journal.control (a manual journal line on the receivable account needs it).
+ * Both racing connections must see it, so it is committed; `remove` deletes it.
  */
 async function committedCanceller(): Promise<{ actor: { userId: string; role: string }; remove: () => Promise<void> }> {
-  const actor = await createCapUser(prisma as unknown as Tx, ['doc.cancel']);
+  const actor = await createCapUser(prisma as unknown as Tx, ['doc.cancel', 'journal.control']);
   return {
     actor,
     remove: async () => {
@@ -174,7 +175,7 @@ d('journal menu cancel run twice at once', () => {
             { accountId: equity.id, debit: 0, credit: 5_000_000 },
           ],
         },
-        userId,
+        ...actor,
       });
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       journalId = created.body.id as string;

@@ -378,6 +378,8 @@
     "formats": "CSV, XLSX, XLS supported (max {{size}})",
     "chooseFile": "Choose import file",
     "downloadTemplate": "Download Excel template",
+    "allOrNothing": "No journal is posted until every row is fixed.",
+    "alreadyImported": "{{count}} journals were already imported and skipped:",
     "previewSummary": "{{valid}} valid rows, {{errors}} errors",
     "errorsCount_one": "Error ({{count}}):",
     "errorsCount_other": "Errors ({{count}}):",

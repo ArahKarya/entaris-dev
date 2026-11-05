@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { JournalSourceType } from '@prisma/client';
 import {
   classifyLegacyJournal,
+  depositRefundSourceKey,
   isMenuCancellableSource,
   isNearImportBatch,
   meetsConfidence,
+  parseRemapSourceKey,
   recurringNarrations,
+  sourceKeys,
   type LegacyJournalFacts,
 } from '../journalSource';
 
@@ -144,5 +147,52 @@ describe('isMenuCancellableSource', () => {
     expect(others).toEqual(['OPENING', 'FY_CLOSE', 'DEPRECIATION', 'DEPOSIT_REFUND', 'DEPOSIT_OFFSET', 'SYSTEM_DOC']);
     for (const t of others) expect(isMenuCancellableSource(t), t).toBe(false);
     expect(isMenuCancellableSource(null)).toBe(false);
+  });
+});
+
+describe('sourceKeys', () => {
+  it('builds each key in the step 4 format', () => {
+    expect(sourceKeys.close('fy-1')).toBe('FY_CLOSE:fy-1');
+    expect(sourceKeys.depositRefund('pay-1')).toBe('DEPOSIT_REFUND:pay-1');
+    expect(sourceKeys.recurring('tpl-1', '2170-03-31')).toBe('RECURRING:tpl-1:2170-03-31');
+    expect(sourceKeys.importGroup('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 3)).toBe('IMPORT:0123456789abcdef:3');
+    expect(sourceKeys.remap('AR', 'acc-old', 'acc-new', '2170-03-31')).toBe('REMAP:AR:acc-old:acc-new:21700331');
+    expect(sourceKeys.openingAccount('acc-1')).toBe('OPENING:ACCOUNT:acc-1');
+    expect(sourceKeys.openingParty('p-1', 'VDEP')).toBe('OPENING:PARTY:p-1:VDEP');
+  });
+
+  it('takes the business (WIB) day of a Date, not the UTC day', () => {
+    // 2170-03-31 20:00 UTC = 2170-04-01 03:00 WIB
+    const late = new Date('2170-03-31T20:00:00Z');
+    expect(sourceKeys.recurring('tpl-1', late)).toBe('RECURRING:tpl-1:2170-04-01');
+    expect(sourceKeys.remap('CUSTOMER_DEPOSIT', 'a', 'b', late)).toBe('REMAP:CUSTOMER_DEPOSIT:a:b:21700401');
+  });
+
+  it('refuses parts that would break parsing', () => {
+    expect(() => sourceKeys.close('')).toThrow();
+    expect(() => sourceKeys.remap('AR', 'a:b', 'c', '2170-01-01')).toThrow();
+    expect(() => sourceKeys.recurring('t', '31/03/2170')).toThrow();
+    expect(() => sourceKeys.importGroup('ABC', 1)).toThrow();
+    expect(() => sourceKeys.importGroup('0123456789abcdef', 0)).toThrow();
+  });
+
+  it('depositRefundSourceKey is the same key, also re-exported by the refund service', async () => {
+    const { depositRefundSourceKey: fromService } = await import('../../depositRefundCancel');
+    expect(depositRefundSourceKey('pay-1')).toBe('DEPOSIT_REFUND:pay-1');
+    expect(fromService('pay-1')).toBe('DEPOSIT_REFUND:pay-1');
+  });
+});
+
+describe('parseRemapSourceKey', () => {
+  it('round-trips a remap key', () => {
+    expect(parseRemapSourceKey(sourceKeys.remap('VENDOR_DEPOSIT', 'from', 'to', '2170-12-31'))).toEqual({
+      role: 'VENDOR_DEPOSIT', fromAccountId: 'from', toAccountId: 'to', day: '21701231',
+    });
+  });
+
+  it('returns null for anything else', () => {
+    for (const key of [null, undefined, '', 'FY_CLOSE:fy-1', 'REMAP:AR:a:b', 'REMAP:AR:a:b:2170-01-01', 'REMAP:AR::b:21700101', 'REMAP:AR:a:b:21700101:x']) {
+      expect(parseRemapSourceKey(key), String(key)).toBeNull();
+    }
   });
 });

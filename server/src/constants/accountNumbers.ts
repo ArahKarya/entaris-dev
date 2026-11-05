@@ -5,8 +5,6 @@ export const ACCOUNT_NUMBERS = {
   AP: '2.1.1',
   SALES: '4.1',
   SERVICE_REVENUE: '4.2',
-  VENDOR_DEPOSIT: '1.3',
-  CUSTOMER_DEPOSIT: '2.1.2',
   COGS: '5',
   OPENING_EQUITY: '3.1',
   RETAINED_EARNINGS: '3.2',
