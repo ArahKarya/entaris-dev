@@ -455,6 +455,14 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Nilai {0} {1} melebihi batas 9999999999999.99.": "The {0} amount {1} exceeds the limit of 9999999999999.99.",
   "Baris jurnal tanpa nilai: isi debit atau kredit.": "The journal line has no amount: fill in a debit or a credit.",
   "Jurnal minimal memiliki 2 baris bernilai.": "A journal needs at least 2 lines with an amount.",
+  // recurring (E7-R5, utils/recurringRules.ts, routes/recurring.ts)
+  "Tanggal berikutnya harus berupa tanggal kalender yang valid (YYYY-MM-DD).": "The next run date must be a valid calendar date (YYYY-MM-DD).",
+  "Tanggal berikutnya harus berformat YYYY-MM-DD.": "The next run date must use the YYYY-MM-DD format.",
+  "Tanggal berikutnya tidak boleh sudah lewat.": "The next run date cannot be in the past.",
+  "Tanggal berikutnya harus setelah tanggal eksekusi terakhir.": "The next run date must be after the last run date.",
+  "Template jurnal berulang tidak boleh membawa pihak; kosongkan pihak di semua baris.": "A recurring journal template cannot carry a party; clear the party on every line.",
+  "Data template tidak sesuai dengan tipe {0}: {1}": "The template data does not match the {0} type: {1}",
+  "Minimal 2 item jurnal.": "At least 2 journal items.",
   // postJournal (E2-R3, services/ledger/postJournal.ts)
   "Tanggal jurnal {0} masuk tahun buku {1}, bukan tahun buku yang diharapkan.": "The journal date {0} falls in fiscal year {1}, not the expected fiscal year.",
   // party rules (E2-R4, services/ledger/partyRules.ts); role names translate inside the patterns.

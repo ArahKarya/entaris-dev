@@ -47,6 +47,17 @@ describe('decideForTool (tier matrix)', () => {
   });
 });
 
+describe('recurring template tools (E7-R5)', () => {
+  it('rec_create, rec_update and rec_delete are not draft-capable: a standard user is queued for approval', () => {
+    for (const name of ['rec_create', 'rec_update', 'rec_delete']) {
+      const tool = getTool(name)!;
+      expect(tool.draftCapable, name).toBe(false);
+      expect(decideForTool(tool, 'draft', false, 'standard'), name).toBe('queue');
+      expect(decideForTool(tool, 'draft', false, 'direct'), name).toBe('execute');
+    }
+  });
+});
+
 describe('checkRate (sliding window)', () => {
   beforeEach(resetRateLimits);
 

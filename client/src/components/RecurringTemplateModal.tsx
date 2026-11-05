@@ -10,6 +10,7 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DateInput, Field } from '@/components/shared';
+import { todayLocal } from '@/lib/date';
 import { PinnedBody, PinnedFooter, PinnedHeader, pinnedDialogClass } from '@/components/overlays/dialog-parts';
 
 interface JournalLine {
@@ -75,7 +76,10 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
       setNextRunDate(editTemplate.nextRunDate ? editTemplate.nextRunDate.substring(0, 10) : '');
       const td = editTemplate.templateData as any;
       setNarration(td?.narration || '');
-      setLines(td?.items?.length > 0 ? td.items : [defaultLine(), defaultLine()]);
+      setLines(td?.items?.length > 0
+        // Stored amounts are 2-decimal strings; the form works with numbers.
+        ? td.items.map((i: JournalLine) => ({ ...i, debit: Number(i.debit) || 0, credit: Number(i.credit) || 0 }))
+        : [defaultLine(), defaultLine()]);
     } else if (isOpen) {
       setName('');
       setTemplateType('journal');
@@ -121,7 +125,11 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
         return;
       }
 
-      templateData = { narration, items: validLines };
+      // A template carries no party; send only the fields the server accepts.
+      templateData = {
+        narration,
+        items: validLines.map(({ accountId, debit, credit, description }) => ({ accountId, debit, credit, description })),
+      };
     }
 
     createMutation.mutate({
@@ -129,7 +137,8 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
       templateType,
       frequency,
       dayOfMonth: dayOfMonth || null,
-      nextRunDate,
+      // An untouched date is not sent back: it may be stale after a run elsewhere.
+      ...(!editTemplate || nextRunDate !== editTemplate.nextRunDate?.substring(0, 10) ? { nextRunDate } : {}),
       templateData,
     });
   };
@@ -215,7 +224,7 @@ const RecurringTemplateModal = ({ isOpen, onClose, editTemplate }: Props) => {
                 error={req(!!nextRunDate)}
                 className={monthly ? undefined : 'sm:col-span-2'}
               >
-                <DateInput value={nextRunDate} onChange={setNextRunDate} />
+                <DateInput value={nextRunDate} onChange={setNextRunDate} min={editTemplate ? undefined : todayLocal()} />
               </Field>
             </div>
 

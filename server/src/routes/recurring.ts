@@ -3,14 +3,41 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
-import { CreateRecurringSchema, UpdateRecurringSchema } from '../utils/schemas';
+import { CreateRecurringSchema, UpdateRecurringSchema, parseTemplateData, type RecurringTemplateType } from '../utils/schemas';
+import { checkNextRunDate, validateJournalTemplateData, RECURRING_TYPE_MISMATCH } from '../utils/recurringRules';
+import { assertJournalLines } from '../utils/journalLineRules';
+import { assertPostableAccounts, TEMPLATE_RULE } from '../services/ledger/accountGuard';
 import { updateBalancesForItems } from '../utils/accountBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
-import { handleRouteError } from '../utils/errors';
+import { BusinessError, handleRouteError } from '../utils/errors';
 import { logger } from '../lib/logger';
 
 const router = Router();
+
+type Tx = Prisma.TransactionClient;
+
+/**
+ * Save-time validation of a template body (E7-R5): the shape must match the template type; a journal
+ * template must balance exactly, carry no party and use only plain posting accounts (no control or
+ * tax accounts). Returns the data to store (journal amounts normalized to 2-decimal strings).
+ */
+async function validatedTemplateData(tx: Tx, templateType: RecurringTemplateType, data: unknown): Promise<Prisma.InputJsonValue> {
+  const parsed = parseTemplateData(templateType, data);
+  if (!parsed.success) {
+    throw new BusinessError(`Data template tidak sesuai dengan tipe ${templateType}: ${parsed.error.issues[0].message}`, RECURRING_TYPE_MISMATCH);
+  }
+  if (templateType !== 'journal') return parsed.data as Prisma.InputJsonValue;
+  const normalized = validateJournalTemplateData(parsed.data as Parameters<typeof validateJournalTemplateData>[0]);
+  await assertPostableAccounts(tx, normalized.items.map((i) => i.accountId), TEMPLATE_RULE);
+  return normalized as unknown as Prisma.InputJsonValue;
+}
+
+function assertNextRunDate(input: Parameters<typeof checkNextRunDate>[0]): Date {
+  const check = checkNextRunDate(input);
+  if (!check.ok) throw new BusinessError(check.message, check.code);
+  return check.date;
+}
 
 // Helper: Calculate next run date
 function calculateNextRunDate(frequency: string, fromDate: Date, dayOfMonth?: number | null): Date {
@@ -68,6 +95,7 @@ async function executeTemplate(
           credit: item.credit || 0,
           description: item.description || data.narration,
         }));
+        assertJournalLines(items);
 
         const journalEntry = await tx.journalEntry.create({
           data: {
@@ -147,16 +175,20 @@ router.post('/', async (req: AuthRequest, res) => {
   if (!body) return;
 
   try {
-    const template = await prisma.recurringTemplate.create({
-      data: {
-        name: body.name,
-        templateType: body.templateType,
-        frequency: body.frequency,
-        dayOfMonth: body.dayOfMonth || null,
-        nextRunDate: new Date(body.nextRunDate),
-        templateData: body.templateData || {},
-        createdBy: req.user!.userId,
-      },
+    const template = await prisma.$transaction(async (tx: Tx) => {
+      const nextRunDate = assertNextRunDate({ nextRunDate: body.nextRunDate });
+      const templateData = await validatedTemplateData(tx, body.templateType, body.templateData);
+      return tx.recurringTemplate.create({
+        data: {
+          name: body.name,
+          templateType: body.templateType,
+          frequency: body.frequency,
+          dayOfMonth: body.dayOfMonth || null,
+          nextRunDate,
+          templateData,
+          createdBy: req.user!.userId,
+        },
+      });
     });
     return res.status(201).json(template);
   } catch (error) {
@@ -170,19 +202,40 @@ router.put('/:id', async (req, res) => {
   if (!body) return;
 
   try {
-    const template = await prisma.recurringTemplate.update({
-      where: { id: req.params.id as string },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.templateType !== undefined && { templateType: body.templateType }),
-        ...(body.frequency !== undefined && { frequency: body.frequency }),
-        ...(body.dayOfMonth !== undefined && { dayOfMonth: body.dayOfMonth }),
-        ...(body.nextRunDate !== undefined && { nextRunDate: new Date(body.nextRunDate) }),
-        ...(body.templateData !== undefined && { templateData: body.templateData }),
-        ...(body.isActive !== undefined && { isActive: body.isActive }),
-      },
+    const outcome = await prisma.$transaction(async (tx: Tx) => {
+      const existing = await tx.recurringTemplate.findUnique({ where: { id: req.params.id as string } });
+      if (!existing) return null;
+
+      const templateType = (body.templateType ?? existing.templateType) as RecurringTemplateType;
+      // Data is re-validated when it or its type changes, and before a template is switched back on
+      // (the stored data may predate these rules).
+      const revalidate = body.templateData !== undefined || body.templateType !== undefined || body.isActive === true;
+      const templateData = revalidate
+        ? await validatedTemplateData(tx, templateType, body.templateData ?? existing.templateData)
+        : undefined;
+      const nextRunDate = body.nextRunDate === undefined
+        ? undefined
+        : assertNextRunDate({
+          nextRunDate: body.nextRunDate,
+          lastRunDate: existing.lastRunDate,
+          previousNextRunDate: existing.nextRunDate,
+        });
+
+      return tx.recurringTemplate.update({
+        where: { id: existing.id },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.templateType !== undefined && { templateType: body.templateType }),
+          ...(body.frequency !== undefined && { frequency: body.frequency }),
+          ...(body.dayOfMonth !== undefined && { dayOfMonth: body.dayOfMonth }),
+          ...(nextRunDate !== undefined && { nextRunDate }),
+          ...(templateData !== undefined && { templateData }),
+          ...(body.isActive !== undefined && { isActive: body.isActive }),
+        },
+      });
     });
-    return res.json(template);
+    if (!outcome) return res.status(404).json({ error: 'Template tidak ditemukan.' });
+    return res.json(outcome);
   } catch (error: any) {
     return handleRouteError(res, error, 'PUT /recurring/:id', 'Gagal mengupdate template berulang.');
   }

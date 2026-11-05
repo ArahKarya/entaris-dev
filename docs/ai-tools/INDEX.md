@@ -436,11 +436,11 @@ Total **512** tool (read 236 · write 165 · critical 111); semuanya aktif secar
 | [`quot_stats`](penjualan.md#quot_stats) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/quotations/stats` |
 | [`quot_summary`](penjualan.md#quot_summary) | penjualan | read | - | Admin, Accountant, Viewer | `GET /api/quotations/summary` |
 | [`quot_update`](penjualan.md#quot_update) | penjualan | write | ya | Admin, Accountant | `PUT /api/quotations/:id` |
-| [`rec_create`](kas-bank.md#rec_create) | kas-bank | write | ya | Admin, Accountant | `POST /api/recurring` |
-| [`rec_delete`](kas-bank.md#rec_delete) | kas-bank | write | ya | Admin, Accountant | `DELETE /api/recurring/:id` |
+| [`rec_create`](kas-bank.md#rec_create) | kas-bank | write | tidak | Admin, Accountant | `POST /api/recurring` |
+| [`rec_delete`](kas-bank.md#rec_delete) | kas-bank | write | tidak | Admin, Accountant | `DELETE /api/recurring/:id` |
 | [`rec_execute`](kas-bank.md#rec_execute) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/recurring/:id/execute` |
 | [`rec_list`](kas-bank.md#rec_list) | kas-bank | read | - | Admin, Accountant | `GET /api/recurring` |
-| [`rec_update`](kas-bank.md#rec_update) | kas-bank | write | ya | Admin, Accountant | `PUT /api/recurring/:id` |
+| [`rec_update`](kas-bank.md#rec_update) | kas-bank | write | tidak | Admin, Accountant | `PUT /api/recurring/:id` |
 | [`recon_add_items`](kas-bank.md#recon_add_items) | kas-bank | write | ya | Admin, Accountant | `POST /api/reconciliation/:id/items` |
 | [`recon_complete`](kas-bank.md#recon_complete) | kas-bank | critical | tidak | Admin, Accountant | `POST /api/reconciliation/:id/complete` |
 | [`recon_create`](kas-bank.md#recon_create) | kas-bank | write | ya | Admin, Accountant | `POST /api/reconciliation` |

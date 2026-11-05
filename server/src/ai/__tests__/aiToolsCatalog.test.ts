@@ -75,6 +75,12 @@ describe('(c) tool write/critical', () => {
     expect(bad).toEqual([]);
   });
 
+  it('tool tulis modul recurring tidak boleh draftCapable (selalu masuk antrean persetujuan)', () => {
+    const bad = writes.filter((t) => t.module === 'recurring' && t.draftCapable).map((t) => t.name);
+    expect(bad).toEqual([]);
+    expect(writes.some((t) => t.module === 'recurring')).toBe(true);
+  });
+
   it('placeholder confirm_template merujuk parameter nyata', () => {
     const bad: string[] = [];
     for (const t of writes) {
