@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildTrialBalance, TrialBalanceAccount } from '../trialBalance';
+import { sumMoney } from '../moneySum';
 
 const acc = (id: string, accountNumber: string, rootType: string): TrialBalanceAccount => ({
   id, accountNumber, name: id, accountType: rootType, rootType,
@@ -38,5 +39,20 @@ describe('buildTrialBalance', () => {
     expect(Object.keys(rows[0]).sort()).toEqual(
       ['accountNumber', 'accountType', 'balance', 'credit', 'debit', 'id', 'name', 'rootType'],
     );
+  });
+});
+
+describe('exact decimal totals', () => {
+  it('sums 0.1 + 0.2 to 0.3', () => {
+    expect(sumMoney([0.1, 0.2])).toBe(0.3);
+    expect(sumMoney(['0.1', '0.2', '0.3'])).toBe(0.6);
+  });
+
+  it('keeps a trial balance row exact when sums arrive as Decimal strings', () => {
+    const rows = buildTrialBalance(
+      [acc('cash', '1.1.1', 'ASSET')],
+      [{ accountId: 'cash', debit: '0.30', credit: '0.10' }],
+    );
+    expect(rows[0]).toMatchObject({ debit: 0.3, credit: 0.1, balance: 0.2 });
   });
 });

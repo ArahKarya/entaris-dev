@@ -10,6 +10,7 @@ import { CancelReasonSchema } from '../utils/schemas';
 import { cancelTrail, STALE_STATUS } from '../utils/cancelClaim';
 import { assertPeriodOpen, assertPeriodsOpen, FISCAL_YEAR_MISSING } from '../utils/periodGuard';
 import Decimal from 'decimal.js';
+import { sumMoney } from '../utils/moneySum';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import { businessDayRange, businessMonthRange, businessToday } from '../utils/businessDate';
 import {
@@ -433,7 +434,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       });
     }
 
-    const totalAmount = dueEntries.reduce((s, e) => s + Number(e.amount), 0);
+    const totalAmount = sumMoney(dueEntries.map((e) => e.amount.toString()));
 
     if (body.dryRun) {
       return res.json({
@@ -486,7 +487,7 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
       // Pull starting JE number once, increment locally to avoid N round-trips
       const startCount = await tx.journalEntry.count();
       const jeNumbers: string[] = [];
-      let postedAmount = 0;
+      let postedAmount = new Decimal(0);
 
       for (const entry of dueEntries) {
         // Claimed under the asset lock: a row posted by another request since the list was read, or
@@ -549,10 +550,10 @@ router.post('/depreciate-bulk', async (req: AuthRequest, res) => {
         });
 
         jeNumbers.push(entryNumber);
-        postedAmount += amount;
+        postedAmount = postedAmount.plus(entry.amount.toString());
       }
 
-      return { posted: jeNumbers.length, totalAmount: postedAmount, jeNumbers };
+      return { posted: jeNumbers.length, totalAmount: postedAmount.toNumber(), jeNumbers };
     }, { timeout: 120_000 });
 
     logger.info(
