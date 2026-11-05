@@ -5,6 +5,7 @@ import { validateBody } from '../utils/validate';
 import { CreateServiceItemSchema, UpdateServiceItemSchema } from '../utils/schemas';
 import { handleRouteError } from '../utils/errors';
 import { logger } from '../lib/logger';
+import { assertPostableAccount, type PostableRule } from '../services/ledger/accountGuard';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
   DEFAULT_SERVICE_ITEM_SORT,
@@ -14,6 +15,9 @@ import {
 } from '../services/serviceItemList';
 
 const router = Router();
+
+/** The account a service is sold on: an active REVENUE detail account. */
+const SERVICE_REVENUE_RULE: PostableRule = { label: 'Akun pendapatan layanan', rootTypes: ['REVENUE'] };
 
 // GET /api/service-items
 // Legacy (no `page`): { data } with every matching row, ordered by code.
@@ -70,16 +74,19 @@ router.post('/', async (req, res) => {
   if (!body) return;
 
   try {
-    const item = await prisma.serviceItem.create({
-      data: {
-        code: body.code,
-        name: body.name,
-        unit: body.unit,
-        defaultRate: body.defaultRate,
-        accountId: body.accountId,
-        description: body.description,
-      },
-      include: { account: { select: { id: true, accountNumber: true, name: true } } },
+    const item = await prisma.$transaction(async (tx) => {
+      await assertPostableAccount(tx, body.accountId, SERVICE_REVENUE_RULE);
+      return tx.serviceItem.create({
+        data: {
+          code: body.code,
+          name: body.name,
+          unit: body.unit,
+          defaultRate: body.defaultRate,
+          accountId: body.accountId,
+          description: body.description,
+        },
+        include: { account: { select: { id: true, accountNumber: true, name: true } } },
+      });
     });
 
     return res.status(201).json(item);
@@ -94,10 +101,19 @@ router.patch('/:id', async (req, res) => {
   if (!body) return;
 
   try {
-    const item = await prisma.serviceItem.update({
-      where: { id: req.params.id as string },
-      data: body,
-      include: { account: { select: { id: true, accountNumber: true, name: true } } },
+    const id = req.params.id as string;
+    const item = await prisma.$transaction(async (tx) => {
+      if (body.accountId) {
+        // Only a changed account is checked, so saving other fields of a service whose old
+        // account no longer qualifies is not blocked.
+        const current = await tx.serviceItem.findUnique({ where: { id }, select: { accountId: true } });
+        if (current && current.accountId !== body.accountId) await assertPostableAccount(tx, body.accountId, SERVICE_REVENUE_RULE);
+      }
+      return tx.serviceItem.update({
+        where: { id },
+        data: body,
+        include: { account: { select: { id: true, accountNumber: true, name: true } } },
+      });
     });
 
     return res.json(item);

@@ -4,7 +4,7 @@
 // a posting that also locks its accounts) cannot deadlock.
 
 import { Prisma } from '@prisma/client';
-import type { StructureFacts } from './accountRules';
+import type { ImportExisting, ParentFacts, StructureFacts } from './accountRules';
 
 type Db = Prisma.TransactionClient;
 
@@ -69,4 +69,35 @@ export async function loadStructureFacts(tx: Db, ids: readonly string[]): Promis
     facts.set(m.accountId, { ...f, mappedRoles: [...f.mappedRoles, m.role] });
   }
   return facts;
+}
+
+export interface ImportFacts {
+  /** Stored accounts by number: the rows' own numbers and their parents. */
+  existing: Map<string, ImportExisting>;
+  parents: Map<string, ParentFacts>;
+}
+
+/**
+ * Stored accounts for an import: one account read (the numbers plus the children of those that
+ * exist) and one ledger groupBy. Also used by the preview, which writes nothing.
+ */
+export async function loadImportFacts(db: Db, numbers: readonly string[]): Promise<ImportFacts> {
+  const unique = [...new Set(numbers)];
+  const accounts = await db.account.findMany({
+    where: { OR: [{ accountNumber: { in: unique } }, { parent: { accountNumber: { in: unique } } }] },
+    select: { id: true, accountNumber: true, rootType: true, isGroup: true, parentId: true },
+  });
+  const asked = new Set(unique);
+  const own = accounts.filter((a) => asked.has(a.accountNumber));
+  const withLedger = await accountIdsWithLedger(db, own.map((a) => a.id));
+  const existing = new Map<string, ImportExisting>();
+  const parents = new Map<string, ParentFacts>();
+  for (const a of own) {
+    const childCount = accounts.filter((c) => c.parentId === a.id).length;
+    existing.set(a.accountNumber, {
+      id: a.id, rootType: a.rootType, isGroup: a.isGroup, parentId: a.parentId, hasLedger: withLedger.has(a.id), childCount,
+    });
+    parents.set(a.accountNumber, { id: a.id, accountNumber: a.accountNumber, rootType: a.rootType, isGroup: a.isGroup });
+  }
+  return { existing, parents };
 }

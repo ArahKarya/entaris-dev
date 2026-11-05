@@ -9,14 +9,15 @@ const db = vi.hoisted(() => {
   const tx: any = {
     journalEntry: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), delete: vi.fn() },
     journalItem: { deleteMany: vi.fn() },
-    accountingLedgerEntry: { createMany: vi.fn(), deleteMany: vi.fn() },
-    account: { findUnique: vi.fn(), update: vi.fn() },
+    accountingLedgerEntry: { createMany: vi.fn(), deleteMany: vi.fn(), groupBy: vi.fn() },
+    account: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn(), upsert: vi.fn() },
+    $queryRaw: vi.fn(async () => []),
     payment: { create: vi.fn(), findMany: vi.fn(), delete: vi.fn() },
     party: { create: vi.fn() },
   };
   return {
     ...tx,
-    account: { ...tx.account, upsert: vi.fn() },
+    account: tx.account,
     party: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     $transaction: vi.fn(async (fn: any) => fn(tx)),
     _tx: tx,
@@ -69,7 +70,9 @@ const noDeletes = () => {
 beforeEach(() => {
   vi.clearAllMocks();
   db.account.findUnique.mockResolvedValue({ id: 'parent-1' });
-  db.account.upsert.mockResolvedValue({ id: 'acc-cash' });
+  db.account.findMany.mockResolvedValue([{ id: 'parent-1', accountNumber: '1.1', rootType: 'ASSET', isGroup: true, parentId: null }]);
+  db.accountingLedgerEntry.groupBy.mockResolvedValue([]);
+  db.account.upsert.mockResolvedValue({ id: 'acc-cash', rootType: 'ASSET' });
   db._tx.journalEntry.create.mockResolvedValue({ id: 'je-new', items: [] });
 });
 

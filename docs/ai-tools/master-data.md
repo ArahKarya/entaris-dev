@@ -533,6 +533,7 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 **Error umum**
 
 - 409/400: kode sudah dipakai.
+- 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE: akun pendapatan harus akun REVENUE detail aktif
 
 ### svc_delete
 
@@ -676,4 +677,8 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 **Efek pembukuan/stok:** Tidak ada efek GL/stok. Invoice lama tidak berubah; perubahan akun hanya berlaku untuk invoice berikutnya.
 
 **Teks konfirmasi:** Ubah item jasa {id}?
+
+**Error umum**
+
+- 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE: akun pendapatan harus akun REVENUE detail aktif
 

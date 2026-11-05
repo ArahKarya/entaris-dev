@@ -13,6 +13,7 @@ export const ACCOUNT_TYPE_MISMATCH = 'ACCOUNT_TYPE_MISMATCH';
 export const ACCOUNT_STRUCTURE_LOCKED = 'ACCOUNT_STRUCTURE_LOCKED';
 export const ACCOUNT_HAS_CHILDREN = 'ACCOUNT_HAS_CHILDREN';
 export const ACCOUNT_DEACTIVATE_BLOCKED = 'ACCOUNT_DEACTIVATE_BLOCKED';
+export const ACCOUNT_IMPORT_ROOT_TYPE = 'ACCOUNT_IMPORT_ROOT_TYPE';
 
 /** First segment of an account number -> root type. 7 is other income; 8 stays an expense. */
 export const ROOT_TYPE_BY_PREFIX: Readonly<Record<string, RootType>> = {
@@ -260,4 +261,120 @@ function deactivationProblem(label: string, current: CurrentAccount, facts: Stru
     return problem(ACCOUNT_DEACTIVATE_BLOCKED, `Akun ${label} masih memiliki saldo di buku besar; nonaktifkan setelah saldonya nol.`);
   }
   return null;
+}
+
+const ROOT_TYPES: readonly RootType[] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
+
+/** One parsed spreadsheet row. `parentNumber` is the effective parent ('' = top level). */
+export interface ImportRowInput {
+  accountNumber: string;
+  rootType: string;
+  accountType: string;
+  parentNumber: string;
+  /** null = the file did not say; keeps what an existing account has. */
+  isGroup: boolean | null;
+}
+
+/** The stored account the row's number points at, if any. */
+export interface ImportExisting {
+  id: string;
+  rootType: RootType;
+  isGroup: boolean;
+  parentId: string | null;
+  hasLedger: boolean;
+  childCount: number;
+}
+
+export interface ImportRowContext {
+  existing: ImportExisting | null;
+  /** The account `parentNumber` resolves to (stored, or accepted earlier in the same file). */
+  parent: ParentFacts | null;
+  /** Another row of the file sits under this number. */
+  hasChildInFile: boolean;
+}
+
+export interface ImportRowPlan {
+  accountNumber: string;
+  rootType: RootType;
+  accountType: RootType;
+  parentNumber: string | null;
+  isGroup: boolean;
+  existingId: string | null;
+}
+
+/**
+ * One import row against the structure rules (E2-R6): the number format, the root type its first
+ * digit implies (the file must agree), a stored parent that is a group of the same type, and for
+ * an account with ledger rows an unchanged structure. A row that fails is rejected whole, so its
+ * name is not applied either. An ancestor becomes a group only while it has no ledger rows.
+ */
+export function planImportRow(input: ImportRowInput, ctx: ImportRowContext): PlanResult<ImportRowPlan> {
+  const accountNumber = normalizeAccountNumber(input.accountNumber);
+  const rootType = isValidAccountNumber(accountNumber) ? deriveRootType(accountNumber) : null;
+  if (!rootType) return formatProblem(accountNumber);
+
+  if (!ROOT_TYPES.includes(input.rootType as RootType)) {
+    return problem(ACCOUNT_IMPORT_ROOT_TYPE, `rootType "${input.rootType}" tidak valid.`);
+  }
+  for (const supplied of [input.rootType, input.accountType]) {
+    if (supplied !== rootType) {
+      return problem(
+        ACCOUNT_TYPE_MISMATCH,
+        `Nomor akun ${accountNumber} bertipe ${rootType}, bukan ${supplied}. Tipe akun ditentukan oleh digit pertama nomor.`,
+      );
+    }
+  }
+
+  if (input.parentNumber) {
+    if (!ctx.parent) {
+      return problem(ACCOUNT_PARENT_NOT_FOUND, `Induk ${input.parentNumber} tidak ditemukan atau barisnya ditolak.`);
+    }
+    const bad = parentProblem(accountNumber, rootType, ctx.parent);
+    if (bad) return bad;
+  }
+
+  const { existing } = ctx;
+  if (!existing) {
+    return {
+      ok: true,
+      data: {
+        accountNumber, rootType, accountType: rootType, existingId: null,
+        parentNumber: input.parentNumber || null,
+        isGroup: input.isGroup ?? ctx.hasChildInFile,
+      },
+    };
+  }
+
+  if (input.isGroup === false && existing.childCount > 0) {
+    return problem(ACCOUNT_HAS_CHILDREN, 'Tidak dapat mengubah akun grup yang masih memiliki sub-akun.');
+  }
+  // Children keep the type they have, so an account that has any cannot be re-typed here (as on the
+  // COA screen); the 7.x reclassification is the repair script's job (e2-coa-structure-check).
+  if (existing.rootType !== rootType && existing.childCount > 0) {
+    return problem(
+      ACCOUNT_STRUCTURE_LOCKED,
+      `Akun ${accountNumber} memiliki sub-akun; tipenya tidak dapat diubah lewat impor. Gunakan skrip e2-coa-structure-check untuk koreksi tipe.`,
+    );
+  }
+  // A group stays a group; a detail account becomes one only when nothing is posted to it. An
+  // account that already has children is saved as a group whatever the file says.
+  const wantsGroup = input.isGroup ?? (existing.isGroup || (ctx.hasChildInFile && !existing.hasLedger));
+  const finalGroup = wantsGroup || existing.childCount > 0;
+  if (existing.hasLedger) {
+    const sameParent = (existing.parentId ?? null) === (ctx.parent?.id ?? null);
+    if (existing.rootType !== rootType || !sameParent || finalGroup !== existing.isGroup) {
+      return problem(
+        ACCOUNT_STRUCTURE_LOCKED,
+        `Akun ${accountNumber} sudah memiliki transaksi; tipe, induk, dan status grup tidak dapat diubah lewat impor.`,
+      );
+    }
+  }
+  return {
+    ok: true,
+    data: {
+      accountNumber, rootType, accountType: rootType, existingId: existing.id,
+      parentNumber: input.parentNumber || null,
+      isGroup: finalGroup,
+    },
+  };
 }

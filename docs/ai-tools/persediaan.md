@@ -463,6 +463,7 @@ Aturan wajib:
 **Error umum**
 
 - 400: Kode item sudah digunakan
+- 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan bukan akun ASSET detail aktif non-kontrol
 
 **Tool terkait:** [`inv_item_update`](#inv_item_update), [`inv_mov_create`](#inv_mov_create), [`opn_create`](#opn_create)
 
@@ -521,7 +522,7 @@ Aturan wajib:
 
 ### inv_item_update
 
-**Ringkasan:** Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang; mengganti accountId hanya berlaku untuk transaksi berikutnya.
+**Ringkasan:** Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif (ITEM_ACCOUNT_HAS_STOCK).
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -575,6 +576,8 @@ Aturan wajib:
 **Error umum**
 
 - 404: item tidak ditemukan
+- 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan tidak valid
+- 400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok
 
 **Tool terkait:** [`inv_items_list`](#inv_items_list)
 
