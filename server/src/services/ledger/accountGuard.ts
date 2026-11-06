@@ -60,6 +60,12 @@ export interface PostableRule {
   alsoRestrict?: readonly SystemAccountRole[];
   /** Appended to the control-account message, e.g. "Gunakan modul Pembayaran." */
   controlHint?: string;
+  /**
+   * Accept a group or inactive account. Only the source side of a system account remap reclass
+   * uses it (REMAP_SOURCE_RULE in services/systemAccountRemap.ts): the balance must leave an old
+   * mapping wherever it sits. Default false.
+   */
+  allowGroupOrInactive?: boolean;
 }
 
 /** Control kinds a journal.control holder may post manually; the deposit roles are never among them. */
@@ -204,10 +210,10 @@ export function postableAccountProblem(
   if (!acc) {
     return { code: ACCOUNT_NOT_FOUND, message: `${rule.label}: akun tidak ditemukan.` };
   }
-  if (acc.isGroup) {
+  if (acc.isGroup && !rule.allowGroupOrInactive) {
     return { code: ACCOUNT_GROUP, message: `${rule.label}: ${acc.accountNumber} ${acc.name} adalah akun grup; pilih akun detail.` };
   }
-  if (!acc.isActive) {
+  if (!acc.isActive && !rule.allowGroupOrInactive) {
     return { code: ACCOUNT_INACTIVE, message: `${rule.label}: akun ${acc.accountNumber} ${acc.name} tidak aktif.` };
   }
   if (rule.rootTypes && !rule.rootTypes.includes(acc.rootType)) {
@@ -249,6 +255,8 @@ export interface AssertPostableOptions {
    * the same account would both hold a share lock and then deadlock on the balance UPDATE.
    */
   lockRows?: boolean;
+  /** Rule per account id, replacing `rule` for that account (only the remap reclass, plan §2.3). */
+  lineRules?: ReadonlyMap<string, PostableRule>;
 }
 
 /** Loads the accounts and throws BusinessError (with an ACCOUNT_* code) on the first problem. */
@@ -262,14 +270,17 @@ export async function assertPostableAccounts(
   if (opts.lockRows && unique.length > 0) {
     await tx.$queryRaw`SELECT id FROM accounts WHERE id IN (${Prisma.join([...unique].sort())}) ORDER BY id FOR UPDATE`;
   }
-  const needsControlMap = rule.allowControl !== true;
+  const ruleOf = (id: string): PostableRule => opts.lineRules?.get(id) ?? rule;
+  const rules = unique.map(ruleOf);
+  const needsControlMap = rules.some((r) => r.allowControl !== true);
+  const alsoRestrict = [...new Set(rules.flatMap((r) => r.alsoRestrict ?? []))];
   const [accounts, control] = await Promise.all([
     tx.account.findMany({ where: { id: { in: unique } }, select: ACCOUNT_LITE_SELECT }),
-    needsControlMap ? loadControlAccountMap(tx, rule.alsoRestrict) : Promise.resolve(new Map<string, readonly RestrictedKind[]>()),
+    needsControlMap ? loadControlAccountMap(tx, alsoRestrict) : Promise.resolve(new Map<string, readonly RestrictedKind[]>()),
   ]);
   const byId = new Map(accounts.map((a) => [a.id, a]));
   for (const id of unique) {
-    const problem = postableAccountProblem(byId.get(id) ?? null, rule, control.get(id) ?? null);
+    const problem = postableAccountProblem(byId.get(id) ?? null, ruleOf(id), control.get(id) ?? null);
     if (problem) throw new BusinessError(problem.message, problem.code);
   }
   return byId;
