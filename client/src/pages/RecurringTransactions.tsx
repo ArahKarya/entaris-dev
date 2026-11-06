@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Pause, Pencil, Play, Plus, Zap } from 'lucide-react';
+import { AlertTriangle, Pause, Pencil, Play, Plus, Zap } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import i18n from '@/i18n';
@@ -24,6 +24,9 @@ interface RecurringTemplate {
   nextRunDate: string;
   lastRunDate?: string | null;
   isActive: boolean;
+  /** Why the last run did not post; cleared by the next successful run. */
+  lastError?: string | null;
+  lastErrorAt?: string | null;
   templateData: unknown;
   createdBy: string;
   user?: { fullName: string };
@@ -127,6 +130,17 @@ export const RecurringTransactions = () => {
             <p className="truncate text-xs text-muted-foreground md:hidden">
               {typeLabel(row.original.templateType)} · {frequencyLabel(row.original)}
             </p>
+            {row.original.lastError && (
+              <p className="flex items-start gap-1 text-xs text-danger-text" title={row.original.lastError}>
+                <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
+                <span className="line-clamp-2">
+                  {t('recurringTransactions.lastError', {
+                    date: row.original.lastErrorAt ? formatDate(row.original.lastErrorAt) : '—',
+                    error: row.original.lastError,
+                  })}
+                </span>
+              </p>
+            )}
           </div>
         ),
       },

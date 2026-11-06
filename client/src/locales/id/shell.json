@@ -233,6 +233,7 @@
       "quotation_expiring": "Penawaran Kedaluwarsa",
       "guarantee_due": "Jaminan Jatuh Tempo",
       "po_overdue": "PO Terlambat",
+      "recurring_failed": "Transaksi Berulang Gagal",
       "cash_book_draft": "Draft Buku Kas",
       "wo_overdue": "WO Terlambat",
       "wo_assigned": "WO Ditugaskan",

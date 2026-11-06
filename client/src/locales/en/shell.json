@@ -233,6 +233,7 @@
       "quotation_expiring": "Quotation expiring",
       "guarantee_due": "Guarantee due",
       "po_overdue": "Late PO",
+      "recurring_failed": "Recurring transaction failed",
       "cash_book_draft": "Cash book draft",
       "wo_overdue": "Late WO",
       "wo_assigned": "WO assigned",

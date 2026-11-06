@@ -2114,6 +2114,7 @@
       "status": "Status",
       "actions": "Actions"
     },
+    "lastError": "Run failed {{date}}: {{error}}",
     "rowActions": "Actions for {{name}}",
     "actions": {
       "edit": "Edit",

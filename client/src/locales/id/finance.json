@@ -2114,6 +2114,7 @@
       "status": "Status",
       "actions": "Aksi"
     },
+    "lastError": "Gagal dijalankan {{date}}: {{error}}",
     "rowActions": "Aksi untuk {{name}}",
     "actions": {
       "edit": "Edit",
