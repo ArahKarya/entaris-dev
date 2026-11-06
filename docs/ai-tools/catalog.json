@@ -2,9 +2,9 @@
   "app": "simple-erp",
   "version": 3,
   "counts": {
-    "tools": 512,
+    "tools": 513,
     "byRisk": {
-      "critical": 111,
+      "critical": 112,
       "read": 236,
       "write": 165
     },
@@ -13,7 +13,7 @@
       "sistem": 19,
       "penjualan": 94,
       "obrolan": 2,
-      "akuntansi": 37,
+      "akuntansi": 38,
       "pengajuan-pembayaran": 32,
       "aset-umum": 141,
       "dashboard": 17,
@@ -24,7 +24,7 @@
       "produksi": 28,
       "master-data": 12
     },
-    "routes": 602
+    "routes": 603
   },
   "toolsets": [
     {
@@ -282,6 +282,7 @@
         "period_lock_get",
         "period_lock_set",
         "sysacct_get",
+        "sysacct_sweep",
         "sysacct_update",
         "tax_create_config",
         "tax_delete_config",
@@ -18148,7 +18149,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Jalankan 10 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, dan Tahun Buku hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.",
+      "desc": "Jalankan 11 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), akun lama role neraca akun sistem yang masih bersaldo setelah pemindahan pemetaan (Former Role Accounts, pindahkan lewat sysacct_sweep), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, Tahun Buku, dan akun bekas peran hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -18166,7 +18167,7 @@
       "related": [
         "hc_preview"
       ],
-      "doc": "### hc_run\n\n**Ringkasan:** Jalankan 10 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, dan Tahun Buku hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin (modul `audit` / `view`)\n- **Catatan akses:** Izin modul audit (view) — default hanya Admin.\n- **Handler:** `GET /api/health-check` (src/routes/healthCheck.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"hc_run\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}>\"\n}\n```\n\n**Isi hasil:** {success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}}}.\n\n**Tool terkait:** [`hc_preview`](#hc_preview)\n",
+      "doc": "### hc_run\n\n**Ringkasan:** Jalankan 11 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), akun lama role neraca akun sistem yang masih bersaldo setelah pemindahan pemetaan (Former Role Accounts, pindahkan lewat sysacct_sweep), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, Tahun Buku, dan akun bekas peran hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin (modul `audit` / `view`)\n- **Catatan akses:** Izin modul audit (view) — default hanya Admin.\n- **Handler:** `GET /api/health-check` (src/routes/healthCheck.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"hc_run\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}>\"\n}\n```\n\n**Isi hasil:** {success, data:{status: ok|warning|error, checks[] {id, status, ringkasan, jumlah masalah}}}.\n\n**Tool terkait:** [`hc_preview`](#hc_preview)\n",
       "example": {
         "tool": "hc_run",
         "args": {}
@@ -38771,7 +38772,7 @@
       "output": {
         "mapping": "object"
       },
-      "outputSummary": "{ mappings: per role → akun[], roles: definisi role akun sistem }.",
+      "outputSummary": "{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.",
       "handler": "GET /api/system-accounts",
       "permAction": "view",
       "enabled": true,
@@ -38779,12 +38780,81 @@
       "phase": 1,
       "accessNote": "GET terbuka bagi semua user login (requireWrite settings).",
       "related": [
-        "sysacct_update"
+        "sysacct_update",
+        "sysacct_sweep"
       ],
-      "doc": "### sysacct_get\n\n**Ringkasan:** Pemetaan akun sistem (role → akun COA) untuk auto-posting GL, mis. Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, serta daftar role yang tersedia dan mana yang wajib.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `settings` / `view`)\n- **Catatan akses:** GET terbuka bagi semua user login (requireWrite settings).\n- **Handler:** `GET /api/system-accounts` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_get\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ mappings: per role → akun[], roles: definisi role akun sistem }.>\"\n}\n```\n\n**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem }.\n\n**Tool terkait:** [`sysacct_update`](#sysacct_update)\n",
+      "doc": "### sysacct_get\n\n**Ringkasan:** Pemetaan akun sistem (role → akun COA) untuk auto-posting GL, mis. Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, serta daftar role yang tersedia dan mana yang wajib.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `settings` / `view`)\n- **Catatan akses:** GET terbuka bagi semua user login (requireWrite settings).\n- **Handler:** `GET /api/system-accounts` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_get\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo iku>\"\n}\n```\n\n**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.\n\n**Tool terkait:** [`sysacct_update`](#sysacct_update), [`sysacct_sweep`](#sysacct_sweep)\n",
       "example": {
         "tool": "sysacct_get",
         "args": {}
+      }
+    },
+    {
+      "name": "sysacct_sweep",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "settings",
+      "desc": "Memindahkan sisa saldo di akun lama sebuah role neraca (akun asal jurnal reklas pemetaan akun sistem sebelumnya, mis. setelah invoice lama dibatalkan) ke akun yang dipetakan sekarang, lewat jurnal reklas SYSTEM_DOC bertanggal hari ini (per pihak untuk Piutang/Hutang/Uang Muka). Hanya role Admin. Tanpa sisa saldo tidak memposting apa pun. Daftar sisa saldo ada di sysacct_get (formerResidues) dan cek kesehatan 'Former Role Accounts'.",
+      "risk": "critical",
+      "roles": [
+        "Admin"
+      ],
+      "input": {
+        "role": "string",
+        "reason": "string"
+      },
+      "params": [
+        {
+          "name": "role",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "Kunci role neraca satu-akun, mis. AR, AP, INVENTORY, CUSTOMER_DEPOSIT."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Alasan reklas (min 5 karakter), masuk narasi jurnal."
+        }
+      ],
+      "output": {
+        "transfers": "array"
+      },
+      "outputSummary": "{ message, transfers: [{ role, fromAccount, toAccount, amount, partyCount, journalNumbers }] } (kosong bila tidak ada sisa).",
+      "handler": "POST /api/system-accounts/:role/sweep",
+      "permAction": "edit",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "draftCapable": false,
+      "postingEffect": "Memposting jurnal reklas SYSTEM_DOC (akun lama ke akun yang dipetakan sekarang, hari ini) untuk setiap akun lama role ini yang masih bersaldo. Tidak bisa dibatalkan dari menu Jurnal.",
+      "confirm_template": "Pindahkan sisa saldo akun lama role {role} ke akun yang dipetakan sekarang? Alasan: {reason}",
+      "prerequisites": [
+        "Role dipetakan ke tepat satu akun detail aktif.",
+        "Tahun buku hari ini terbuka dan tidak terkunci."
+      ],
+      "errors": [
+        "403: hanya Admin",
+        "400: role tidak valid / reason kurang dari 5 karakter",
+        "400 SWEEP_ROLE_INVALID: role bukan role neraca satu-akun (role laba rugi tidak direklas)",
+        "400 ACCOUNT_MAPPING_MISSING: role belum dipetakan",
+        "400 ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun yang dipetakan sekarang bukan akun detail aktif",
+        "400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting",
+        "400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; ulangi"
+      ],
+      "related": [
+        "sysacct_get",
+        "sysacct_update"
+      ],
+      "doc": "### sysacct_sweep\n\n**Ringkasan:** Memindahkan sisa saldo di akun lama sebuah role neraca (akun asal jurnal reklas pemetaan akun sistem sebelumnya, mis. setelah invoice lama dibatalkan) ke akun yang dipetakan sekarang, lewat jurnal reklas SYSTEM_DOC bertanggal hari ini (per pihak untuk Piutang/Hutang/Uang Muka). Hanya role Admin. Tanpa sisa saldo tidak memposting apa pun. Daftar sisa saldo ada di sysacct_get (formerResidues) dan cek kesehatan 'Former Role Accounts'.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`)\n- **Handler:** `POST /api/system-accounts/:role/sweep` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `role` | path | `string` | ya | Kunci role neraca satu-akun, mis. AR, AP, INVENTORY, CUSTOMER_DEPOSIT. |\n| `reason` | body | `string` | ya | Alasan reklas (min 5 karakter), masuk narasi jurnal. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_sweep\",\n  \"args\": {\n    \"role\": \"<role>\",\n    \"reason\": \"<reason>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Pindahkan sisa saldo akun lama role <role> ke akun yang dipetakan sekarang? Alasan: <reason>\"\n}\n```\n\n**Isi hasil:** { message, transfers: [{ role, fromAccount, toAccount, amount, partyCount, journalNumbers }] } (kosong bila tidak ada sisa).\n\n**Efek pembukuan/stok:** Memposting jurnal reklas SYSTEM_DOC (akun lama ke akun yang dipetakan sekarang, hari ini) untuk setiap akun lama role ini yang masih bersaldo. Tidak bisa dibatalkan dari menu Jurnal.\n\n**Teks konfirmasi:** Pindahkan sisa saldo akun lama role {role} ke akun yang dipetakan sekarang? Alasan: {reason}\n\n**Prasyarat**\n\n- Role dipetakan ke tepat satu akun detail aktif.\n- Tahun buku hari ini terbuka dan tidak terkunci.\n\n**Error umum**\n\n- 403: hanya Admin\n- 400: role tidak valid / reason kurang dari 5 karakter\n- 400 SWEEP_ROLE_INVALID: role bukan role neraca satu-akun (role laba rugi tidak direklas)\n- 400 ACCOUNT_MAPPING_MISSING: role belum dipetakan\n- 400 ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun yang dipetakan sekarang bukan akun detail aktif\n- 400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting\n- 400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; ulangi\n\n**Tool terkait:** [`sysacct_get`](#sysacct_get), [`sysacct_update`](#sysacct_update)\n",
+      "example": {
+        "tool": "sysacct_sweep",
+        "args": {
+          "role": "<role>",
+          "reason": "<reason>"
+        }
       }
     },
     {
@@ -38792,14 +38862,16 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "settings",
-      "desc": "Mengubah pemetaan akun sistem (mappings: role+accountId+sortOrder; clearRoles: melepas role non-wajib). Hanya role Admin (dicek eksplisit). Mempengaruhi SEMUA posting otomatis berikutnya.",
+      "desc": "Mengubah pemetaan akun sistem (mappings: role+accountId+sortOrder; clearRoles: melepas role non-wajib). Hanya role Admin (dicek eksplisit). Mempengaruhi SEMUA posting otomatis berikutnya. Memindah role neraca satu-akun (mis. Piutang, Hutang, Persediaan, Uang Muka) dari akun yang masih bersaldo ditolak kecuali transferBalance=true dengan reason: saldo seluruh riwayat akun lama direklas ke akun baru (per pihak untuk Piutang/Hutang/Uang Muka) dalam satu jurnal SYSTEM_DOC bertanggal hari ini. Role laba rugi (mis. HPP, Retur Penjualan) dipindah tanpa reklas; riwayat tetap di akun lama.",
       "risk": "critical",
       "roles": [
         "Admin"
       ],
       "input": {
         "mappings": "array<object>",
-        "clearRoles": "array<string>"
+        "clearRoles": "array<string>",
+        "transferBalance": "boolean",
+        "reason": "string"
       },
       "params": [
         {
@@ -38834,35 +38906,55 @@
           "type": "array<string>",
           "required": false,
           "description": "Roles yang ingin dilepas total (set ke kosong). Tidak boleh role wajib."
+        },
+        {
+          "name": "transferBalance",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Pindahkan saldo akun lama role neraca ke akun baru lewat jurnal reklas hari ini. Wajib dengan reason."
+        },
+        {
+          "name": "reason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan reklas (min 5 karakter), masuk narasi jurnal. Wajib bila transferBalance."
         }
       ],
       "output": {
         "status": "string"
       },
-      "outputSummary": "Pemetaan terbaru.",
+      "outputSummary": "Pemetaan terbaru + transfers (reklas per role: akun lama/baru, jumlah, jumlah pihak, nomor jurnal).",
       "handler": "PUT /api/system-accounts",
       "permAction": "edit",
       "enabled": true,
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak memposting jurnal, tetapi menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.",
-      "confirm_template": "Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles})? Berdampak pada semua posting otomatis.",
+      "postingEffect": "Dengan transferBalance memposting jurnal reklas SYSTEM_DOC (akun lama ke akun baru, hari ini) untuk role neraca yang dipindah; tanpa itu tidak memposting. Menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.",
+      "confirm_template": "Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles}, pindahkan saldo: {transferBalance})? Berdampak pada semua posting otomatis.",
       "prerequisites": [
         "Akun tujuan aktif, bukan akun grup, dan bertipe akar sesuai role (hanya pasangan role-akun yang berubah diperiksa).",
-        "Role wajib tidak boleh dikosongkan."
+        "Role wajib tidak boleh dikosongkan.",
+        "Role neraca yang dipindah dari akun bersaldo butuh transferBalance=true dan reason; tahun buku hari ini harus terbuka dan tidak terkunci."
       ],
       "errors": [
         "403: hanya Admin",
         "400: role tidak valid / role wajib dilepas",
         "400 ACCOUNT_GROUP / ACCOUNT_INACTIVE / ACCOUNT_ROOT_TYPE: akun baru untuk sebuah role adalah akun grup, nonaktif, atau bertipe akar berbeda dari yang diharapkan role",
-        "400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun"
+        "400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun",
+        "400 ACCOUNT_HAS_BALANCE: akun lama role neraca masih bersaldo; respons memuat balances (role, akun lama/baru, jumlah, jumlah pihak). Ulangi dengan transferBalance=true dan reason, atau jangan pindahkan role itu",
+        "400: transferBalance tanpa reason (min 5 karakter)",
+        "400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting; pemetaan tidak berubah",
+        "400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; tidak ada yang disimpan, ulangi"
       ],
       "related": [
         "sysacct_get",
-        "coa_flat"
+        "coa_flat",
+        "sysacct_sweep"
       ],
-      "doc": "### sysacct_update\n\n**Ringkasan:** Mengubah pemetaan akun sistem (mappings: role+accountId+sortOrder; clearRoles: melepas role non-wajib). Hanya role Admin (dicek eksplisit). Mempengaruhi SEMUA posting otomatis berikutnya.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`)\n- **Handler:** `PUT /api/system-accounts` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `mappings` | body | `array<object>` | tidak |  |\n| `mappings[].role` | body | `string` | ya |  |\n| `mappings[].accountId` | body | `uuid` | ya |  |\n| `mappings[].sortOrder` | body | `number` | tidak |  |\n| `clearRoles` | body | `array<string>` | tidak | Roles yang ingin dilepas total (set ke kosong). Tidak boleh role wajib. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_update\",\n  \"args\": {\n    \"mappings\": [\n      {\n        \"role\": \"<role>\",\n        \"accountId\": \"00000000-0000-0000-0000-000000000000\"\n      }\n    ],\n    \"clearRoles\": []\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah pemetaan akun sistem ([...] pemetaan, lepas [...])? Berdampak pada semua posting otomatis.\"\n}\n```\n\n**Isi hasil:** Pemetaan terbaru.\n\n**Efek pembukuan/stok:** Tidak memposting jurnal, tetapi menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.\n\n**Teks konfirmasi:** Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles})? Berdampak pada semua posting otomatis.\n\n**Prasyarat**\n\n- Akun tujuan aktif, bukan akun grup, dan bertipe akar sesuai role (hanya pasangan role-akun yang berubah diperiksa).\n- Role wajib tidak boleh dikosongkan.\n\n**Error umum**\n\n- 403: hanya Admin\n- 400: role tidak valid / role wajib dilepas\n- 400 ACCOUNT_GROUP / ACCOUNT_INACTIVE / ACCOUNT_ROOT_TYPE: akun baru untuk sebuah role adalah akun grup, nonaktif, atau bertipe akar berbeda dari yang diharapkan role\n- 400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun\n\n**Tool terkait:** [`sysacct_get`](#sysacct_get), [`coa_flat`](#coa_flat)\n",
+      "doc": "### sysacct_update\n\n**Ringkasan:** Mengubah pemetaan akun sistem (mappings: role+accountId+sortOrder; clearRoles: melepas role non-wajib). Hanya role Admin (dicek eksplisit). Mempengaruhi SEMUA posting otomatis berikutnya. Memindah role neraca satu-akun (mis. Piutang, Hutang, Persediaan, Uang Muka) dari akun yang masih bersaldo ditolak kecuali transferBalance=true dengan reason: saldo seluruh riwayat akun lama direklas ke akun baru (per pihak untuk Piutang/Hutang/Uang Muka) dalam satu jurnal SYSTEM_DOC bertanggal hari ini. Role laba rugi (mis. HPP, Retur Penjualan) dipindah tanpa reklas; riwayat tetap di akun lama.\n\n- **Risk / tier:** `critical` / Wajib-Approve\n- **Draft-capable:** tidak (efek langsung)\n- **Roles & izin:** Admin (modul `settings` / `edit`)\n- **Handler:** `PUT /api/system-accounts` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `mappings` | body | `array<object>` | tidak |  |\n| `mappings[].role` | body | `string` | ya |  |\n| `mappings[].accountId` | body | `uuid` | ya |  |\n| `mappings[].sortOrder` | body | `number` | tidak |  |\n| `clearRoles` | body | `array<string>` | tidak | Roles yang ingin dilepas total (set ke kosong). Tidak boleh role wajib. |\n| `transferBalance` | body | `boolean` | tidak | Pindahkan saldo akun lama role neraca ke akun baru lewat jurnal reklas hari ini. Wajib dengan reason. |\n| `reason` | body | `string` | tidak | Alasan reklas (min 5 karakter), masuk narasi jurnal. Wajib bila transferBalance. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_update\",\n  \"args\": {\n    \"mappings\": [\n      {\n        \"role\": \"<role>\",\n        \"accountId\": \"00000000-0000-0000-0000-000000000000\"\n      }\n    ],\n    \"clearRoles\": []\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"action\",\n  \"status\": \"pending_approval\",\n  \"approvalId\": \"<id>\",\n  \"confirm\": \"Ubah pemetaan akun sistem ([...] pemetaan, lepas [...], pindahkan saldo: {transferBalance})? Berdampak pada semua posting otomatis.\"\n}\n```\n\n**Isi hasil:** Pemetaan terbaru + transfers (reklas per role: akun lama/baru, jumlah, jumlah pihak, nomor jurnal).\n\n**Efek pembukuan/stok:** Dengan transferBalance memposting jurnal reklas SYSTEM_DOC (akun lama ke akun baru, hari ini) untuk role neraca yang dipindah; tanpa itu tidak memposting. Menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.\n\n**Teks konfirmasi:** Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles}, pindahkan saldo: {transferBalance})? Berdampak pada semua posting otomatis.\n\n**Prasyarat**\n\n- Akun tujuan aktif, bukan akun grup, dan bertipe akar sesuai role (hanya pasangan role-akun yang berubah diperiksa).\n- Role wajib tidak boleh dikosongkan.\n- Role neraca yang dipindah dari akun bersaldo butuh transferBalance=true dan reason; tahun buku hari ini harus terbuka dan tidak terkunci.\n\n**Error umum**\n\n- 403: hanya Admin\n- 400: role tidak valid / role wajib dilepas\n- 400 ACCOUNT_GROUP / ACCOUNT_INACTIVE / ACCOUNT_ROOT_TYPE: akun baru untuk sebuah role adalah akun grup, nonaktif, atau bertipe akar berbeda dari yang diharapkan role\n- 400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun\n- 400 ACCOUNT_HAS_BALANCE: akun lama role neraca masih bersaldo; respons memuat balances (role, akun lama/baru, jumlah, jumlah pihak). Ulangi dengan transferBalance=true dan reason, atau jangan pindahkan role itu\n- 400: transferBalance tanpa reason (min 5 karakter)\n- 400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting; pemetaan tidak berubah\n- 400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; tidak ada yang disimpan, ulangi\n\n**Tool terkait:** [`sysacct_get`](#sysacct_get), [`coa_flat`](#coa_flat), [`sysacct_sweep`](#sysacct_sweep)\n",
       "example": {
         "tool": "sysacct_update",
         "args": {

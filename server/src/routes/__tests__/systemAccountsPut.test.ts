@@ -1,7 +1,9 @@
 // PUT /api/system-accounts validation without a database (E2-R8, PR-4.11). A new (role, account)
 // pair must be an active detail account of the role's root type, and two roles of different
 // meaning may not share an account. Pairs already stored are not re-checked, so re-sending a legacy
-// mapping (COGS on group account 5) next to a real change still succeeds.
+// mapping (COGS on group account 5) next to a real change still succeeds. A balance-sheet role moving
+// away from an account with a ledger balance needs transferBalance + reason (PR-4.12); the reclass
+// itself is covered by systemAccountRemap.integration.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { callRoute } from '../../__tests__/helpers/routeHarness';
 
@@ -10,6 +12,8 @@ const db = vi.hoisted(() => ({
   stored: [] as Array<{ role: string; accountId: string }>,
   writes: { deleteMany: vi.fn(), createMany: vi.fn() },
   lock: vi.fn(),
+  /** Rows of the old-account residue query (party_id, amount). */
+  residue: vi.fn(async (): Promise<unknown[]> => []),
 }));
 vi.mock('../../lib/prisma', () => {
   const prisma = {
@@ -20,6 +24,7 @@ vi.mock('../../lib/prisma', () => {
       createMany: (...a: unknown[]) => db.writes.createMany(...a),
     },
     $executeRaw: (...a: unknown[]) => db.lock(...a),
+    $queryRaw: () => db.residue(),
     $transaction: (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
   };
   return { prisma };
@@ -51,6 +56,8 @@ beforeEach(() => {
   db.writes.deleteMany.mockReset();
   db.writes.createMany.mockReset();
   db.lock.mockReset();
+  db.residue.mockReset();
+  db.residue.mockResolvedValue([]);
   vi.spyOn(systemAccounts, 'invalidateCache').mockImplementation(() => undefined);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -172,5 +179,54 @@ describe('PUT /system-accounts validation', () => {
       mappings: [{ role: 'AR', accountId: UUID(1) }, { role: 'INVENTORY', accountId: UUID(1) }, { role: 'PREPAID_EXPENSE', accountId: UUID(2) }],
     });
     expect(r.status).toBe(200);
+  });
+
+  it('AR moving off an account with a ledger balance, no transferBalance: 400 ACCOUNT_HAS_BALANCE with the balances', async () => {
+    db.stored = [{ role: 'AR', accountId: UUID(1) }];
+    db.residue.mockResolvedValue([{ party_id: 'p-1', amount: '300.00' }, { party_id: 'p-2', amount: '200.00' }]);
+    const r = await put({ mappings: [{ role: 'AR', accountId: UUID(2) }] });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('ACCOUNT_HAS_BALANCE');
+    expect(r.body.error).toBe('Peran Piutang Usaha: akun lama 1.2.1 Akun 1.2.1 masih bersaldo 500.00. Pindahkan saldo ke akun baru dengan alasan, atau batalkan perubahan peran ini.');
+    expect(r.body.balances).toEqual([{
+      role: 'AR', roleLabel: 'Piutang Usaha', fromAccountId: UUID(1), fromAccount: '1.2.1 Akun 1.2.1',
+      toAccountId: UUID(2), toAccount: '1.2.2 Akun 1.2.2', amount: '500.00', partyCount: 2,
+    }]);
+    expect(db.writes.deleteMany).not.toHaveBeenCalled();
+    expect(db.writes.createMany).not.toHaveBeenCalled();
+  });
+
+  it('AR moving off an empty account: saved without a reclass', async () => {
+    db.stored = [{ role: 'AR', accountId: UUID(1) }];
+    const r = await put({ mappings: [{ role: 'AR', accountId: UUID(2) }] });
+    expect(r.status).toBe(200);
+    expect(r.body.transfers).toEqual([]);
+    expect(db.residue).toHaveBeenCalled();
+  });
+
+  it('transferBalance without a reason: 400 before anything is read', async () => {
+    db.stored = [{ role: 'AR', accountId: UUID(1) }];
+    const r = await put({ mappings: [{ role: 'AR', accountId: UUID(2) }], transferBalance: true });
+    expect(r.status).toBe(400);
+    expect(db.lock).not.toHaveBeenCalled();
+    const short = await put({ mappings: [{ role: 'AR', accountId: UUID(2) }], transferBalance: true, reason: ' ab ' });
+    expect(short.status).toBe(400);
+  });
+
+  it('a profit and loss role (COGS) moves without a balance check', async () => {
+    db.stored = [{ role: 'COGS', accountId: UUID(4) }];
+    db.residue.mockResolvedValue([{ party_id: null, amount: '900.00' }]);
+    const r = await put({ mappings: [{ role: 'COGS', accountId: UUID(7) }] });
+    expect(r.status).toBe(200);
+    expect(r.body.transfers).toEqual([]);
+    expect(db.residue).not.toHaveBeenCalled();
+  });
+
+  it('re-sending an unchanged AR beside another change does not check its balance', async () => {
+    db.stored = [{ role: 'AR', accountId: UUID(1) }];
+    db.residue.mockResolvedValue([{ party_id: 'p-1', amount: '1.00' }]);
+    const r = await put({ mappings: [{ role: 'AR', accountId: UUID(1) }, { role: 'PROJECT_GUARANTEE', accountId: UUID(2) }] });
+    expect(r.status).toBe(200);
+    expect(db.residue).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,21 @@ import { systemAccounts } from '../services/systemAccounts';
 import { postableAccountProblem } from '../services/ledger/accountGuard';
 import { changedMappings, findRoleConflict, resultingMappings } from '../services/systemAccountMappingRules';
 import {
+  AccountHasBalanceError,
+  applyRemap,
+  assertRemapEmptied,
+  assertTransferAllowed,
+  findFormerResidues,
+  hasResidue,
+  isReclassRole,
+  lockRemaps,
+  planRemap,
+  remapCandidates,
+  sweepFormerAccounts,
+  type RemapPlan,
+  type RemapTransfer,
+} from '../services/systemAccountRemap';
+import {
   SYSTEM_ACCOUNT_ROLES,
   ALL_SYSTEM_ROLES,
   type SystemAccountRole,
@@ -58,11 +73,24 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       multiAccount: meta.multiAccount,
       required: meta.required,
       expectedRootType: meta.expectedRootType,
+      // Balance-sheet single-account role: its balance moves with the mapping (otherwise history stays).
+      balanceMoves: isReclassRole(key),
     };
   });
 
-  res.json({ mappings: grouped, roles });
+  // Old accounts of balance-sheet roles still holding a balance after a remap (sweep candidates).
+  const formerResidues = await findFormerResidues(prisma);
+
+  res.json({ mappings: grouped, roles, formerResidues });
 });
+
+/** Answers ACCOUNT_HAS_BALANCE with the balances for the transfer dialog; anything else as usual. */
+function remapError(res: Response, error: unknown, context: string, fallback: string) {
+  if (error instanceof AccountHasBalanceError) {
+    return res.status(400).json({ error: error.message, code: error.code, balances: error.balances });
+  }
+  return handleRouteError(res, error, context, fallback);
+}
 
 // PUT /api/system-accounts: update mappings (requires settings edit permission)
 const updateSchema = z.object({
@@ -75,8 +103,14 @@ const updateSchema = z.object({
   ).default([]),
   // Roles yang ingin dilepas total (set ke kosong). Tidak boleh role wajib.
   clearRoles: z.array(z.string()).default([]),
+  // Pindahkan saldo akun lama peran neraca ke akun baru (jurnal reklas hari ini). Wajib dengan alasan.
+  transferBalance: z.boolean().default(false),
+  reason: z.string().trim().min(5, 'Alasan minimal 5 karakter.').max(500).optional(),
 }).refine((d) => d.mappings.length > 0 || d.clearRoles.length > 0, {
   message: 'Tidak ada perubahan untuk disimpan.',
+}).refine((d) => !d.transferBalance || !!d.reason, {
+  message: 'Alasan wajib diisi untuk memindahkan saldo.',
+  path: ['reason'],
 });
 
 router.put('/', async (req: AuthRequest, res: Response) => {
@@ -89,7 +123,7 @@ router.put('/', async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Data tidak valid.', details: parsed.error.format() });
   }
 
-  const { mappings: inputMappings, clearRoles } = parsed.data;
+  const { mappings: inputMappings, clearRoles, transferBalance, reason } = parsed.data;
 
   // Validate roles
   const validRoles = new Set<string>(ALL_SYSTEM_ROLES);
@@ -145,10 +179,11 @@ router.put('/', async (req: AuthRequest, res: Response) => {
   // Determine which roles are being updated (mapped + dilepas)
   const rolesToUpdate = [...new Set([...inputMappings.map((m) => m.role), ...clearRoles])];
 
+  let transfers: RemapTransfer[] = [];
   try {
-    await prisma.$transaction(async (tx) => {
+    transfers = await prisma.$transaction(async (tx) => {
       // Serialise saves: the stored mappings the checks compare against must still be current at commit.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('system-accounts-remap'))`;
+      await lockRemaps(tx);
       const stored = await tx.systemAccountMapping.findMany({ select: { role: true, accountId: true } });
 
       const changed = changedMappings(inputMappings, stored);
@@ -172,6 +207,17 @@ router.put('/', async (req: AuthRequest, res: Response) => {
         );
       }
 
+      // A single-account role moving to another account: balance-sheet roles carry their balance
+      // (refused without transferBalance), profit and loss roles move without a reclass.
+      const plans: RemapPlan[] = [];
+      for (const candidate of remapCandidates(inputMappings, stored)) plans.push(await planRemap(tx, candidate));
+      assertTransferAllowed(plans, transferBalance);
+      const moving = plans.filter(hasResidue);
+      const posted: RemapTransfer[] = [];
+      for (const plan of moving) {
+        posted.push(await applyRemap(tx, plan, { actorId: req.user!.userId, reason: reason ?? '' }));
+      }
+
       // Delete existing mappings for the submitted roles
       await tx.systemAccountMapping.deleteMany({
         where: { role: { in: rolesToUpdate } },
@@ -185,9 +231,12 @@ router.put('/', async (req: AuthRequest, res: Response) => {
           sortOrder: m.sortOrder,
         })),
       });
-    });
+
+      await assertRemapEmptied(tx, moving);
+      return posted;
+    }, { timeout: 60000 });
   } catch (error) {
-    return handleRouteError(res, error, 'PUT /system-accounts', 'Gagal menyimpan konfigurasi akun sistem.');
+    return remapError(res, error, 'PUT /system-accounts', 'Gagal menyimpan konfigurasi akun sistem.');
   }
 
   // Invalidate cache
@@ -213,7 +262,43 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       accountName: m.account.name,
       sortOrder: m.sortOrder,
     })),
+    transfers,
   });
+});
+
+// POST /api/system-accounts/:role/sweep: move what is left on the role's former accounts (e.g. after
+// an old invoice was voided) to the account mapped now, through the same reclass as a remap.
+const sweepSchema = z.object({
+  reason: z.string().trim().min(5, 'Alasan minimal 5 karakter.').max(500),
+});
+
+router.post('/:role/sweep', async (req: AuthRequest, res: Response) => {
+  if (req.user?.role !== 'Admin') {
+    return res.status(403).json({ error: 'Hanya Admin yang dapat mengubah konfigurasi akun sistem.' });
+  }
+  const role = String(req.params.role ?? '');
+  if (!(ALL_SYSTEM_ROLES as readonly string[]).includes(role)) {
+    return res.status(400).json({ error: `Role "${role}" tidak valid.` });
+  }
+  const parsed = sweepSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Data tidak valid.', details: parsed.error.format() });
+  }
+
+  try {
+    const transfers = await prisma.$transaction(
+      (tx) => sweepFormerAccounts(tx, role as SystemAccountRole, { actorId: req.user!.userId, reason: parsed.data.reason }),
+      { timeout: 60000 },
+    );
+    res.json({
+      message: transfers.length > 0
+        ? 'Sisa saldo akun lama dipindahkan ke akun yang dipetakan sekarang.'
+        : 'Tidak ada sisa saldo di akun lama peran ini.',
+      transfers,
+    });
+  } catch (error) {
+    return handleRouteError(res, error, 'POST /system-accounts/:role/sweep', 'Gagal memindahkan sisa saldo akun lama.');
+  }
 });
 
 export default router;

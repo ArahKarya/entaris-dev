@@ -34,6 +34,25 @@ describe('AIRA registry — load file nyata', () => {
   });
 });
 
+describe('AIRA registry — pemindahan pemetaan akun sistem (E2-R8)', () => {
+  it('sysacct_update mengenal transferBalance, reason dan ACCOUNT_HAS_BALANCE', () => {
+    loadRegistry(true);
+    const t = getTool('sysacct_update')!;
+    expect((t.params ?? []).map((p) => p.name)).toEqual(expect.arrayContaining(['mappings', 'clearRoles', 'transferBalance', 'reason']));
+    expect(t.errors?.some((e) => e.includes('ACCOUNT_HAS_BALANCE'))).toBe(true);
+    expect(t.risk).toBe('critical');
+  });
+
+  it('sysacct_sweep critical, tidak draftCapable (selalu antrean persetujuan)', () => {
+    loadRegistry(true);
+    const t = getTool('sysacct_sweep')!;
+    expect(t.handler).toBe('POST /api/system-accounts/:role/sweep');
+    expect(t.risk).toBe('critical');
+    expect(t.draftCapable).toBe(false);
+    expect((t.params ?? []).map((p) => p.name)).toEqual(['role', 'reason']);
+  });
+});
+
 describe('riskToTier', () => {
   it('read→auto, write→draft, critical→must_approve', () => {
     expect(riskToTier('read')).toBe('auto');
