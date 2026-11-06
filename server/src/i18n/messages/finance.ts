@@ -212,7 +212,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Gagal menyimpan konfigurasi akun sistem.": "Failed to save the system account configuration.",
   // system accounts (E2-R8): remap with balance-sheet reclass and sweep (services/systemAccountRemap.ts)
   "Akun asal reklas": "Reclass source account",
-  "Alasan minimal 5 karakter.": "The reason must be at least 5 characters.",
   "Alasan wajib diisi untuk memindahkan saldo.": "A reason is required to transfer the balance.",
   "Peran {0}: akun lama {1} masih bersaldo {2}. Pindahkan saldo ke akun baru dengan alasan, atau batalkan perubahan peran ini.": "Role {0}: the old account {1} still has a balance of {2}. Transfer the balance to the new account with a reason, or undo this role change.",
   "Saldo akun {0} berubah selama reklas peran {1}. Tidak ada yang disimpan; ulangi.": "The balance of account {0} changed during the reclass of role {1}. Nothing was saved; try again.",
