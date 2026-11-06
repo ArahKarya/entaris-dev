@@ -183,6 +183,25 @@ d('journal import posts through createManualJournalInTx', () => {
     });
   });
 
+  it('an already-imported control journal is skipped for a user without journal.control, next to a new journal', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const boss = await controller(tx);
+      const party = await customer(tx, `IT-IJ Customer ${tag()}`);
+      const file = journal(b.arNo, b.revNo, party.name);
+      expect((await importFile(file, boss)).body.success).toBe(1);
+      const other = await tx.account.create({
+        data: { name: 'IT-IJ lain', accountNumber: `IT-IJ-${tag()}`, accountType: 'REVENUE', rootType: 'REVENUE' },
+      });
+      const fresh = journal(other.accountNumber, b.revNo, '', 'IT-IJ baru');
+      const res = await importFile([...file, ...fresh], await plain(tx));
+      expect(res.body).toMatchObject({ success: 1, failed: 0, errors: [], totalJournals: 2 });
+      expect(res.body.alreadyImported).toHaveLength(1);
+      expect(await tx.journalEntry.count({ where: { sourceType: 'IMPORT', narration: 'IT-IJ piutang' } })).toBe(1);
+      expect(await tx.journalEntry.count({ where: { sourceType: 'IMPORT', narration: 'IT-IJ baru' } })).toBe(1);
+    });
+  });
+
   it('a group account is refused on its row', async () => {
     await inRollback(async (tx) => {
       const b = await books(tx);

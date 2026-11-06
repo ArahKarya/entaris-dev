@@ -23,6 +23,7 @@ import {
   type CheckedGroup,
   type ImportRowError,
 } from '../../services/journalImport';
+import { PARTY_NOT_FOUND, PARTY_AMBIGUOUS_NAME } from '../../services/ledger/partyRules';
 import { resolveImportParties } from '../../services/journalImportParties';
 import { upload, parseFileDetailed, sanitizeCellValue } from './shared';
 
@@ -83,11 +84,9 @@ router.post(
         if (!isPreview) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('IMPORT_JOURNALS'))`;
 
         const accounts = await loadAccounts(tx, lineCheck.checked);
-        errors.push(...(await accountErrors(tx, lineCheck.checked, accounts, canControl)));
         // Parties resolve to ids before the content hash, so naming a party by id or by name is the same journal.
         const accountIds = new Map([...accounts].map(([number, a]) => [number, a.id]));
         const resolved = await resolveImportParties(tx, lineCheck.checked, accountIds);
-        errors.push(...resolved.errors);
 
         const parts = groupSourceKeyParts(resolved.groups);
         const keyed = resolved.groups.map((c, i) => ({
@@ -107,6 +106,13 @@ router.post(
           .map((k) => ({ narration: k.group.narration, day: k.group.day, sourceKey: k.sourceKey }));
         const todo = keyed.filter((k) => !imported.has(k.sourceKey));
 
+        // Account and party-rule problems count only for journals that will post: a journal already in
+        // the books is skipped even if the rules or the importer's rights changed since. A party code
+        // that names no single party stays an error everywhere, because the unresolved line hashes like
+        // a journal without a party and could otherwise match an old one by accident.
+        const todoRows = new Set(todo.flatMap((k) => k.group.items.map((i) => i.rowNum)));
+        errors.push(...(await accountErrors(tx, todo, accounts, canControl)));
+        errors.push(...resolved.errors.filter((e) => todoRows.has(e.row) || e.code === PARTY_NOT_FOUND || e.code === PARTY_AMBIGUOUS_NAME));
         errors.push(...(await periodErrors(tx, todo)));
 
         const ready = todo;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { matchPartyCode, type PartyLite } from '../journalImportParties';
 
-const p = (id: string, name: string): PartyLite => ({ id, name, partyType: 'CUSTOMER' });
+const p = (id: string, name: string): PartyLite => ({ id, name, partyType: 'Customer' });
 
 describe('matchPartyCode', () => {
   const parties = [p('id-1', 'PT Maju'), p('id-2', 'CV Jaya'), p('id-3', 'cv jaya')];
