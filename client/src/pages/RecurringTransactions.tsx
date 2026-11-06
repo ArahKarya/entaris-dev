@@ -74,12 +74,10 @@ export const RecurringTransactions = () => {
 
   const executeMutation = useMutation({
     mutationFn: (id: string) => api.post(`/recurring/${id}/execute`),
-    onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['recurring-templates'] });
-      if (res.data.success) toast.success(t('recurringTransactions.toast.executed'));
-      else toast.error(res.data.error || t('recurringTransactions.toast.executeFailed'));
-    },
+    onSuccess: () => toast.success(t('recurringTransactions.toast.executed')),
     onError: (e) => toast.error(errorMessage(e, t('recurringTransactions.toast.executeFailed'))),
+    // A failed run is a 400 but still stores lastError on the template, so the list refetches either way.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['recurring-templates'] }),
   });
 
   const toggleMutation = useMutation({

@@ -19,7 +19,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, Prisma, type FiscalYear } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { txPrismaProxy, type Tx } from '../helpers/routeHarness';
+import { callRoute, txPrismaProxy, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 
@@ -32,6 +32,7 @@ vi.mock('../../services/telegramService', () => ({
 }));
 
 import { runDueTemplates, runRecurringTemplate, RECURRING_FAILED_NOTIFICATION } from '../../services/recurringExecute';
+import recurringRouter from '../../routes/recurring';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -200,6 +201,22 @@ d('recurring template execution (E2-R3)', () => {
       const t = await template(tx, b, [{ accountId: ar.accountId, debit: 100, credit: 0 }, { accountId: b.cashId, debit: 0, credit: 100 }]);
       expect(await runRecurringTemplate(t.id, { userId: b.userId, now: NOW })).toMatchObject({ outcome: 'failed', code: 'ACCOUNT_CONTROL' });
       expect(await recurringJournals(tx, t.id)).toHaveLength(0);
+    });
+  });
+
+  it('a failed manual run answers 400 with its code, and the list returns lastError in the request language', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const t = await template(tx, b, rent(b, '100.005'));
+
+      const run = await callRoute(recurringRouter, 'post', '/:id/execute', { userId: b.userId, params: { id: t.id } });
+      expect(run.status).toBe(400);
+      expect(run.body).toMatchObject({ code: 'LINE_AMOUNT_PRECISION' });
+
+      const row = async (headers?: Record<string, string>) =>
+        (await callRoute(recurringRouter, 'get', '/', { userId: b.userId, headers })).body.data.find((r: { id: string }) => r.id === t.id);
+      expect((await row()).lastError).toBe('Baris 1: Nilai debit 100.005 lebih dari 2 angka desimal.');
+      expect((await row({ 'Accept-Language': 'en' })).lastError).toBe('Line 1: The debit amount 100.005 has more than 2 decimal places.');
     });
   });
 

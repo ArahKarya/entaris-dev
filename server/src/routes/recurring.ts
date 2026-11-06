@@ -9,6 +9,8 @@ import { assertPostableAccounts, TEMPLATE_RULE } from '../services/ledger/accoun
 import { runDueTemplates, runRecurringTemplate } from '../services/recurringExecute';
 import { BusinessError, handleRouteError } from '../utils/errors';
 import { logger } from '../lib/logger';
+import { translateFields } from '../i18n/translateFields';
+import { requestLanguage } from '../middleware/responseLanguage';
 
 const router = Router();
 
@@ -36,14 +38,15 @@ function assertNextRunDate(input: Parameters<typeof checkNextRunDate>[0]): Date 
   return check.date;
 }
 
-// GET /api/recurring — list all templates
-router.get('/', async (_req, res) => {
+// GET /api/recurring — list all templates. lastError holds the server's message from the failed run,
+// so it is translated like a top-level error.
+router.get('/', async (req, res) => {
   try {
     const templates = await prisma.recurringTemplate.findMany({
       orderBy: { createdAt: 'desc' },
       include: { user: { select: { fullName: true } } },
     });
-    return res.json({ data: templates });
+    return res.json({ data: translateFields(templates, requestLanguage(req), ['lastError']) });
   } catch (error) {
     logger.error({ error }, 'GET /recurring error');
     return res.status(500).json({ error: 'Gagal mengambil data template berulang.' });
