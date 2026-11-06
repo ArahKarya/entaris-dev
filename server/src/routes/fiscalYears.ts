@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { JournalSourceType, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
-import { updateAccountBalance } from '../utils/accountBalance';
 import { validateBody } from '../utils/validate';
 import { CreateFiscalYearSchema, ReopenFiscalYearSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
@@ -10,6 +9,9 @@ import { assertYearEndNotLocked } from '../utils/periodGuard';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { cancelTrail } from '../utils/cancelClaim';
 import { systemAccounts } from '../services/systemAccounts';
+import { DOCUMENT_RULE } from '../services/ledger/accountGuard';
+import { sourceKeys } from '../services/ledger/journalSource';
+import { postJournal } from '../services/ledger/postJournal';
 import { CloseChecklistFailedError, assertCloseChecklistPasses, runCloseChecklist } from '../services/fiscalYearClose';
 import { ACCOUNT_MAPPING_MISSING, SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
 import { logger } from '../lib/logger';
@@ -57,11 +59,12 @@ interface CloseJournalInput {
 }
 
 /**
- * Posts the CLOSE journal on the year's last day: a profit is DR current profit / CR retained
- * earnings, a loss the other way round, with its ledger rows and running balances. The first close
- * is CLOSE-<name>; after n earlier CLOSE journals of the year (each cancelled by a reopen) it is
- * CLOSE-<name>-R<n+1>. The caller holds the year row FOR UPDATE, so the count cannot race.
- * The single writer of this journal, so the shared posting service can take it over in one place.
+ * Posts the CLOSE journal on the year's last day through postJournal: a profit is DR current profit /
+ * CR retained earnings, a loss the other way round. The first close is CLOSE-<name>; after n earlier
+ * CLOSE journals of the year (each cancelled by a reopen) it is CLOSE-<name>-R<n+1>. The caller holds
+ * the year row FOR UPDATE, so the count cannot race. The lines are fixed by code (DOCUMENT_RULE, no
+ * party); the year must be the one of the year's last day; the monthly lock date is skipped (the
+ * close locks the year itself, and a reopen needs the lock moved back first).
  */
 async function postCloseJournalInTx(tx: Tx, input: CloseJournalInput): Promise<{ id: string; entryNumber: string }> {
   const { year, profit, userId } = input;
@@ -73,37 +76,23 @@ async function postCloseJournalInTx(tx: Tx, input: CloseJournalInput): Promise<{
   const currentProfit = { debit: profit.isPositive() ? amount : zero, credit: profit.isNegative() ? amount : zero };
   const retained = { debit: currentProfit.credit, credit: currentProfit.debit };
 
-  const closeEntry = await tx.journalEntry.create({
-    data: {
-      entryNumber,
-      date: year.endDate,
-      narration: `Tutup Buku Tahun ${year.name}`,
-      status: 'Submitted',
-      fiscalYearId: year.id,
-      createdBy: userId,
-      submittedAt: new Date(),
-      sourceType: 'FY_CLOSE',
-      sourceKey: `FY_CLOSE:${year.id}`,
-      items: {
-        create: [
-          { accountId: input.currentProfitAccountId, ...currentProfit, description: `Tutup akun laba tahun berjalan ${year.name}` },
-          { accountId: input.retainedEarningsAccountId, ...retained, description: `Transfer ke laba ditahan ${year.name}` },
-        ],
-      },
-    },
-  });
-
-  const ledgerRow = { date: year.endDate, referenceType: 'JournalEntry', referenceId: closeEntry.id, fiscalYearId: year.id };
-  await tx.accountingLedgerEntry.createMany({
-    data: [
-      { ...ledgerRow, accountId: input.currentProfitAccountId, ...currentProfit, description: `Tutup buku ${year.name}` },
-      { ...ledgerRow, accountId: input.retainedEarningsAccountId, ...retained, description: `Laba ditahan ${year.name}` },
+  const { journal } = await postJournal(tx, {
+    entryNumber,
+    date: year.endDate,
+    narration: `Tutup Buku Tahun ${year.name}`,
+    lines: [
+      { accountId: input.currentProfitAccountId, ...currentProfit, description: `Tutup akun laba tahun berjalan ${year.name}` },
+      { accountId: input.retainedEarningsAccountId, ...retained, description: `Transfer ke laba ditahan ${year.name}` },
     ],
+    sourceType: 'FY_CLOSE',
+    sourceKey: sourceKeys.close(year.id),
+    createdBy: userId,
+    accountRule: DOCUMENT_RULE,
+    partyRule: 'off',
+    periodOptions: { ignoreLock: true },
+    expectFiscalYearId: year.id,
   });
-
-  await updateAccountBalance(tx, input.currentProfitAccountId, currentProfit.debit, currentProfit.credit);
-  await updateAccountBalance(tx, input.retainedEarningsAccountId, retained.debit, retained.credit);
-  return { id: closeEntry.id, entryNumber };
+  return { id: journal.id, entryNumber };
 }
 
 // GET /api/fiscal-years

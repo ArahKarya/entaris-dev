@@ -82,9 +82,12 @@ describe('journal writers tag their source type', () => {
     expect(args[0]).toContain("sourceType: 'MANUAL'");
   });
 
-  it('the year-close journal carries its fiscal-year key', () => {
-    const text = readFileSync(join(SRC, 'routes/fiscalYears.ts'), 'utf8');
-    expect(text).toMatch(/sourceKey: `FY_CLOSE:\$\{[^}]+\}`/);
+  it('the year-close journal posts through postJournal with its fiscal-year key', () => {
+    const args = callArgs(readFileSync(join(SRC, 'routes/fiscalYears.ts'), 'utf8'), 'postJournal');
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain("sourceType: 'FY_CLOSE'");
+    expect(args[0]).toContain('sourceKey: sourceKeys.close(year.id)');
+    expect(args[0]).toContain('periodOptions: { ignoreLock: true }');
   });
 
   it('postJournalInTx defaults to SYSTEM_DOC', () => {

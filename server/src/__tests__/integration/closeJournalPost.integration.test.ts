@@ -9,11 +9,11 @@
  * - the close still posts while the period lock covers the year's last month (the close journal
  *   skips the lock date; the reopen requires the lock to move back first);
  * - a mapped account that can no longer be posted to (inactive) refuses the close with its code and
- *   leaves the year open.
+ *   leaves the year open (the shared posting function checks the accounts; the old writer did not).
  * The 0,30 - 0,10 - 0,20 case (no CLOSE journal) stays in fiscalYearReopen.integration.test.ts.
  *
  * Route handlers run through the route harness, whose `$transaction` is a savepoint; everything
- * runs in a rollback transaction in fiscal years of its own (2188, 2189). The close checklist gate is
+ * runs in a rollback transaction in a fiscal year of its own (2188). The close checklist gate is
  * stubbed to pass (covered by fiscalYearCloseChecklist.integration.test.ts), and systemAccounts is
  * stubbed to map CURRENT_PROFIT / RETAINED_EARNINGS to fixture accounts.
  */
@@ -114,8 +114,6 @@ async function books(tx: Tx): Promise<Books> {
     currentProfitId: await account(tx, 'EQUITY', 'Laba tahun berjalan'),
     retainedId: await account(tx, 'EQUITY', 'Laba ditahan'),
   };
-  // A later open year, so the reopen's later-year check has something to share-lock.
-  await createFiscalYear(tx, { year: Y + 1 });
   const original = systemAccounts.getAccounts.bind(systemAccounts);
   const fake = (id: string) => [{ id, accountNumber: id, name: id }];
   vi.spyOn(systemAccounts, 'getAccounts').mockImplementation(async (role) => {
@@ -247,6 +245,22 @@ d('year-close journal (POST /fiscal-years/:id/close)', () => {
       const [j] = await closeJournals(tx, b.fy);
       expect(j).toMatchObject({ entryNumber: `CLOSE-${b.fy.name}`, status: 'Submitted', sourceKey: `FY_CLOSE:${b.fy.id}` });
       expect(await balance(tx, b.retainedId)).toBe(30 * JT);
+    });
+  });
+
+  it('refuses the close when a mapped account is inactive, and leaves the year open', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      await trade(tx, b, 80 * JT, 30 * JT);
+      await tx.account.update({ where: { id: b.retainedId }, data: { isActive: false } });
+
+      const r = await close(b.fy.id);
+      expect(r.status).toBe(400);
+      expect(r.body).toMatchObject({ code: 'ACCOUNT_INACTIVE' });
+      expect(await closeJournals(tx, b.fy)).toHaveLength(0);
+      const year = await tx.fiscalYear.findUniqueOrThrow({ where: { id: b.fy.id } });
+      expect(year.isClosed).toBe(false);
+      expect(await balance(tx, b.retainedId)).toBe(0);
     });
   });
 });
