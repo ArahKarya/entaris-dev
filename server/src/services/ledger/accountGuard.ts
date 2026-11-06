@@ -7,7 +7,7 @@
 import { Prisma, type RootType } from '@prisma/client';
 import type { SystemAccountRole } from '../../types/systemAccounts';
 import { BusinessError } from '../../utils/errors';
-import { loadFormerRoleAccounts } from './partyRules';
+import { loadFormerRoleMoves } from './partyRules';
 
 type Tx = Prisma.TransactionClient;
 
@@ -158,9 +158,10 @@ const ACCOUNT_LITE_SELECT = {
  * Account id -> restricted kinds for the control roles (plus extraRoles) and item inventory
  * accounts. One account can be mapped under several roles; it keeps all of them, in `roles`
  * order. Role mappings replace the item-account kind for the same account. An account that held
- * a party role before a remap keeps that role as a kind too: its ALE still counts in the party
- * subledger (roleAccountIds includeFormer), so a former deposit account stays closed to manual
- * journals and a former AR/AP account still needs journal.control.
+ * one of these roles before a remap keeps that role as a kind too: a former party account still
+ * counts in the party subledger (roleAccountIds includeFormer), so a former deposit account stays
+ * closed to manual journals and a former AR/AP, inventory or GRNI account still needs
+ * journal.control; what a voided document leaves there is the role's, and the sweep moves it.
  */
 export async function loadControlAccountMap(
   tx: Tx,
@@ -174,7 +175,7 @@ export async function loadControlAccountMap(
       select: { accountId: true },
       distinct: ['accountId'],
     }),
-    loadFormerRoleAccounts(tx),
+    loadFormerRoleMoves(tx),
   ]);
   const claims = [...mappings, ...former];
   const byRole = new Map<string, RestrictedKind[]>();

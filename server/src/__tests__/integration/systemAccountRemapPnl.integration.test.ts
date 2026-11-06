@@ -4,7 +4,9 @@
  * COGS on a group expense account with ledger rows in a closed year (2165) and an open one (2166)
  * moves to a detail account under it without transferBalance and without a journal: the year-end
  * close does not zero expense ledger rows, so a reclass would pull 2165's cost into 2166. The
- * ledger of both years stays where it was, and the next COGS posting reads the new account.
+ * ledger of both years stays where it was (the profit and loss report of each year is unchanged),
+ * and the COGS mapping now resolves to the new account. Postings that still prefer a hardcoded 5.1
+ * (sales invoice, delivery order) only read the mapping from PR-4.13a, which tests them.
  *
  * Everything runs in a rollback transaction on fixtures made here, in fiscal years 2165/2166.
  */
@@ -21,6 +23,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import { systemAccounts } from '../../services/systemAccounts';
 import router from '../../routes/systemAccounts';
+import reportsRouter from '../../routes/reports';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -112,6 +115,14 @@ d('profit and loss role remap (PR-4.12)', () => {
       await costRow(tx, closed, userId, '2165-05-10', group.id, stock.id, 100 * JT);
       await costRow(tx, open, userId, '2166-02-10', group.id, stock.id, 40 * JT);
       const journalsBefore = await tx.journalEntry.count();
+      const profitLoss = async (year: number) => {
+        const res = await callRoute(reportsRouter, 'get', '/profit-loss', { query: { startDate: `${year}-01-01`, endDate: `${year}-12-31` }, userId, role: 'Admin' });
+        expect(res.status).toBe(200);
+        return res.body as { totalExpense: number; netProfit: number };
+      };
+      const before = { closed: await profitLoss(2165), open: await profitLoss(2166) };
+      expect(before.closed.totalExpense).toBe(100 * JT);
+      expect(before.open.totalExpense).toBe(40 * JT);
 
       const r = await callRoute(router, 'put', '/', { body: { mappings: [{ role: 'COGS', accountId: detail.id }] }, userId, role: 'Admin' });
       expect(r.status).toBe(200);
@@ -123,6 +134,8 @@ d('profit and loss role remap (PR-4.12)', () => {
       expect(await netIn(tx, group.id, open)).toBe(40 * JT);
       expect(await netIn(tx, detail.id, closed)).toBe(0);
       expect(await netIn(tx, detail.id, open)).toBe(0);
+      expect(await profitLoss(2165)).toEqual(before.closed);
+      expect(await profitLoss(2166)).toEqual(before.open);
 
       systemAccounts.invalidateCache();
       expect((await systemAccounts.getAccount('COGS')).id).toBe(detail.id);

@@ -8,6 +8,10 @@
  * - Voiding one of those old invoices afterwards lands on the old account: the receivable check
  *   stays green (the old account is a former AR account), the former-account check reports the
  *   residue and the sweep moves it, leaving the old account at 0.
+ * - AR moving off an account whose net is zero posts no journal but is recorded, so a receipt from
+ *   before the move voided later is still found on the old account (control account, check, sweep).
+ * - After a balance-sheet move, a journal a person makes on the old account is not the role's
+ *   residue; a document posting there still is. A former GRNI account stays a control account.
  * - An old AR group account with ledger rows can be emptied (REMAP_SOURCE_RULE); a group target is
  *   refused. Saving another role next to an unchanged AR does not check AR's balance. A closed
  *   current year refuses the transfer and keeps the mapping.
@@ -32,6 +36,8 @@ import { cancelSalesInvoiceInTx } from '../../services/invoiceCancellation';
 import { findArSubledgerDiffs } from '../../services/ledger/arSubledgerCheck';
 import { findFormerResidues } from '../../services/systemAccountRemap';
 import { checkFormerRoleAccounts } from '../../routes/health/formerRoleAccountChecks';
+import { isControlAccount } from '../../services/ledger/accountGuard';
+import { voidJournalByIdInTx } from '../../utils/journalCancel';
 import router from '../../routes/systemAccounts';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -106,11 +112,20 @@ async function net(tx: Tx, accountId: string, partyId?: string): Promise<number>
   return Number(agg._sum.debit ?? 0) - Number(agg._sum.credit ?? 0);
 }
 
-/** A balanced journal written straight to the ledger (legacy data the reclass has to move). */
-async function rawJournal(tx: Tx, fy: FiscalYear, userId: string, date: Date, lines: Array<{ accountId: string; partyId?: string; debit?: number; credit?: number }>) {
+/**
+ * A balanced journal written straight to the ledger (legacy data the reclass has to move). MANUAL
+ * unless `source` says otherwise (null = a document journal of unknown source); `createdAt` sets
+ * when its ledger rows were written.
+ */
+async function rawJournal(
+  tx: Tx, fy: FiscalYear, userId: string, date: Date,
+  lines: Array<{ accountId: string; partyId?: string; debit?: number; credit?: number }>,
+  opts: { source?: 'MANUAL' | null; createdAt?: Date } = {},
+) {
   const je = await tx.journalEntry.create({
     data: {
-      entryNumber: `IT-RM-${tag()}`, date, status: 'Submitted', fiscalYearId: fy.id, createdBy: userId, sourceType: 'MANUAL',
+      entryNumber: `IT-RM-${tag()}`, date, status: 'Submitted', fiscalYearId: fy.id, createdBy: userId,
+      sourceType: opts.source === undefined ? 'MANUAL' : opts.source,
       items: { create: lines.map((l) => ({ accountId: l.accountId, partyId: l.partyId ?? null, debit: l.debit ?? 0, credit: l.credit ?? 0 })) },
     },
   });
@@ -118,6 +133,7 @@ async function rawJournal(tx: Tx, fy: FiscalYear, userId: string, date: Date, li
     data: lines.map((l) => ({
       date, accountId: l.accountId, partyId: l.partyId ?? null, debit: l.debit ?? 0, credit: l.credit ?? 0,
       referenceType: 'JournalEntry', referenceId: je.id, fiscalYearId: fy.id,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })),
   });
   return je;
@@ -150,6 +166,9 @@ d('system account remap with balance-sheet reclass (PR-4.12)', () => {
       const inv1 = await invoice(f.p1, 300 * JT);
       await invoice(f.p2, 200 * JT);
       expect(await net(tx, f.oldAr.id)).toBe(500 * JT);
+      const invoiceRows = await tx.accountingLedgerEntry.findMany({
+        where: { accountId: f.oldAr.id }, select: { id: true, partyId: true, debit: true, credit: true }, orderBy: { id: 'asc' },
+      });
 
       // Without transferBalance: refused with the balance, nothing changes.
       const refused = await put(f.userId, { mappings: [{ role: 'AR', accountId: f.newAr.id }] });
@@ -172,6 +191,11 @@ d('system account remap with balance-sheet reclass (PR-4.12)', () => {
       expect(await net(tx, f.newAr.id)).toBe(500 * JT);
       expect(await net(tx, f.newAr.id, f.p1)).toBe(300 * JT);
       expect(await net(tx, f.newAr.id, f.p2)).toBe(200 * JT);
+      // The invoices' own ledger rows keep their account and party; only the reclass is new.
+      expect(await tx.accountingLedgerEntry.findMany({
+        where: { id: { in: invoiceRows.map((r) => r.id) } }, select: { id: true, partyId: true, debit: true, credit: true }, orderBy: { id: 'asc' },
+      })).toEqual(invoiceRows);
+      expect(await tx.accountingLedgerEntry.count({ where: { id: { in: invoiceRows.map((r) => r.id) }, accountId: f.oldAr.id } })).toBe(invoiceRows.length);
       expect(Number((await tx.account.findUniqueOrThrow({ where: { id: f.oldAr.id } })).balance)).toBe(0);
       expect(Number((await tx.account.findUniqueOrThrow({ where: { id: f.newAr.id } })).balance)).toBe(500 * JT);
       expect(await findArSubledgerDiffs(tx, { partyIds: [f.p1, f.p2] })).toEqual([]);
@@ -199,6 +223,115 @@ d('system account remap with balance-sheet reclass (PR-4.12)', () => {
       const again = await callRoute(router, 'post', '/:role/sweep', { params: { role: 'AR' }, body: { reason: 'Sisa batal invoice lama' }, userId: f.userId, role: 'Admin' });
       expect(again.status).toBe(200);
       expect(again.body.transfers).toEqual([]);
+    });
+  });
+
+  it('AR moving off an account netting zero: no journal, yet a receipt voided later is found and swept', async () => {
+    await inRollback(async (tx) => {
+      clockAt(`${Y}-06-15T10:00:00+07:00`);
+      const f = await fixture(tx);
+      const cash = await account(tx, 'Kas');
+      const inv = await submitSalesInvoiceInTx(
+        tx,
+        { date: `${Y}-03-01`, partyId: f.p1, items: [{ itemName: 'IT-RM jasa', itemType: 'service', quantity: 1, rate: 100 * JT }] },
+        f.userId,
+      );
+      expect(inv).toBeTruthy();
+      const receipt = await rawJournal(tx, f.fy, f.userId, new Date(`${Y}-03-05T00:00:00+07:00`), [
+        { accountId: cash.id, debit: 100 * JT },
+        { accountId: f.oldAr.id, partyId: f.p1, credit: 100 * JT },
+      ], { source: null });
+      expect(await net(tx, f.oldAr.id)).toBe(0);
+
+      const journalsBefore = await tx.journalEntry.count();
+      const moved = await put(f.userId, { mappings: [{ role: 'AR', accountId: f.newAr.id }] });
+      expect(moved.status).toBe(200);
+      expect(moved.body.transfers).toEqual([]);
+      expect(await tx.journalEntry.count()).toBe(journalsBefore);
+      expect(await tx.systemAccountRoleMove.findMany({ where: { fromAccountId: f.oldAr.id } })).toEqual([
+        expect.objectContaining({ role: 'AR', toAccountId: f.newAr.id, movedBy: f.userId }),
+      ]);
+      expect(await isControlAccount(tx, f.oldAr.id)).toBe('AR');
+
+      // The receipt from before the move is voided: 100 jt is back on the old account.
+      await voidJournalByIdInTx(tx, receipt.id);
+      expect(await net(tx, f.oldAr.id, f.p1)).toBe(100 * JT);
+      const check = await checkFormerRoleAccounts();
+      expect(check.status).toBe('warning');
+      expect(check.details).toContainEqual(expect.objectContaining({ role: 'AR', amount: '100000000.00', parties: 1 }));
+
+      const swept = await callRoute(router, 'post', '/:role/sweep', { params: { role: 'AR' }, body: { reason: 'Sisa batal penerimaan' }, userId: f.userId, role: 'Admin' });
+      expect(swept.status).toBe(200);
+      expect(swept.body.transfers).toEqual([expect.objectContaining({ fromAccountId: f.oldAr.id, toAccountId: f.newAr.id, amount: '100000000.00' })]);
+      expect(await net(tx, f.oldAr.id)).toBe(0);
+      expect(await net(tx, f.newAr.id, f.p1)).toBe(100 * JT);
+      expect((await findFormerResidues(tx, 'AR')).filter((r) => r.fromAccountId === f.oldAr.id)).toEqual([]);
+    });
+  });
+
+  it('after a move, a hand-made journal on the old account is not the role residue; a document journal is', async () => {
+    await inRollback(async (tx) => {
+      clockAt(`${Y}-06-15T10:00:00+07:00`);
+      const f = await fixture(tx);
+      const oldAdv = await account(tx, 'Uang muka karyawan lama');
+      const newAdv = await account(tx, 'Uang muka karyawan baru');
+      const contra = await account(tx, 'Lawan', { accountType: 'LIABILITY', rootType: 'LIABILITY' });
+      await mapRole(tx, 'EMPLOYEE_ADVANCE', oldAdv.id);
+      await rawJournal(tx, f.fy, f.userId, new Date(`${Y}-02-01T00:00:00+07:00`), [
+        { accountId: oldAdv.id, debit: 10 * JT },
+        { accountId: contra.id, credit: 10 * JT },
+      ]);
+      const ok = await put(f.userId, { mappings: [{ role: 'EMPLOYEE_ADVANCE', accountId: newAdv.id }], transferBalance: true, reason: 'Pindah akun uang muka' });
+      expect(ok.status).toBe(200);
+      expect(await net(tx, oldAdv.id)).toBe(0);
+      const movedAt = (await tx.systemAccountRoleMove.findFirstOrThrow({ where: { fromAccountId: oldAdv.id } })).movedAt;
+      const later = new Date(movedAt.getTime() + 60_000);
+
+      // An accountant uses the old account as an ordinary one: not swept into the role account.
+      await rawJournal(tx, f.fy, f.userId, new Date(`${Y}-06-15T00:00:00+07:00`), [
+        { accountId: oldAdv.id, debit: 3 * JT },
+        { accountId: contra.id, credit: 3 * JT },
+      ], { createdAt: later });
+      expect(await net(tx, oldAdv.id)).toBe(3 * JT);
+      expect((await findFormerResidues(tx, 'EMPLOYEE_ADVANCE')).filter((r) => r.fromAccountId === oldAdv.id)).toEqual([]);
+
+      // A document journal (not hand-made) landing there after the move is the role's.
+      await rawJournal(tx, f.fy, f.userId, new Date(`${Y}-06-15T00:00:00+07:00`), [
+        { accountId: oldAdv.id, debit: 2 * JT },
+        { accountId: contra.id, credit: 2 * JT },
+      ], { source: null, createdAt: later });
+      expect((await findFormerResidues(tx, 'EMPLOYEE_ADVANCE')).filter((r) => r.fromAccountId === oldAdv.id)).toEqual([
+        expect.objectContaining({ amount: '2000000.00', toAccountId: newAdv.id, sweepable: true }),
+      ]);
+      const swept = await callRoute(router, 'post', '/:role/sweep', { params: { role: 'EMPLOYEE_ADVANCE' }, body: { reason: 'Sisa dokumen' }, userId: f.userId, role: 'Admin' });
+      expect(swept.status).toBe(200);
+      expect(swept.body.transfers).toEqual([expect.objectContaining({ amount: '2000000.00' })]);
+      expect(await net(tx, oldAdv.id)).toBe(3 * JT); // the hand-made 3 jt stays
+      expect(await net(tx, newAdv.id)).toBe(12 * JT);
+    });
+  });
+
+  it('a former GRNI account stays a control account; clearing GRNI with a balance is refused', async () => {
+    await inRollback(async (tx) => {
+      clockAt(`${Y}-06-15T10:00:00+07:00`);
+      const f = await fixture(tx);
+      const liab = { accountType: 'LIABILITY', rootType: 'LIABILITY' };
+      const grniA = await account(tx, 'GRNI lama', liab);
+      const grniB = await account(tx, 'GRNI baru', liab);
+      const stock = await account(tx, 'Persediaan');
+      await mapRole(tx, 'ACCRUED_PAYABLE', grniA.id);
+      const moved = await put(f.userId, { mappings: [{ role: 'ACCRUED_PAYABLE', accountId: grniB.id }] });
+      expect(moved.status).toBe(200);
+      expect(await isControlAccount(tx, grniA.id)).toBe('ACCRUED_PAYABLE');
+
+      await rawJournal(tx, f.fy, f.userId, new Date(`${Y}-02-01T00:00:00+07:00`), [
+        { accountId: stock.id, debit: 40 * JT },
+        { accountId: grniB.id, credit: 40 * JT },
+      ], { source: null });
+      const cleared = await put(f.userId, { clearRoles: ['ACCRUED_PAYABLE'] });
+      expect(cleared.status).toBe(400);
+      expect(cleared.body.code).toBe('ROLE_CLEAR_HAS_BALANCE');
+      expect((await tx.systemAccountMapping.findFirst({ where: { role: 'ACCRUED_PAYABLE' } }))!.accountId).toBe(grniB.id);
     });
   });
 

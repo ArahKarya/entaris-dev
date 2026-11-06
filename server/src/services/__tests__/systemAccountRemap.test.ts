@@ -154,13 +154,25 @@ describe('REMAP_SOURCE_RULE', () => {
   });
 });
 
-/** journalEntry.findMany answers remap journals; mappings and the residue query are configurable. */
-function formerTx(keys: string[], mappings: Array<{ role: string; accountId: string }>, residue: (accountId: string) => unknown[]) {
+interface MoveRow { role: string; fromAccountId: string; toAccountId: string | null; movedAt: Date }
+
+/**
+ * journalEntry.findMany answers remap journals, systemAccountRoleMove.findMany the move history;
+ * mappings, item accounts and the residue query (accountId, then the hand-made filter) are configurable.
+ */
+function formerTx(
+  keys: string[],
+  mappings: Array<{ role: string; accountId: string }>,
+  residue: (accountId: string, filter?: Prisma.Sql) => unknown[],
+  opts: { moves?: MoveRow[]; itemAccounts?: string[] } = {},
+) {
   return {
-    journalEntry: { findMany: async () => keys.map((sourceKey) => ({ sourceKey })) },
+    journalEntry: { findMany: async () => keys.map((sourceKey, i) => ({ sourceKey, createdAt: new Date(Date.UTC(2162, 0, 10 + i)) })) },
+    systemAccountRoleMove: { findMany: async () => opts.moves ?? [] },
+    inventoryItem: { count: async ({ where }: any) => (opts.itemAccounts ?? []).filter((a) => a === where.accountId).length },
     systemAccountMapping: { findMany: async ({ where }: any = {}) => mappings.filter((m) => !where?.role || m.role === where.role) },
     account: { findMany: async ({ where }: any) => where.id.in.map((id: string) => ref(id, id)) },
-    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => residue(String(values[0])),
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => residue(String(values[0]), values[1] as Prisma.Sql),
     $executeRaw: vi.fn(async () => 0),
   } as any;
 }
@@ -200,6 +212,50 @@ describe('findFormerResidues / sweepFormerAccounts', () => {
     const tx = formerTx(keys, [{ role: 'INVENTORY', accountId: 'inv' }], residue);
     expect(await sweepFormerAccounts(tx, 'INVENTORY', { actorId: 'u', reason: 'sisa' })).toEqual([]);
     expect(tx.$executeRaw).toHaveBeenCalledOnce(); // the remap advisory lock
+  });
+
+  it('a move with nothing reclassed (history row only) still makes a former account', async () => {
+    const moves = [{ role: 'AR', fromAccountId: 'old', toAccountId: 'cur', movedAt: new Date('2162-03-01T02:00:00Z') }];
+    const tx = formerTx([], [{ role: 'AR', accountId: 'cur' }], residue, { moves });
+    expect(await findFormerResidues(tx)).toEqual([
+      expect.objectContaining({ role: 'AR', fromAccountId: 'old', toAccountId: 'cur', amount: '-3.00', sweepable: true }),
+    ]);
+  });
+
+  it('a cleared role (no account now) is reported but not sweepable', async () => {
+    const moves = [{ role: 'EMPLOYEE_ADVANCE', fromAccountId: 'old', toAccountId: null, movedAt: new Date('2162-03-01') }];
+    const tx = formerTx([], [], residue, { moves });
+    expect(await findFormerResidues(tx)).toEqual([
+      expect.objectContaining({ role: 'EMPLOYEE_ADVANCE', fromAccountId: 'old', sweepable: false }),
+    ]);
+  });
+
+  it('a former account another role maps now is skipped, in the report and the sweep', async () => {
+    const moves = [{ role: 'EMPLOYEE_ADVANCE', fromAccountId: 'old', toAccountId: 'adv', movedAt: new Date('2162-03-01') }];
+    const tx = formerTx([], [{ role: 'EMPLOYEE_ADVANCE', accountId: 'adv' }, { role: 'PROJECT_GUARANTEE', accountId: 'old' }], residue, { moves });
+    expect(await findFormerResidues(tx)).toEqual([]);
+    expect(await sweepFormerAccounts(tx, 'EMPLOYEE_ADVANCE', { actorId: 'u', reason: 'sisa' })).toEqual([]);
+  });
+
+  it('a former inventory account an item still uses is skipped', async () => {
+    const moves = [{ role: 'INVENTORY', fromAccountId: 'old', toAccountId: 'inv', movedAt: new Date('2162-03-01') }];
+    const tx = formerTx([], [{ role: 'INVENTORY', accountId: 'inv' }], residue, { moves, itemAccounts: ['old'] });
+    expect(await findFormerResidues(tx)).toEqual([]);
+  });
+
+  it('the residue of a former account leaves out hand-made journals after the last history move, not after a sweep', async () => {
+    const movedAt = new Date('2162-03-01T02:00:00Z');
+    const seen: Prisma.Sql[] = [];
+    const moves = [{ role: 'AR', fromAccountId: 'old', toAccountId: 'cur', movedAt }];
+    // The sweep journal (createdAt 2162-01-10 in formerTx, any time) does not replace the move time.
+    const tx = formerTx([sourceKeys.remap('AR', 'old', 'cur', '2162-04-01')], [{ role: 'AR', accountId: 'cur' }], (id, filter) => {
+      if (filter) seen.push(filter);
+      return residue(id);
+    }, { moves });
+    await findFormerResidues(tx);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].sql).toContain('ale.created_at >');
+    expect(seen[0].values).toEqual([movedAt, 'MANUAL', 'IMPORT', 'RECURRING', 'CASH_BOOK']);
   });
 });
 

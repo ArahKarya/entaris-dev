@@ -118,7 +118,7 @@ function roleTx(mappings: Mapping[], remapKeys: string[] = []) {
         .filter((m) => roles.includes(m.role))
         .map((m) => ({ ...m, account: ACCOUNT_NAMES[m.accountId] ?? { accountNumber: '9.9', name: m.accountId } }));
     },
-    'journalEntry.findMany': () => remapKeys.map((sourceKey) => ({ sourceKey })),
+    'journalEntry.findMany': () => remapKeys.map((sourceKey, i) => ({ sourceKey, createdAt: new Date(Date.UTC(2170, 0, 1 + i)) })),
     'account.findUnique': (args: any) => ACCOUNT_NAMES[args.where.id] ?? { accountNumber: '9.9', name: args.where.id },
     'party.findMany': (args: any) =>
       [{ id: 'c', partyType: 'Customer' }, { id: 's', partyType: 'Supplier' }].filter((p) => args.where.id.in.includes(p.id)),

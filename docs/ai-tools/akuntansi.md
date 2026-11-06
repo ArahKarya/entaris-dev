@@ -1874,6 +1874,10 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400: transferBalance tanpa reason (min 5 karakter)
 - 400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting; pemetaan tidak berubah
 - 400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; tidak ada yang disimpan, ulangi
+- 400 ACCOUNT_SHARED_WITH_ROLE: akun lama juga dipakai role lain (saldo tidak bisa dipisah per role; simpan tanpa transferBalance), atau dua role bersaldo meninggalkan satu akun sekaligus (pindahkan satu per satu)
+- 400 REMAP_CHAIN: role neraca pindah ke akun yang ditinggalkan role neraca lain dalam simpanan yang sama (mis. tukar akun); pindahkan satu role per simpan
+- 400 ROLE_CLEAR_HAS_BALANCE: role neraca dilepas padahal akunnya masih bersaldo; pindahkan ke akun lain beserta saldonya
+- 400 INVENTORY_ACCOUNT_ITEMS: Persediaan dipindah sementara barang bersaldo stok memakai akun lama sebagai akun persediaannya sendiri; kosongkan akun barang itu dulu
 
 **Tool terkait:** [`sysacct_get`](#sysacct_get), [`coa_flat`](#coa_flat), [`sysacct_sweep`](#sysacct_sweep)
 

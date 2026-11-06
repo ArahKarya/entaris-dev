@@ -1,9 +1,9 @@
 // Party rules for journal lines (E2-R4): which accounts carry a party (customer or supplier) and
 // of which type. The party roles are the subledger accounts (receivable, payable, both deposits).
 // The role map reads system account mappings through the caller's transaction (never the cache)
-// and also holds accounts that held a party role before a remap, taken from the sourceKey of the
-// remap reclass journals that are not cancelled, so a document voided after a remap still lands on
-// the party's subledger.
+// and also holds accounts that held a party role before a remap (loadFormerRoleMoves: the role
+// move history and the sourceKey of the remap reclass journals that are not cancelled), so a
+// document voided after a remap still lands on the party's subledger.
 
 import type { PartyType, Prisma } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
@@ -61,17 +61,50 @@ export interface FormerRoleAccount {
   accountId: string;
 }
 
-/** Accounts a party role moved away from, oldest reclass first (remap journals not cancelled). */
-export async function loadFormerRoleAccounts(tx: Tx): Promise<FormerRoleAccount[]> {
-  const journals = await tx.journalEntry.findMany({
-    where: { sourceType: 'SYSTEM_DOC', sourceKey: { startsWith: REMAP_KEY_PREFIX }, status: { not: 'Cancelled' } },
-    select: { sourceKey: true },
-    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-  });
-  const out: FormerRoleAccount[] = [];
+export interface FormerRoleMove {
+  role: string;
+  accountId: string;
+  /** Where the role went; null when it was cleared. */
+  toAccountId: string | null;
+  movedAt: Date;
+  /** history: a row of system_account_role_moves; journal: a remap reclass journal (also a sweep). */
+  source: 'history' | 'journal';
+}
+
+/**
+ * Every move of a system account role off an account, oldest first: the role move history
+ * (written by every balance-sheet move, also one with nothing to reclass, and every clear) plus
+ * the remap reclass journals not cancelled (sweeps, and fixtures without a history row).
+ */
+export async function loadFormerRoleMoves(tx: Tx): Promise<FormerRoleMove[]> {
+  const [moves, journals] = await Promise.all([
+    tx.systemAccountRoleMove.findMany({
+      select: { role: true, fromAccountId: true, toAccountId: true, movedAt: true },
+      orderBy: { movedAt: 'asc' },
+    }),
+    tx.journalEntry.findMany({
+      where: { sourceType: 'SYSTEM_DOC', sourceKey: { startsWith: REMAP_KEY_PREFIX }, status: { not: 'Cancelled' } },
+      select: { sourceKey: true, createdAt: true },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+    }),
+  ]);
+  const out: FormerRoleMove[] = moves.map((m) => ({
+    role: m.role, accountId: m.fromAccountId, toAccountId: m.toAccountId, movedAt: m.movedAt, source: 'history',
+  }));
   for (const j of journals) {
     const key = parseRemapSourceKey(j.sourceKey);
-    if (key && isPartyRole(key.role)) out.push({ role: key.role, accountId: key.fromAccountId });
+    if (key) {
+      out.push({ role: key.role, accountId: key.fromAccountId, toAccountId: key.toAccountId, movedAt: j.createdAt, source: 'journal' });
+    }
+  }
+  return out.sort((a, b) => a.movedAt.getTime() - b.movedAt.getTime());
+}
+
+/** Accounts a party role moved away from, oldest move first. */
+export async function loadFormerRoleAccounts(tx: Tx): Promise<FormerRoleAccount[]> {
+  const out: FormerRoleAccount[] = [];
+  for (const m of await loadFormerRoleMoves(tx)) {
+    if (isPartyRole(m.role)) out.push({ role: m.role, accountId: m.accountId });
   }
   return out;
 }

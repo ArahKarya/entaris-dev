@@ -18,9 +18,17 @@ import {
   planRemap,
   remapCandidates,
   sweepFormerAccounts,
+  type BalancePlan,
   type RemapPlan,
   type RemapTransfer,
 } from '../services/systemAccountRemap';
+import {
+  assertInventoryItemsFollow,
+  assertNoRemapChain,
+  planRoleClears,
+  recordRoleMoves,
+  splitSharedPlans,
+} from '../services/systemAccountRemapGuards';
 import {
   SYSTEM_ACCOUNT_ROLES,
   ALL_SYSTEM_ROLES,
@@ -198,7 +206,8 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       }
 
       const touchedRoles = new Set([...inputMappings.map((m) => m.role), ...clearRoles]);
-      const conflict = findRoleConflict(changed, resultingMappings(inputMappings, stored, touchedRoles));
+      const after = resultingMappings(inputMappings, stored, touchedRoles);
+      const conflict = findRoleConflict(changed, after);
       if (conflict) {
         const account = accountMap.get(conflict.accountId);
         throw new BusinessError(
@@ -208,15 +217,28 @@ router.put('/', async (req: AuthRequest, res: Response) => {
       }
 
       // A single-account role moving to another account: balance-sheet roles carry their balance
-      // (refused without transferBalance), profit and loss roles move without a reclass.
+      // (refused without transferBalance), profit and loss roles move without a reclass. A balance
+      // on an account another role keeps stays there; a balance-sheet role is not cleared while
+      // its account holds a balance.
       const plans: RemapPlan[] = [];
       for (const candidate of remapCandidates(inputMappings, stored)) plans.push(await planRemap(tx, candidate));
-      assertTransferAllowed(plans, transferBalance);
-      const moving = plans.filter(hasResidue);
+      assertNoRemapChain(plans);
+      const { reclass, shared } = splitSharedPlans(plans, after, transferBalance);
+      const clears = await planRoleClears(tx, clearRoles, inputMappings, stored, after);
+      assertTransferAllowed(reclass, transferBalance);
+      const moving = reclass.filter(hasResidue);
+      await assertInventoryItemsFollow(tx, moving);
       const posted: RemapTransfer[] = [];
       for (const plan of moving) {
         posted.push(await applyRemap(tx, plan, { actorId: req.user!.userId, reason: reason ?? '' }));
       }
+      // Every balance-sheet move and clear stays on record, also without a reclass, so the old
+      // account remains a former role account (subledgers, control accounts, check, sweep).
+      const balancePlans = [...reclass.filter((p): p is BalancePlan => p.kind === 'balance'), ...shared];
+      await recordRoleMoves(tx, [
+        ...balancePlans.map((p) => ({ role: p.role, fromAccountId: p.from.id, toAccountId: p.to.id })),
+        ...clears.map((c) => ({ ...c, toAccountId: null })),
+      ], { actorId: req.user!.userId, reason });
 
       // Delete existing mappings for the submitted roles
       await tx.systemAccountMapping.deleteMany({

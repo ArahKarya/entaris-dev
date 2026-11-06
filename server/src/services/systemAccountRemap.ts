@@ -10,20 +10,24 @@
 // years' expense into the current one. Their history stays on the old account and still rolls up
 // into the profit and loss report through its group. Multi-account roles are never reclassed.
 //
-// The remap journal names the old account in its sourceKey, so it stays a former role account
-// (services/ledger/partyRules.ts loadFormerRoleAccounts): a document voided later still lands on
-// the party's subledger. What such a void leaves on the old account is reported by the health
-// check "Akun bekas peran kontrol bersaldo" and moved by the sweep, through the same reclass.
+// Every move of a balance-sheet role, also one with nothing to reclass, and every clear is written
+// to system_account_role_moves (the remap journal also names the old account in its sourceKey),
+// so the old account stays a former role account (services/ledger/partyRules.ts
+// loadFormerRoleMoves): a document voided later still lands on the party's subledger, and a former
+// control account stays a control account. What such a void leaves on the old account is reported
+// by the health check "Akun bekas peran kontrol bersaldo" and moved by the sweep, through the same
+// reclass. Only the role's own residue counts there: journals a person made on the old account
+// after the move are not the role's, and an account another role maps now is skipped.
 
-import { Prisma, type JournalSourceType, type RootType } from '@prisma/client';
+import { Prisma, type RootType } from '@prisma/client';
 import type { prisma as prismaClient } from '../lib/prisma';
 import { BusinessError } from '../utils/errors';
 import { businessToday, startOfBusinessDay } from '../utils/businessDate';
 import type { JournalLineInput } from '../utils/journalLineRules';
 import { DOCUMENT_RULE, type PostableRule } from './ledger/accountGuard';
 import { postJournal } from './ledger/postJournal';
-import { PARTY_ROLES } from './ledger/partyRules';
-import { REMAP_KEY_PREFIX, parseRemapSourceKey, sourceKeys } from './ledger/journalSource';
+import { PARTY_ROLES, loadFormerRoleMoves } from './ledger/partyRules';
+import { MENU_CANCELLABLE_SOURCES, sourceKeys } from './ledger/journalSource';
 import { SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
 import type { MappingPair } from './systemAccountMappingRules';
 import { missingMappingError } from './systemAccounts';
@@ -97,27 +101,49 @@ interface AccountRef {
 
 export type RemapPlan =
   | { kind: 'pnl'; role: SystemAccountRole; from: AccountRef; to: AccountRef }
-  | { kind: 'balance'; role: SystemAccountRole; from: AccountRef; to: AccountRef; lines: RemapLine[]; net: Prisma.Decimal };
+  | {
+    kind: 'balance'; role: SystemAccountRole; from: AccountRef; to: AccountRef; lines: RemapLine[]; net: Prisma.Decimal;
+    /** Former account: journals a person made after this move are not the role's residue. */
+    movedAt?: Date;
+  };
+
+/** Journals a person makes (Journal menu, import, template, cash book). */
+const HAND_MADE_SOURCES = [...MENU_CANCELLABLE_SOURCES];
+
+/** With `movedAt`: leaves out ledger rows of hand-made journals posted after the move. */
+function roleRowsFilter(movedAt: Date | undefined): Prisma.Sql {
+  if (!movedAt) return Prisma.empty;
+  return Prisma.sql`AND NOT (ale.created_at > ${movedAt} AND EXISTS (
+    SELECT 1 FROM journal_entries je
+     WHERE je.id = ale.reference_id AND je.source_type::text IN (${Prisma.join(HAND_MADE_SOURCES)})))`;
+}
 
 /**
- * What is left on an account for a role, over its whole history: per party for the party roles,
- * one line without a party otherwise. Zero lines are dropped, so [] = nothing to move.
+ * What is left on an account for a role: per party for the party roles, one line without a party
+ * otherwise. Zero lines are dropped, so [] = nothing to move. The whole history counts, except,
+ * for a former account (`movedAt`), journals a person made there after the role left it.
  */
-export async function accountResidue(db: Db, role: SystemAccountRole, accountId: string): Promise<RemapLine[]> {
+export async function accountResidue(
+  db: Db,
+  role: SystemAccountRole,
+  accountId: string,
+  movedAt?: Date,
+): Promise<RemapLine[]> {
+  const filter = roleRowsFilter(movedAt);
   if (PARTY_ROLE_SET.has(role)) {
     const rows = await db.$queryRaw<{ party_id: string | null; amount: string }[]>`
-      SELECT party_id, SUM(debit - credit)::text AS amount
-        FROM accounting_ledger_entries
-       WHERE account_id = ${accountId} AND is_cancelled = false
-       GROUP BY party_id
-      HAVING SUM(debit - credit) <> 0
-       ORDER BY party_id NULLS FIRST`;
+      SELECT ale.party_id, SUM(ale.debit - ale.credit)::text AS amount
+        FROM accounting_ledger_entries ale
+       WHERE ale.account_id = ${accountId} AND ale.is_cancelled = false ${filter}
+       GROUP BY ale.party_id
+      HAVING SUM(ale.debit - ale.credit) <> 0
+       ORDER BY ale.party_id NULLS FIRST`;
     return rows.map((r) => ({ partyId: r.party_id, amount: new Prisma.Decimal(r.amount) }));
   }
   const rows = await db.$queryRaw<{ amount: string | null }[]>`
-    SELECT SUM(debit - credit)::text AS amount
-      FROM accounting_ledger_entries
-     WHERE account_id = ${accountId} AND is_cancelled = false`;
+    SELECT SUM(ale.debit - ale.credit)::text AS amount
+      FROM accounting_ledger_entries ale
+     WHERE ale.account_id = ${accountId} AND ale.is_cancelled = false ${filter}`;
   const amount = new Prisma.Decimal(rows[0]?.amount ?? 0);
   return amount.isZero() ? [] : [{ partyId: null, amount }];
 }
@@ -129,15 +155,18 @@ async function accountRefs(db: Db, ids: readonly string[]): Promise<Map<string, 
 
 const refOf = (refs: Map<string, AccountRef>, id: string): AccountRef => refs.get(id) ?? { id, accountNumber: id, name: '' };
 
-/** The plan of one move: profit and loss roles never reclass; balance-sheet roles carry their residue. */
-export async function planRemap(db: Db, candidate: RemapCandidate): Promise<RemapPlan> {
+/**
+ * The plan of one move: profit and loss roles never reclass; balance-sheet roles carry their
+ * residue. `movedAt` = the old account is a former account the role left then (sweep).
+ */
+export async function planRemap(db: Db, candidate: RemapCandidate, movedAt?: Date): Promise<RemapPlan> {
   const refs = await accountRefs(db, [candidate.fromAccountId, candidate.toAccountId]);
   const from = refOf(refs, candidate.fromAccountId);
   const to = refOf(refs, candidate.toAccountId);
   if (!isReclassRole(candidate.role)) return { kind: 'pnl', role: candidate.role, from, to };
-  const lines = await accountResidue(db, candidate.role, candidate.fromAccountId);
+  const lines = await accountResidue(db, candidate.role, candidate.fromAccountId, movedAt);
   const net = lines.reduce((sum, l) => sum.plus(l.amount), ZERO);
-  return { kind: 'balance', role: candidate.role, from, to, lines, net };
+  return { kind: 'balance', role: candidate.role, from, to, lines, net, ...(movedAt ? { movedAt } : {}) };
 }
 
 /** A reclass to post: a balance plan with something on the old account. */
@@ -258,7 +287,7 @@ export async function applyRemap(tx: Tx, plan: BalancePlan, opts: ApplyRemapOpti
  */
 export async function assertRemapEmptied(tx: Tx, plans: readonly BalancePlan[]): Promise<void> {
   for (const p of plans) {
-    if ((await accountResidue(tx, p.role, p.from.id)).length > 0) {
+    if ((await accountResidue(tx, p.role, p.from.id, p.movedAt)).length > 0) {
       throw new BusinessError(
         `Saldo akun ${accountLabel(p.from)} berubah selama reklas peran ${SYSTEM_ACCOUNT_ROLES[p.role].label}. Tidak ada yang disimpan; ulangi.`,
         REMAP_BALANCE_CHANGED,
@@ -272,27 +301,43 @@ export async function lockRemaps(tx: Tx): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${REMAP_LOCK_KEY}))`;
 }
 
-/** Source type of the reclass journals (written in applyRemap). */
-const REMAP_SOURCE_TYPE: JournalSourceType = 'SYSTEM_DOC';
+interface FormerAccount {
+  role: SystemAccountRole;
+  fromAccountId: string;
+  /** Where the role went last; null when it was cleared. */
+  toAccountId: string | null;
+  /** The last time the role left this account. */
+  movedAt: Date;
+  source: 'history' | 'journal';
+}
 
-/** (role, old account) of every reclass-role remap journal not cancelled, oldest first, without repeats. */
-async function formerAccounts(db: Db): Promise<RemapCandidate[]> {
-  const journals = await db.journalEntry.findMany({
-    where: { sourceType: REMAP_SOURCE_TYPE, sourceKey: { startsWith: REMAP_KEY_PREFIX }, status: { not: 'Cancelled' } },
-    select: { sourceKey: true },
-    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-  });
-  const seen = new Set<string>();
-  const out: RemapCandidate[] = [];
-  for (const j of journals) {
-    const key = parseRemapSourceKey(j.sourceKey);
-    if (!key || !(key.role in SYSTEM_ACCOUNT_ROLES)) continue;
-    const role = key.role as SystemAccountRole;
-    if (!isReclassRole(role) || seen.has(`${role}:${key.fromAccountId}`)) continue;
-    seen.add(`${role}:${key.fromAccountId}`);
-    out.push({ role, fromAccountId: key.fromAccountId, toAccountId: key.toAccountId });
+/**
+ * (role, old account) of every balance-sheet role move, oldest first, without repeats. The move
+ * time is the last history row (a sweep journal is no move: it would hide what a person posted
+ * there before it); a pair known only from remap journals takes the first one.
+ */
+async function formerAccounts(db: Db): Promise<FormerAccount[]> {
+  const byKey = new Map<string, FormerAccount>();
+  const moves = await loadFormerRoleMoves(db);
+  for (const m of [...moves.filter((x) => x.source === 'history'), ...moves.filter((x) => x.source === 'journal')]) {
+    if (!(m.role in SYSTEM_ACCOUNT_ROLES)) continue;
+    const role = m.role as SystemAccountRole;
+    const key = `${role}:${m.accountId}`;
+    const known = byKey.get(key);
+    if (!isReclassRole(role) || (known && m.source === 'journal')) continue;
+    byKey.set(key, { role, fromAccountId: m.accountId, toAccountId: m.toAccountId, movedAt: m.movedAt, source: m.source });
   }
-  return out;
+  return [...byKey.values()];
+}
+
+/**
+ * A former account whose balance is no longer only the role's: another role maps it now (two
+ * non-exclusive roles may share an account), or, for INVENTORY, an item keeps its stock there.
+ */
+async function formerAccountInUse(db: Db, f: FormerAccount, mappings: readonly MappingPair[]): Promise<boolean> {
+  if (mappings.some((m) => m.accountId === f.fromAccountId)) return true;
+  if (f.role !== 'INVENTORY') return false;
+  return (await db.inventoryItem.count({ where: { accountId: f.fromAccountId } })) > 0;
 }
 
 export interface FormerResidue extends RemapBalance {
@@ -302,8 +347,8 @@ export interface FormerResidue extends RemapBalance {
 
 /**
  * Former accounts of balance-sheet roles that still hold something for the role, typically after
- * a document dated before the remap was voided. An account the role is mapped to again is not
- * former. `role` narrows the list to one role.
+ * a document dated before the remap was voided. An account the role (or another role) maps now,
+ * and a former inventory account an item still uses, are skipped. `role` narrows the list.
  */
 export async function findFormerResidues(db: Db, role?: SystemAccountRole): Promise<FormerResidue[]> {
   const [former, mappings] = await Promise.all([
@@ -313,10 +358,10 @@ export async function findFormerResidues(db: Db, role?: SystemAccountRole): Prom
   const out: FormerResidue[] = [];
   for (const f of former) {
     if (role && f.role !== role) continue;
+    if (await formerAccountInUse(db, f, mappings)) continue;
     const current = mappings.filter((m) => m.role === f.role).map((m) => m.accountId);
-    if (current.includes(f.fromAccountId)) continue;
-    const toAccountId = current.length === 1 ? current[0] : f.toAccountId;
-    const plan = await planRemap(db, { role: f.role, fromAccountId: f.fromAccountId, toAccountId });
+    const toAccountId = current.length === 1 ? current[0] : (f.toAccountId ?? f.fromAccountId);
+    const plan = await planRemap(db, { role: f.role, fromAccountId: f.fromAccountId, toAccountId }, f.movedAt);
     if (hasResidue(plan)) out.push({ ...balanceOf(plan), sweepable: current.length === 1 });
   }
   return out;
@@ -335,7 +380,8 @@ export async function sweepFormerAccounts(tx: Tx, role: SystemAccountRole, opts:
     );
   }
   await lockRemaps(tx);
-  const current = await tx.systemAccountMapping.findMany({ where: { role }, select: { accountId: true } });
+  const mappings = await tx.systemAccountMapping.findMany({ select: { role: true, accountId: true } });
+  const current = mappings.filter((m) => m.role === role);
   if (current.length !== 1) {
     throw missingMappingError(role);
   }
@@ -343,8 +389,8 @@ export async function sweepFormerAccounts(tx: Tx, role: SystemAccountRole, opts:
   const transfers: RemapTransfer[] = [];
   const posted: BalancePlan[] = [];
   for (const f of await formerAccounts(tx)) {
-    if (f.role !== role || f.fromAccountId === toAccountId) continue;
-    const plan = await planRemap(tx, { role, fromAccountId: f.fromAccountId, toAccountId });
+    if (f.role !== role || (await formerAccountInUse(tx, f, mappings))) continue;
+    const plan = await planRemap(tx, { role, fromAccountId: f.fromAccountId, toAccountId }, f.movedAt);
     if (!hasResidue(plan)) continue;
     transfers.push(await applyRemap(tx, plan, opts));
     posted.push(plan);
