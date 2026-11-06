@@ -551,7 +551,7 @@
         },
         "system-accounts": {
           "title": "Year-close system accounts",
-          "hint": "Map Current Year Profit and Retained Earnings in Settings > System Accounts."
+          "hint": "Map Current Year Profit and Retained Earnings to active detail accounts in Settings > System Accounts."
         },
         "do-uninvoiced": {
           "title": "Uninvoiced delivery notes",

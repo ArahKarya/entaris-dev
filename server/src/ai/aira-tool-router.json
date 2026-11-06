@@ -17520,12 +17520,14 @@
       "confirm_template": "TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.",
       "prerequisites": [
         "Capability doc.cancel.",
-        "Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan.",
+        "Akun sistem RETAINED_EARNINGS & CURRENT_PROFIT terpetakan ke akun detail yang aktif (butir daftar cek system-accounts).",
         "Daftar cek tutup buku tanpa butir yang memblokir (cek dulu dengan fy_close_checklist): tahun buku sebelumnya sudah ditutup; tidak ada jurnal, invoice, atau pembayaran Draft bertanggal di tahun ini; penyusutan aset aktif bulan-bulan tahun ini sudah diposting; ledger tahun ini seimbang dan sinkron dengan baris jurnal (selisih lama yang tercatat di baseline dengan nominal sama diabaikan)."
       ],
       "errors": [
         "400 CLOSE_CHECKLIST_FAILED: daftar cek tutup buku masih memblokir; body memuat `checklist` (sama dengan fy_close_checklist) yang merinci butirnya",
         "400 ACCOUNT_MAPPING_MISSING: akun sistem Laba Tahun Berjalan (CURRENT_PROFIT) atau Laba Ditahan (RETAINED_EARNINGS) belum dipetakan",
+        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP / ACCOUNT_NOT_FOUND: akun yang dipetakan untuk Laba Tahun Berjalan atau Laba Ditahan tidak aktif, akun grup, atau tidak ada (daftar cek system-accounts melaporkannya lebih dulu); petakan ke akun detail yang aktif di Pengaturan > Akun Sistem",
+        "400 JOURNAL_FY_MISMATCH: tanggal akhir tahun buku jatuh di tahun buku lain (rentang tahun buku tumpang tindih); jurnal penutup tidak diposting",
         "400: tahun buku sudah ditutup",
         "400: tahun buku tidak ditemukan",
         "403: tanpa capability doc.cancel atau tanpa izin edit modul settings"
