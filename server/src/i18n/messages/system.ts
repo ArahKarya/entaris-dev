@@ -283,7 +283,6 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Akun back office belum dimuat.": "Back-office accounts are not loaded yet.",
   "Pengajuan {0} menunggu persetujuan, tetapi tidak ada pengguna aktif yang berwenang menyetujuinya.": "Request {0} is waiting for approval, but no active user may approve it.",
   "Pertanggungjawaban {0} menunggu atasan, tetapi atasan pengaju tidak aktif.": "Settlement {0} is waiting for the supervisor, but the requester's supervisor is inactive.",
-  "Transaksi berulang gagal dijalankan: {0}": "The recurring transaction failed to run: {0}",
   "Tahun buku untuk {0} sudah ditutup. Buka kembali tahun buku itu sebelum membuat data uji coba.": "The fiscal year for {0} is closed. Reopen it before creating demo data.",
   "Belum ada tahun buku untuk {0}. Buat tahun buku yang mencakup tanggal itu di Pengaturan > Tahun Buku.": "There is no fiscal year for {0}. Create one that covers that date in Settings > Fiscal Years.",
   "Periode s.d. {0} dikunci, sedangkan data uji coba dimulai {1}. Mundurkan kunci periode ke sebelum {1} di Pengaturan > Tahun Buku sebelum membuat data uji coba.": "The period up to {0} is locked, but the demo data starts on {1}. Move the period lock back to before {1} in Settings > Fiscal Years before creating demo data.",

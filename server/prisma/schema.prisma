@@ -1823,6 +1823,9 @@ model RecurringTemplate {
   lastRunDate  DateTime? @map("last_run_date")
   isActive     Boolean   @default(true) @map("is_active")
   templateData Json      @map("template_data")
+  /// Why the last run did not post (validation or posting); cleared by the next successful run.
+  lastError    String?   @map("last_error")
+  lastErrorAt  DateTime? @map("last_error_at")
   createdBy    String    @map("created_by")
   user         User      @relation("UserRecurring", fields: [createdBy], references: [id])
   createdAt    DateTime  @default(now()) @map("created_at")

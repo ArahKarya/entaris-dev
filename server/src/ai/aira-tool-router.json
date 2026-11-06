@@ -25878,7 +25878,7 @@
       "group": "Bank & Kas",
       "toolset": "kas-bank",
       "module": "recurring",
-      "desc": "Menjalankan satu template berulang sekarang. Untuk tipe journal langsung membuat dan memposting Jurnal Umum bertanggal hari ini; tipe lain mengembalikan success=false. Setelah berhasil, lastRunDate dan nextRunDate diperbarui.",
+      "desc": "Menjalankan satu template berulang sekarang. Tipe journal diposting lewat jalur posting bersama sebagai Jurnal Umum bertanggal hari ini (WIB), sumber RECURRING dengan kunci RECURRING:<id template>:<tanggal>. Setelah berhasil, lastRunDate dan nextRunDate maju satu periode dan lastError dikosongkan. Bila gagal, tidak ada jurnal, jadwal tidak maju, alasan disimpan di lastError template, dan Admin/Akuntan mendapat satu notifikasi per template per hari.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -25899,14 +25899,14 @@
       "output": {
         "status": "string"
       },
-      "outputSummary": "{ success, result (jurnal) } atau { success: false, error }.",
+      "outputSummary": "{ success: true, result (jurnal) }; gagal = HTTP 400 { error, code } (alasan juga tersimpan di lastError template).",
       "handler": "POST /api/recurring/:id/execute",
       "permAction": "edit",
       "enabled": true,
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Template divalidasi seimbang saat disimpan dan saat dieksekusi (manual maupun scheduler). Tipe invoice: tidak ada efek.",
+      "postingEffect": "Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Saat dieksekusi, template diperiksa ulang: seimbang tepat, maksimal 2 desimal, tanpa pihak, tanpa akun kontrol/pajak, tahun buku dan kunci periode hari ini. Tipe invoice: tidak ada efek (RECURRING_TYPE_UNSUPPORTED).",
       "confirm_template": "Jalankan template berulang {id} sekarang? Jurnal akan langsung diposting.",
       "prerequisites": [
         "Template bertipe journal dengan items valid",
@@ -25914,7 +25914,12 @@
       ],
       "errors": [
         "404: Template tidak ditemukan",
-        "success=false: tipe belum didukung / gagal membuat jurnal"
+        "400 JOURNAL_UNBALANCED / LINE_AMOUNT_PRECISION / LINE_AMOUNT_INVALID / LINE_BOTH_SIDES / LINES_TOO_FEW: baris template melanggar aturan baris jurnal; perbaiki template (rec_update)",
+        "400 PARTY_NOT_ALLOWED: template membawa pihak; kosongkan pihak di semua baris",
+        "400 ACCOUNT_CONTROL / ACCOUNT_INACTIVE / ACCOUNT_GROUP / ACCOUNT_NOT_FOUND: akun template tidak boleh diposting (akun kontrol/pajak, nonaktif, grup, atau terhapus)",
+        "400 RECURRING_TYPE_MISMATCH: data template tidak sesuai tipenya",
+        "400 RECURRING_TYPE_UNSUPPORTED: tipe selain journal belum bisa dieksekusi",
+        "400 FISCAL_YEAR_MISSING / PERIOD_CLOSED / PERIOD_LOCKED: belum ada tahun buku untuk hari ini, tahun bukunya tertutup, atau tanggal hari ini terkunci"
       ],
       "related": [
         "rec_list",
