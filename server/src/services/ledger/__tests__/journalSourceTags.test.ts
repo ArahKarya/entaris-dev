@@ -11,7 +11,6 @@ const SRC = join(__dirname, '../../..');
 const EXPECTED: Record<string, Record<string, number>> = {
   'routes/recurring.ts': { RECURRING: 1 },
   'services/recurringRunner.ts': { RECURRING: 1 },
-  'routes/import/journals.ts': { IMPORT: 1 },
   'routes/fiscalYears.ts': { FY_CLOSE: 1 },
   'routes/fixedAssets.ts': { DEPRECIATION: 2 },
   'routes/customerDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
@@ -80,6 +79,14 @@ describe('journal writers tag their source type', () => {
     const args = callArgs(text, 'createManualJournalInTx');
     expect(args).toHaveLength(1);
     expect(args[0]).toContain("sourceType: 'MANUAL'");
+  });
+
+  it('the journal import posts IMPORT through createManualJournalInTx', () => {
+    const text = readFileSync(join(SRC, 'routes/import/journals.ts'), 'utf8');
+    const args = callArgs(text, 'createManualJournalInTx');
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain("sourceType: 'IMPORT'");
+    expect(args[0]).toContain('sourceKey');
   });
 
   it('the year-close journal carries its fiscal-year key', () => {

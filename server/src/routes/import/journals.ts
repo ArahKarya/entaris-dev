@@ -2,8 +2,6 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AuthRequest, requirePerm } from '../../middleware/auth';
-import { updateBalancesForItems } from '../../utils/accountBalance';
-import { generateDocumentNumber } from '../../utils/documentNumber';
 import { assertPeriodOpen, PERIOD_BUSY } from '../../utils/periodGuard';
 import { importDateToInstant } from '../../utils/importDate';
 import { BusinessError, handleRouteError } from '../../utils/errors';
@@ -15,6 +13,7 @@ import {
   TAX_ACCOUNT_ROLES,
   type AccountLite,
 } from '../../services/ledger/accountGuard';
+import { createManualJournalInTx } from '../../services/manualJournal';
 import { sourceKeys } from '../../services/ledger/journalSource';
 import {
   checkGroupLines,
@@ -24,6 +23,7 @@ import {
   type CheckedGroup,
   type ImportRowError,
 } from '../../services/journalImport';
+import { resolveImportParties } from '../../services/journalImportParties';
 import { upload, parseFileDetailed, sanitizeCellValue } from './shared';
 
 const router = Router();
@@ -77,15 +77,23 @@ router.post(
 
       const outcome = await prisma.$transaction(async (tx: Prisma.TransactionClient): Promise<ImportOutcome> => {
         const errors: ImportRowError[] = [...parsed.errors, ...lineCheck.errors];
-        const parts = groupSourceKeyParts(lineCheck.checked);
-        const keyed = lineCheck.checked.map((c, i) => ({
-          ...c,
-          sourceKey: sourceKeys.importGroup(parts[i].hash, parts[i].occurrence),
-        }));
 
         // One import at a time: keys are not unique in the database, so two uploads of the same file
         // would both see no existing key and post twice.
         if (!isPreview) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('IMPORT_JOURNALS'))`;
+
+        const accounts = await loadAccounts(tx, lineCheck.checked);
+        errors.push(...(await accountErrors(tx, lineCheck.checked, accounts, canControl)));
+        // Parties resolve to ids before the content hash, so naming a party by id or by name is the same journal.
+        const accountIds = new Map([...accounts].map(([number, a]) => [number, a.id]));
+        const resolved = await resolveImportParties(tx, lineCheck.checked, accountIds);
+        errors.push(...resolved.errors);
+
+        const parts = groupSourceKeyParts(resolved.groups);
+        const keyed = resolved.groups.map((c, i) => ({
+          ...c,
+          sourceKey: sourceKeys.importGroup(parts[i].hash, parts[i].occurrence),
+        }));
 
         // A journal already imported (same content, not cancelled) is skipped, not posted twice.
         const existing = keyed.length === 0
@@ -99,62 +107,29 @@ router.post(
           .map((k) => ({ narration: k.group.narration, day: k.group.day, sourceKey: k.sourceKey }));
         const todo = keyed.filter((k) => !imported.has(k.sourceKey));
 
-        errors.push(...(await accountErrors(tx, todo, canControl)));
         errors.push(...(await periodErrors(tx, todo)));
 
         const ready = todo;
         if (isPreview || errors.length > 0) return { errors, ready, skipped, posted: [] };
 
         const posted: ImportOutcome['posted'] = [];
-        const accountIds = await accountIdsByNumber(tx, ready);
         for (const { group, lines, sourceKey } of ready) {
-          const date = importDateToInstant(group.day);
-          const fiscalYear = await assertPeriodOpen(tx, { date }, 'jurnal');
-          const entryNumber = await generateDocumentNumber(tx, 'JV', date, fiscalYear.id);
-
-          const journalEntry = await tx.journalEntry.create({
-            data: {
-              entryNumber,
-              date,
-              narration: group.narration,
-              status: 'Submitted',
-              fiscalYearId: fiscalYear.id,
-              createdBy: userId,
-              submittedAt: new Date(),
-              sourceType: 'IMPORT',
-              sourceKey,
-              items: {
-                create: lines.map((l) => ({
-                  accountId: accountIds.get(l.accountId)!,
-                  debit: l.debit,
-                  credit: l.credit,
-                  description: l.description || group.narration,
-                })),
-              },
-            },
-            include: { items: true },
-          });
-
-          // Post to immutable ledger
-          await tx.accountingLedgerEntry.createMany({
-            data: journalEntry.items.map((item) => ({
-              date,
-              accountId: item.accountId,
-              partyId: item.partyId,
-              debit: item.debit,
-              credit: item.credit,
-              referenceType: 'JournalEntry',
-              referenceId: journalEntry.id,
-              description: item.description || group.narration,
-              fiscalYearId: fiscalYear.id,
-            })),
-          });
-
-          await updateBalancesForItems(
+          const { journal } = await createManualJournalInTx(
             tx,
-            journalEntry.items.map((i) => ({ accountId: i.accountId, debit: i.debit, credit: i.credit })),
+            {
+              date: group.day,
+              narration: group.narration,
+              items: lines.map((l) => ({
+                accountId: accountIds.get(l.accountId)!,
+                debit: l.debit.toFixed(2),
+                credit: l.credit.toFixed(2),
+                partyId: l.partyId,
+                description: l.description,
+              })),
+            },
+            { userId, sourceType: 'IMPORT', sourceKey, canControl },
           );
-          posted.push({ id: journalEntry.id, entryNumber });
+          posted.push({ id: journal.id, entryNumber: journal.entryNumber });
         }
         return { errors, ready, skipped, posted };
       }, { timeout: IMPORT_TX_TIMEOUT_MS });
@@ -166,7 +141,7 @@ router.post(
             date: g.group.day,
             ref: g.group.ref,
             narration: g.group.narration,
-            items: g.group.items.map((i) => ({ accountNumber: i.accountNumber, debit: i.debit, credit: i.credit, description: i.description })),
+            items: g.group.items.map((i) => ({ accountNumber: i.accountNumber, debit: i.debit, credit: i.credit, description: i.description, partyCode: i.partyCode })),
           })),
           errors: outcome.errors,
           total: rows.length,
@@ -193,15 +168,23 @@ router.post(
 
 const ACCOUNT_SELECT = { id: true, accountNumber: true, name: true, rootType: true, isGroup: true, isActive: true } as const;
 
-/** Account lookup by number for every journal at once; a missing or non-postable account is an error on its rows. */
-async function accountErrors(tx: Prisma.TransactionClient, groups: readonly CheckedGroup[], canControl: boolean): Promise<ImportRowError[]> {
+/** Every account the checked journals name, by account number. */
+async function loadAccounts(tx: Prisma.TransactionClient, groups: readonly CheckedGroup[]): Promise<Map<string, AccountLite>> {
   const numbers = [...new Set(groups.flatMap((g) => g.lines.map((l) => l.accountId)))];
-  if (numbers.length === 0) return [];
-  const [accounts, controlMap] = await Promise.all([
-    tx.account.findMany({ where: { accountNumber: { in: numbers } }, select: ACCOUNT_SELECT }),
-    loadControlAccountMap(tx, TAX_ACCOUNT_ROLES),
-  ]);
-  const byNumber = new Map<string, AccountLite>(accounts.map((a) => [a.accountNumber, a]));
+  if (numbers.length === 0) return new Map();
+  const accounts = await tx.account.findMany({ where: { accountNumber: { in: numbers } }, select: ACCOUNT_SELECT });
+  return new Map(accounts.map((a) => [a.accountNumber, a]));
+}
+
+/** A missing or non-postable account is an error on its rows. */
+async function accountErrors(
+  tx: Prisma.TransactionClient,
+  groups: readonly CheckedGroup[],
+  byNumber: ReadonlyMap<string, AccountLite>,
+  canControl: boolean,
+): Promise<ImportRowError[]> {
+  if (groups.length === 0) return [];
+  const controlMap = await loadControlAccountMap(tx, TAX_ACCOUNT_ROLES);
   const rule = manualJournalRule(canControl);
   const errors: ImportRowError[] = [];
   for (const { group } of groups) {
@@ -212,16 +195,10 @@ async function accountErrors(tx: Prisma.TransactionClient, groups: readonly Chec
         continue;
       }
       const problem = postableAccountProblem(account, rule, controlMap.get(account.id) ?? null);
-      if (problem) errors.push({ row: item.rowNum, message: problem.message });
+      if (problem) errors.push({ row: item.rowNum, message: problem.message, code: problem.code });
     }
   }
   return errors;
-}
-
-async function accountIdsByNumber(tx: Prisma.TransactionClient, groups: readonly CheckedGroup[]): Promise<Map<string, string>> {
-  const numbers = [...new Set(groups.flatMap((g) => g.lines.map((l) => l.accountId)))];
-  const accounts = await tx.account.findMany({ where: { accountNumber: { in: numbers } }, select: { id: true, accountNumber: true } });
-  return new Map(accounts.map((a) => [a.accountNumber, a.id]));
 }
 
 /** An open fiscal year and an unlocked period for each distinct date; a failure lands on every row of the journals dated then. */
