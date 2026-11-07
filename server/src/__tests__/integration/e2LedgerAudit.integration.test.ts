@@ -307,7 +307,7 @@ d('ledger audit', () => {
     });
   });
 
-  it('manualPartyLines: party on a plain account, import line without party, wrong party type, manual deposit line', async () => {
+  it('manualPartyLines: party on a plain account, import line without party, wrong party type, manual deposit line, Both is fine', async () => {
     await inRollback(async (tx) => {
       const f = await fixture(tx);
       const onPlain = await journal(tx, f, { sourceType: 'MANUAL' }, [{ accountId: f.contra, debit: 10, partyId: f.customer }, { accountId: f.cash, credit: 10 }]);
@@ -326,7 +326,7 @@ d('ledger audit', () => {
       expect(rows.find((r) => r.key === byItem(onPlain, f.contra))?.cause).toBe('party-on-non-role-account');
       expect(rows.find((r) => r.key === byItem(importNoParty, f.ar))?.cause).toBe('import-role-line-without-party');
       expect(rows.find((r) => r.key === byItem(wrongType, f.ar))?.cause).toBe('party-type-mismatch');
-      expect(rows.find((r) => r.key === byItem(bothLine, f.ar))?.cause).toBe('party-both-pending-e2pr9');
+      expect(rows.filter((r) => bothLine.items.some((i) => i.id === r.key))).toEqual([]);
       expect(rows.find((r) => r.key === byItem(deposit, f.customerDeposit))?.cause).toBe('manual-deposit-account');
       expect(rows.filter((r) => clean.items.some((i) => i.id === r.key))).toEqual([]);
       expect(rows.filter((r) => documentJournal.items.some((i) => i.id === r.key))).toEqual([]);

@@ -1,6 +1,6 @@
 // Receivable and customer deposit balances per Customer: the general ledger (active ledger rows on
 // the AR / CUSTOMER_DEPOSIT accounts, by party_id) against the subledger the documents keep
-// (invoice outstanding plus opening outstanding plus the manual party adjustment of
+// (invoice outstanding plus opening receivable plus the manual party adjustment of
 // services/ledger/partyAdjustments.ts; deposit amount less applications and refunds). The ledger
 // side reads the role's accounts through the caller's transaction, including the accounts the role
 // held before a remap (roleAccountIds includeFormer), so a document voided after a remap still
@@ -31,8 +31,6 @@ export interface PartySubledgerDiff {
   subledger: Prisma.Decimal;
   /** gl - subledger. */
   difference: Prisma.Decimal;
-  /** AR only: opening outstanding of a party typed Both, left out of the subledger (it may be payable). */
-  openingIgnored?: Prisma.Decimal;
 }
 
 export interface SubledgerScope {
@@ -52,7 +50,6 @@ interface DiffRow {
   party_type: string | null;
   gl: string;
   subledger: string;
-  opening_ignored: string | null;
 }
 
 /**
@@ -108,13 +105,12 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
     joined AS (
       SELECT COALESCE(g.party_id, s.party_id) AS party_id,
              COALESCE(g.amount, 0) AS gl,
-             COALESCE(s.amount, 0) AS subledger,
-             s.opening_ignored
+             COALESCE(s.amount, 0) AS subledger
         FROM gl g
         FULL OUTER JOIN sub s ON s.party_id = g.party_id
     )
     SELECT j.party_id, p.name AS party_name, p."partyType"::text AS party_type,
-           j.gl::text AS gl, j.subledger::text AS subledger, j.opening_ignored::text AS opening_ignored
+           j.gl::text AS gl, j.subledger::text AS subledger
       FROM joined j
       LEFT JOIN parties p ON p.id = j.party_id
      WHERE ABS(j.gl - j.subledger) > ${SUBLEDGER_TOLERANCE}::numeric
@@ -123,7 +119,6 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
   return rows.map((r) => {
     const glAmount = new Prisma.Decimal(r.gl);
     const subAmount = new Prisma.Decimal(r.subledger);
-    const ignored = r.opening_ignored === null ? null : new Prisma.Decimal(r.opening_ignored);
     return {
       partyId: r.party_id,
       partyName: r.party_name,
@@ -131,7 +126,6 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
       gl: glAmount,
       subledger: subAmount,
       difference: glAmount.minus(subAmount),
-      ...(ignored && !ignored.isZero() ? { openingIgnored: ignored } : {}),
     };
   });
 }
@@ -139,10 +133,10 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
 /**
  * Receivable per party: ledger debit - credit on the AR accounts (current and former) against the
  * outstanding of its sales invoices (not Draft or Cancelled), plus its manual party adjustment on
- * those accounts (hand-made journals, whatever the party type), plus its opening outstanding. A
- * ledger row without a source type is not an adjustment and still shows up. Opening outstanding counts
- * for Customers only; a party typed Both shares it with payables, so it is left out and reported in
- * `openingIgnored`. In a year-scoped run a party with such an invoice dated in the year is active.
+ * those accounts (hand-made journals, whatever the party type), plus its opening receivable (the
+ * opening directed to the receivable side plus what the migration left undirected, legacyUnassigned,
+ * services/ledger/partySides.ts). A ledger row without a source type is not an adjustment and still
+ * shows up. A party typed Both has its payable side checked apart from this one. The inclusion test uses the same expression as the amount (opening_outstanding - opening_payable). Until payment consumption is split by side (5.13), a vendor overpayment by a Both party lowers opening_outstanding and shows up here. In a year-scoped run a party with such an invoice dated in the year is active.
  * [] while AR is not mapped. Largest difference first.
  */
 export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
@@ -152,8 +146,9 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
   const sub = Prisma.sql`
     SELECT p.id AS party_id,
            COALESCE(inv.outstanding, 0) + COALESCE(adj.amount, 0)
-             + CASE WHEN p."partyType" = 'Customer' THEN p.opening_outstanding ELSE 0 END AS amount,
-           CASE WHEN p."partyType" = 'Both' THEN p.opening_outstanding END AS opening_ignored
+             + CASE WHEN p."partyType" IN ('Customer', 'Both')
+                    THEN p.opening_receivable + (p.opening_outstanding - p.opening_receivable - p.opening_payable)
+                    ELSE 0 END AS amount
       FROM parties p
       LEFT JOIN (
         SELECT party_id, SUM(outstanding) AS outstanding
@@ -163,7 +158,7 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
       ) inv ON inv.party_id = p.id
       LEFT JOIN (${manualPartyAdjustmentSql(accountIds, ADJUSTMENT_SIGN.AR)}) adj ON adj.party_id = p.id
      WHERE inv.party_id IS NOT NULL OR adj.party_id IS NOT NULL
-        OR (p."partyType" IN ('Customer', 'Both') AND p.opening_outstanding <> 0)`;
+        OR (p."partyType" IN ('Customer', 'Both') AND (p.opening_outstanding - p.opening_payable) <> 0)`;
   const active = scope.fiscalYear
     ? activeCte(accountIds, scope.fiscalYear, Prisma.sql`
         SELECT party_id FROM sales_invoices
@@ -185,8 +180,7 @@ export async function findCustomerDepositDiffs(tx: Tx, scope: SubledgerScope = {
   if (accountIds.length === 0 || scope.partyIds?.length === 0) return [];
   const gl = glCte(accountIds, Prisma.sql`ale.credit - ale.debit`, scope);
   const sub = Prisma.sql`
-    SELECT pay.party_id, SUM(pay.amount - pay.refunded_amount - COALESCE(app.applied, 0)) AS amount,
-           NULL::numeric AS opening_ignored
+    SELECT pay.party_id, SUM(pay.amount - pay.refunded_amount - COALESCE(app.applied, 0)) AS amount
       FROM payments pay
       LEFT JOIN (
         SELECT deposit_payment_id, SUM(applied_amount) AS applied

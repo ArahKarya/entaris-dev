@@ -1521,7 +1521,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 |---|---|---|---|---|
 | `date` | body | `date` | ya | Tanggal jurnal (YYYY-MM-DD); harus jatuh di tahun buku terbuka. |
 | `narration` | body | `string` | ya | Keterangan jurnal. |
-| `items` | body | `array<object>` | ya | Minimal 2 baris: accountId*, debit, credit (tepat satu > 0, maksimal 2 desimal), partyId (wajib di akun Piutang Usaha = Customer dan Hutang Usaha = Supplier; dilarang di akun lain), description. |
+| `items` | body | `array<object>` | ya | Minimal 2 baris: accountId*, debit, credit (tepat satu > 0, maksimal 2 desimal), partyId (wajib di akun Piutang Usaha = Customer atau Both dan Hutang Usaha = Supplier atau Both; dilarang di akun lain), description. |
 | `items[].accountId` | body | `string` | ya |  |
 | `items[].debit` | body | `number` | tidak |  |
 | `items[].credit` | body | `number` | tidak |  |
@@ -1580,7 +1580,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400 ACCOUNT_CONTROL: akun kontrol tanpa journal.control, atau akun uang muka (selalu ditolak)
 - 400 PARTY_REQUIRED: baris akun Piutang/Hutang Usaha tanpa pihak
 - 400 PARTY_NOT_ALLOWED: pihak diisi di baris akun selain Piutang/Hutang Usaha
-- 400 PARTY_TYPE_MISMATCH: Piutang hanya Customer, Hutang hanya Supplier; mitra Both belum bisa dipakai
+- 400 PARTY_TYPE_MISMATCH: Piutang hanya Customer, Hutang hanya Supplier; mitra bertipe Both boleh di keduanya (sisinya ditentukan akun)
 - 400 PARTY_NOT_FOUND: pihak tidak ditemukan
 - 400 PARTY_ROLE_AMBIGUOUS: akun dipetakan ke dua peran pihak; perbaiki pemetaan Akun Sistem
 - 400 PERIOD_CLOSED / FISCAL_YEAR_MISSING: tahun buku untuk tanggal itu ditutup atau tidak ada

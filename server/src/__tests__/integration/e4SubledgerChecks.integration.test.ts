@@ -7,7 +7,7 @@
  * matter. Everything runs in a rollback transaction; route handlers through the route harness.
  * - A 3 jt AR journal without an invoice, and a 1 jt deposit journal without a deposit, show up
  *   as differences; a real flow (invoice, part payment, deposit, apply) shows none.
- * - Opening outstanding counts for a Customer; for a party typed Both it is left out and reported.
+ * - The receivable side of the opening counts for a Customer and for a party typed Both.
  * - GET /health-check lists the two new checks.
  * - Close checklist: both checks block; a captured baseline stops the same difference from
  *   blocking, and a smaller one of the same sign; a larger difference, a flipped sign, or a new
@@ -17,7 +17,6 @@
  * - A Customer imported with an opening receivable has no difference (opening outstanding is set).
  * - Imported parties carry their opening on the side columns too: no outstanding drift and nothing
  *   for e2-party-side-recalc to rewrite, with an opening (Customer, Supplier) or without (Both).
- * - The health check detail carries the ignored-opening column on every row once one row has it.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -41,7 +40,6 @@ import { businessDayOf } from '../../utils/businessDate';
 import customerDepositsRouter from '../../routes/customerDeposits';
 import healthCheckRouter from '../../routes/healthCheck';
 import importPartiesRouter from '../../routes/import/parties';
-import { detailRows } from '../../routes/health/arChecks';
 import { checkPartyOutstandingDrift } from '../../routes/health/partyChecks';
 import { planPartySideRecalc } from '../../services/ledger/partySides';
 import { Prisma } from '@prisma/client';
@@ -116,8 +114,13 @@ async function books(tx: Tx): Promise<Books> {
   };
 }
 
-async function party(tx: Tx, partyType: 'Customer' | 'Both' = 'Customer', openingOutstanding = 0): Promise<string> {
-  const p = await tx.party.create({ data: { name: `IT-E4 ${partyType} ${tag()}`, partyType, openingOutstanding } });
+async function party(
+  tx: Tx,
+  partyType: 'Customer' | 'Both' = 'Customer',
+  openingOutstanding = 0,
+  sides: { openingReceivable?: number; openingPayable?: number } = {},
+): Promise<string> {
+  const p = await tx.party.create({ data: { name: `IT-E4 ${partyType} ${tag()}`, partyType, openingOutstanding, ...sides } });
   return p.id;
 }
 
@@ -230,24 +233,24 @@ d('AR and customer deposit vs subledger (E4-R3)', () => {
     });
   });
 
-  it('counts opening outstanding for a Customer and leaves it out for a party typed Both', async () => {
+  it('counts the receivable side of the opening for a Customer and for a party typed Both', async () => {
     await inRollback(async (tx) => {
       const b = await books(tx);
       const customer = await party(tx, 'Customer', 600_000);
-      const both = await party(tx, 'Both', 400_000);
+      // 400k opening: 150k directed to receivable, 100k to payable, 150k still undirected (counts as receivable).
+      const both = await party(tx, 'Both', 400_000, { openingReceivable: 150_000, openingPayable: 100_000 });
       await arJournal(tx, b, both, 250_000);
 
       const rows = await findArSubledgerDiffs(tx, { partyIds: [customer, both] });
       const byParty = new Map(rows.map((r) => [r.partyId, r]));
       expect(byParty.get(customer)!.difference.toFixed(2)).toBe('-600000.00');
-      expect(byParty.get(customer)!.openingIgnored).toBeUndefined();
-      expect(byParty.get(both)!.subledger.toFixed(2)).toBe('0.00');
-      expect(byParty.get(both)!.difference.toFixed(2)).toBe('250000.00');
-      expect(byParty.get(both)!.openingIgnored!.toFixed(2)).toBe('400000.00');
+      expect(byParty.get(both)!.subledger.toFixed(2)).toBe('300000.00');
+      expect(byParty.get(both)!.difference.toFixed(2)).toBe('-50000.00');
 
-      // The Customer's opening journal brings its ledger in line.
+      // The opening journals bring both ledgers in line: the payable side of Both stays out of AR.
       await arJournal(tx, b, customer, 600_000);
-      expect((await findArSubledgerDiffs(tx, { partyIds: [customer] }))).toEqual([]);
+      await arJournal(tx, b, both, 50_000);
+      expect(await findArSubledgerDiffs(tx, { partyIds: [customer, both] })).toEqual([]);
     });
   });
 
@@ -456,21 +459,5 @@ d('AR and customer deposit vs subledger (E4-R3)', () => {
       const none = ar.items.filter((i) => i.key.startsWith('Party:none'));
       expect(none).toEqual([{ key: `Party:none:${b.fy.id}`, kind: 'Party', label: '(tanpa Customer)', amount: '700000.00' }]);
     });
-  });
-
-  it('puts the ignored-opening column on every detail row once one row has it', () => {
-    const row = (partyName: string, difference: number, openingIgnored?: number) => ({
-      partyId: partyName,
-      partyName,
-      partyType: openingIgnored === undefined ? 'Customer' : 'Both',
-      gl: new Prisma.Decimal(difference),
-      subledger: new Prisma.Decimal(0),
-      difference: new Prisma.Decimal(difference),
-      ...(openingIgnored === undefined ? {} : { openingIgnored: new Prisma.Decimal(openingIgnored) }),
-    });
-    const rows = detailRows([row('A', 10 * JT), row('B', 250_000, 400_000)]);
-    expect(rows[0]).toHaveProperty('opening_outstanding_ignored', null);
-    expect(rows[1]).toHaveProperty('opening_outstanding_ignored', 400_000);
-    expect(detailRows([row('A', 10 * JT)])[0]).not.toHaveProperty('opening_outstanding_ignored');
   });
 });
