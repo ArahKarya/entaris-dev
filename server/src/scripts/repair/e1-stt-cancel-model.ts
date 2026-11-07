@@ -4,18 +4,22 @@
 //   A       original Cancelled with active ledger rows: --apply sets it Submitted, reversed by the
 //           CXL. Ledger rows and balances stay, so no total moves (also in a closed year).
 //   B       original's ledger rows cancelled too: only with --include-ale-fix, in open years after the
-//           lock date. Also reactivates its ledger rows and adds its impact back to the stored
-//           balances: Inventory and the uninvoiced payable change by the STT amount.
+//           lock date. Also reactivates its ledger rows and sets the stored balances of its accounts
+//           to the ledger: Inventory and the uninvoiced payable change by the STT amount when the
+//           stored balance had dropped the original (column stored_balance follows-ledger), and stay
+//           when it still included it (includes-original). With any other drift on those accounts
+//           (stored-balance-drift) the pair is skipped: the old ALE sync fix never touched balances.
 //   C       a journal booked to another fiscal year than its date: report only (owner decision #5d).
 //   REVIEW  any other shape (column reason): report only.  PAIRED: already fixed.
 // --apply needs --approved-by "<accountant name>"; the name goes on one audit row per fixed journal
 // and in the CSV, which --apply always writes (default file name when --out is not given) before
 // the transaction starts. A second run finds the fixed pairs PAIRED and writes nothing.
 //
-// Release order (plan §8): back up the database; do not run "recalculate balances" in the System
-// Check before this; dry run and send the CSV to the accountant; --apply (A), then, if B is approved,
-// --apply --include-ale-fix; dry run again (all PAIRED); only then capture the year-close baseline
-// (e1-close-baseline.js).
+// Release order (plan §8): back up the database; dry run and send the CSV to the accountant; --apply
+// (A), then, if B is approved, --apply --include-ale-fix; dry run again (all PAIRED); only then
+// capture the year-close baseline (e1-close-baseline.js). The order against the stored-balance
+// recalculation (e2-stored-balance-recalc) is free; a B pair skipped as stored-balance-drift needs
+// that recalculation (or the accountant's review of the other drift) first.
 //
 // Usage (from server/, DATABASE_URL set):
 //   node dist/scripts/repair/e1-stt-cancel-model.js [--fy <name>] [--out file.csv]
@@ -39,7 +43,8 @@ import { parseSttCancelArgs } from '../../services/ledger/sttCancelLegacyArgs';
 const HEADER = [
   'stt_number', 'stt_status', 'class', 'reason', 'original_journal', 'original_status', 'original_date', 'original_year',
   'cxl_journal', 'cxl_status', 'cxl_date', 'cxl_year', 'amount', 'original_ale_active', 'original_ale_cancelled',
-  'year_closed', 'locked', 'action', 'ledger_fix_blocked', 'ale_sync_fix_after_cancel', 'applied', 'approved_by',
+  'year_closed', 'locked', 'action', 'ledger_fix_blocked', 'ale_sync_fix_after_cancel', 'balance_fix_after_ale_sync',
+  'stored_balance', 'stored_drift', 'applied', 'approved_by',
 ].join(',');
 
 type Runs = { aleSync: Date[]; balanceDrift: Date[] };
@@ -48,12 +53,19 @@ function writeCsv(file: string, rows: readonly LegacySttRow[], runs: Runs, appli
   const lines = rows.map((r) => {
     const cancelledAt = r.original?.cancelledAt;
     const syncAfter = cancelledAt ? runs.aleSync.some((t) => t > cancelledAt) : null;
+    // The last ALE sync after the cancel cancelled the original's rows; a balance-drift fix after it
+    // made the stored balance drop the original too.
+    const lastSync = cancelledAt ? runs.aleSync.filter((t) => t > cancelledAt).at(-1) : undefined;
+    const balanceFixAfter = lastSync ? runs.balanceDrift.some((t) => t > lastSync) : null;
+    // Per account: stored - ledger before the fix / the original's impact.
+    const storedDrift = r.storedBalance?.accounts
+      .map((a) => `${a.accountNumber}: ${a.difference.toFixed(2)} / ${a.originalImpact.toFixed(2)}`).join('; ') ?? null;
     const done = applied.get(r.sttNumber) ?? 'no';
     return [
       r.sttNumber, r.sttStatus, r.cls, r.reason, r.original?.entryNumber ?? null, r.original?.status ?? null, r.original?.day ?? null,
       r.original?.fiscalYearName ?? null, r.cxl.entryNumber, r.cxl.status, r.cxl.day, r.cxl.fiscalYearName, r.amount.toFixed(2),
       r.originalAleActive, r.originalAleCancelled, !!r.original?.yearClosed || r.cxl.yearClosed, r.locked, r.action,
-      r.ledgerFixBlocked, syncAfter, done, done.startsWith('fixed') ? approvedBy : null,
+      r.ledgerFixBlocked, syncAfter, balanceFixAfter, r.storedBalance?.state ?? null, storedDrift, done, done.startsWith('fixed') ? approvedBy : null,
     ].map(csvCell).join(',');
   });
   writeFileSync(file, `${[HEADER, ...lines].join('\n')}\n`, 'utf8');
@@ -67,7 +79,8 @@ function printPlan(rows: readonly LegacySttRow[], runs: Runs) {
   for (const [cls, n] of [...counts.entries()].sort()) console.log(`  ${cls}: ${n}`);
   for (const r of rows.filter((x) => x.cls !== 'PAIRED')) {
     const blocked = r.ledgerFixBlocked ? `, ledger fix blocked: ${r.ledgerFixBlocked}` : '';
-    console.log(`  ${r.sttNumber} ${r.cls}${r.reason ? ` (${r.reason})` : ''} ${r.amount.toFixed(2)}${blocked}`);
+    const stored = r.storedBalance ? `, stored balance: ${r.storedBalance.state}` : '';
+    console.log(`  ${r.sttNumber} ${r.cls}${r.reason ? ` (${r.reason})` : ''} ${r.amount.toFixed(2)}${blocked}${stored}`);
   }
   const last = (d: Date[]) => (d.length ? d[d.length - 1]!.toISOString() : 'never');
   console.log(`Old health-check fixes: ALE sync ${runs.aleSync.length}x (last ${last(runs.aleSync)}), balance drift ${runs.balanceDrift.length}x (last ${last(runs.balanceDrift)})`);

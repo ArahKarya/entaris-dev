@@ -8,7 +8,8 @@
  *   A  the original's ledger rows still active (ledger right, status wrong)
  *   B  the original's ledger rows cancelled too (only the reversal on the books)
  * Ledger rows are written straight to the table, every group balanced, and the stored balances
- * follow the active rows. Queries are scoped to the fixture's STTs. Route handlers run through the
+ * follow the active rows (a B case adds the original back to them where it tests a stored balance
+ * that never dropped it). Queries are scoped to the fixture's STTs. Route handlers run through the
  * route harness; everything runs in a rollback transaction.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -25,6 +26,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 import journalsRouter from '../../routes/journals';
 import { applyAccountImpacts } from '../../utils/accountBalance';
 import { findAleJournalMismatches } from '../../services/ledger/aleSyncCheck';
+import { findAccountBalanceDrift } from '../../services/ledger/storedBalances';
 import { cancelJournalsInTx, JOURNAL_ALREADY_REVERSED } from '../../services/ledger/cancelJournals';
 import { runCloseChecklist } from '../../services/fiscalYearClose';
 import { setPeriodLockInTx } from '../../services/periodLock';
@@ -235,10 +237,15 @@ d('legacy STT cancel data: apply', () => {
       expect(await balance(tx, b.inventoryId)).toBe('-10950000.00');
       expect(await balance(tx, b.accruedId)).toBe('-10950000.00');
 
-      const result = await applySttCancelLegacy(tx, await plan(tx, [a, bb]), { approvedBy: APPROVED, includeAleFix: true });
+      const rows = await plan(tx, [a, bb]);
+      expect(rows.find((r) => r.sttNumber === bb.sttNumber)!.storedBalance).toMatchObject({ state: 'follows-ledger' });
+      const result = await applySttCancelLegacy(tx, rows, { approvedBy: APPROVED, includeAleFix: true });
       expect(result).toMatchObject({ fixed: [a.sttNumber], ledgerFixed: [bb.sttNumber], skipped: [] });
       expect(await balance(tx, b.inventoryId)).toBe('0.00');
       expect(await balance(tx, b.accruedId)).toBe('0.00');
+      expect((await findAccountBalanceDrift(tx, { accountIds: [b.inventoryId, b.accruedId] })).total).toBe(0);
+      const audit = await tx.auditLog.findFirstOrThrow({ where: { action: STT_CANCEL_AUDIT_ACTION, entityId: bb.original.id } });
+      expect(audit.newValues).toMatchObject({ class: 'B', ledgerReactivated: true, storedBalance: 'follows-ledger' });
       expect(await tx.accountingLedgerEntry.count({ where: { referenceId: bb.original.id, isCancelled: true } })).toBe(0);
       expect(await tx.journalEntry.findUniqueOrThrow({ where: { id: bb.original.id } })).toMatchObject({ status: 'Submitted', reversedById: bb.cxl.id });
       const ids = [a.original.id, a.cxl.id, bb.original.id, bb.cxl.id];
@@ -252,6 +259,48 @@ d('legacy STT cancel data: apply', () => {
       const before = await snapshot(tx, b, [a, bb]);
       expect(await applySttCancelLegacy(tx, again, { approvedBy: APPROVED, includeAleFix: true })).toMatchObject({ fixed: [], ledgerFixed: [], skipped: [] });
       expect(await snapshot(tx, b, [a, bb])).toEqual(before);
+    });
+  });
+
+  it('B whose stored balance never dropped the original (no balance fix after the ALE sync): ledger restored, balances not added twice', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const bb = await legacyStt(tx, b, 'B', { amount: 10_950_000 });
+      // The CXL reversed the balances while both sets were active, the ALE sync then cancelled the
+      // original's rows without touching balances: stored 0, ledger -10.95 jt.
+      await applyAccountImpacts(tx, await tx.journalItem.findMany({ where: { journalEntryId: bb.original.id } }));
+      expect(await balance(tx, b.inventoryId)).toBe('0.00');
+      expect(await balance(tx, b.accruedId)).toBe('0.00');
+
+      const rows = await plan(tx, [bb]);
+      expect(rows[0]).toMatchObject({ cls: 'B', ledgerFixBlocked: null, storedBalance: { state: 'includes-original' } });
+      const inventory = rows[0].storedBalance!.accounts.find((x) => x.accountId === b.inventoryId)!;
+      expect([inventory.difference.toFixed(2), inventory.originalImpact.toFixed(2)]).toEqual(['10950000.00', '10950000.00']);
+
+      const result = await applySttCancelLegacy(tx, rows, { approvedBy: APPROVED, includeAleFix: true });
+      expect(result).toMatchObject({ ledgerFixed: [bb.sttNumber], skipped: [] });
+      expect(await balance(tx, b.inventoryId)).toBe('0.00');
+      expect(await balance(tx, b.accruedId)).toBe('0.00');
+      expect((await findAccountBalanceDrift(tx, { accountIds: [b.inventoryId, b.accruedId] })).total).toBe(0);
+      expect((await findAleJournalMismatches(tx, { journalIds: [bb.original.id, bb.cxl.id] })).total).toBe(0);
+      const audit = await tx.auditLog.findFirstOrThrow({ where: { action: STT_CANCEL_AUDIT_ACTION, entityId: bb.original.id } });
+      expect(audit.newValues).toMatchObject({ class: 'B', storedBalance: 'includes-original' });
+    });
+  });
+
+  it('skips B when its accounts carry other stored-balance drift, and changes nothing', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const bb = await legacyStt(tx, b, 'B');
+      await tx.account.update({ where: { id: b.inventoryId }, data: { balance: { increment: 500 } } });
+      const before = await snapshot(tx, b, [bb]);
+
+      const rows = await plan(tx, [bb]);
+      expect(rows[0]).toMatchObject({ cls: 'B', ledgerFixBlocked: 'stored-balance-drift', storedBalance: { state: 'drift' } });
+      const result = await applySttCancelLegacy(tx, rows, { approvedBy: APPROVED, includeAleFix: true });
+      expect(result.ledgerFixed).toEqual([]);
+      expect(result.skipped).toEqual([{ sttNumber: bb.sttNumber, why: expect.stringMatching(/^stored-balance-drift: .*500\.00/) }]);
+      expect(await snapshot(tx, b, [bb])).toEqual(before);
     });
   });
 

@@ -8,18 +8,22 @@
 //      payable are off by the STT amount, and no ledger check sees it.
 // The fix gives both the final form the cancel model knows (cancelJournals.ts JOURNAL_ALREADY_REVERSED):
 // original Submitted with reversed_by_id = the CXL. A keeps its ledger rows and balances, so totals do
-// not move and it may be fixed in a closed year. B also reactivates the original's ledger rows and adds
-// its impact back to the stored balances, so it only runs with includeAleFix, in open years after the
-// lock date. Every other shape is reported only (C: a CXL booked to another fiscal year than its date,
+// not move and it may be fixed in a closed year. B also reactivates the original's ledger rows and sets
+// the stored balances of its accounts to the ledger (storedBalances.ts), so it only runs with
+// includeAleFix, in open years after the lock date. The old ALE sync fix never touched balances, so
+// whether the stored balance had dropped the original depends on a later balance-drift fix: B runs only
+// when the stored balances equal the ledger without the original or still include exactly the
+// original, never on top of other drift. Every other shape is reported only (C: a CXL booked to another fiscal year than its date,
 // kept as is because moving it changes two years' totals, owner decision #5d; REVIEW: anything else).
 import { Prisma } from '@prisma/client';
-import { applyAccountImpacts } from '../../utils/accountBalance';
+import { computeImpactDecimal } from '../../utils/accountBalance';
 import { businessDayOf } from '../../utils/businessDate';
 import { BusinessError } from '../../utils/errors';
 import { journalFamilyWhere } from '../../utils/journalFamily';
 import { assertPeriodOpen, FISCAL_YEAR_MISSING, fiscalYearOn, PERIOD_CLOSED, PERIOD_LOCKED } from '../../utils/periodGuard';
 import { getPeriodLock } from '../periodLock';
 import { legacyCxlPairSql } from './legacyCxlPair';
+import { findAccountBalanceDrift, recalculateAccountBalances, STORED_BALANCE_TOLERANCE } from './storedBalances';
 
 type Tx = Prisma.TransactionClient;
 
@@ -114,7 +118,61 @@ export interface LegacySttRow {
   /** fix = status only (A); fix-ledger = status, ledger rows and balances (B); none = report only. */
   action: 'fix' | 'fix-ledger' | 'none';
   /** B only: why includeAleFix would skip it now. */
-  ledgerFixBlocked: 'closed-year' | 'locked' | null;
+  ledgerFixBlocked: 'closed-year' | 'locked' | 'stored-balance-drift' | null;
+  /** B only: the stored balances of the original's accounts against the active ledger rows. */
+  storedBalance: StoredBalanceCheck | null;
+}
+
+/**
+ * How the stored balances of a B original's accounts stand before its ledger rows are reactivated:
+ *   follows-ledger     stored = active ledger (without the original): a balance-drift fix ran after
+ *                      the ALE sync; reactivating adds the original's impact.
+ *   includes-original  stored = active ledger + the original's impact: no fix ran since; reactivating
+ *                      makes the ledger match and the balances stay.
+ *   drift              anything else (other drift on the account): B is skipped, recalculate first.
+ */
+export type StoredBalanceState = 'follows-ledger' | 'includes-original' | 'drift';
+
+export interface StoredBalanceAccount {
+  accountId: string;
+  accountNumber: string;
+  /** stored - active ledger, before the fix. */
+  difference: Prisma.Decimal;
+  /** The original's lines on this account, signed by its normal side. */
+  originalImpact: Prisma.Decimal;
+}
+
+export interface StoredBalanceCheck {
+  state: StoredBalanceState;
+  accounts: StoredBalanceAccount[];
+}
+
+/** storedBalances.ts drift of the accounts of `items`, compared with their impact (read-only). */
+export async function storedBalanceCheck(
+  db: Tx,
+  items: readonly { accountId: string; debit: Prisma.Decimal.Value; credit: Prisma.Decimal.Value }[],
+): Promise<StoredBalanceCheck> {
+  const totals = totalsBy(items, (i) => i.accountId);
+  const ids = [...totals.keys()].sort();
+  const accounts = await db.account.findMany({ where: { id: { in: ids } }, orderBy: { id: 'asc' }, select: { id: true, accountNumber: true, rootType: true } });
+  const drift = await findAccountBalanceDrift(db, { accountIds: ids });
+  const differenceOf = new Map(drift.rows.map((r) => [r.accountId, r.difference]));
+  const rows = accounts.map((a) => {
+    const t = totals.get(a.id)!;
+    return {
+      accountId: a.id,
+      accountNumber: a.accountNumber,
+      difference: differenceOf.get(a.id) ?? new Prisma.Decimal(0),
+      originalImpact: computeImpactDecimal(a.rootType, t.debit, t.credit),
+    };
+  });
+  const within = (x: Prisma.Decimal) => x.abs().lte(STORED_BALANCE_TOLERANCE);
+  const state: StoredBalanceState =
+    accounts.length !== ids.length ? 'drift'
+      : rows.every((r) => within(r.difference)) ? 'follows-ledger'
+        : rows.every((r) => within(r.difference.minus(r.originalImpact))) ? 'includes-original'
+          : 'drift';
+  return { state, accounts: rows };
 }
 
 export interface LegacySttScope {
@@ -230,6 +288,7 @@ export async function planSttCancelLegacy(db: Tx, scope: LegacySttScope = {}): P
     const lockDate = lock.lockDate;
     const locked = lockDate !== null && [original?.view.day, cxl.view.day].some((d) => d !== undefined && d <= lockDate);
     const closed = !!original?.view.yearClosed || cxl.view.yearClosed;
+    const storedBalance = cls === 'B' ? await storedBalanceCheck(db, original!.items) : null;
     rows.push({
       sttId: p.stt_id,
       sttNumber: p.stt_number,
@@ -243,7 +302,12 @@ export async function planSttCancelLegacy(db: Tx, scope: LegacySttScope = {}): P
       originalAleCancelled: original?.facts.aleCancelled ?? 0,
       locked,
       action: cls === 'A' ? 'fix' : cls === 'B' ? 'fix-ledger' : 'none',
-      ledgerFixBlocked: cls !== 'B' ? null : closed ? 'closed-year' : locked ? 'locked' : null,
+      ledgerFixBlocked: cls !== 'B' ? null
+        : closed ? 'closed-year'
+          : locked ? 'locked'
+            : storedBalance!.state === 'drift' ? 'stored-balance-drift'
+              : null,
+      storedBalance,
     });
   }
   return rows;
@@ -318,12 +382,23 @@ export async function applySttCancelLegacy(tx: Tx, plan: readonly LegacySttRow[]
     const family = await tx.journalEntry.findMany({ where: journalFamilyWhere(`JV-${now.sttNumber}`), include: { items: true } });
     const original = family.find((j) => j.id === now.original!.id)!;
     const cxl = family.find((j) => j.id === now.cxl.id)!;
+    let storedIds: string[] = [];
+    let storedState: StoredBalanceState | null = null;
     if (now.cls === 'B') {
       const problem = await periodProblem(tx, [original, cxl]);
       if (problem) {
         skip(problem);
         continue;
       }
+      // Read again per pair: an earlier B pair in this run may share the accounts.
+      const stored = await storedBalanceCheck(tx, original.items);
+      if (stored.state === 'drift') {
+        const detail = stored.accounts.map((a) => `${a.accountNumber} ${a.difference.toFixed(2)}`).join(', ');
+        skip(`stored-balance-drift: stored balances differ from the ledger (${detail}); run the stored-balance recalculation first`);
+        continue;
+      }
+      storedIds = stored.accounts.map((a) => a.accountId);
+      storedState = stored.state;
     }
 
     const { count } = await tx.journalEntry.updateMany({
@@ -343,9 +418,13 @@ export async function applySttCancelLegacy(tx: Tx, plan: readonly LegacySttRow[]
       if (ale.count !== now.originalAleCancelled) {
         throw new SttCancelRefusal(`Nothing was changed: the ledger rows of ${original.entryNumber} changed while the run was planned.`);
       }
-      // The stored balances follow the active ledger rows (the old sync fix recomputed them without
-      // the original), so the original's impact is added back from its lines (= its ledger rows).
-      await applyAccountImpacts(tx, original.items);
+      // The one balance rule: the stored balances of the pair's accounts become the active ledger,
+      // which now includes the original. follows-ledger adds its impact; includes-original is a no-op.
+      if (storedIds.length > 0) await recalculateAccountBalances(tx, storedIds);
+      const left = await findAccountBalanceDrift(tx, { accountIds: storedIds });
+      if (left.total > 0) {
+        throw new SttCancelRefusal(`Nothing was changed: the stored balances of ${original.entryNumber} still differ from the ledger after the fix.`);
+      }
     }
     await tx.auditLog.create({
       data: {
@@ -369,6 +448,7 @@ export async function applySttCancelLegacy(tx: Tx, plan: readonly LegacySttRow[]
           sttNumber: now.sttNumber,
           class: now.cls,
           ledgerReactivated: now.cls === 'B',
+          storedBalance: storedState,
           amount: now.amount.toFixed(2),
           approvedBy,
         },
