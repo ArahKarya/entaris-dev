@@ -80,6 +80,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       description: meta.description,
       multiAccount: meta.multiAccount,
       required: meta.required,
+      usage: meta.usage,
       expectedRootType: meta.expectedRootType,
       // Balance-sheet single-account role: its balance moves with the mapping (otherwise history stays).
       balanceMoves: isReclassRole(key),

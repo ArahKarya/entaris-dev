@@ -1,3 +1,12 @@
+/**
+ * How the code uses a role, so the settings screen does not promise what nothing does.
+ * posting: posting code reads the mapping and writes to it.
+ * default: only suggests or pre-fills an account in a picker.
+ * manual:  usable through manual journals only; no code reads the mapping.
+ * belum:   nothing reads it yet (registered for later; hidden behind a toggle in the UI).
+ */
+export type RoleUsage = 'posting' | 'default' | 'manual' | 'belum';
+
 export const SYSTEM_ACCOUNT_ROLES = {
   CASH: {
     key: 'CASH',
@@ -5,6 +14,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun kas dan bank untuk pembayaran masuk/keluar',
     multiAccount: true,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   AR: {
@@ -13,6 +23,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Auto-debit saat faktur penjualan di-submit',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   AP: {
@@ -21,6 +32,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Auto-credit saat faktur pembelian di-submit',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'LIABILITY' as const,
   },
   INVENTORY: {
@@ -29,6 +41,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun persediaan barang default',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   SALES: {
@@ -37,6 +50,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Auto-credit pendapatan penjualan',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'REVENUE' as const,
   },
   SERVICE_REVENUE: {
@@ -45,6 +59,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Default akun pendapatan jasa',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'REVENUE' as const,
   },
   VENDOR_DEPOSIT: {
@@ -53,6 +68,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun uang muka ke vendor/supplier',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   CUSTOMER_DEPOSIT: {
@@ -61,6 +77,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun uang muka dari pelanggan',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'LIABILITY' as const,
   },
   PROJECT_GUARANTEE: {
@@ -69,6 +86,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Setoran jaminan (tender/pelaksanaan) ke pemberi proyek',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   EMPLOYEE_ADVANCE: {
@@ -77,6 +95,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Didebit saat Pengajuan Pembayaran jenis uang muka / perjalanan dinas dibayar',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   COGS: {
@@ -85,6 +104,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'HPP - auto-debit saat penjualan barang',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
   OPENING_EQUITY: {
@@ -93,6 +113,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Contra account untuk import/setup saldo awal',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EQUITY' as const,
   },
   RETAINED_EARNINGS: {
@@ -101,6 +122,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun tutup buku akhir tahun fiskal',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EQUITY' as const,
   },
   CURRENT_PROFIT: {
@@ -109,6 +131,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Laba tahun berjalan (computed di neraca)',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EQUITY' as const,
   },
 
@@ -118,7 +141,8 @@ export const SYSTEM_ACCOUNT_ROLES = {
     label: 'PPN Masukan',
     description: 'PPN masukan dari pembelian barang/jasa (VAT Input)',
     multiAccount: false,
-    required: true,
+    required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   TAX_OUTPUT: {
@@ -127,6 +151,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'PPN keluaran dari penjualan barang/jasa (VAT Output)',
     multiAccount: false,
     required: true,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'LIABILITY' as const,
   },
   INCOME_TAX_EXPENSE: {
@@ -135,6 +160,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Beban pajak penghasilan badan (PPh Badan)',
     multiAccount: false,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -145,6 +171,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Contra revenue: potongan harga penjualan ke pelanggan',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'REVENUE' as const,
   },
   SALES_RETURN: {
@@ -153,6 +180,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Contra revenue: pengembalian barang dari pelanggan',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'REVENUE' as const,
   },
 
@@ -163,6 +191,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Biaya ekspedisi/pengiriman barang ke pelanggan',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -173,6 +202,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun default untuk pencatatan pembelian aset tetap',
     multiAccount: true,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   ACCUM_DEPRECIATION: {
@@ -181,6 +211,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun kontra aset untuk akumulasi penyusutan aset tetap',
     multiAccount: true,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   DEPRECIATION_EXPENSE: {
@@ -189,6 +220,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Beban penyusutan aset tetap periodik',
     multiAccount: true,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -199,6 +231,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Biaya administrasi bank, buku cek, giro',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
   INTEREST_EXPENSE: {
@@ -207,6 +240,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Beban bunga pinjaman bank/pihak ketiga',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
   INTEREST_INCOME: {
@@ -215,6 +249,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Pendapatan bunga deposito/tabungan bank',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'REVENUE' as const,
   },
 
@@ -225,6 +260,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Dipakai lewat jurnal umum; tidak ada posting otomatis (pembukuan hanya rupiah)',
     multiAccount: false,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
   FX_UNREALIZED: {
@@ -233,6 +269,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Dipakai lewat jurnal umum; revaluasi valas belum didukung (pembukuan hanya rupiah)',
     multiAccount: false,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -243,6 +280,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Beban penghapusan piutang yang tidak dapat ditagih',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
   ALLOWANCE_DOUBTFUL: {
@@ -251,6 +289,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Contra asset: penyisihan piutang ragu-ragu',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
 
@@ -261,6 +300,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Aset lancar: biaya yang sudah dibayar tapi belum jatuh tempo',
     multiAccount: true,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   ACCRUED_EXPENSE: {
@@ -269,6 +309,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Kewajiban: beban yang sudah terjadi tapi belum dibayar',
     multiAccount: false,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'LIABILITY' as const,
   },
 
@@ -279,6 +320,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Penarikan modal oleh pemilik/pemegang saham',
     multiAccount: false,
     required: false,
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'EQUITY' as const,
   },
 
@@ -289,6 +331,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Pendapatan di luar usaha utama (non-operating income)',
     multiAccount: false,
     required: false,
+    usage: 'default' as RoleUsage,
     expectedRootType: 'REVENUE' as const,
   },
   OTHER_EXPENSE: {
@@ -297,6 +340,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Beban di luar operasional utama (non-operating expense)',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -307,6 +351,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Selisih nilai output vs input produksi (biaya konversi: listrik, tenaga kerja, overhead)',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -317,6 +362,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Beban selisih stok opname (inventory variance expense)',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -327,6 +373,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun untuk pembulatan dan selisih kecil yang tidak material',
     multiAccount: false,
     required: false,
+    usage: 'belum' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 
@@ -339,6 +386,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
       'invoice belum). Reversed DR saat PI submit.',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'LIABILITY' as const,
   },
   PURCHASE_PRICE_VARIANCE: {
@@ -349,6 +397,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
       'PI lebih mahal, CR kalau lebih murah.',
     multiAccount: false,
     required: false,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 } as const;
@@ -362,14 +411,13 @@ export type SystemAccountRole = keyof typeof SYSTEM_ACCOUNT_ROLES;
 
 /**
  * Roles the posting code writes to. A mapping to a group or inactive account breaks the next
- * posting, so startup and the mapping audit watch these. SALES_RETURN, PRODUCTION_CONVERSION and
- * PURCHASE_PRICE_VARIANCE join once PR-4.13 reads them (they are mapped and audited now so the
- * data is clean before that deploy).
+ * posting, so startup and the mapping audit watch these. Same set as the roles whose usage is
+ * 'posting' (a unit test keeps the two in step).
  */
 export const POSTING_SYSTEM_ROLES = [
   'CASH', 'AR', 'AP', 'INVENTORY', 'SALES', 'SERVICE_REVENUE', 'VENDOR_DEPOSIT', 'CUSTOMER_DEPOSIT',
   'COGS', 'OPENING_EQUITY', 'RETAINED_EARNINGS', 'CURRENT_PROFIT', 'TAX_OUTPUT', 'ACCRUED_PAYABLE',
-  'PROJECT_GUARANTEE', 'INVENTORY_VARIANCE', 'OTHER_EXPENSE',
+  'PROJECT_GUARANTEE', 'INVENTORY_VARIANCE', 'OTHER_EXPENSE', 'EMPLOYEE_ADVANCE',
   'SALES_RETURN', 'PRODUCTION_CONVERSION', 'PURCHASE_PRICE_VARIANCE',
 ] as const satisfies readonly SystemAccountRole[];
 
@@ -390,60 +438,7 @@ export const REQUIRED_SYSTEM_ROLES = ALL_SYSTEM_ROLES.filter(
   (k) => SYSTEM_ACCOUNT_ROLES[k].required,
 );
 
-// Default account numbers for seeding and data migration
-export const DEFAULT_ACCOUNT_NUMBERS: Record<SystemAccountRole, string | string[]> = {
-  CASH: ['1.1.1', '1.1.2', '1.1.3', '1.1.4', '1.1.5'],
-  AR: '1.2.1',
-  AP: '2.1.1',
-  INVENTORY: '1.4.0',
-  SALES: '4.1',
-  SERVICE_REVENUE: '4.2',
-  VENDOR_DEPOSIT: '1.3',
-  EMPLOYEE_ADVANCE: '1.5.6',
-  CUSTOMER_DEPOSIT: '2.1.2',
-  PROJECT_GUARANTEE: '1.8',
-  COGS: '5',
-  OPENING_EQUITY: '3.1',
-  RETAINED_EARNINGS: '3.2',
-  CURRENT_PROFIT: '3.4',
-  // Pajak
-  TAX_INPUT: '1.5.3',
-  TAX_OUTPUT: '2.2.1',
-  INCOME_TAX_EXPENSE: '6.17',
-  // Diskon & Retur
-  SALES_DISCOUNT: '4.4',
-  SALES_RETURN: '4.3',
-  // Pengiriman
-  SHIPPING_EXPENSE: '6.14',
-  // Aset Tetap & Depresiasi
-  FIXED_ASSET: ['1.6.1', '1.6.2', '1.6.3', '1.6.4', '1.6.5'],
-  ACCUM_DEPRECIATION: ['1.7.1', '1.7.2', '1.7.3', '1.7.4'],
-  DEPRECIATION_EXPENSE: ['6.21', '6.22', '6.23', '6.24'],
-  // Biaya Bank & Bunga
-  BANK_CHARGE: '8.2',
-  INTEREST_EXPENSE: '8.1',
-  INTEREST_INCOME: '7.1',
-  // Selisih Kurs
-  FX_GAIN_LOSS: '8.4',
-  FX_UNREALIZED: '8.5',
-  // Piutang Tak Tertagih
-  BAD_DEBT_EXPENSE: '6.27',
-  ALLOWANCE_DOUBTFUL: '1.2.5',
-  // Akrual & Dibayar Dimuka
-  PREPAID_EXPENSE: ['1.5.1', '1.5.2'],
-  ACCRUED_EXPENSE: '2.2.6',
-  // Ekuitas
-  OWNER_DRAWING: '3.5',
-  // Pendapatan & Beban Lain-lain
-  OTHER_INCOME: '7.4',
-  OTHER_EXPENSE: '8.7',
-  // Biaya Konversi Produksi
-  PRODUCTION_CONVERSION: '5.12',
-  // Selisih Persediaan
-  INVENTORY_VARIANCE: '6.38',
-  // Pembulatan
-  ROUNDING_ACCOUNT: '8.8',
-  // Pembelian — STT/PI flow
-  ACCRUED_PAYABLE: '2.1.5',
-  PURCHASE_PRICE_VARIANCE: '5.11',
-};
+/** Roles of one usage kind, in registry order. */
+export function rolesByUsage(usage: RoleUsage): SystemAccountRole[] {
+  return ALL_SYSTEM_ROLES.filter((k) => SYSTEM_ACCOUNT_ROLES[k].usage === usage);
+}

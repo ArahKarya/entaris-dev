@@ -85,3 +85,40 @@ describe('SystemAccountReclassDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+describe('SystemAccountsTab role usage', () => {
+  const usageData = {
+    roles: [
+      { key: 'AR', label: 'Piutang Usaha', description: 'Piutang', multiAccount: false, required: true, usage: 'posting', expectedRootType: 'ASSET' },
+      { key: 'SALES_DISCOUNT', label: 'Diskon Penjualan', description: 'Diskon', multiAccount: false, required: false, usage: 'belum', expectedRootType: 'REVENUE' },
+      { key: 'BANK_CHARGE', label: 'Biaya Bank', description: 'Biaya', multiAccount: false, required: false, usage: 'belum', expectedRootType: 'EXPENSE' },
+    ],
+    mappings: { AR: [{ id: 'm1', accountId: 'cur', accountNumber: '1.2.2', accountName: 'Piutang', accountType: 'ASSET', sortOrder: 0 }] },
+    formerResidues: [],
+  };
+
+  beforeEach(() => {
+    get.mockImplementation(async (url: string) => ({
+      data: url === '/system-accounts' ? usageData : [{ id: 'cur', accountNumber: '1.2.2', name: 'Piutang', rootType: 'ASSET', isGroup: false, isActive: true }],
+    }));
+  });
+
+  it('badges a posting role and hides roles not used yet behind a toggle', async () => {
+    renderTab();
+    expect(await screen.findByTestId('role-usage-AR')).toHaveTextContent('Dipakai posting otomatis');
+    expect(screen.queryByText('Diskon Penjualan')).not.toBeInTheDocument();
+    expect(screen.queryByText('Biaya Bank')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('show-unused-roles'));
+    expect(await screen.findByText('Diskon Penjualan')).toBeInTheDocument();
+    expect(screen.getByTestId('role-usage-SALES_DISCOUNT')).toHaveTextContent('Belum dipakai otomatis');
+    expect(screen.getByTestId('role-usage-BANK_CHARGE')).toHaveTextContent('Belum dipakai otomatis');
+  });
+
+  it('leaves roles not used yet out of the totals', async () => {
+    renderTab();
+    await screen.findByTestId('role-usage-AR');
+    const totalCard = screen.getByText('Total Role').closest('div')!;
+    expect(within(totalCard).getByText('1')).toBeInTheDocument();
+  });
+});

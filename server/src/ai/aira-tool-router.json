@@ -12583,7 +12583,7 @@
       "output": {
         "mapping": "object"
       },
-      "outputSummary": "{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.",
+      "outputSummary": "{ mappings: per role → akun[], roles: definisi role akun sistem (+ usage: posting = dibaca posting otomatis, default = pengisi awal pilihan akun, manual = hanya jurnal manual, belum = belum dipakai kode; balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.",
       "handler": "GET /api/system-accounts",
       "permAction": "view",
       "enabled": true,
