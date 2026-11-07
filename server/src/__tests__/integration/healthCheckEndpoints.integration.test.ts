@@ -23,7 +23,6 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 import healthCheckRouter from '../../routes/healthCheck';
 import { checkAleSync, checkNonJournalAle, checkOrphanAle } from '../../routes/health/aleChecks';
 import { checkPartyOutstandingDrift } from '../../routes/health/partyChecks';
-import { findAleJournalMismatches } from '../../services/ledger/aleSyncCheck';
 import { runLedgerAudit } from '../../services/ledger/ledgerAudit';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -80,15 +79,18 @@ async function books(tx: Tx, isClosed = false): Promise<Books> {
   };
 }
 
-/** Two balanced ledger rows of `referenceType`/`referenceId`, debit `debitId`, credit `creditId`. */
+/** Two balanced ledger rows of `referenceType`/`referenceId`, debit `debitId`, credit `creditId`, of `partyId` (none by default). */
 async function ledgerRows(
   tx: Tx,
   b: Books,
   ref: { type?: string; id: string },
   amount: number,
-  opts: { debitId?: string; creditId?: string; cancelled?: boolean } = {},
+  opts: { debitId?: string; creditId?: string; cancelled?: boolean; partyId?: string } = {},
 ) {
-  const row = { date: DAY, referenceType: ref.type ?? 'JournalEntry', referenceId: ref.id, fiscalYearId: b.fy.id, isCancelled: opts.cancelled ?? false };
+  const row = {
+    date: DAY, referenceType: ref.type ?? 'JournalEntry', referenceId: ref.id, fiscalYearId: b.fy.id,
+    isCancelled: opts.cancelled ?? false, partyId: opts.partyId ?? null,
+  };
   await tx.accountingLedgerEntry.createMany({
     data: [
       { ...row, accountId: opts.debitId ?? b.inventoryId, debit: amount, credit: 0 },
@@ -191,31 +193,50 @@ d('Orphan ALE Entries and Non-Journal Ledger Entries', () => {
       });
       const linked = await invoice(`SI-IT2142-${tag()}`);
       const alone = await invoice(`SI-IT2142-${tag()}`);
-      const twin = randomUUID();
-      // linked: its journal JV-<number> exists; twin: no document, but a journal has the same rows; alone: neither.
+      const elsewhere = await invoice(`SI-IT2142-${tag()}`);
+      const otherYear = { ...b, fy: await createFiscalYear(tx, { year: 2142 }) };
+      const thirdId = (await tx.account.create({ data: { name: 'IT2142 Lain', accountNumber: `IT2142-${tag()}`, accountType: 'LIABILITY', rootType: 'LIABILITY' } })).id;
+      const [twin, partial, ofParty] = [randomUUID(), randomUUID(), randomUUID()];
+      // linked: its journal JV-<number> exists in the same year; elsewhere: its JV-<number> is in another
+      // year; alone: neither. twin: no document, every row matches a journal's row; partial: only one row
+      // does (an unrelated journal of the same amount on the same day); ofParty: same rows as a journal
+      // but booked to a party the journal's rows do not have.
       await journal(tx, b, { number: `JV-${linked.invoiceNumber}`, amount: 3 * JT });
       await ledgerRows(tx, b, { type: 'SalesInvoice', id: linked.id }, 3 * JT, { debitId: b.accruedId, creditId: b.inventoryId });
       await ledgerRows(tx, b, { type: 'SalesInvoice', id: alone.id }, 2 * JT, { debitId: b.accruedId, creditId: b.inventoryId });
+      await journal(tx, otherYear, { number: `JV-${elsewhere.invoiceNumber}`, amount: 5 * JT });
+      await ledgerRows(tx, b, { type: 'SalesInvoice', id: elsewhere.id }, 5 * JT, { debitId: b.accruedId, creditId: b.inventoryId });
       await journal(tx, b, { amount: 11 * JT });
       await ledgerRows(tx, b, { type: 'Payment', id: twin }, 11 * JT);
+      await journal(tx, { ...b, accruedId: thirdId }, { amount: 13 * JT });
+      await ledgerRows(tx, b, { type: 'Payment', id: partial }, 13 * JT);
+      await journal(tx, b, { amount: 17 * JT });
+      await ledgerRows(tx, b, { type: 'Payment', id: ofParty }, 17 * JT, { partyId: party.id });
 
-      const res = await checkNonJournalAle({ referenceIds: [linked.id, alone.id, twin] });
-      expect(res).toMatchObject({ name: 'Non-Journal Ledger Entries', status: 'warning', count: 3, fixable: false });
+      const res = await checkNonJournalAle({ referenceIds: [linked.id, alone.id, elsewhere.id, twin, partial, ofParty] });
+      expect(res).toMatchObject({ name: 'Non-Journal Ledger Entries', status: 'warning', count: 6, fixable: false });
       expect(res.details).toEqual([
-        { reference_type: 'Payment', documents: 1, entries: 2, debit: 11 * JT, duplicated_documents: 1 },
-        { reference_type: 'SalesInvoice', documents: 2, entries: 4, debit: 5 * JT, duplicated_documents: 1 },
+        { reference_type: 'Payment', documents: 3, entries: 6, debit: 41 * JT, duplicated_documents: 0, possibly_duplicated_documents: 1 },
+        { reference_type: 'SalesInvoice', documents: 3, entries: 6, debit: 10 * JT, duplicated_documents: 1, possibly_duplicated_documents: 0 },
       ]);
 
-      // The ledger audit lists the same groups, one per document, with the reason.
+      // The ledger audit lists the same groups, one per document, with the reason; only `linked` is a
+      // duplicate (the year close blocks on it), the others are report only.
       const audit = await runLedgerAudit(tx, { only: ['nonJournalAle'], fiscalYearId: b.fy.id });
       const rows = audit.sections[0]!.rows;
       expect(rows.map((r) => [r.label, r.cause, r.amount, r.gate])).toEqual([
-        [twin, 'also-in-journal', '11000000.00', false],
+        [ofParty, 'document-only', '17000000.00', false],
+        [partial, 'document-only', '13000000.00', false],
+        [twin, 'twin-rows-only', '11000000.00', false],
+        [elsewhere.invoiceNumber, 'document-only', '5000000.00', false],
         [linked.invoiceNumber, 'also-in-journal', '3000000.00', false],
         [alone.invoiceNumber, 'document-only', '2000000.00', false],
       ]);
-      expect(rows[1]!.detail).toContain(`journal JV-${linked.invoiceNumber}`);
-      expect(rows[0]!.detail).toContain('2 row(s) with a twin journal ledger row');
+      expect(rows[4]!.detail).toContain(`journal JV-${linked.invoiceNumber}`);
+      expect(rows[3]!.detail).not.toContain('journal JV-');
+      expect(rows[2]!.detail).toContain('2 row(s) with a twin journal ledger row');
+      expect(rows[1]!.detail).toContain('1 row(s) with a twin journal ledger row');
+      expect(rows[0]!.detail).not.toContain('twin');
     });
   });
 });
@@ -229,6 +250,23 @@ d('Party Outstanding Drift', () => {
       expect(res).toMatchObject({ name: 'Party Outstanding Drift', status: 'warning', count: 1, fixable: false });
       expect(res.details).toEqual([{ party_name: drifted.name, party_type: 'Customer', stored: 500_000, expected: 0, difference: 500_000 }]);
       expect(await checkPartyOutstandingDrift({ partyIds: [fine.id] })).toMatchObject({ status: 'ok', count: 0 });
+    });
+  });
+
+  it('an account in two party roles is this check\'s error; GET still answers with every check', async () => {
+    await inRollback(async (tx) => {
+      const shared = await tx.account.create({
+        data: { name: 'IT2142 Hutang ganda', accountNumber: `IT2142-${tag()}`, accountType: 'LIABILITY', rootType: 'LIABILITY' },
+      });
+      await tx.systemAccountMapping.createMany({ data: [{ role: 'AP', accountId: shared.id }, { role: 'VENDOR_DEPOSIT', accountId: shared.id }] });
+      const res = await checkPartyOutstandingDrift();
+      expect(res).toMatchObject({ name: 'Party Outstanding Drift', status: 'error', count: 1, details: [], fixable: false });
+      expect(res.message).toContain(shared.accountNumber);
+
+      const route = await callRoute(healthCheckRouter, 'get', '/', await createCapUser(tx, []));
+      expect(route.status, JSON.stringify(route.body)).toBe(200);
+      const checks = route.body.data.checks as Array<{ name: string; status: string }>;
+      expect(checks.find((c) => c.name === 'Party Outstanding Drift')).toMatchObject({ status: 'error' });
     });
   });
 });
@@ -254,7 +292,21 @@ d('GET /api/health-check', () => {
 
       const sync = byName('ALE vs JournalItem Sync');
       expect(sync.status).toBe('error');
-      expect(sync.count).toBe((await findAleJournalMismatches(tx, {})).total);
+      // Independent of the check's query: lines of Submitted journals minus active ledger rows, netted
+      // per journal and account; a journal with any account left over is one finding.
+      const [syncCount] = await tx.$queryRaw<Array<{ n: bigint }>>`
+        SELECT COUNT(DISTINCT journal_id) AS n FROM (
+          SELECT journal_id FROM (
+            SELECT jea.journal_entry_id AS journal_id, jea.account_id, jea.debit, jea.credit
+              FROM journal_entry_accounts jea
+              JOIN journal_entries je ON je.id = jea.journal_entry_id AND je.status = 'Submitted'
+            UNION ALL
+            SELECT ale.reference_id, ale.account_id, -ale.debit, -ale.credit
+              FROM accounting_ledger_entries ale
+             WHERE ale.reference_type = 'JournalEntry' AND ale.is_cancelled = false) x
+           GROUP BY journal_id, account_id
+          HAVING SUM(debit) <> 0 OR SUM(credit) <> 0) t`;
+      expect(sync.count).toBe(Number(syncCount!.n));
       expect(sync.details[0]).toMatchObject({ journal_number: noLedger.entryNumber, cause: 'no-ledger' });
       expect(sync.details.length).toBeLessThanOrEqual(20);
 

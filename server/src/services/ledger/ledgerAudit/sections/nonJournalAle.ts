@@ -16,7 +16,7 @@ export const nonJournalAleSection: AuditSection = {
     const { rows } = await findNonJournalAle(tx, { fiscalYearId: opts.fiscalYearId });
     return rows.map<AuditRow>((g) => ({
       section: 'nonJournalAle',
-      cause: g.duplicate ? 'also-in-journal' : 'document-only',
+      cause: g.duplicate ? 'also-in-journal' : g.possibleDuplicate ? 'twin-rows-only' : 'document-only',
       key: `${g.referenceType}:${g.referenceId}@${g.fiscalYearId}`,
       label: g.label,
       date: businessDayOf(g.date),

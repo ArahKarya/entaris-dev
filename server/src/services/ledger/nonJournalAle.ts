@@ -24,12 +24,25 @@ export interface NonJournalAleGroup {
   rows: number;
   debit: Prisma.Decimal;
   credit: Prisma.Decimal;
-  /** Submitted journal of the document: "JV-<number>" (and its "-..." satellites) or the payment's journal. */
+  /**
+   * Submitted journal of the document in the same fiscal year: "JV-<number>" (and its "-..."
+   * satellites) or the payment's journal.
+   */
   linkedJournal: string | null;
-  /** Rows with a twin journal ledger row: same account, business day, fiscal year, debit and credit. */
+  /**
+   * Rows with a twin journal ledger row: same account, party, business day, fiscal year, debit and
+   * credit. Not paired one to one (one journal row can be the twin of several document rows), so it
+   * is a hint for the accountant, never a gate.
+   */
   mirroredRows: number;
-  /** The document is also booked through a journal (linked journal or twin rows): counted twice. */
+  /**
+   * The document is also booked through its own journal (linkedJournal): counted twice. Keyed on
+   * the document, so an unrelated posting with the same amount cannot make it one; this is what the
+   * year close blocks on.
+   */
   duplicate: boolean;
+  /** Not linked, but every row has a twin journal row: possibly counted twice, report only. */
+  possibleDuplicate: boolean;
 }
 
 export interface NonJournalAleTypeSummary {
@@ -38,13 +51,14 @@ export interface NonJournalAleTypeSummary {
   rows: number;
   debit: Prisma.Decimal;
   duplicates: number;
+  possibleDuplicates: number;
 }
 
 export interface NonJournalAleScope {
   fiscalYearId?: string;
   /** Only these documents (reference ids); an empty list matches nothing. */
   referenceIds?: readonly string[];
-  /** Only documents that are counted twice. */
+  /** Only documents that are counted twice (`duplicate`). */
   duplicatesOnly?: boolean;
   limit?: number;
 }
@@ -73,10 +87,11 @@ interface Row {
   linked_journal: string | null;
   mirrored_rows: number;
   duplicate: boolean;
+  possible_duplicate: boolean;
   total: bigint;
   duplicate_total: bigint;
   closed_total: bigint;
-  by_type: Array<{ referenceType: string; documents: number; rows: number; debit: string; duplicates: number }> | null;
+  by_type: Array<{ referenceType: string; documents: number; rows: number; debit: string; duplicates: number; possibleDuplicates: number }> | null;
 }
 
 /** Groups of active non-journal ledger rows, largest debit first. */
@@ -98,6 +113,7 @@ export async function findNonJournalAle(tx: Tx, scope: NonJournalAleScope = {}):
                  JOIN journal_entries mj ON mj.id = m.reference_id AND mj.status = 'Submitted'
                 WHERE m.reference_type = 'JournalEntry' AND m.is_cancelled = false
                   AND m.account_id = ale.account_id AND m.fiscal_year_id = ale.fiscal_year_id
+                  AND m.party_id IS NOT DISTINCT FROM ale.party_id
                   AND m.debit = ale.debit AND m.credit = ale.credit
                   AND (m.date + ${offset}::interval)::date = (ale.date + ${offset}::interval)::date
              ) AS mirrored
@@ -123,11 +139,12 @@ export async function findNonJournalAle(tx: Tx, scope: NonJournalAleScope = {}):
     ),
     found AS (
       SELECT d.*, lj.entry_number AS linked_journal,
-             (lj.entry_number IS NOT NULL OR d.mirrored_rows > 0) AS duplicate
+             (lj.entry_number IS NOT NULL) AS duplicate,
+             (lj.entry_number IS NULL AND d.mirrored_rows = d.n_rows) AS possible_duplicate
         FROM documents d
         LEFT JOIN LATERAL (
           SELECT je.entry_number FROM journal_entries je
-           WHERE je.status = 'Submitted'
+           WHERE je.status = 'Submitted' AND je.fiscal_year_id = d.fiscal_year_id
              AND (je.id = d.payment_journal_id
                OR (d.label IS NOT NULL
                    AND (je.entry_number = 'JV-' || d.label OR starts_with(je.entry_number, 'JV-' || d.label || '-'))))
@@ -139,13 +156,14 @@ export async function findNonJournalAle(tx: Tx, scope: NonJournalAleScope = {}):
       SELECT * FROM found ${onlyDuplicates}
     )
     SELECT reference_type, reference_id, fiscal_year_id, fiscal_year_name, is_closed, label, date, n_rows,
-           debit::text AS debit, credit::text AS credit, linked_journal, mirrored_rows, duplicate,
+           debit::text AS debit, credit::text AS credit, linked_journal, mirrored_rows, duplicate, possible_duplicate,
            COUNT(*) OVER () AS total,
            COUNT(*) FILTER (WHERE duplicate) OVER () AS duplicate_total,
            COUNT(*) FILTER (WHERE is_closed) OVER () AS closed_total,
            (SELECT jsonb_agg(t ORDER BY t."referenceType") FROM (
               SELECT reference_type AS "referenceType", COUNT(*)::int AS documents, SUM(n_rows)::int AS rows,
-                     SUM(debit)::text AS debit, (COUNT(*) FILTER (WHERE duplicate))::int AS duplicates
+                     SUM(debit)::text AS debit, (COUNT(*) FILTER (WHERE duplicate))::int AS duplicates,
+                     (COUNT(*) FILTER (WHERE possible_duplicate))::int AS "possibleDuplicates"
                 FROM picked GROUP BY reference_type) t) AS by_type
       FROM picked
      ORDER BY picked.debit DESC, picked.reference_id, picked.fiscal_year_id
@@ -172,6 +190,7 @@ export async function findNonJournalAle(tx: Tx, scope: NonJournalAleScope = {}):
       linkedJournal: r.linked_journal,
       mirroredRows: r.mirrored_rows,
       duplicate: r.duplicate,
+      possibleDuplicate: r.possible_duplicate,
     })),
   };
 }

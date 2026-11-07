@@ -115,7 +115,8 @@ export async function checkOrphanAle(scope: { referenceIds?: readonly string[] }
 /**
  * Ledger rows booked to a document instead of a journal, summed per reference type. A warning: the
  * per-document list is the ledger audit's (section nonJournalAle), and a document also booked
- * through a journal blocks the year close (non-journal-ale-duplicate).
+ * through its own journal blocks the year close (non-journal-ale-duplicate). Documents whose rows
+ * all have a twin in some other journal are counted apart (possibly double, never a gate).
  */
 export async function checkNonJournalAle(scope: Omit<NonJournalAleScope, 'limit' | 'duplicatesOnly'> = {}): Promise<CheckResult> {
   const { total, duplicateTotal, byType } = await findNonJournalAle(prisma, { ...scope, limit: 1 });
@@ -132,6 +133,7 @@ export async function checkNonJournalAle(scope: Omit<NonJournalAleScope, 'limit'
       entries: t.rows,
       debit: t.debit.toNumber(),
       duplicated_documents: t.duplicates,
+      possibly_duplicated_documents: t.possibleDuplicates,
     })),
     fixable: false,
   };

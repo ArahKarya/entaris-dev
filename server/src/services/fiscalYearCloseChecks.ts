@@ -177,9 +177,13 @@ const aleVsJournal: CloseCheck = {
 
 /**
  * Documents of the year booked twice: ledger rows of the document itself (reference_type other than
- * JournalEntry, left from old generators) next to its journal's rows. The close profit adds every
- * reference type, and ale-vs-journal and ledger-balanced do not see the double (it is balanced and
- * not a journal's), so without this check Retained Earnings would take the double and lock it.
+ * JournalEntry, left from old generators) next to its own journal in the same year (JV-<number> or
+ * the payment's journal). Rows that only look like an unrelated journal's (twin rows) are reported by
+ * the health check and the ledger audit but do not block: a later posting with the same amount could
+ * otherwise add an item after the baseline was captured, with no way to baseline it. The close
+ * profit adds every reference type, and ale-vs-journal and ledger-balanced do not see the double (it
+ * is balanced and not a journal's), so without this check Retained Earnings would take the double
+ * and lock it.
  * Items are keyed `<type>:<id>@<fiscal year id>`, amount = the document rows' debit; baseline-aware,
  * so an old double the accountant accepted does not block.
  */
