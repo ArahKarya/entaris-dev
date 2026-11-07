@@ -168,6 +168,16 @@ d('a Both party in manual journals (PR-5.9b)', () => {
     });
   });
 
+  it('includes a Both party in the AR check by the same expression as its amount, with or without an invoice', async () => {
+    await inRollback(async (tx) => {
+      // Payable opening of 10 jt whose outstanding was consumed by a vendor payment: -10 jt, invoice or not.
+      const both = await party(tx, 'Both', { openingOutstanding: 0, openingReceivable: 0, openingPayable: 10 * JT });
+      const diffs = await findArSubledgerDiffs(tx, { partyIds: [both] });
+      expect(diffs).toHaveLength(1);
+      expect(diffs[0]!.subledger.toFixed(2)).toBe('-10000000.00');
+    });
+  });
+
   it('still refuses a Customer on a payable line and a Supplier on a receivable line', async () => {
     await inRollback(async (tx) => {
       const b = await books(tx);

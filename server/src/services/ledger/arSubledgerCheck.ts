@@ -136,7 +136,7 @@ async function diffs(tx: Tx, gl: Prisma.Sql, sub: Prisma.Sql, scope: SubledgerSc
  * those accounts (hand-made journals, whatever the party type), plus its opening receivable (the
  * opening directed to the receivable side plus what the migration left undirected, legacyUnassigned,
  * services/ledger/partySides.ts). A ledger row without a source type is not an adjustment and still
- * shows up. A party typed Both has its payable side checked apart from this one. In a year-scoped run a party with such an invoice dated in the year is active.
+ * shows up. A party typed Both has its payable side checked apart from this one. The inclusion test uses the same expression as the amount (opening_outstanding - opening_payable). Until payment consumption is split by side (5.13), a vendor overpayment by a Both party lowers opening_outstanding and shows up here. In a year-scoped run a party with such an invoice dated in the year is active.
  * [] while AR is not mapped. Largest difference first.
  */
 export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
@@ -158,7 +158,7 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
       ) inv ON inv.party_id = p.id
       LEFT JOIN (${manualPartyAdjustmentSql(accountIds, ADJUSTMENT_SIGN.AR)}) adj ON adj.party_id = p.id
      WHERE inv.party_id IS NOT NULL OR adj.party_id IS NOT NULL
-        OR (p."partyType" IN ('Customer', 'Both') AND p.opening_outstanding <> 0)`;
+        OR (p."partyType" IN ('Customer', 'Both') AND (p.opening_outstanding - p.opening_payable) <> 0)`;
   const active = scope.fiscalYear
     ? activeCte(accountIds, scope.fiscalYear, Prisma.sql`
         SELECT party_id FROM sales_invoices
