@@ -375,7 +375,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Pengajuan hanya rupiah": "Payment requests are in rupiah only",
   // Document journal void (services/ledger/cancelJournals.ts)
   "Jurnal {0} sudah dibalik dengan jurnal lain, jadi tidak dibatalkan lagi. Periksa jurnal pembaliknya di Buku Besar.": "Journal {0} has already been reversed by another journal, so it is not cancelled again. Check its reversing journal in the General Ledger.",
-  "saldo awal sudah tercatat di jurnal {0}. Impor ulang tidak mengubah saldo awal; koreksi lewat jurnal manual.": "the opening balance is already recorded in journal {0}. Re-importing does not change opening balances; correct it with a manual journal.",
   "Akun \"{0}\" disimpan, tetapi {1}": "Account \"{0}\" was saved, but {1}",
   "Mitra \"{0}\" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.": "Partner \"{0}\" already exists: profile updated, opening balance unchanged. Correct the balance with a manual journal.",
   // Period guard (utils/periodGuard.ts); the {label} nouns below translate inside the patterns.
@@ -524,4 +523,10 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Saldo harus angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal dan paling banyak 2 angka desimal.": "The balance must be a number without thousands separators, with a dot as the decimal mark and at most 2 decimal places.",
   "Tanggal saldo awal harus berformat YYYY-MM-DD.": "The opening balance date must be YYYY-MM-DD.",
   "Alasan menembus kunci periode minimal 10 karakter.": "The reason for posting through the period lock needs at least 10 characters.",
+  // opening balance (E2-R11): COA import (routes/import/coa.ts, services/coa/coaImport.ts)
+  "openingBalance: {0}": "openingBalance: {0}",
+  "openingDate: {0}": "openingDate: {0}",
+  "saldo awal tercatat {0} akan diganti {1}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance {0} would be replaced by {1}. Tick this account's confirmation on the import screen to replace it.",
+  "saldo awal tercatat akan diganti {0}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance would be replaced by {0}. Tick this account's confirmation on the import screen to replace it.",
+  "nilai {0} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over {1}. Isi saldo per tanggal cut-over, atau centang konfirmasi akun ini bila nilai ini memang saldo awalnya.": "the value {0} equals the account's running balance, not the balance at the cut-over date {1}. Enter the balance at the cut-over date, or tick this account's confirmation if this value really is the opening balance.",
 };

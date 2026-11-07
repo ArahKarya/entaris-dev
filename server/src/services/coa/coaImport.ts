@@ -1,9 +1,11 @@
 // Chart-of-accounts import (E2-R6), split into three steps: parse the spreadsheet rows, validate
 // them against the structure rules and the stored accounts (the preview runs both, the import
 // runs both and then writes), and apply (routes/import/coa.ts). A row that fails is reported with
-// its row number and skipped; the other rows still go in.
+// its row number and skipped; the other rows still go in. The opening balance column is read as
+// an exact decimal and written through the opening balance service (services/ledger/openingBalance.ts).
 
 import type { Prisma } from '@prisma/client';
+import { parseImportAmount, parseImportDate } from '../../utils/importDate';
 import {
   planImportRow,
   type ImportRowInput,
@@ -32,19 +34,45 @@ export interface ParsedCoaRow {
   /** Effective parent: the file's value, else the number minus its last segment ('' = top level). */
   parentNumber: string;
   isGroup: boolean | null;
-  openingBalance: number;
+  /**
+   * The opening balance at the cut-over date as an exact decimal string (normal side, negative for
+   * a contra balance), or null when the cell is blank: a blank cell leaves the opening balance as it is.
+   */
+  openingBalance: string | null;
+  /** YYYY-MM-DD from the optional openingDate column; null (blank) means the cut-over date. */
+  openingDate: string | null;
 }
 
 export interface CoaImportRow extends ImportRowPlan {
   rowNum: number;
   name: string;
-  openingBalance: number;
+  openingBalance: string | null;
+  openingDate: string | null;
   /** What the row was planned from, so the write can plan it again under the locks. */
   input: ImportRowInput;
   hasChildInFile: boolean;
 }
 
 type RawRow = Record<string, string>;
+/** Per row, the headers whose Excel cell was a number or formula (routes/import/shared.ts parseFileDetailed). */
+type NumericCells = Record<string, boolean>;
+
+/**
+ * Opening balance headers. A "balance" column (or the party columns outstandingAmount/piutang/hutang)
+ * is not read: the old template exported the running balance there, and posting it as the opening
+ * balance would count every movement after the cut-over twice.
+ */
+const OPENING_BALANCE_KEYS = ['openingBalance', 'opening_balance', 'saldoAwal', 'saldo_awal'] as const;
+const OPENING_DATE_KEYS = ['openingDate', 'opening_date', 'asOfDate'] as const;
+
+/** The first non-blank cell among `keys`, with whether that cell was a number in the sheet. */
+function pickCell(r: RawRow, numeric: NumericCells, keys: readonly string[]): { text: string; fromNumberCell: boolean } {
+  for (const key of keys) {
+    const text = (r[key] ?? '').toString().trim();
+    if (text) return { text, fromNumberCell: !!numeric[key] };
+  }
+  return { text: '', fromNumberCell: false };
+}
 
 const TRUE_WORDS = ['true', '1', 'yes', 'ya'];
 const FALSE_WORDS = ['false', '0', 'no', 'tidak'];
@@ -60,10 +88,15 @@ export function derivedParentNumber(accountNumber: string): string {
   return accountNumber.split('.').slice(0, -1).join('.');
 }
 
-/** Step 1: read the columns of every row; only missing or unreadable cells are errors here. */
+/**
+ * Step 1: read the columns of every row; only missing or unreadable cells are errors here. The
+ * opening balance follows the journal amount rules (utils/importDate.ts parseImportAmount): text
+ * with at most 2 decimals, no thousands separators, no exponent; a number cell within rounding of 2 decimals.
+ */
 export function parseCoaRows(
   rows: readonly RawRow[],
   sanitize: (value: string) => string,
+  numericCells: readonly NumericCells[] = [],
 ): { parsed: ParsedCoaRow[]; errors: ImportRowError[] } {
   const parsed: ParsedCoaRow[] = [];
   const errors: ImportRowError[] = [];
@@ -76,13 +109,23 @@ export function parseCoaRows(
     const accountType = (r.accountType || r.account_type || rootType).trim().toUpperCase();
     const explicitParent = (r.parentNumber || r.parent_number || '').trim();
     const isGroup = parseIsGroup((r.isGroup || r.is_group || '').toString());
-    const openingBalanceStr = (r.openingBalance || r.opening_balance || r.outstandingAmount || r.outstanding_amount || r.saldoAwal || r.saldo_awal || r.piutang || r.hutang || r.balance || '').toString().trim();
-    const openingBalance = openingBalanceStr ? parseFloat(openingBalanceStr) : 0;
+    const numeric = numericCells[i] ?? {};
+    const balanceCell = pickCell(r, numeric, OPENING_BALANCE_KEYS);
+    const dateCell = pickCell(r, numeric, OPENING_DATE_KEYS);
 
     if (!accountNumber) return void errors.push({ row: rowNum, message: 'Kolom "accountNumber" wajib diisi.' });
     if (!name) return void errors.push({ row: rowNum, message: 'Kolom "name" wajib diisi.' });
-    if (isNaN(openingBalance)) {
-      return void errors.push({ row: rowNum, message: `openingBalance "${openingBalanceStr}" bukan angka valid.` });
+    let openingBalance: string | null = null;
+    if (balanceCell.text) {
+      const amount = parseImportAmount(balanceCell.text, { fromNumberCell: balanceCell.fromNumberCell });
+      if (!amount.ok) return void errors.push({ row: rowNum, message: `openingBalance: ${amount.message}` });
+      openingBalance = amount.value;
+    }
+    let openingDate: string | null = null;
+    if (dateCell.text) {
+      const day = parseImportDate(dateCell.text);
+      if (!day.ok) return void errors.push({ row: rowNum, message: `openingDate: ${day.message}` });
+      openingDate = day.day;
     }
     parsed.push({
       rowNum,
@@ -93,6 +136,7 @@ export function parseCoaRows(
       parentNumber: explicitParent || derivedParentNumber(accountNumber),
       isGroup,
       openingBalance,
+      openingDate,
     });
   });
   return { parsed, errors };
@@ -157,7 +201,7 @@ export async function validateCoaRows(
       isGroup: plan.data.isGroup,
     });
     rows.push({
-      ...plan.data, rowNum: row.rowNum, name: row.name, openingBalance: row.openingBalance,
+      ...plan.data, rowNum: row.rowNum, name: row.name, openingBalance: row.openingBalance, openingDate: row.openingDate,
       input: row, hasChildInFile: childInFile,
     });
   }

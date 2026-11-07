@@ -396,7 +396,21 @@
     "changeFile": "Ganti File",
     "importing": "Mengimport…",
     "importCount_one": "Import {{count}} Data",
-    "importCount_other": "Import {{count}} Data"
+    "importCount_other": "Import {{count}} Data",
+    "confirmTitle": "Konfirmasi per akun: centang hanya akun yang saldo awalnya memang diganti atau diposting dengan nilai di berkas (saldo per tanggal cut-over, bukan saldo berjalan).",
+    "confirmReplaceRow": "{{account}} {{name}}: ganti saldo awal tercatat {{recorded}} menjadi {{amount}}",
+    "confirmRunningRow": "{{account}} {{name}}: {{amount}} sama dengan saldo berjalan; tetap posting sebagai saldo awal",
+    "throughLock": "Tembus kunci periode",
+    "lockReason": "Alasan",
+    "lockReasonHint": "Wajib, minimal 10 karakter; dicatat di audit trail.",
+    "opening": {
+      "unchanged": "Saldo awal tidak berubah",
+      "post": "Saldo awal baru diposting",
+      "replace": "Mengganti saldo awal tercatat {{recorded}}",
+      "refused": "Saldo awal ditolak untuk akun ini",
+      "runningBalance": "sama dengan saldo berjalan",
+      "dateMismatch": "Tanggal bukan tanggal cut-over {{date}}"
+    }
   },
   "userForm": {
     "saved": "Data pengguna disimpan.",
