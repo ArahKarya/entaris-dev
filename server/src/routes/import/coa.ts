@@ -2,20 +2,85 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AuthRequest } from '../../middleware/auth';
-import { updateBalancesForItems } from '../../utils/accountBalance';
 import { BusinessError } from '../../utils/errors';
-import { generateDocumentNumber } from '../../utils/documentNumber';
-import { getOpenFiscalYear } from '../../utils/fiscalYear';
-import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
-import { upload, parseFile, sanitizeCellValue } from './shared';
+import { upload, parseFileDetailed, sanitizeCellValue } from './shared';
 import { ACCOUNT_PARENT_NOT_FOUND } from '../../services/coa/accountRules';
 import { loadImportFacts, lockAccounts } from '../../services/coa/accountStructure';
-import { parseCoaRows, replanImportRow, validateCoaRows } from '../../services/coa/coaImport';
+import { parseCoaRows, replanImportRow, validateCoaRows, type CoaImportRow } from '../../services/coa/coaImport';
+import {
+  previewAccountOpening,
+  setOpeningBalanceInTx,
+  type OpeningChangePreview,
+  type OpeningOutcome,
+} from '../../services/ledger/openingBalance';
 
 const router = Router();
 
+/** A row would replace a recorded opening balance, and the request did not confirm replacing. */
+export const OPENING_REPLACE_UNCONFIRMED = 'OPENING_REPLACE_UNCONFIRMED';
+/** A row's amount equals the account's running balance (old template), and the request did not confirm it. */
+export const OPENING_RUNNING_BALANCE = 'OPENING_RUNNING_BALANCE';
+
+/** Rows that change an opening balance already in the ledger need `confirmReplace`. */
+const needsConfirm = (p: OpeningChangePreview): boolean =>
+  p.allowed && (p.action === 'replace' || (p.action === 'post' && p.runningBalance));
+
+const isTrue = (v: unknown): boolean => v === true || v === 'true';
+
+function previewAccount(row: CoaImportRow, id: string | null) {
+  return { id, accountNumber: row.accountNumber, name: row.name, rootType: row.rootType, isGroup: row.isGroup };
+}
+
+/**
+ * The row's opening balance through the opening balance service, in its own transaction after the
+ * account is saved. Returns null when there is nothing to write: a blank cell, or the same amount
+ * (also zero) on an account that takes no opening balance. Throws a BusinessError with a code for
+ * a refusal; the account itself stays saved.
+ */
+async function importOpening(
+  row: CoaImportRow,
+  accountId: string,
+  userId: string,
+  confirmReplace: boolean,
+): Promise<OpeningOutcome | null> {
+  if (row.openingBalance === null) return null;
+  const amount = row.openingBalance;
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const preview = await previewAccountOpening(tx, previewAccount(row, accountId), amount);
+    if (!preview.allowed && preview.action === 'unchanged') return null;
+    if (needsConfirm(preview) && !confirmReplace) {
+      throw preview.action === 'replace'
+        ? new BusinessError(
+            `saldo awal tercatat ${preview.recorded} akan diganti ${amount}. Centang konfirmasi penggantian saldo awal di layar impor untuk menggantinya.`,
+            OPENING_REPLACE_UNCONFIRMED,
+          )
+        : new BusinessError(
+            `nilai ${amount} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over ${preview.cutoverDate}. Isi saldo per tanggal cut-over, atau centang konfirmasi bila nilai ini memang saldo awalnya.`,
+            OPENING_RUNNING_BALANCE,
+          );
+    }
+    const outcome = await setOpeningBalanceInTx(tx, {
+      target: { kind: 'ACCOUNT', accountId },
+      amount,
+      asOfDate: row.openingDate ?? undefined,
+      userId,
+    });
+    // The preview ran before the service took its locks; a keyed journal that appeared since is still a replacement.
+    if (outcome.cancelled.length > 0 && !confirmReplace) {
+      throw new BusinessError(
+        `saldo awal tercatat akan diganti ${amount}. Centang konfirmasi penggantian saldo awal di layar impor untuk menggantinya.`,
+        OPENING_REPLACE_UNCONFIRMED,
+      );
+    }
+    return outcome;
+  }, { timeout: 15000 });
+}
+
 // POST /api/import/coa
+// Accounts first (structure rules, one transaction per row), then each row's opening balance at
+// the cut-over date through the opening balance service. ?preview=true writes nothing and shows per
+// row what the opening balance would do; a row that replaces a recorded opening needs confirmReplace.
 router.post(
   '/coa',
   upload.single('file'),
@@ -23,29 +88,36 @@ router.post(
     if (!req.file) return res.status(400).json({ error: 'File wajib diunggah.' });
 
     try {
-      const rows = await parseFile(req.file.buffer, req.file.originalname);
+      const { rows, numericCells } = await parseFileDetailed(req.file.buffer, req.file.originalname);
       const isPreview = req.query.preview === 'true';
+      const confirmReplace = isTrue(req.body?.confirmReplace) || isTrue(req.query.confirmReplace);
 
-      const { parsed, errors } = parseCoaRows(rows, sanitizeCellValue);
+      const { parsed, errors } = parseCoaRows(rows, sanitizeCellValue, numericCells);
       const validated = await validateCoaRows(prisma, parsed);
       errors.push(...validated.errors);
       const validRows = validated.rows;
 
       if (isPreview) {
-        const data = validRows.map((r) => ({
-          accountNumber: r.accountNumber,
-          name: r.name,
-          rootType: r.rootType,
-          accountType: r.accountType,
-          parentNumber: r.parentNumber ?? '',
-          isGroup: r.isGroup,
-          openingBalance: r.openingBalance,
-        }));
+        const data = [];
+        for (const r of validRows) {
+          const opening = r.openingBalance === null ? null : await previewAccountOpening(prisma, previewAccount(r, r.existingId), r.openingBalance);
+          data.push({
+            accountNumber: r.accountNumber,
+            name: r.name,
+            rootType: r.rootType,
+            accountType: r.accountType,
+            parentNumber: r.parentNumber ?? '',
+            isGroup: r.isGroup,
+            openingBalance: r.openingBalance ?? '',
+            opening: opening && { ...opening, needsConfirm: needsConfirm(opening) },
+          });
+        }
         return res.json({ data, errors, total: rows.length });
       }
 
       // Insert valid rows, parents first (validateCoaRows sorts by depth).
       let success = 0;
+      const openings: Array<{ row: number; accountNumber: string; action: OpeningOutcome['action']; journalNumber: string | null; cancelled: string[] }> = [];
       for (const row of validRows) {
         let account: Awaited<ReturnType<typeof prisma.account.upsert>>;
         try {
@@ -82,99 +154,30 @@ router.post(
         }
 
         try {
-          // Create opening balance GL journal for non-group accounts with balance
-          if (row.openingBalance !== 0 && !row.isGroup) {
-            const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
-            if (account.id !== openingEquity.id) {
-              const now = new Date();
-              const absAmount = Math.abs(row.openingBalance);
-
-              // ASSET/EXPENSE normal balance = debit, LIABILITY/EQUITY/REVENUE normal balance = credit
-              const isDebitNormal = ['ASSET', 'EXPENSE'].includes(account.rootType);
-              const isPositive = row.openingBalance > 0;
-
-              // Positive balance on debit-normal account → DR account / CR retained
-              // Positive balance on credit-normal account → CR account / DR retained
-              const accountDebit = (isDebitNormal === isPositive) ? absAmount : 0;
-              const accountCredit = (isDebitNormal === isPositive) ? 0 : absAmount;
-
-              await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-                // Inside the transaction so the fiscal year stays share-locked until the journal commits.
-                const fiscalYear = await getOpenFiscalYear(tx, now);
-                // Re-import never deletes posted journals (audit G-25): an account that already has
-                // an active opening-balance journal keeps it, and the row is reported instead.
-                const existingOpening = await tx.journalEntry.findFirst({
-                  where: {
-                    status: 'Submitted',
-                    OR: [
-                      { narration: { startsWith: `Saldo awal akun: ${row.accountNumber} - ` } },
-                      // Opening balance set from the COA screen (PATCH /coa/:id/balance).
-                      { narration: { startsWith: `Saldo Awal: ${row.accountNumber} - ` } },
-                    ],
-                  },
-                  select: { entryNumber: true },
-                });
-                if (existingOpening) {
-                  throw new BusinessError(
-                    `saldo awal sudah tercatat di jurnal ${existingOpening.entryNumber}. Impor ulang tidak mengubah saldo awal; koreksi lewat jurnal manual.`,
-                  );
-                }
-
-                const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
-                const journal = await tx.journalEntry.create({
-                  data: {
-                    entryNumber: jvNumber,
-                    date: now,
-                    narration: `Saldo awal akun: ${row.accountNumber} - ${row.name}`,
-                    status: 'Submitted',
-                    fiscalYearId: fiscalYear.id,
-                    createdBy: req.user!.userId,
-                    submittedAt: now,
-                    sourceType: 'OPENING',
-                    items: {
-                      create: [
-                        { accountId: account.id, debit: accountDebit, credit: accountCredit, description: `Saldo awal: ${row.accountNumber} - ${row.name}` },
-                        { accountId: openingEquity.id, debit: accountCredit, credit: accountDebit, description: `Saldo awal: ${row.accountNumber} - ${row.name}` },
-                      ],
-                    },
-                  },
-                  include: { items: true },
-                });
-
-                await tx.accountingLedgerEntry.createMany({
-                  data: journal.items.map((item: any) => ({
-                    date: now,
-                    accountId: item.accountId,
-                    debit: item.debit,
-                    credit: item.credit,
-                    referenceType: 'JournalEntry' as const,
-                    referenceId: journal.id,
-                    description: item.description || `Saldo awal: ${row.accountNumber}`,
-                    fiscalYearId: fiscalYear.id,
-                  })),
-                });
-
-                await updateBalancesForItems(
-                  tx,
-                  journal.items.map((i: any) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) }))
-                );
-              }, { timeout: 15000 });
-            }
+          const outcome = await importOpening(row, account.id, req.user!.userId, confirmReplace);
+          if (outcome) {
+            openings.push({
+              row: row.rowNum,
+              accountNumber: row.accountNumber,
+              action: outcome.action,
+              journalNumber: outcome.journal?.entryNumber ?? null,
+              cancelled: outcome.cancelled,
+            });
           }
-
           success++;
         } catch (err: any) {
           if (err instanceof BusinessError) {
             // The account itself was saved; only its opening balance was left as it was.
             success++;
-            errors.push({ row: row.rowNum, message: `Akun "${row.accountNumber}" disimpan, tetapi ${err.message}` });
+            errors.push({ row: row.rowNum, message: `Akun "${row.accountNumber}" disimpan, tetapi ${err.message}`, ...(err.code ? { code: err.code } : {}) });
           } else {
+            logger.error({ error: err, accountNumber: row.accountNumber }, 'POST /import/coa opening balance error');
             errors.push({ row: row.rowNum, message: `Baris ${row.rowNum}: gagal membuat jurnal saldo awal akun "${row.accountNumber}": ${err.message}` });
           }
         }
       }
 
-      return res.json({ success, failed: rows.length - success, errors });
+      return res.json({ success, failed: rows.length - success, errors, openings });
     } catch (error: any) {
       logger.error({ error }, 'POST /import/coa error');
       return res.status(400).json({ error: error.message || 'Gagal memproses file.' });

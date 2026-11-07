@@ -1,5 +1,7 @@
-// Re-importing COA or parties must never delete posted opening-balance journals (audit G-25):
-// an account/party that already has an opening balance keeps it and the row is reported.
+// Re-importing COA or parties must never delete posted opening-balance journals (audit G-25).
+// COA (E2-R12): the opening balance goes through the opening balance service; the same amount is
+// 'unchanged', a replacement needs confirmReplace, a refusal is reported and the account stays saved.
+// Parties: a party that already has an opening balance keeps it and the row is reported.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -28,6 +30,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: db }));
 vi.mock('../import/shared', () => ({
   upload: { single: () => (req: any, _res: any, next: any) => { req.file = { buffer: Buffer.from(''), originalname: 'x.csv' }; next(); } },
   parseFile: vi.fn(async () => db.rows),
+  parseFileDetailed: vi.fn(async () => ({ rows: db.rows, numericCells: db.rows.map(() => ({})) })),
   sanitizeCellValue: (v: unknown) => String(v ?? ''),
 }));
 vi.mock('../../utils/fiscalYear', () => ({ getOpenFiscalYear: vi.fn(async () => ({ id: 'fy-1' })) }));
@@ -37,7 +40,11 @@ vi.mock('../../services/systemAccounts', () => ({
   systemAccounts: { getAccount: vi.fn(async (role: string) => ({ id: `acc-${role}` })) },
 }));
 
-import coaRouter from '../import/coa';
+const opening = vi.hoisted(() => ({ previewAccountOpening: vi.fn(), setOpeningBalanceInTx: vi.fn() }));
+vi.mock('../../services/ledger/openingBalance', () => opening);
+
+import { BusinessError } from '../../utils/errors';
+import coaRouter, { OPENING_REPLACE_UNCONFIRMED, OPENING_RUNNING_BALANCE } from '../import/coa';
 import partiesRouter from '../import/parties';
 
 let server: http.Server;
@@ -77,35 +84,130 @@ beforeEach(() => {
 });
 
 describe('POST /api/import/coa re-import', () => {
-  beforeEach(() => {
-    db.rows = [{ accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '500000' }];
+  const preview = (over: Record<string, unknown> = {}) => ({
+    allowed: true, reason: null, cutoverDate: '2026-01-01', recorded: '500000.00', action: 'unchanged', runningBalance: false, ...over,
+  });
+  const outcome = (over: Record<string, unknown> = {}) => ({
+    action: 'unchanged', asOfDate: '2026-01-01', amount: '500000', journal: { entryNumber: 'JV-202601-0001' }, cancelled: [], ...over,
   });
 
-  it('keeps the existing opening journal and reports the row', async () => {
-    db._tx.journalEntry.findFirst.mockResolvedValue({ entryNumber: 'JV-202601-0001' });
+  beforeEach(() => {
+    db.rows = [{ accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '500000' }];
+    opening.previewAccountOpening.mockResolvedValue(preview());
+    opening.setOpeningBalanceInTx.mockResolvedValue(outcome());
+  });
 
+  it('same amount: the service reports unchanged, nothing is posted or deleted', async () => {
     const res = await post('/api/import/coa');
 
     expect(res.status).toBe(200);
-    expect(res.body.errors[0].message).toContain('JV-202601-0001');
-    // The account row itself was saved, so it counts as imported.
-    expect(res.body).toMatchObject({ success: 1, failed: 0 });
+    expect(res.body).toMatchObject({ success: 1, failed: 0, errors: [] });
+    expect(res.body.openings).toEqual([{ row: 2, accountNumber: '1.1.1', action: 'unchanged', journalNumber: 'JV-202601-0001', cancelled: [] }]);
+    // The opening is set on the saved account by its id (never matched by number prefix: 1.1.1 vs 1.1.10).
+    expect(opening.setOpeningBalanceInTx.mock.calls[0][1]).toMatchObject({ target: { kind: 'ACCOUNT', accountId: 'acc-cash' }, amount: '500000', userId: 'u-1' });
+    expect(opening.setOpeningBalanceInTx.mock.calls[0][1].asOfDate).toBeUndefined();
     expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
     noDeletes();
   });
 
-  it('matches only this account, not accounts sharing the prefix (1.1.1 vs 1.1.10)', async () => {
-    db._tx.journalEntry.findFirst.mockResolvedValue(null);
+  it('a blank opening balance cell leaves the opening balance alone', async () => {
+    db.rows = [{ accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '' }];
 
-    await post('/api/import/coa');
+    const res = await post('/api/import/coa');
 
-    const where = db._tx.journalEntry.findFirst.mock.calls[0][0].where;
-    expect(where.OR).toEqual([
-      { narration: { startsWith: 'Saldo awal akun: 1.1.1 - ' } },
-      { narration: { startsWith: 'Saldo Awal: 1.1.1 - ' } },
-    ]);
-    expect(db._tx.journalEntry.create).toHaveBeenCalledTimes(1);
+    expect(res.body).toMatchObject({ success: 1, errors: [], openings: [] });
+    expect(opening.previewAccountOpening).not.toHaveBeenCalled();
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
+  });
+
+  it('a replacement without confirmReplace is refused per row; the account stays saved', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ action: 'replace', recorded: '400000.00' }));
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body).toMatchObject({ success: 1, failed: 0 });
+    expect(res.body.errors[0]).toMatchObject({ row: 2, code: OPENING_REPLACE_UNCONFIRMED });
+    expect(res.body.errors[0].message).toContain('400000.00');
+    expect(db._tx.account.upsert).toHaveBeenCalledTimes(1);
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
     noDeletes();
+  });
+
+  it('a replacement with confirmReplace goes through the service', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ action: 'replace', recorded: '400000.00' }));
+    opening.setOpeningBalanceInTx.mockResolvedValue(outcome({ action: 'replaced', journal: { entryNumber: 'JV-202601-0002' }, cancelled: ['JV-202601-0001'] }));
+
+    const res = await post('/api/import/coa?confirmReplace=true');
+
+    expect(res.body.errors).toEqual([]);
+    expect(res.body.openings[0]).toMatchObject({ action: 'replaced', journalNumber: 'JV-202601-0002', cancelled: ['JV-202601-0001'] });
+  });
+
+  it('refuses a value that equals the running balance unless confirmed', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ action: 'post', recorded: null, runningBalance: true }));
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors[0]).toMatchObject({ code: OPENING_RUNNING_BALANCE });
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
+  });
+
+  it('rolls back when the service replaced a journal the preview did not see and nothing was confirmed', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ action: 'post', recorded: null }));
+    opening.setOpeningBalanceInTx.mockResolvedValue(outcome({ action: 'replaced', cancelled: ['JV-202601-0001'] }));
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors[0]).toMatchObject({ code: OPENING_REPLACE_UNCONFIRMED });
+    expect(res.body.openings).toEqual([]);
+  });
+
+  it('reports a refusal of the service with its code (old unkeyed opening journal)', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ allowed: false, reason: 'OPENING_LEGACY_REVIEW', action: 'post', recorded: null }));
+    opening.setOpeningBalanceInTx.mockRejectedValue(new BusinessError('Akun 1.1.1 masih memiliki jurnal saldo awal lama tanpa kunci (OB-1).', 'OPENING_LEGACY_REVIEW'));
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body).toMatchObject({ success: 1, failed: 0 });
+    expect(res.body.errors[0]).toMatchObject({ row: 2, code: 'OPENING_LEGACY_REVIEW' });
+    expect(res.body.errors[0].message).toContain('OB-1');
+    noDeletes();
+  });
+
+  it('skips the same amount on an account that takes no opening balance (0 on a revenue account)', async () => {
+    db.rows = [{ accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '0' }];
+    opening.previewAccountOpening.mockResolvedValue(preview({ allowed: false, reason: 'ACCOUNT_ROOT_TYPE', recorded: null }));
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body).toMatchObject({ success: 1, errors: [], openings: [] });
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
+  });
+
+  it('refuses an amount with more than two decimals or a thousands separator before writing', async () => {
+    db.rows = [
+      { accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '500000.123' },
+      { accountNumber: '1.1.2', name: 'Bank', rootType: 'ASSET', openingBalance: '5.000.000' },
+    ];
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors.map((e: any) => e.row)).toEqual([2, 3]);
+    expect(db._tx.account.upsert).not.toHaveBeenCalled();
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
+  });
+
+  it('preview shows per row what the opening balance would do and writes nothing', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ action: 'replace', recorded: '400000.00' }));
+
+    const res = await post('/api/import/coa?preview=true');
+
+    expect(res.body.data[0]).toMatchObject({
+      accountNumber: '1.1.1', openingBalance: '500000',
+      opening: { allowed: true, cutoverDate: '2026-01-01', recorded: '400000.00', action: 'replace', needsConfirm: true },
+    });
+    expect(db._tx.account.upsert).not.toHaveBeenCalled();
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
   });
 });
 

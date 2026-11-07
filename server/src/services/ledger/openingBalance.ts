@@ -1,5 +1,5 @@
 // The one opening balance service and the one cut-over date (E2-R11, plan step 5 §2.4). Every
-// opening balance writer (the COA screen now; the COA import, the party opening balance and the
+// opening balance writer (the COA screen, the COA import; the party opening balance and the
 // opening deposit later) calls setOpeningBalanceInTx in its own transaction:
 //   1. the cut-over date: company_settings.cutover_date, or the start of the earliest open fiscal
 //      year; an asOfDate on another day is refused (OPENING_DATE_MISMATCH);
@@ -24,7 +24,7 @@ import { FISCAL_YEAR_MISSING, fiscalYearOn, fiscalYearRange, type PeriodGuardOpt
 import { cancelTrail, type CancelTrail } from '../../utils/cancelClaim';
 import { mappedAccount } from '../systemAccounts';
 import { lockAccounts } from '../coa/accountStructure';
-import { assertPostableAccount, DOCUMENT_RULE, loadControlAccountMap, OPENING_ACCOUNT_RULE, postableAccountProblem } from './accountGuard';
+import { assertPostableAccount, DOCUMENT_RULE, loadControlAccountMap, OPENING_ACCOUNT_RULE, postableAccountProblem, type AccountLite } from './accountGuard';
 import { cancelJournalsInTx, type JournalWithItems } from './cancelJournals';
 import { classifyLegacyJournal, sourceKeys, type OpeningPartyKind } from './journalSource';
 import { postJournal } from './postJournal';
@@ -349,6 +349,71 @@ export async function describeAccountOpening(db: Db, accountId: string): Promise
     editable: reason === null,
     reason,
   };
+}
+
+/** What an import row would do to the opening balance: keep it, post a first one, or replace the recorded one. */
+export type OpeningImportAction = 'unchanged' | 'post' | 'replace';
+
+export interface OpeningChangePreview {
+  /** false when setOpeningBalanceInTx would refuse the account itself (`reason`); period and lock state are not checked here. */
+  allowed: boolean;
+  reason: string | null;
+  /** null only when no fiscal year is open (reason FISCAL_YEAR_MISSING). */
+  cutoverDate: string | null;
+  /** The opening the account holds now (describeAccountOpening.amount), or null. */
+  recorded: string | null;
+  action: OpeningImportAction;
+  /**
+   * The amount equals the account's whole ledger balance, which differs from the recorded opening:
+   * it looks like the running balance (old template). Posting it would count every movement after
+   * the cut-over twice, so the import asks for a confirmation.
+   */
+  runningBalance: boolean;
+}
+
+/** The account as the import file describes it; `id` null for an account the import has not created yet. */
+export interface OpeningPreviewAccount {
+  id: string | null;
+  accountNumber: string;
+  name: string;
+  rootType: AccountLite['rootType'];
+  isGroup: boolean;
+}
+
+/**
+ * Compares `amount` with the account's opening balance without writing anything (the import
+ * preview and the import's confirmation check). The refusals come from the rules of
+ * setOpeningBalanceInTx: describeAccountOpening for a stored account, OPENING_ACCOUNT_RULE for a new one.
+ */
+export async function previewAccountOpening(db: Db, account: OpeningPreviewAccount, amount: Prisma.Decimal.Value): Promise<OpeningChangePreview> {
+  const wanted = new Prisma.Decimal(amount);
+  const firstAction: OpeningImportAction = wanted.isZero() ? 'unchanged' : 'post';
+  let view: AccountOpeningView | null = null;
+  let cutoverDate: string;
+  try {
+    if (account.id) view = await describeAccountOpening(db, account.id);
+    cutoverDate = view ? view.cutoverDate : (await peekCutoverDate(db)).day;
+  } catch (e) {
+    if (e instanceof BusinessError && e.code === FISCAL_YEAR_MISSING) {
+      return { allowed: false, reason: FISCAL_YEAR_MISSING, cutoverDate: null, recorded: null, action: firstAction, runningBalance: false };
+    }
+    throw e;
+  }
+  if (!view || !account.id) {
+    const problem = postableAccountProblem({ ...account, id: '', isActive: true }, OPENING_ACCOUNT_RULE, null);
+    return { allowed: problem === null, reason: problem?.code ?? null, cutoverDate, recorded: null, action: firstAction, runningBalance: false };
+  }
+  const recorded = view.amount === null ? null : new Prisma.Decimal(view.amount);
+  const action: OpeningImportAction = (recorded ?? ZERO).eq(wanted) ? 'unchanged' : recorded === null ? 'post' : 'replace';
+  let runningBalance = false;
+  if (action !== 'unchanged') {
+    const [agg, stored] = await Promise.all([
+      db.accountingLedgerEntry.aggregate({ where: { accountId: account.id, isCancelled: false }, _sum: { debit: true, credit: true } }),
+      db.account.findUnique({ where: { id: account.id }, select: { rootType: true } }),
+    ]);
+    runningBalance = signed(stored?.rootType ?? account.rootType, agg._sum.debit ?? ZERO, agg._sum.credit ?? ZERO).eq(wanted);
+  }
+  return { allowed: view.editable, reason: view.reason, cutoverDate, recorded: view.amount, action, runningBalance };
 }
 
 /** The keyed journal already holds exactly the wanted line: one journal, on the day, target + equity. */
