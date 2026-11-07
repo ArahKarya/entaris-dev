@@ -1,137 +1,46 @@
 // Preview + fix for /api/health-check/preview/:check and /fix/:check. Only the stored-balance
 // recalculation is left; every other check is detect-only (E2-R14), corrected by a journal in the
-// current period or a repair script.
-import type { Prisma } from '@prisma/client';
+// current period or a repair script. Both sides use services/ledger/storedBalances.ts: the stored
+// balance is set to the sum of the account's active ledger rows over every year, and only the
+// accounts that differ are written. Ledger rows are never touched.
 import { prisma } from '../../lib/prisma';
-import { recalculateAccountBalances } from '../../utils/accountBalance';
-import { BusinessError } from '../../utils/errors';
+import { findAccountBalanceDrift, recalculateAccountBalances } from '../../services/ledger/storedBalances';
+import { driftDetail } from './checks';
 
-export const FIX_DRIFT_CLOSED_YEARS = 'FIX_DRIFT_CLOSED_YEARS';
-
-/**
- * Interim guard until the single stored-balance rule (PR-5.5): the recalculation sums every year,
- * while closing a year subtracts its revenue/expense from accounts.balance, so one click would put
- * closed years back and a later reopen would add them again.
- */
-async function assertNoClosedPnlYears(db: Prisma.TransactionClient | typeof prisma, lockYears = false): Promise<void> {
-  // Close/reopen lock the year FOR UPDATE; sharing the rows makes a close in flight finish first
-  // (and be seen here) or wait for this fix.
-  if (lockYears) await db.$queryRaw`SELECT id FROM fiscal_years FOR SHARE`;
-  const rows = await db.$queryRaw<Array<{ one: number }>>`
-    SELECT 1 AS one
-      FROM accounting_ledger_entries ale
-      JOIN fiscal_years fy ON fy.id = ale.fiscal_year_id
-      JOIN accounts a ON a.id = ale.account_id
-     WHERE fy.is_closed = true
-       AND ale.is_cancelled = false
-       AND a."rootType" IN ('REVENUE','EXPENSE')
-     LIMIT 1
-  `;
-  if (rows.length > 0) {
-    throw new BusinessError(
-      'Hitung ulang saldo ditutup sementara: tahun buku tertutup masih mengurangi saldo laba rugi. Tersedia lagi setelah aturan saldo tunggal.',
-      FIX_DRIFT_CLOSED_YEARS,
-    );
-  }
-}
+/** Rows the preview lists; `count` is every drifting account. */
+const PREVIEW_LIMIT = 50;
 
 export async function previewAccountBalanceDrift(): Promise<{ description: string; count: number; details: unknown[] }> {
-  await assertNoClosedPnlYears(prisma);
-  const drifts = await prisma.$queryRaw<Array<{
-    account_code: string;
-    account_name: string;
-    root_type: string;
-    stored_balance: string;
-    computed_balance: string;
-    drift: string;
-  }>>`
-    WITH computed AS (
-      SELECT jea.account_id,
-             a."rootType" AS root_type,
-             CASE
-               WHEN a."rootType" IN ('ASSET','EXPENSE')
-                 THEN SUM(jea.debit) - SUM(jea.credit)
-               ELSE SUM(jea.credit) - SUM(jea.debit)
-             END AS computed_balance
-        FROM journal_entry_accounts jea
-        JOIN journal_entries je ON je.id = jea.journal_entry_id
-        JOIN accounts a ON a.id = jea.account_id
-       WHERE je.status != 'Cancelled'
-       GROUP BY jea.account_id, a."rootType"
-    )
-    SELECT a."accountNumber" AS account_code,
-           a.name AS account_name,
-           c.root_type,
-           a.balance::text AS stored_balance,
-           c.computed_balance::text AS computed_balance,
-           ABS(a.balance - c.computed_balance)::text AS drift
-      FROM computed c
-      JOIN accounts a ON a.id = c.account_id
-     WHERE ABS(a.balance - c.computed_balance) > 0.01
-     ORDER BY ABS(a.balance - c.computed_balance) DESC
-     LIMIT 50
-  `;
-
+  const { total, rows } = await findAccountBalanceDrift(prisma, { limit: PREVIEW_LIMIT });
   return {
-    description: drifts.length === 0
-      ? 'Tidak ada akun yang drift. Semua saldo sudah sesuai dengan jurnal. Klik "Perbaiki" hanya akan menghitung ulang tanpa mengubah nilai.'
-      : `Akan MENGUBAH saldo ${drifts.length} akun berikut agar sesuai dengan hasil hitung dari jurnal:`,
-    count: drifts.length,
-    details: drifts,
+    description: total === 0
+      ? 'Tidak ada akun yang selisih. Semua saldo tersimpan sudah sama dengan buku besar; "Perbaiki" tidak mengubah apa pun.'
+      : `Akan MENGUBAH saldo tersimpan ${total} akun berikut agar sama dengan buku besar (baris buku besar tidak berubah):`,
+    count: total,
+    details: rows.map(driftDetail),
   };
 }
 
 /**
- * Fix account balance drift: recalculate all account balances from JournalItems.
- * Captures before/after snapshot of drifted accounts for audit.
+ * Sets every drifting account's stored balance to the ledger sum. The snapshot lists each changed
+ * account with its stored balance before and after, for the audit row.
  */
 export async function fixAccountBalanceDrift(): Promise<{ fixed: number; message: string; snapshot: unknown }> {
   return await prisma.$transaction(async (tx) => {
-    await assertNoClosedPnlYears(tx, true);
-    // Capture drifted accounts BEFORE recalculation (rootType-aware formula)
-    const beforeDrift = await tx.$queryRaw<Array<{
-      account_code: string;
-      account_name: string;
-      root_type: string;
-      stored_balance: string;
-      computed_balance: string;
-    }>>`
-      WITH computed AS (
-        SELECT jea.account_id,
-               a."rootType" AS root_type,
-               CASE
-                 WHEN a."rootType" IN ('ASSET','EXPENSE')
-                   THEN SUM(jea.debit) - SUM(jea.credit)
-                 ELSE SUM(jea.credit) - SUM(jea.debit)
-               END AS computed_balance
-          FROM journal_entry_accounts jea
-          JOIN journal_entries je ON je.id = jea.journal_entry_id
-          JOIN accounts a ON a.id = jea.account_id
-         WHERE je.status != 'Cancelled'
-         GROUP BY jea.account_id, a."rootType"
-      )
-      SELECT a."accountNumber" AS account_code,
-             a.name AS account_name,
-             c.root_type,
-             a.balance::text AS stored_balance,
-             c.computed_balance::text AS computed_balance
-        FROM computed c
-        JOIN accounts a ON a.id = c.account_id
-       WHERE ABS(a.balance - c.computed_balance) > 0.01
-       ORDER BY ABS(a.balance - c.computed_balance) DESC
-       LIMIT 50
-    `;
-
-    await recalculateAccountBalances(tx);
-    const count = await tx.account.count();
-
+    const { changed } = await recalculateAccountBalances(tx);
     return {
-      fixed: count,
-      message: `Dihitung ulang saldo ${count} akun dari jurnal`,
+      fixed: changed.length,
+      message: `Saldo tersimpan ${changed.length} akun diisi ulang dari buku besar`,
       snapshot: {
-        driftedAccountsBefore: beforeDrift,
-        totalDrifted: beforeDrift.length,
-        totalAccountsRecalc: count,
+        changed: changed.map((c) => ({
+          account_code: c.accountNumber,
+          account_name: c.name,
+          root_type: c.rootType,
+          before: c.stored.toFixed(2),
+          after: c.fromLedger.toFixed(2),
+          closed_year_contribution: c.closedYearContribution.toFixed(2),
+        })),
+        totalChanged: changed.length,
       },
     };
   }, { timeout: 60000 });
