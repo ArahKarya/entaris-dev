@@ -223,6 +223,42 @@ d('delete-dummy: legacy dummy data cleanup (E7-R13)', () => {
     });
   }, 60000);
 
+  it('refuses with 409 DUMMY_GROUP_SHARED when a dummy party sits in the ledger group of a real journal, and deletes nothing', async () => {
+    await inRollback(async (tx) => {
+      const fy = await createFiscalYear(tx, { year: Y });
+      const actor = await manager(tx);
+      const ar = await tx.account.findUniqueOrThrow({ where: { accountNumber: arNumber } });
+      const income = await testAccount(tx, 'REVENUE', 0);
+      const dummy = await legacyDummy(tx, { fiscalYearId: fy.id, date: `${Y}-03-10`, userId: actor.userId, arId: ar.id, incomeId: income.id });
+      const date = new Date(`${Y}-04-01`);
+      const real = await tx.journalEntry.create({
+        data: {
+          entryNumber: `IT-REAL-JV-${tag()}`, date, status: 'Submitted', narration: 'Real journal touching a dummy party',
+          fiscalYearId: fy.id, createdBy: actor.userId, submittedAt: date,
+          items: { create: [{ accountId: ar.id, debit: 7_000, credit: 0 }, { accountId: income.id, debit: 0, credit: 7_000 }] },
+        },
+      });
+      // Balanced real group; only its AR line names the dummy party.
+      await tx.accountingLedgerEntry.createMany({
+        data: [
+          { accountId: ar.id, partyId: dummy.party.id, date, debit: 7_000, credit: 0, referenceType: 'JournalEntry', referenceId: real.id, fiscalYearId: fy.id },
+          { accountId: income.id, date, debit: 0, credit: 7_000, referenceType: 'JournalEntry', referenceId: real.id, fiscalYearId: fy.id },
+        ],
+      });
+
+      const r = await callRoute(dummyDataRouter, 'post', '/delete-dummy', actor);
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect(r.body.code).toBe('DUMMY_GROUP_SHARED');
+      expect(r.body.error).toContain(real.entryNumber);
+
+      expect(await tx.party.findUnique({ where: { id: dummy.party.id } })).not.toBeNull();
+      expect(await tx.journalEntry.findUnique({ where: { id: real.id } })).not.toBeNull();
+      expect(await tx.journalEntry.findUnique({ where: { id: dummy.journal.id } })).not.toBeNull();
+      expect(await tx.accountingLedgerEntry.count({ where: { referenceId: real.id } })).toBe(2);
+      expect(await tx.accountingLedgerEntry.count({ where: { referenceId: { in: [dummy.invoice.id, dummy.journal.id] } } })).toBe(3);
+    });
+  }, 60000);
+
   it('refuses a role with settings edit but without approval.bypass with 403', async () => {
     await inRollback(async (tx) => {
       const fy = await createFiscalYear(tx, { year: Y });

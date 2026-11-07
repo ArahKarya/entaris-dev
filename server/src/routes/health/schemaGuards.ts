@@ -7,12 +7,14 @@ import type { CheckResult } from './checks';
 export interface RequiredTrigger {
   table: string;
   name: string;
+  /** What breaks without the trigger, as an Indonesian clause for the health message ("jejak audit bisa diubah"). */
+  purpose: string;
 }
 
 /** audit_trail append-only (E7-R11, migration 20261106000000_audit_trail_append_only). */
 export const REQUIRED_TRIGGERS: readonly RequiredTrigger[] = [
-  { table: 'audit_trail', name: 'audit_trail_append_only_row' },
-  { table: 'audit_trail', name: 'audit_trail_append_only_truncate' },
+  { table: 'audit_trail', name: 'audit_trail_append_only_row', purpose: 'jejak audit bisa diubah' },
+  { table: 'audit_trail', name: 'audit_trail_append_only_truncate', purpose: 'jejak audit bisa diubah' },
 ];
 
 interface TriggerRow {
@@ -44,21 +46,24 @@ export async function checkRequiredTriggers(): Promise<CheckResult> {
 
   // The remedy depends on the problem: a restart re-applies the migration only when
   // _prisma_migrations no longer lists it (restore of an older dump); a trigger disabled or dropped
-  // by hand stays broken after a restart (MIGRATION.md, "Migrasi trigger jejak audit").
-  const missing = problems.filter((p) => p.problem === 'missing').length;
-  const disabled = problems.filter((p) => p.problem === 'disabled').map((p) => p.name).join(', ');
+  // by hand stays broken after a restart (MIGRATION.md, "Migrasi trigger ...").
+  const missingRows = problems.filter((p) => p.problem === 'missing');
+  const missing = missingRows.length;
+  const disabledRows = problems.filter((p) => p.problem === 'disabled');
+  const disabled = disabledRows.map((p) => `${p.table}.${p.name}`).join(', ');
+  const purposes = [...new Set(problems.map((p) => p.purpose))].join(', ');
   return {
     name: 'Required Database Triggers',
     status: problems.length > 0 ? 'error' : 'ok',
     message: problems.length === 0
       ? 'Semua trigger database aktif'
       : missing > 0 && disabled
-        ? `${missing} trigger database hilang dan ${problems.length - missing} nonaktif; jejak audit bisa diubah. Jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).`
+        ? `${missing} trigger database hilang dan ${problems.length - missing} nonaktif; ${purposes}. Jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (bagian Migrasi trigger).`
         : missing > 0
-          ? `${missing} trigger database hilang; jejak audit bisa diubah. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).`
-          : `${problems.length} trigger database nonaktif; jejak audit bisa diubah. Aktifkan lagi dengan ALTER TABLE audit_trail ENABLE TRIGGER <nama> untuk: ${disabled}.`,
+          ? `${missing} trigger database hilang; ${purposes}. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (bagian Migrasi trigger).`
+          : `${problems.length} trigger database nonaktif; ${purposes}. Aktifkan lagi dengan ALTER TABLE <tabel> ENABLE TRIGGER <nama> untuk: ${disabled}.`,
     count: problems.length,
-    details: problems,
+    details: problems.map(({ table, name, problem }) => ({ table, name, problem })),
     fixable: false,
   };
 }

@@ -95,6 +95,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Satu baris jurnal tidak boleh memiliki debit dan kredit sekaligus.": "A journal line cannot have both a debit and a credit.",
   "Jurnal tidak seimbang. Total Debit ({0}) ≠ Total Kredit ({1}).": "Journal is not balanced. Total Debit ({0}) ≠ Total Credit ({1}).",
   "Gagal menyimpan jurnal.": "Failed to save the journal.",
+  "Jurnal tidak seimbang di buku besar; transaksi dibatalkan.": "The journal is unbalanced in the General Ledger; the transaction was rolled back.",
   "Jurnal sudah dibatalkan.": "Journal is already cancelled.",
   "Alasan pembatalan maksimal 500 karakter.": "The cancel reason can be at most 500 characters.",
   "Status pengajuan sudah berubah. Muat ulang halaman lalu coba lagi.": "The status has already changed. Reload the page and try again.",
