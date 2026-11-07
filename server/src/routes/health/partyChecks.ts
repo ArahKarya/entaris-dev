@@ -4,12 +4,17 @@
 // only; the stored column is rewritten by the party recalculation, not from here.
 import { prisma } from '../../lib/prisma';
 import { computePartyOutstandingDrift } from '../../services/partyOutstandingDrift';
+import { rowsOrAmbiguous } from './arChecks';
 import type { CheckResult } from './checks';
 
 const DETAIL_LIMIT = 20;
 
 export async function checkPartyOutstandingDrift(scope: { partyIds?: readonly string[] } = {}): Promise<CheckResult> {
-  const rows = (await computePartyOutstandingDrift(prisma, scope)).filter((r) => Number(r.storedMinusExpected) !== 0);
+  // The manual journal part reads the AR and AP role accounts: an ambiguous mapping is this check's
+  // error, not the whole health check's.
+  const all = await rowsOrAmbiguous('Party Outstanding Drift', () => computePartyOutstandingDrift(prisma, scope));
+  if (!Array.isArray(all)) return all;
+  const rows = all.filter((r) => Number(r.storedMinusExpected) !== 0);
   return {
     name: 'Party Outstanding Drift',
     status: rows.length > 0 ? 'warning' : 'ok',

@@ -32,10 +32,7 @@ export function detailRows(rows: readonly PartySubledgerDiff[]) {
  * (PARTY_ROLE_AMBIGUOUS): the check cannot tell that account's lines apart, and one failing check
  * must not take the whole health check down.
  */
-async function rowsOrAmbiguous(
-  name: string,
-  find: () => Promise<PartySubledgerDiff[]>,
-): Promise<PartySubledgerDiff[] | CheckResult> {
+export async function rowsOrAmbiguous<T>(name: string, find: () => Promise<T[]>): Promise<T[] | CheckResult> {
   try {
     return await find();
   } catch (err) {
