@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import api from '../lib/api';
+import { cap } from '../lib/permissions';
 import { cn } from '../lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -95,7 +96,9 @@ const AlreadyImportedNote = ({ items }: { items: Array<{ narration: string; date
 const OpeningCell = ({ value, opening }: { value: unknown; opening?: OpeningPreview | null }) => {
   const { t } = useTranslation('shell');
   if (!opening) return <>{String(value ?? '')}</>;
-  const label = !opening.allowed && opening.action !== 'unchanged'
+  const label = opening.reason === 'OPENING_DATE_MISMATCH'
+    ? t('importModal.opening.dateMismatch', { date: opening.cutoverDate ?? '—' })
+    : !opening.allowed && opening.action !== 'unchanged'
     ? t('importModal.opening.refused')
     : opening.action === 'replace'
       ? t('importModal.opening.replace', { recorded: opening.recorded ?? '—' })
@@ -110,6 +113,44 @@ const OpeningCell = ({ value, opening }: { value: unknown; opening?: OpeningPrev
   );
 };
 
+interface OpeningRow {
+  accountNumber: string;
+  name: string;
+  openingBalance: unknown;
+  opening?: OpeningPreview | null;
+}
+
+/**
+ * Every COA row that needs a confirmation, each with its own checkbox (also rows beyond the 20 shown
+ * in the table): ticking one replacement never confirms a running balance on another account.
+ */
+const OpeningConfirmList = ({ rows, confirmed, onToggle }: { rows: OpeningRow[]; confirmed: string[]; onToggle: (accountNumber: string, on: boolean) => void }) => {
+  const { t } = useTranslation('shell');
+  return (
+    <fieldset className="grid gap-1.5 rounded-lg bg-warning-subtle p-3 text-xs text-warning-text">
+      <legend className="sr-only">{t('importModal.confirmTitle')}</legend>
+      <p className="font-semibold">{t('importModal.confirmTitle')}</p>
+      <div className="grid max-h-32 gap-1 overflow-y-auto">
+        {rows.map((row) => (
+          <label key={row.accountNumber} className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={confirmed.includes(row.accountNumber)}
+              onChange={(e) => onToggle(row.accountNumber, e.target.checked)}
+            />
+            <span>
+              {row.opening?.action === 'replace'
+                ? t('importModal.confirmReplaceRow', { account: row.accountNumber, name: row.name, recorded: row.opening.recorded ?? '—', amount: String(row.openingBalance) })
+                : t('importModal.confirmRunningRow', { account: row.accountNumber, name: row.name, amount: String(row.openingBalance) })}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+};
+
 const ImportModal = ({ isOpen, onClose, importType }: Props) => {
   const { t } = useTranslation(['shell', 'common']);
   const [step, setStep] = useState<'upload' | 'preview' | 'result'>('upload');
@@ -117,7 +158,9 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [confirmed, setConfirmed] = useState<string[]>([]);
+  const [throughLock, setThroughLock] = useState(false);
+  const [lockReason, setLockReason] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const config = typeConfig[importType];
@@ -132,7 +175,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
       return res.data as PreviewResult;
     },
     onSuccess: (data) => {
-      setConfirmReplace(false);
+      setConfirmed([]);
       setPreview(data);
       setStep('preview');
     },
@@ -145,7 +188,8 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append('file', file);
-      if (confirmReplace) formData.append('confirmReplace', 'true');
+      confirmed.forEach((accountNumber) => formData.append('confirmReplace', accountNumber));
+      if (throughLock) formData.append('throughLockReason', lockReason.trim());
       const res = await api.post(config.endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -207,12 +251,19 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
     setSelectedFile(null);
     setPreview(null);
     setResult(null);
-    setConfirmReplace(false);
+    setConfirmed([]);
+    setThroughLock(false);
+    setLockReason('');
     onClose();
   };
 
-  const openingRows: Array<{ opening?: OpeningPreview | null }> = importType === 'coa' ? preview?.data ?? [] : [];
-  const replaceCount = openingRows.filter((row) => row.opening?.needsConfirm).length;
+  const openingRows: OpeningRow[] = importType === 'coa' ? preview?.data ?? [] : [];
+  const confirmRows = openingRows.filter((row) => row.opening?.needsConfirm);
+  const toggleConfirm = (accountNumber: string, on: boolean) =>
+    setConfirmed((list) => (on ? [...list, accountNumber] : list.filter((n) => n !== accountNumber)));
+  // Posting through the period lock (owner decision #10): period.lock holders only, with a reason.
+  const canThroughLock = cap('period.lock') && openingRows.some((row) => row.opening?.allowed && row.opening.action !== 'unchanged');
+  const lockReasonOk = !throughLock || lockReason.trim().length >= 10;
   const STEPS = ['upload', 'preview', 'result'] as const;
   const busy = previewMutation.isPending || importMutation.isPending;
   const stepLabel = t(`importModal.steps.${step}`);
@@ -317,16 +368,29 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                 <AlreadyImportedNote items={preview.alreadyImported!} />
               )}
 
-              {replaceCount > 0 && (
-                <label className="flex items-start gap-2 rounded-lg bg-warning-subtle p-3 text-xs text-warning-text">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={confirmReplace}
-                    onChange={(e) => setConfirmReplace(e.target.checked)}
-                  />
-                  <span>{t('importModal.confirmReplace', { count: replaceCount })}</span>
-                </label>
+              {confirmRows.length > 0 && (
+                <OpeningConfirmList rows={confirmRows} confirmed={confirmed} onToggle={toggleConfirm} />
+              )}
+
+              {canThroughLock && (
+                <div className="grid gap-2 text-xs">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={throughLock} onChange={(e) => setThroughLock(e.target.checked)} />
+                    {t('importModal.throughLock')}
+                  </label>
+                  {throughLock && (
+                    <label className="grid gap-1">
+                      <span>{t('importModal.lockReason')}</span>
+                      <textarea
+                        className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+                        rows={2}
+                        value={lockReason}
+                        onChange={(e) => setLockReason(e.target.value)}
+                      />
+                      <span className="text-muted-foreground">{t('importModal.lockReasonHint')}</span>
+                    </label>
+                  )}
+                </div>
               )}
 
               {preview.data.length > 0 && (
@@ -411,11 +475,11 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
           {step === 'preview' && preview && (
             <>
               <Button type="button" variant="ghost" disabled={importMutation.isPending}
-                onClick={() => { setStep('upload'); setSelectedFile(null); setPreview(null); }}>
+                onClick={() => { setStep('upload'); setSelectedFile(null); setPreview(null); setConfirmed([]); }}>
                 {t('importModal.changeFile')}
               </Button>
               <Button type="button" onClick={handleConfirmImport}
-                disabled={preview.data.length === 0 || (importType === 'journals' && preview.errors.length > 0)} loading={importMutation.isPending}>
+                disabled={preview.data.length === 0 || (importType === 'journals' && preview.errors.length > 0) || !lockReasonOk} loading={importMutation.isPending}>
                 {importMutation.isPending ? t('importModal.importing') : t('importModal.importCount', { count: preview.data.length })}
               </Button>
             </>

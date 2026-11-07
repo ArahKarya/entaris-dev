@@ -397,14 +397,19 @@
     "importing": "Importing…",
     "importCount_one": "Import {{count}} row",
     "importCount_other": "Import {{count}} rows",
-    "confirmReplace_one": "I confirm replacing the recorded opening balance of {{count}} account (balance at the cut-over date, not the running balance).",
-    "confirmReplace_other": "I confirm replacing the recorded opening balance of {{count}} accounts (balance at the cut-over date, not the running balance).",
+    "confirmTitle": "Confirm per account: tick only the accounts whose opening balance really is replaced or posted with the value in the file (the balance at the cut-over date, not the running balance).",
+    "confirmReplaceRow": "{{account}} {{name}}: replace the recorded opening balance {{recorded}} with {{amount}}",
+    "confirmRunningRow": "{{account}} {{name}}: {{amount}} equals the running balance; post it as the opening balance anyway",
+    "throughLock": "Post through the period lock",
+    "lockReason": "Reason",
+    "lockReasonHint": "Required, at least 10 characters; recorded in the audit trail.",
     "opening": {
       "unchanged": "Opening balance unchanged",
       "post": "New opening balance posted",
       "replace": "Replaces the recorded opening balance {{recorded}}",
       "refused": "This account takes no opening balance here",
-      "runningBalance": "equals the running balance"
+      "runningBalance": "equals the running balance",
+      "dateMismatch": "The date is not the cut-over date {{date}}"
     }
   },
   "userForm": {
