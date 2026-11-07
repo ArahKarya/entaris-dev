@@ -177,7 +177,7 @@ router.get('/:id/opening', async (req, res) => {
       return res.status(404).json({ error: 'Akun tidak ditemukan.' });
     }
     return res.json(await describeAccountOpening(prisma, id));
-  } catch (error: any) {
+  } catch (error) {
     return handleRouteError(res, error, 'GET /coa/:id/opening', 'Gagal mengambil saldo awal akun.');
   }
 });
