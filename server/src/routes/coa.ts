@@ -2,12 +2,9 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
-import { updateAccountBalance } from '../utils/accountBalance';
-import { generateDocumentNumber } from '../utils/documentNumber';
-import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
 import { CreateAccountSchema, UpdateAccountSchema, SetBalanceSchema } from '../utils/schemas';
-import { BusinessError, handleRouteError } from '../utils/errors';
+import { handleRouteError } from '../utils/errors';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { compareAccountNumber } from '../utils/accountSort';
@@ -17,6 +14,8 @@ import { accountIdsWithLedger, loadStructureFacts, lockAccounts } from '../servi
 import { loadPartyRoleMap } from '../services/ledger/partyRules';
 import { currentPnlYear, currentProfit, pnlPeriodBalances } from '../services/coa/pnlPeriodBalances';
 import { businessToday } from '../utils/businessDate';
+import { hasCap } from '../services/permissionService';
+import { OPENING_LOCK_RIGHT, setOpeningBalanceInTx } from '../services/ledger/openingBalance';
 
 const router = Router();
 
@@ -169,73 +168,41 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/coa/:id/balance: set opening balance (requires coa edit permission)
+// PATCH /api/coa/:id/balance: the account's opening balance at the cut-over date (E2-R11), through
+// the one opening balance service; requires coa edit permission. throughLock (post into a locked
+// month) needs period.lock and is never open to AIRA (owner decision #10).
 router.patch('/:id/balance', async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const body = validateBody(SetBalanceSchema, req.body, res);
   if (!body) return;
 
   try {
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const account = await tx.account.findUnique({ where: { id } });
-      if (!account) throw new BusinessError('Akun tidak ditemukan.');
-      if (account.isGroup) throw new BusinessError('Tidak bisa set saldo untuk akun grup.');
-
-      const currentBalance = Number(account.balance);
-      const newBalance = body.balance;
-      const delta = newBalance - currentBalance;
-
-      if (Math.abs(delta) < 0.01) return account; // No change
-
-      // Counter-entry to Opening Equity
-      const equityAccount = await systemAccounts.getAccount('OPENING_EQUITY');
-
-      const now = new Date();
-      const fiscalYear = await getOpenFiscalYear(tx, now);
-      const entryNumber = await generateDocumentNumber(tx, 'OB', now, fiscalYear.id);
-
-      // Determine debit/credit based on account type and delta direction
-      let accountDebit = 0, accountCredit = 0;
-      let equityDebit = 0, equityCredit = 0;
-
-      if (account.rootType === 'ASSET' || account.rootType === 'EXPENSE') {
-        if (delta > 0) { accountDebit = delta; equityCredit = delta; }
-        else { accountCredit = Math.abs(delta); equityDebit = Math.abs(delta); }
-      } else {
-        if (delta > 0) { accountCredit = delta; equityDebit = delta; }
-        else { accountDebit = Math.abs(delta); equityCredit = Math.abs(delta); }
+    if (body.throughLock) {
+      if (req.user!.via === 'mcp') {
+        return res.status(403).json({ error: 'AIRA tidak dapat menembus kunci periode untuk saldo awal.', code: OPENING_LOCK_RIGHT });
       }
-
-      const journalEntry = await tx.journalEntry.create({
-        data: {
-          entryNumber,
-          date: now,
-          narration: `Saldo Awal: ${account.accountNumber} - ${account.name}`,
-          status: 'Submitted',
-          fiscalYearId: fiscalYear.id,
-          createdBy: req.user!.userId,
-          submittedAt: now,
-          sourceType: 'OPENING',
-          items: {
-            create: [
-              { accountId: id, debit: accountDebit, credit: accountCredit, description: `Saldo Awal: ${account.name}` },
-              { accountId: equityAccount.id, debit: equityDebit, credit: equityCredit, description: `Saldo Awal: ${account.name}` },
-            ],
-          },
+      if (!(await hasCap(req.user!.role, 'period.lock'))) {
+        return res.status(403).json({ error: 'Menembus kunci periode untuk saldo awal butuh hak Kunci Periode (period.lock).', code: OPENING_LOCK_RIGHT });
+      }
+    }
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const opening = await setOpeningBalanceInTx(tx, {
+        target: { kind: 'ACCOUNT', accountId: id },
+        amount: body.balance,
+        asOfDate: body.asOfDate,
+        userId: req.user!.userId,
+        throughLock: body.throughLock,
+      });
+      const account = await tx.account.findUnique({ where: { id } });
+      return {
+        account,
+        opening: {
+          asOfDate: opening.asOfDate,
+          action: opening.action,
+          journalNumber: opening.journal?.entryNumber ?? null,
+          cancelled: opening.cancelled,
         },
-      });
-
-      await tx.accountingLedgerEntry.createMany({
-        data: [
-          { date: now, accountId: id, debit: accountDebit, credit: accountCredit, referenceType: 'JournalEntry', referenceId: journalEntry.id, description: `Saldo Awal: ${account.name}`, fiscalYearId: fiscalYear.id },
-          { date: now, accountId: equityAccount.id, debit: equityDebit, credit: equityCredit, referenceType: 'JournalEntry', referenceId: journalEntry.id, description: `Saldo Awal: ${account.name}`, fiscalYearId: fiscalYear.id },
-        ],
-      });
-
-      await updateAccountBalance(tx, id, accountDebit, accountCredit);
-      await updateAccountBalance(tx, equityAccount.id, equityDebit, equityCredit);
-
-      return tx.account.findUnique({ where: { id } });
+      };
     }, { timeout: 15000 });
 
     return res.json(result);

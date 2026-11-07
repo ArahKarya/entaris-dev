@@ -276,7 +276,12 @@ describe('architecture: the remap escapes stay in the remap (plan §2.3)', () =>
     expect(users(/allowGroupOrInactive/)).toEqual(['services/ledger/accountGuard.ts', 'services/systemAccountRemap.ts']);
   });
 
-  it('only accountGuard, postJournal (definitions) and systemAccountRemap pass lineRules', () => {
-    expect(users(/\blineRules\b/)).toEqual(['services/ledger/accountGuard.ts', 'services/ledger/postJournal.ts', 'services/systemAccountRemap.ts']);
+  it('only accountGuard, postJournal (definitions), systemAccountRemap and the opening balance service pass lineRules', () => {
+    expect(users(/\blineRules\b/)).toEqual([
+      'services/ledger/accountGuard.ts',
+      'services/ledger/openingBalance.ts',
+      'services/ledger/postJournal.ts',
+      'services/systemAccountRemap.ts',
+    ]);
   });
 });
