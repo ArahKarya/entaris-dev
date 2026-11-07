@@ -265,11 +265,17 @@ export const GeneralLedger = () => {
         meta: { align: 'right' },
         cell: ({ row }) => {
           const { debit } = lineTotals(row.original.items);
+          const reversal = row.original.reversedBy;
           return (
             <div className="flex flex-col items-end gap-1">
               <span className={amountClass(row.original.status)}>{money(debit)}</span>
-              {/* Mobile: status stacked here because its column is hidden. */}
+              {/* Mobile: status and its reversal stacked here because their column is hidden. */}
               <StatusBadge status={row.original.status} docType="journal" className="sm:hidden" />
+              {reversal && (
+                <DocumentLink className="text-xs sm:hidden" onClick={() => setSelectedId(reversal.id)}>
+                  {t('generalLedger.reversedBy', { number: reversal.entryNumber })}
+                </DocumentLink>
+              )}
             </div>
           );
         },
