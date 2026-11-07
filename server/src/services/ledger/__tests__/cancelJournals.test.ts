@@ -20,7 +20,14 @@ describe('cancelJournalsInTx', () => {
     const js = [journal('JV-A'), journal('JV-A-CORR'), journal('JV-A-R2')];
 
     expect(await cancelJournalsInTx(tx, js, { label: 'penerimaan barang', trail })).toEqual(['JV-A', 'JV-A-R2']);
-    expect(voidJournalInTx.mock.calls).toEqual(js.map((j) => [tx, j, 'penerimaan barang', trail]));
+    expect(voidJournalInTx.mock.calls).toEqual(js.map((j) => [tx, j, 'penerimaan barang', trail, undefined]));
+  });
+
+  it('passes periodOptions to every void', async () => {
+    voidJournalInTx.mockResolvedValue(true);
+    const js = [journal('JV-A'), journal('JV-B')];
+    await cancelJournalsInTx(tx, js, { label: 'jurnal', periodOptions: { ignoreLock: true } });
+    expect(voidJournalInTx.mock.calls.map((c) => c[4])).toEqual([{ ignoreLock: true }, { ignoreLock: true }]);
   });
 
   it('rejects a journal that already has a reversal before voiding any', async () => {

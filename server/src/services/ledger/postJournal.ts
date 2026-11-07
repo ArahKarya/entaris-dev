@@ -40,7 +40,8 @@ export interface PostJournalInput {
   accountRule: PostableRule;
   /**
    * Rule per account id replacing accountRule for that account. Only the system account remap
-   * reclass passes it (REMAP_SOURCE_RULE on the old account, services/systemAccountRemap.ts).
+   * reclass (REMAP_SOURCE_RULE on the old account, services/systemAccountRemap.ts) and the opening
+   * balance (OPENING_ACCOUNT_RULE on the target, services/ledger/openingBalance.ts) pass it.
    */
   lineRules?: ReadonlyMap<string, PostableRule>;
   partyRule: PartyRule;
@@ -50,7 +51,7 @@ export interface PostJournalInput {
   ledgerPartyless?: boolean;
   /** Verified against the year of `date` (JOURNAL_FY_MISMATCH); the year is never taken from here. */
   expectFiscalYearId?: string;
-  /** { ignoreLock: true } only for the year-end close journal. */
+  /** { ignoreLock: true } only for the year-end close journal and an opening balance posted through the lock (owner decision #10). */
   periodOptions?: PeriodGuardOptions;
   dropEmptyLines?: boolean;
   /** submittedAt; default now. */

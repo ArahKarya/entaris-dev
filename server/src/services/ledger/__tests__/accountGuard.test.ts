@@ -13,6 +13,7 @@ import {
   DOCUMENT_RULE,
   INVENTORY_ITEM,
   MANUAL_CONTROL_KINDS,
+  OPENING_ACCOUNT_RULE,
   TEMPLATE_RULE,
   TAX_ACCOUNT_ROLES,
   assertPostableAccount,
@@ -260,5 +261,39 @@ describe('named rules', () => {
     expect(translateMessage(postableAccountProblem(ar, TEMPLATE_RULE, ['TAX_OUTPUT'])!.message, 'en')).toBe(
       'Template account: account 1.2.1 Piutang Usaha (Dagang) is a control account (Output VAT) and cannot be posted to directly. Recurring journal templates cannot use control or tax accounts.',
     );
+  });
+});
+
+describe('OPENING_ACCOUNT_RULE (E2-R11)', () => {
+  const check = (over: Partial<AccountLite>, kinds: readonly string[] | null = null) =>
+    postableAccountProblem(acc(over), OPENING_ACCOUNT_RULE, kinds as any)?.code ?? null;
+
+  it('refuses revenue and expense accounts', () => {
+    expect(check({ accountNumber: '4.1', name: 'Penjualan', rootType: 'REVENUE' })).toBe(ACCOUNT_ROOT_TYPE);
+    expect(check({ accountNumber: '6.16', rootType: 'EXPENSE' })).toBe(ACCOUNT_ROOT_TYPE);
+  });
+
+  it.each([
+    ['1.4.1 item inventory', INVENTORY_ITEM],
+    ['1.2.1 receivable', 'AR'],
+    ['2.1.1 payable', 'AP'],
+    ['1.3 supplier deposit', 'VENDOR_DEPOSIT'],
+    ['2.1.3 customer deposit', 'CUSTOMER_DEPOSIT'],
+    ['2.2.3 GRNI', 'ACCRUED_PAYABLE'],
+    ['1.4.0 inventory', 'INVENTORY'],
+  ])('refuses the control account %s and points to the party / stock path', (_name, kind) => {
+    const problem = postableAccountProblem(acc({ rootType: 'ASSET' }), OPENING_ACCOUNT_RULE, [kind as any]);
+    expect(problem?.code).toBe(ACCOUNT_CONTROL);
+    expect(problem?.message).toContain('saldo awal pihak');
+  });
+
+  it('accepts cash, input VAT, retained earnings and fixed assets', () => {
+    // Tax roles are not restricted by this rule, so the control map never lists them for it.
+    expect(OPENING_ACCOUNT_RULE.alsoRestrict).toEqual([]);
+    expect(check({ accountNumber: '1.1.1', rootType: 'ASSET' })).toBeNull();
+    expect(check({ accountNumber: '1.5.1', rootType: 'ASSET' })).toBeNull();
+    expect(check({ accountNumber: '3.2', rootType: 'EQUITY' })).toBeNull();
+    expect(check({ accountNumber: '1.6.1', rootType: 'ASSET' })).toBeNull();
+    expect(check({ accountNumber: '2.4', rootType: 'LIABILITY' })).toBeNull();
   });
 });

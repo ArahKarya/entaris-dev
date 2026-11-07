@@ -136,6 +136,20 @@ export const PAYMENT_REQUEST_RULE: PostableRule = {
 /** System journals whose accounts are all chosen by code (year-end close, reclass target side). Not the cash book or payment requests. */
 export const DOCUMENT_RULE: PostableRule = { label: 'Akun posting', allowControl: true };
 
+/**
+ * The account of an account opening balance (E2-R11, services/ledger/openingBalance.ts): balance
+ * sheet accounts only, never a control account (receivables, payables and deposits open per party,
+ * inventory through the opening stock import). Tax accounts and fixed assets are allowed (owner
+ * decisions #2b, #11). The equity accounts the opening journal itself uses are refused by the service.
+ */
+export const OPENING_ACCOUNT_RULE: PostableRule = {
+  label: 'Akun saldo awal',
+  rootTypes: ['ASSET', 'LIABILITY', 'EQUITY'],
+  allowControl: false,
+  alsoRestrict: [],
+  controlHint: 'Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.',
+};
+
 export interface AccountLite {
   id: string;
   accountNumber: string;
@@ -256,7 +270,7 @@ export interface AssertPostableOptions {
    * the same account would both hold a share lock and then deadlock on the balance UPDATE.
    */
   lockRows?: boolean;
-  /** Rule per account id, replacing `rule` for that account (only the remap reclass, plan §2.3). */
+  /** Rule per account id, replacing `rule` for that account (the remap reclass, plan §2.3, and the opening balance). */
   lineRules?: ReadonlyMap<string, PostableRule>;
 }
 

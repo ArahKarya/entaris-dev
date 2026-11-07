@@ -13,7 +13,7 @@ import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
 import { voidJournalInTx } from '../../utils/journalCancel';
 import { journalFamilyWhere } from '../../utils/journalFamily';
-import type { PeriodLabel } from '../../utils/periodGuard';
+import type { PeriodGuardOptions, PeriodLabel } from '../../utils/periodGuard';
 import type { CancelTrail } from '../../utils/cancelClaim';
 
 type Tx = Prisma.TransactionClient;
@@ -30,6 +30,11 @@ export interface CancelJournalsOptions {
   label: PeriodLabel;
   /** User and reason of a user-initiated cancel, stored on each voided journal. */
   trail?: CancelTrail;
+  /**
+   * Passed to the period guard of each void. { ignoreLock: true } only for the opening balance
+   * service with a period.lock holder's reason (owner decision #10); a closed year still refuses.
+   */
+  periodOptions?: PeriodGuardOptions;
 }
 
 /**
@@ -42,7 +47,7 @@ export interface CancelJournalsOptions {
 export async function cancelJournalsInTx(
   tx: Tx,
   journals: readonly JournalWithItems[],
-  { label, trail }: CancelJournalsOptions,
+  { label, trail, periodOptions }: CancelJournalsOptions,
 ): Promise<string[]> {
   const reversed = journals.find((j) => j.reversedById);
   if (reversed) {
@@ -53,7 +58,7 @@ export async function cancelJournalsInTx(
   }
   const voided: string[] = [];
   for (const journal of journals) {
-    if (await voidJournalInTx(tx, journal, label, trail)) voided.push(journal.entryNumber);
+    if (await voidJournalInTx(tx, journal, label, trail, periodOptions)) voided.push(journal.entryNumber);
   }
   return voided;
 }
