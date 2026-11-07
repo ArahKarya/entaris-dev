@@ -9,12 +9,15 @@
  * rollback transaction and assertions only look at this file's accounts and references, except the
  * lock-order races, which need committed rows on two connections and delete them after.
  * - The dry run writes nothing; a difference equal to minus one closed year, to two closed years,
- *   or to a reopened year added back and another closed is `closed-year`; any other is
- *   `unexplained`; an account that agrees but has closed-year rows is listed as `ok`.
+ *   or to a reopened year added back and another closed is `closed-year`, also when the reopened
+ *   year got postings after the reopen or was closed again; any other is `unexplained`; an account
+ *   that agrees but has closed-year rows is listed as `ok`.
  * - recalculateAccountBalances writes only the accounts that differ, to the all-time ledger sum.
  * - Orphan groups: an open-year journal group is cancelled whole and its accounts rebalanced; a
  *   closed year, a locked month and a stock reference are left as they are; one audit row names the
- *   accountant; a stale plan is skipped; no approver, no run.
+ *   accountant; a stale plan is skipped; no approver, no run. Rows dated in a closed year or in no
+ *   year are not cancelled whatever year they are tagged with; while a year is closed a revenue
+ *   account only loses the cancelled amount.
  * - A posting that waits for the recalculation's locks, or that the recalculation waits for, is
  *   neither lost nor counted twice.
  */
@@ -97,11 +100,12 @@ function quarter(db: Tx | PrismaClient, q: 1 | 2 | 3 | 4, isClosed = false): Pro
 /** Two balanced ledger rows plus the incremental balance the way posting does it. */
 async function post(
   tx: Tx, fy: FiscalYear, date: string, debitId: string, creditId: string, amount: number,
-  ref: { referenceType?: string; referenceId?: string } = {},
+  ref: { referenceType?: string; referenceId?: string; at?: Date } = {},
 ) {
   const row = {
     date: new Date(date), fiscalYearId: fy.id,
     referenceType: ref.referenceType ?? 'ItFixture', referenceId: ref.referenceId ?? `it-bal-${tag()}`,
+    ...(ref.at ? { createdAt: ref.at } : {}),
   };
   await tx.accountingLedgerEntry.createMany({
     data: [
@@ -135,22 +139,26 @@ async function yearImpacts(tx: Tx, fy: FiscalYear): Promise<{ accountId: string;
 }
 
 /** The close of routes/fiscalYears.ts before PR-5.5: subtract the year's contribution. */
-async function closeLikeRoute(tx: Tx, fy: FiscalYear, userId: string) {
+async function closeLikeRoute(tx: Tx, fy: FiscalYear, userId: string, at?: Date) {
   for (const { accountId, impact } of await yearImpacts(tx, fy)) {
     await tx.account.update({ where: { id: accountId }, data: { balance: { decrement: impact } } });
   }
   await tx.fiscalYear.update({ where: { id: fy.id }, data: { isClosed: true, closedAt: new Date() } });
-  await tx.fiscalYearEvent.create({ data: { fiscalYearId: fy.id, action: 'close', userId } });
+  await tx.fiscalYearEvent.create({ data: { fiscalYearId: fy.id, action: 'close', userId, ...(at ? { createdAt: at } : {}) } });
 }
 
 /** The reopen before PR-5.5: add the year's contribution back. */
-async function reopenLikeRoute(tx: Tx, fy: FiscalYear, userId: string) {
+async function reopenLikeRoute(tx: Tx, fy: FiscalYear, userId: string, at?: Date) {
   for (const { accountId, impact } of await yearImpacts(tx, fy)) {
     await tx.account.update({ where: { id: accountId }, data: { balance: { increment: impact } } });
   }
   await tx.fiscalYear.update({ where: { id: fy.id }, data: { isClosed: false, closedAt: null } });
-  await tx.fiscalYearEvent.create({ data: { fiscalYearId: fy.id, action: 'reopen', userId, reason: 'test' } });
+  await tx.fiscalYearEvent.create({ data: { fiscalYearId: fy.id, action: 'reopen', userId, reason: 'test', ...(at ? { createdAt: at } : {}) } });
 }
+
+/** Strictly increasing timestamps: one rollback transaction gives every default now() the same value. */
+let clock = Date.now();
+const tick = () => new Date((clock += 1000));
 
 const rowOf = (rows: StoredBalancePlanRow[], a: Account) => rows.find((r) => r.accountId === a.id);
 const balanceOf = async (tx: Tx, a: Account) => (await tx.account.findUniqueOrThrow({ where: { id: a.id } })).balance;
@@ -224,6 +232,32 @@ d('stored balance rule and recalculation plan', () => {
       // Expense: Q1 counted twice (+), Q2 subtracted (-).
       expect(rowOf(rows, mixed)).toMatchObject({ class: 'closed-year', explanation: `+${q1.name} -${q2.name}` });
       expect(rowOf(rows, mixed)!.difference.toString()).toBe(String(35 * JT));
+    });
+  });
+
+  it('explains a reopened year by the amount the reopen added back, after later postings and a second close', async () => {
+    await inRollback(async (tx) => {
+      const userId = await ensureAdmin(tx);
+      const q1 = await quarter(tx, 1);
+      const cash = await account(tx, 'ASSET');
+      const revenue = await account(tx, 'REVENUE');
+      await post(tx, q1, `${Y}-02-10`, cash.id, revenue.id, 100 * JT, { at: tick() });
+      await closeLikeRoute(tx, q1, userId, tick());
+      await recalculateAccountBalances(tx, [revenue.id]);
+      await reopenLikeRoute(tx, q1, userId, tick());
+      // Posted into the reopened year: stored and ledger both rise, the year is now 120.
+      await post(tx, q1, `${Y}-03-10`, cash.id, revenue.id, 20 * JT, { at: tick() });
+
+      const open = rowOf((await planStoredBalanceRecalc(tx)).rows, revenue)!;
+      expect(open.difference.toString()).toBe(String(100 * JT));
+      expect(open.contributions.map((c) => c.contribution.toString())).toEqual([String(120 * JT)]);
+      expect(open).toMatchObject({ class: 'closed-year', explanation: `+${q1.name}` });
+
+      // Closed again: -120 on top of the +100 the reopen left.
+      await closeLikeRoute(tx, q1, userId, tick());
+      const again = rowOf((await planStoredBalanceRecalc(tx)).rows, revenue)!;
+      expect(again.difference.toString()).toBe(String(-20 * JT));
+      expect(again).toMatchObject({ class: 'closed-year', explanation: `+${q1.name} -${q1.name}` });
     });
   });
 
@@ -317,7 +351,9 @@ d('orphan ledger repair', () => {
       const result = await applyOrphanAleRepair(tx, plan, { approvedBy: 'Akuntan Uji' });
       expect(result.applied).toEqual([orphanKey(group)]);
       expect(result.skipped).toEqual([]);
-      expect(result.rebalanced.sort()).toEqual([cash.accountNumber, revenue.accountNumber].sort());
+      // Q1 is closed: revenue only loses the cancelled amount, cash is recalculated.
+      expect(result.rebalanced).toEqual([cash.accountNumber]);
+      expect(result.adjusted).toEqual([revenue.accountNumber]);
 
       const rowsOf = (referenceId: string) => tx.accountingLedgerEntry.findMany({ where: { referenceId } });
       expect((await rowsOf(repairId)).every((r) => r.isCancelled)).toBe(true);
@@ -331,6 +367,7 @@ d('orphan ledger repair', () => {
       expect(audits).toHaveLength(1);
       expect(audits[0]).toMatchObject({ entityType: 'JournalEntry', via: 'repair', viaMeta: { script: ORPHAN_ALE_AUDIT_ACTION, approvedBy: 'Akuntan Uji' } });
       expect(audits[0].oldValues).toMatchObject({ isCancelled: false, rows: 4, debit: '5000000.00' });
+      expect(audits[0].newValues).toMatchObject({ isCancelled: true, approvedBy: 'Akuntan Uji', balanceUpdate: expect.stringContaining('revenue/expense') });
 
       // The same (now stale) plan again: nothing left to cancel, the group is skipped.
       const again = await applyOrphanAleRepair(tx, plan, { approvedBy: 'Akuntan Uji' });
@@ -338,6 +375,65 @@ d('orphan ledger repair', () => {
       expect(again.skipped).toEqual([{ key: orphanKey(group), reason: 'changed-since-plan' }]);
       const fresh = (await planOrphanAleRepair(tx)).filter((g) => ours.has(g.referenceId));
       expect(fresh.some((g) => g.action === 'repair')).toBe(false);
+    });
+  });
+
+  it('judges a group by its row dates too: a stale open-year tag does not open a closed or missing year', async () => {
+    await inRollback(async (tx) => {
+      const q1 = await quarter(tx, 1, true);
+      const q3 = await quarter(tx, 3);
+      const cash = await account(tx, 'ASSET');
+      const revenue = await account(tx, 'REVENUE');
+      await tx.$executeRaw`INSERT INTO period_lock (id, lock_date) VALUES (1, ${`${Y}-01-05`}::date)
+        ON CONFLICT (id) DO UPDATE SET lock_date = EXCLUDED.lock_date`;
+      // Dated in closed Q1 but tagged with open Q3; dated in Q2, which has no fiscal year here.
+      const inClosed = await post(tx, q3, `${Y}-03-20`, cash.id, revenue.id, JT, { referenceType: 'JournalEntry' });
+      const inNone = await post(tx, q3, `${Y}-05-10`, cash.id, revenue.id, JT, { referenceType: 'JournalEntry' });
+      // Spread over open and closed days, every row tagged with Q3: the closed day counts too.
+      const spread = `it-orphan-${tag()}`;
+      await post(tx, q3, `${Y}-09-01`, cash.id, revenue.id, JT, { referenceType: 'JournalEntry', referenceId: spread });
+      await post(tx, q1, `${Y}-02-01`, cash.id, revenue.id, JT, { referenceType: 'JournalEntry', referenceId: spread });
+      await post(tx, q3, `${Y}-03-25`, cash.id, revenue.id, JT, { referenceType: 'JournalEntry', referenceId: spread });
+      await tx.$executeRaw`UPDATE accounting_ledger_entries SET fiscal_year_id = ${q3.id} WHERE reference_id = ${spread}`;
+      const ours = new Set([inClosed, inNone, spread]);
+
+      const plan = (await planOrphanAleRepair(tx)).filter((g) => ours.has(g.referenceId));
+      const actionOf = (id: string) => plan.find((g) => g.referenceId === id)?.action;
+      expect(plan.every((g) => !g.yearClosed && g.fiscalYearIds.length === 1 && g.fiscalYearIds[0] === q3.id)).toBe(true);
+      expect(actionOf(inClosed)).toBe('closed-year');
+      expect(actionOf(inNone)).toBe('no-fiscal-year');
+      expect(actionOf(spread)).toBe('closed-year');
+      expect(q1.isClosed).toBe(true);
+
+      const result = await applyOrphanAleRepair(tx, plan, { approvedBy: 'Akuntan Uji' });
+      expect(result.applied).toEqual([]);
+      const active = await tx.accountingLedgerEntry.count({ where: { referenceId: { in: [...ours] }, isCancelled: false } });
+      expect(active).toBe(10);
+    });
+  });
+
+  it('while a year is closed, takes only the cancelled amount off a revenue account', async () => {
+    await inRollback(async (tx) => {
+      const userId = await ensureAdmin(tx);
+      const q1 = await quarter(tx, 1);
+      const q3 = await quarter(tx, 3);
+      const cash = await account(tx, 'ASSET');
+      const revenue = await account(tx, 'REVENUE');
+      await post(tx, q1, `${Y}-02-10`, cash.id, revenue.id, 10 * JT);
+      await closeLikeRoute(tx, q1, userId);
+      const id = await post(tx, q3, `${Y}-09-20`, cash.id, revenue.id, 3 * JT, { referenceType: 'JournalEntry' });
+      const before = await balanceOf(tx, revenue);
+      expect(before.toString()).toBe(String(3 * JT));
+
+      const plan = (await planOrphanAleRepair(tx)).filter((g) => g.referenceId === id);
+      expect(plan.map((g) => g.action)).toEqual(['repair']);
+      const result = await applyOrphanAleRepair(tx, plan, { approvedBy: 'Akuntan Uji' });
+      expect(result.adjusted).toEqual([revenue.accountNumber]);
+      // Not the all-time 10 JT the recalculation would give, which a reopen of Q1 would raise to 20 JT.
+      expect((await balanceOf(tx, revenue)).toString()).toBe('0');
+      expect((await balanceOf(tx, cash)).toString()).toBe(String(10 * JT));
+      const drift = rowOf((await planStoredBalanceRecalc(tx)).rows, revenue)!;
+      expect(drift).toMatchObject({ class: 'closed-year', explanation: `-${q1.name}` });
     });
   });
 

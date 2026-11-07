@@ -2,10 +2,17 @@
 // StockOpname no longer exists. Core of scripts/repair/e2-orphan-ale-repair.ts, which replaces the
 // removed health-check fix (it cancelled rows of every year and left accounts.balance stale).
 // The plan groups the rows per reference; --apply cancels a whole group in one statement (each
-// group stays balanced for the ledger trigger) and recalculates the balance of the accounts it
-// touched. Only JournalEntry groups in an open fiscal year outside the period lock are repaired;
-// closed years, locked months and stock references are reported for a correction by journal.
-import { Prisma } from '@prisma/client';
+// group stays balanced for the ledger trigger) and updates the balance of the accounts it touched.
+// Only JournalEntry groups in an open fiscal year outside the period lock are repaired; closed
+// years, locked months and stock references are reported for a correction by journal.
+//
+// Balances: a balance-sheet account is recalculated from the ledger. A revenue/expense account
+// is only moved by the cancelled rows while any fiscal year is closed: until PR-5.5 its stored
+// balance leaves out the closed years' contributions, which a recalculation would put back (and a
+// later reopen would then add a second time). The one-time recalculation of those accounts is
+// e2-stored-balance-recalc's job.
+import { Prisma, type RootType } from '@prisma/client';
+import { applyAccountImpacts } from '../../utils/accountBalance';
 import { BusinessError } from '../../utils/errors';
 import { assertPeriodsOpen, FISCAL_YEAR_MISSING, PERIOD_CLOSED, PERIOD_LOCKED } from '../../utils/periodGuard';
 import { lockAccounts } from '../coa/accountStructure';
@@ -26,6 +33,8 @@ export interface OrphanAleGroup {
   credit: Prisma.Decimal;
   firstDate: Date;
   lastDate: Date;
+  /** Every distinct row date, oldest first. */
+  dates: Date[];
   fiscalYearIds: string[];
   fiscalYearNames: string[];
   yearClosed: boolean;
@@ -41,6 +50,8 @@ export interface OrphanRepairResult {
   skipped: { key: string; reason: string }[];
   /** Accounts whose stored balance the recalculation changed. */
   rebalanced: string[];
+  /** Revenue/expense accounts moved by the cancelled rows only (a fiscal year is closed). */
+  adjusted: string[];
 }
 
 export const orphanKey = (g: Pick<OrphanAleGroup, 'referenceType' | 'referenceId'>): string => `${g.referenceType}:${g.referenceId}`;
@@ -60,6 +71,7 @@ interface GroupRow {
   credit: string;
   first_date: Date;
   last_date: Date;
+  dates: Date[];
   fiscal_year_ids: string[];
   fiscal_year_names: string[];
   year_closed: boolean;
@@ -74,12 +86,21 @@ const PERIOD_ACTION: Record<string, OrphanGroupAction> = {
 };
 
 /**
- * The period guard on a group: its fiscal years (closed or missing) and the lock date on its
- * earliest day. Returns the report-only action it falls in, or null when the group may change.
+ * The period guard on a group, the way the cancel paths call it: the fiscal year covering each row
+ * date (closed or missing) and the lock date on each day, plus every fiscal year the rows are
+ * tagged with, since an older date edit can leave that id stale. Returns the report-only action
+ * it falls in, or null when the group may change.
  */
-async function periodRefusal(tx: Tx, g: Pick<OrphanAleGroup, 'firstDate' | 'fiscalYearIds'>): Promise<OrphanGroupAction | null> {
+async function periodRefusal(
+  tx: Tx,
+  g: Pick<OrphanAleGroup, 'firstDate' | 'dates' | 'fiscalYearIds'>,
+): Promise<OrphanGroupAction | null> {
+  const refs = [
+    ...g.dates.map((date) => ({ date })),
+    ...g.fiscalYearIds.map((fiscalYearId) => ({ date: g.firstDate, fiscalYearId })),
+  ];
   try {
-    await assertPeriodsOpen(tx, g.fiscalYearIds.map((fiscalYearId) => ({ date: g.firstDate, fiscalYearId })), 'jurnal');
+    await assertPeriodsOpen(tx, refs, 'jurnal');
     return null;
   } catch (e) {
     const action = e instanceof BusinessError && e.code ? PERIOD_ACTION[e.code] : undefined;
@@ -97,6 +118,7 @@ export async function planOrphanAleRepair(tx: Tx): Promise<OrphanAleGroup[]> {
     SELECT ale.reference_type, ale.reference_id, COUNT(*)::int AS rows,
            SUM(ale.debit)::text AS debit, SUM(ale.credit)::text AS credit,
            MIN(ale.date) AS first_date, MAX(ale.date) AS last_date,
+           array_agg(DISTINCT ale.date ORDER BY ale.date) AS dates,
            array_agg(DISTINCT ale.fiscal_year_id) AS fiscal_year_ids,
            array_agg(DISTINCT fy.name) AS fiscal_year_names,
            bool_or(fy.is_closed) AS year_closed,
@@ -119,6 +141,7 @@ export async function planOrphanAleRepair(tx: Tx): Promise<OrphanAleGroup[]> {
       credit: new Prisma.Decimal(r.credit),
       firstDate: r.first_date,
       lastDate: r.last_date,
+      dates: r.dates,
       fiscalYearIds: r.fiscal_year_ids,
       fiscalYearNames: r.fiscal_year_names,
       yearClosed: r.year_closed,
@@ -135,8 +158,8 @@ export async function planOrphanAleRepair(tx: Tx): Promise<OrphanAleGroup[]> {
 }
 
 /**
- * Cancels the planned `repair` groups in the caller's transaction, then recalculates the touched
- * accounts. A group is skipped (nothing written for it) when its active orphan rows differ from
+ * Cancels the planned `repair` groups in the caller's transaction, then updates the touched
+ * accounts (see the file header: recalculated, or moved by the cancelled rows). A group is skipped (nothing written for it) when its active orphan rows differ from
  * the plan, or the period guard now refuses it. One audit row per cancelled group names the
  * accountant. Refuses without an approver name.
  */
@@ -148,15 +171,18 @@ export async function applyOrphanAleRepair(
   const approvedBy = options.approvedBy.trim();
   if (!approvedBy) throw new Error('--apply needs --approved-by "<accountant name>"');
   const repairs = plan.filter((g) => g.action === 'repair');
-  if (repairs.length === 0) return { approvedBy, applied: [], skipped: [], rebalanced: [] };
+  if (repairs.length === 0) return { approvedBy, applied: [], skipped: [], rebalanced: [], adjusted: [] };
 
   const admin = await tx.user.findFirst({ where: { role: 'Admin', isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
   if (!admin) throw new Error('No active Admin user to record the audit rows under.');
 
   await lockAccounts(tx, repairs.flatMap((g) => g.accountIds));
+  const [{ closed_year: closedYear }] = await tx.$queryRaw<{ closed_year: boolean }[]>`
+    SELECT EXISTS (SELECT 1 FROM fiscal_years WHERE is_closed) AS closed_year`;
+  const balanceUpdate = closedYear ? 'revenue/expense by the cancelled rows, others recalculated' : 'recalculated';
   const applied: string[] = [];
   const skipped: { key: string; reason: string }[] = [];
-  const touched = new Set<string>();
+  const cancelled: { account_id: string; debit: string; credit: string }[] = [];
   for (const g of repairs) {
     const key = orphanKey(g);
     const refusal = await periodRefusal(tx, g);
@@ -180,7 +206,7 @@ export async function applyOrphanAleRepair(
     }
     const ids = current.map((r) => r.id);
     await tx.$executeRaw`UPDATE accounting_ledger_entries SET is_cancelled = true WHERE id = ANY(${ids}::text[])`;
-    for (const r of current) touched.add(r.account_id);
+    cancelled.push(...current);
     await tx.auditLog.create({
       data: {
         userId: admin.id,
@@ -191,13 +217,38 @@ export async function applyOrphanAleRepair(
           isCancelled: false, ledgerEntryIds: ids, rows: g.rows, debit: g.debit.toFixed(2), credit: g.credit.toFixed(2),
           fiscalYears: g.fiscalYearNames, accounts: g.accountNumbers,
         },
-        newValues: { isCancelled: true, approvedBy },
+        newValues: { isCancelled: true, approvedBy, balanceUpdate },
         via: 'repair',
         viaMeta: { script: ORPHAN_ALE_AUDIT_ACTION, approvedBy },
       },
     });
     applied.push(key);
   }
-  const { changed } = touched.size > 0 ? await recalculateAccountBalances(tx, [...touched]) : { changed: [] };
-  return { approvedBy, applied, skipped, rebalanced: changed.map((c) => c.accountNumber) };
+  const { rebalanced, adjusted } = await updateTouchedBalances(tx, cancelled, closedYear);
+  return { approvedBy, applied, skipped, rebalanced, adjusted };
+}
+
+/** The balance update of the file header for the cancelled rows; returns the account numbers. */
+async function updateTouchedBalances(
+  tx: Tx,
+  cancelled: readonly { account_id: string; debit: string; credit: string }[],
+  closedYear: boolean,
+): Promise<{ rebalanced: string[]; adjusted: string[] }> {
+  const ids = [...new Set(cancelled.map((r) => r.account_id))];
+  if (ids.length === 0) return { rebalanced: [], adjusted: [] };
+  const accounts = await tx.account.findMany({ where: { id: { in: ids } }, select: { id: true, accountNumber: true, rootType: true } });
+  const byDelta = new Set(
+    closedYear ? accounts.filter((a) => a.rootType === 'REVENUE' || a.rootType === 'EXPENSE').map((a) => a.id) : [],
+  );
+  const rootTypes = new Map<string, RootType>(accounts.map((a) => [a.id, a.rootType]));
+  // Cancelling a row takes its impact off: the same lines with debit and credit swapped.
+  await applyAccountImpacts(
+    tx,
+    cancelled.filter((r) => byDelta.has(r.account_id)).map((r) => ({ accountId: r.account_id, debit: r.credit, credit: r.debit })),
+    rootTypes,
+  );
+  const recalc = ids.filter((id) => !byDelta.has(id));
+  const { changed } = recalc.length > 0 ? await recalculateAccountBalances(tx, recalc) : { changed: [] };
+  const adjusted = accounts.filter((a) => byDelta.has(a.id)).map((a) => a.accountNumber).sort();
+  return { rebalanced: changed.map((c) => c.accountNumber), adjusted };
 }

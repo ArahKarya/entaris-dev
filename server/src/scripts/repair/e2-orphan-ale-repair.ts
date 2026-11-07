@@ -1,12 +1,15 @@
 // Orphan ledger rows (E2-R14). Dry run by default: lists every active ledger row group whose
 // JournalEntry, StockMovement or StockOpname no longer exists, per reference, with its fiscal years:
 //   repair            JournalEntry in an open fiscal year outside the period lock: --apply cancels it
-//   closed-year       in a closed fiscal year: report only, correct by journal in an open period
+//   closed-year       dated in or tagged with a closed fiscal year: report only, correct by journal
+//                     in an open period
 //   period-locked     on or before the period lock date: report only (move the lock back first)
-//   no-fiscal-year    tagged with a fiscal year that does not cover it: report only
+//   no-fiscal-year    a row date that no fiscal year covers: report only
 //   stock-reference   StockMovement/StockOpname rows: report only (no code writes these any more)
 // --apply cancels each repair group as a whole (is_cancelled = true, rows stay) and recalculates
-// accounts.balance of the touched accounts from the ledger. It needs --approved-by "<accountant
+// accounts.balance of the touched accounts from the ledger, except revenue/expense accounts while
+// a fiscal year is closed: those only lose the cancelled rows' amount, since until PR-5.5 their
+// stored balance leaves out the closed years (e2-stored-balance-recalc reports that). It needs --approved-by "<accountant
 // name>"; the name goes on one audit row per group and in the CSV, which --apply always writes
 // (default file name when --out is not given) before the transaction starts.
 //
@@ -83,6 +86,9 @@ async function main() {
     applied = new Set(result.applied);
     console.log(`Cancelled ${result.applied.length} orphan group(s), approved by ${result.approvedBy}.`);
     if (result.rebalanced.length > 0) console.log(`Stored balance recalculated: ${result.rebalanced.join(', ')}`);
+    if (result.adjusted.length > 0) {
+      console.log(`Stored balance moved by the cancelled rows only (a fiscal year is closed): ${result.adjusted.join(', ')}`);
+    }
     for (const s of result.skipped) console.log(`Skipped ${s.key}: ${s.reason}`);
   } else {
     console.log('Dry run: nothing written. Pass --apply --approved-by "<accountant name>" to cancel the repair groups.');

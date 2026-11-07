@@ -5,9 +5,10 @@
 // utils/accountBalance.ts recalculateAccountBalances all go through this file.
 //
 // Until the year close stops changing revenue/expense balances (PR-5.5), a closed year's
-// contribution is subtracted from those accounts at close and added back at reopen, while every
-// recalculation in between restores the whole history. The plan below explains a difference by
-// those per-year contributions so the accountant can approve the one-time recalculation.
+// contribution is subtracted from those accounts at close and added back at reopen, each time as it
+// stood at that moment, while every recalculation in between restores the whole history. The plan
+// below explains a difference by those close and reopen amounts so the accountant can approve the
+// one-time recalculation.
 import { Prisma, type RootType } from '@prisma/client';
 import { lockAccounts } from '../coa/accountStructure';
 
@@ -151,10 +152,22 @@ export interface RecalcYear {
   reopened: boolean;
 }
 
+/** A close or reopen of a year, with the amount it moved one account's stored balance by. */
+export interface YearEvent {
+  action: 'close' | 'reopen';
+  /**
+   * The year's contribution as the event saw it: its active rows created up to the event. A row
+   * cancelled after the event is missing here, so such an account comes out unexplained.
+   */
+  contribution: Prisma.Decimal;
+}
+
 export interface YearContribution {
   year: RecalcYear;
-  /** Signed by the account's normal side. */
+  /** Today's contribution, signed by the account's normal side. */
   contribution: Prisma.Decimal;
+  /** The year's closes (-) and reopens (+), oldest first. */
+  events: YearEvent[];
 }
 
 export interface StoredBalancePlanRow extends AccountBalanceDrift {
@@ -164,19 +177,39 @@ export interface StoredBalancePlanRow extends AccountBalanceDrift {
   explanation: string | null;
 }
 
-/** Years beyond this many are not combined (2^n subsets); the row is then unexplained. */
+/** Years beyond this many are not combined; the row is then unexplained. */
 export const MAX_COMBINED_YEARS = 12;
 
-/**
- * The sign a year's contribution can carry in `stored - ledger`: the close subtracts it (a closed
- * year: -1, or 0 after a recalculation), the reopen adds it back (an open reopened year: +1 when a
- * recalculation ran while it was closed, else 0). Any other year: 0.
- */
-const allowedSign = (y: RecalcYear): -1 | 1 | 0 => (y.isClosed ? -1 : y.reopened ? 1 : 0);
+/** Combinations beyond this many (years times their candidate amounts) are not tried. */
+export const MAX_COMBINATIONS = 1 << MAX_COMBINED_YEARS;
+
+interface Candidate {
+  amount: Prisma.Decimal;
+  label: string;
+  events: number;
+}
 
 /**
- * Pure: `ok` within the tolerance, `closed-year` when the difference equals the signed sum of a
- * subset of the contributions (smallest subset first), `unexplained` otherwise.
+ * What one year can leave in `stored - ledger`: the events after the last recalculation of the
+ * account, i.e. a suffix of its closes (-) and reopens (+), or nothing. Shortest suffix first;
+ * suffixes that cancel out are left out.
+ */
+function yearCandidates(c: YearContribution): Candidate[] {
+  const out: Candidate[] = [];
+  for (let k = c.events.length - 1; k >= 0; k--) {
+    const suffix = c.events.slice(k);
+    const amount = suffix.reduce((s, e) => (e.action === 'close' ? s.minus(e.contribution) : s.plus(e.contribution)), new Prisma.Decimal(0));
+    if (amount.isZero()) continue;
+    const label = suffix.map((e) => `${e.action === 'close' ? '-' : '+'}${c.year.name}`).join(' ');
+    out.push({ amount, label, events: suffix.length });
+  }
+  return out;
+}
+
+/**
+ * Pure: `ok` within the tolerance, `closed-year` when the difference equals the sum of one
+ * candidate (see yearCandidates) for each of a set of years (fewest years and events first),
+ * `unexplained` otherwise.
  */
 export function classifyStoredBalance(
   difference: Prisma.Decimal.Value,
@@ -184,21 +217,20 @@ export function classifyStoredBalance(
 ): { class: StoredBalanceClass; explanation: string | null } {
   const diff = new Prisma.Decimal(difference);
   if (diff.abs().lte(STORED_BALANCE_TOLERANCE)) return { class: 'ok', explanation: null };
-  const terms = contributions
-    .map((c) => ({ c, sign: allowedSign(c.year) }))
-    .filter((t) => t.sign !== 0 && !t.c.contribution.isZero());
-  if (terms.length === 0 || terms.length > MAX_COMBINED_YEARS) return { class: 'unexplained', explanation: null };
-  const masks = Array.from({ length: (1 << terms.length) - 1 }, (_, i) => i + 1);
-  const bits = (m: number) => terms.filter((_, i) => m & (1 << i));
-  masks.sort((x, y) => bits(x).length - bits(y).length || x - y);
-  for (const mask of masks) {
-    const picked = bits(mask);
-    const sum = picked.reduce((s, t) => s.plus(t.c.contribution.times(t.sign)), new Prisma.Decimal(0));
+  const terms = contributions.map(yearCandidates).filter((t) => t.length > 0);
+  const size = terms.reduce((n, t) => n * (t.length + 1), 1);
+  if (terms.length === 0 || terms.length > MAX_COMBINED_YEARS || size > MAX_COMBINATIONS) {
+    return { class: 'unexplained', explanation: null };
+  }
+  // Built from the last year back so equal-sized combinations keep the earlier years first.
+  let combos: Candidate[][] = [[]];
+  for (const t of [...terms].reverse()) combos = combos.flatMap((c) => [c, ...t.map((k) => [k, ...c])]);
+  const events = (c: Candidate[]) => c.reduce((n, k) => n + k.events, 0);
+  const ordered = combos.filter((c) => c.length > 0).sort((x, y) => x.length - y.length || events(x) - events(y));
+  for (const picked of ordered) {
+    const sum = picked.reduce((s, k) => s.plus(k.amount), new Prisma.Decimal(0));
     if (sum.minus(diff).abs().lte(STORED_BALANCE_TOLERANCE)) {
-      return {
-        class: 'closed-year',
-        explanation: picked.map((t) => `${t.sign < 0 ? '-' : '+'}${t.c.year.name}`).join(' '),
-      };
+      return { class: 'closed-year', explanation: picked.map((k) => k.label).join(' ') };
     }
   }
   return { class: 'unexplained', explanation: null };
@@ -219,26 +251,8 @@ export async function planStoredBalanceRecalc(db: Db): Promise<{ years: RecalcYe
      ORDER BY fy.start_date, fy.name
   `;
   const years: RecalcYear[] = yearRows.map((y) => ({ fiscalYearId: y.id, name: y.name, isClosed: y.is_closed, reopened: y.reopened }));
-  const yearById = new Map(years.map((y) => [y.fiscalYearId, y]));
 
-  const sums = years.length === 0 ? [] : await db.$queryRaw<{ account_id: string; fiscal_year_id: string; contribution: string }[]>`
-    SELECT ale.account_id, ale.fiscal_year_id,
-           (${signed(Prisma.sql`SUM(ale.debit)`, Prisma.sql`SUM(ale.credit)`)})::text AS contribution
-      FROM accounting_ledger_entries ale
-      JOIN accounts a ON a.id = ale.account_id
-     WHERE ale.is_cancelled = false
-       AND a."rootType"::text IN ('REVENUE', 'EXPENSE')
-       AND ale.fiscal_year_id = ANY(${years.map((y) => y.fiscalYearId)}::text[])
-     GROUP BY ale.account_id, ale.fiscal_year_id, a."rootType"
-  `;
-  const byAccount = new Map<string, YearContribution[]>();
-  for (const s of sums) {
-    const contribution = new Prisma.Decimal(s.contribution);
-    if (contribution.isZero()) continue;
-    const list = byAccount.get(s.account_id) ?? [];
-    list.push({ year: yearById.get(s.fiscal_year_id)!, contribution });
-    byAccount.set(s.account_id, list);
-  }
+  const byAccount = years.length === 0 ? new Map<string, YearContribution[]>() : await yearContributions(db, years);
 
   const drifted = await findAccountBalanceDrift(db);
   const seen = new Set(drifted.rows.map((r) => r.accountId));
@@ -257,4 +271,58 @@ export async function planStoredBalanceRecalc(db: Db): Promise<{ years: RecalcYe
   });
   rows.sort((x, y) => x.accountNumber.localeCompare(y.accountNumber));
   return { years, rows };
+}
+
+/**
+ * Per revenue/expense account: each year's contribution today and as each of its closes and
+ * reopens saw it (the rows created up to the event). A closed year without a close event (closed
+ * before the events were recorded) gets one with today's contribution.
+ */
+async function yearContributions(db: Db, years: readonly RecalcYear[]): Promise<Map<string, YearContribution[]>> {
+  const ids = years.map((y) => y.fiscalYearId);
+  const today = await db.$queryRaw<{ account_id: string; fiscal_year_id: string; contribution: string }[]>`
+    SELECT ale.account_id, ale.fiscal_year_id,
+           (${signed(Prisma.sql`SUM(ale.debit)`, Prisma.sql`SUM(ale.credit)`)})::text AS contribution
+      FROM accounting_ledger_entries ale
+      JOIN accounts a ON a.id = ale.account_id
+     WHERE ale.is_cancelled = false
+       AND a."rootType"::text IN ('REVENUE', 'EXPENSE')
+       AND ale.fiscal_year_id = ANY(${ids}::text[])
+     GROUP BY ale.account_id, ale.fiscal_year_id, a."rootType"
+  `;
+  const events = await db.$queryRaw<{ id: string; fiscal_year_id: string; action: 'close' | 'reopen' }[]>`
+    SELECT id, fiscal_year_id, action FROM fiscal_year_events
+     WHERE fiscal_year_id = ANY(${ids}::text[]) ORDER BY created_at, id
+  `;
+  const atEvent = events.length === 0 ? [] : await db.$queryRaw<{ account_id: string; event_id: string; contribution: string }[]>`
+    SELECT ale.account_id, e.id AS event_id,
+           (${signed(Prisma.sql`SUM(ale.debit)`, Prisma.sql`SUM(ale.credit)`)})::text AS contribution
+      FROM fiscal_year_events e
+      JOIN accounting_ledger_entries ale
+        ON ale.fiscal_year_id = e.fiscal_year_id AND ale.created_at <= e.created_at AND ale.is_cancelled = false
+      JOIN accounts a ON a.id = ale.account_id
+     WHERE e.fiscal_year_id = ANY(${ids}::text[])
+       AND a."rootType"::text IN ('REVENUE', 'EXPENSE')
+     GROUP BY ale.account_id, e.id, a."rootType"
+  `;
+  const key = (accountId: string, other: string) => `${accountId}|${other}`;
+  const todayOf = new Map(today.map((t) => [key(t.account_id, t.fiscal_year_id), new Prisma.Decimal(t.contribution)]));
+  const atEventOf = new Map(atEvent.map((t) => [key(t.account_id, t.event_id), new Prisma.Decimal(t.contribution)]));
+  const accountIds = new Set([...today.map((t) => t.account_id), ...atEvent.map((t) => t.account_id)]);
+
+  const byAccount = new Map<string, YearContribution[]>();
+  for (const accountId of accountIds) {
+    const list: YearContribution[] = [];
+    for (const year of years) {
+      const contribution = todayOf.get(key(accountId, year.fiscalYearId)) ?? new Prisma.Decimal(0);
+      const yearEvents: YearEvent[] = events
+        .filter((e) => e.fiscal_year_id === year.fiscalYearId)
+        .map((e) => ({ action: e.action, contribution: atEventOf.get(key(accountId, e.id)) ?? new Prisma.Decimal(0) }));
+      if (year.isClosed && yearEvents.at(-1)?.action !== 'close') yearEvents.push({ action: 'close', contribution });
+      if (contribution.isZero() && yearEvents.every((e) => e.contribution.isZero())) continue;
+      list.push({ year, contribution, events: yearEvents });
+    }
+    if (list.length > 0) byAccount.set(accountId, list);
+  }
+  return byAccount;
 }

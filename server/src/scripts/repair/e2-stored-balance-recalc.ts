@@ -2,8 +2,9 @@
 // from the sum of its active ledger rows over all years, and every revenue/expense account with
 // ledger rows in a closed or reopened fiscal year, with that year's contribution per column:
 //   ok            within half a cent
-//   closed-year   the difference is a signed sum of year contributions: a year close subtracted
-//                 them (-), or a reopen added one back after a recalculation (+)
+//   closed-year   the difference is a signed sum of year closes and reopens since the account's
+//                 last recalculation: a close subtracted the year's contribution as it stood then
+//                 (-), a reopen added it back (+); "+2025 -2025" is a reopen and a second close
 //   unexplained   anything else: review before any recalculation
 // Only the stored balance column changes on a recalculation (COA page, delete/deactivate guards);
 // the reports read the ledger and do not move.
