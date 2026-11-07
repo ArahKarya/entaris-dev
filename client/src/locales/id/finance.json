@@ -2399,6 +2399,13 @@
       "reasonTooShort": "Alasan minimal {{min}} karakter.",
       "dateNote": "Jurnal reklas bertanggal hari ini dan tidak dapat dibatalkan dari menu Jurnal.",
       "cancel": "Batal"
+    },
+    "showUnused": "Tampilkan role yang belum dipakai ({{count}})",
+    "usage": {
+      "posting": "Dipakai posting otomatis",
+      "default": "Mengisi awal pilihan akun",
+      "manual": "Hanya untuk jurnal manual",
+      "belum": "Belum dipakai otomatis"
     }
   },
   "timeline": {

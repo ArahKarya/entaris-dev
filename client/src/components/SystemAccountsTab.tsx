@@ -9,12 +9,16 @@ import { ComboboxFilter, EmptyState, LoadingState } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { SystemAccountReclassDialog, type ReclassBalance } from '@/components/settings/SystemAccountReclassDialog';
 
+/** How the server uses a role: posting reads it, default pre-fills a picker, manual is for journals, belum is unused. */
+type RoleUsage = 'posting' | 'default' | 'manual' | 'belum';
+
 interface RoleMeta {
   key: string;
   label: string;
   description: string;
   multiAccount: boolean;
   required: boolean;
+  usage?: RoleUsage;
   expectedRootType: string;
   /** Balance-sheet single-account role: moving it reclasses the old account's balance. */
   balanceMoves?: boolean;
@@ -89,6 +93,8 @@ export const SystemAccountsTab: React.FC = () => {
   const [hasChanges, setHasChanges] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  // Roles nothing reads yet stay out of sight (and out of the stats) until asked for.
+  const [showUnused, setShowUnused] = useState(false);
   // ACCOUNT_HAS_BALANCE answer of the last save, shown in the transfer dialog.
   const [pendingTransfer, setPendingTransfer] = useState<ReclassBalance[] | null>(null);
   // Former account residues of one role, shown in the sweep dialog.
@@ -124,13 +130,14 @@ export const SystemAccountsTab: React.FC = () => {
   // Summary stats
   const stats = useMemo(() => {
     if (!data) return { total: 0, configured: 0, required: 0, requiredConfigured: 0 };
-    const total = data.roles.length;
-    const configured = data.roles.filter((r) => {
+    const active = data.roles.filter((r) => r.usage !== 'belum');
+    const total = active.length;
+    const configured = active.filter((r) => {
       const ids = editState[r.key] ?? currentMappings[r.key] ?? [];
       return ids.length > 0;
     }).length;
-    const required = data.roles.filter((r) => r.required).length;
-    const requiredConfigured = data.roles.filter((r) => {
+    const required = active.filter((r) => r.required).length;
+    const requiredConfigured = active.filter((r) => {
       if (!r.required) return false;
       const ids = editState[r.key] ?? currentMappings[r.key] ?? [];
       return ids.length > 0;
@@ -229,13 +236,16 @@ export const SystemAccountsTab: React.FC = () => {
     });
   };
 
+  const unusedCount = data?.roles.filter((r) => r.usage === 'belum').length ?? 0;
+  const isShown = (meta: RoleMeta) => showUnused || meta.usage !== 'belum';
+
   const getGroupStatus = (roles: string[]): { total: number; configured: number; allRequired: boolean } => {
     let total = 0;
     let configured = 0;
     let allRequired = true;
     for (const roleKey of roles) {
       const meta = getRoleMeta(roleKey);
-      if (!meta) continue;
+      if (!meta || !isShown(meta)) continue;
       total++;
       const ids = getEditValue(roleKey);
       if (ids.length > 0) configured++;
@@ -251,13 +261,14 @@ export const SystemAccountsTab: React.FC = () => {
       title: t(`systemAccountsTab.groups.${group.key}.title`),
       description: t(`systemAccountsTab.groups.${group.key}.description`),
     }));
-    if (!searchTerm) return groups;
     const q = searchTerm.toLowerCase();
     return groups.map((group) => ({
       ...group,
       roles: group.roles.filter((roleKey) => {
         const meta = data?.roles.find((r) => r.key === roleKey);
         if (!meta) return false;
+        if (!showUnused && meta.usage === 'belum') return false;
+        if (!searchTerm) return true;
         return (
           meta.label.toLowerCase().includes(q) ||
           meta.description.toLowerCase().includes(q) ||
@@ -266,7 +277,7 @@ export const SystemAccountsTab: React.FC = () => {
         );
       }),
     })).filter((group) => group.roles.length > 0);
-  }, [searchTerm, data, t]);
+  }, [searchTerm, showUnused, data, t]);
 
   if (isLoading) {
     return <LoadingState label={t('systemAccountsTab.loading')} />;
@@ -354,6 +365,18 @@ export const SystemAccountsTab: React.FC = () => {
         />
       </div>
 
+      {unusedCount > 0 && (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer w-fit">
+          <input
+            type="checkbox"
+            checked={showUnused}
+            onChange={(e) => setShowUnused(e.target.checked)}
+            data-testid="show-unused-roles"
+          />
+          {t('systemAccountsTab.showUnused', { count: unusedCount })}
+        </label>
+      )}
+
       {/* Groups */}
       {filteredGroups.map((group) => {
         const isCollapsed = collapsedGroups.has(group.key);
@@ -418,6 +441,17 @@ export const SystemAccountsTab: React.FC = () => {
                             {meta.required && (
                               <span className="text-xs font-medium text-primary bg-primary-subtle px-1.5 py-0.5 rounded">
                                 {t('systemAccountsTab.required')}
+                              </span>
+                            )}
+                            {meta.usage && (
+                              <span
+                                className={cn(
+                                  'text-xs font-medium px-1.5 py-0.5 rounded',
+                                  meta.usage === 'belum' ? 'text-warning-text bg-warning-subtle' : 'text-muted-foreground bg-muted',
+                                )}
+                                data-testid={`role-usage-${roleKey}`}
+                              >
+                                {t(`systemAccountsTab.usage.${meta.usage}`)}
                               </span>
                             )}
                             {meta.multiAccount && (

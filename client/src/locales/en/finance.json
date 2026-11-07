@@ -2399,6 +2399,13 @@
       "reasonTooShort": "The reason must be at least {{min}} characters.",
       "dateNote": "The reclass journal is dated today and cannot be cancelled from the Journal menu.",
       "cancel": "Cancel"
+    },
+    "showUnused": "Show roles not used yet ({{count}})",
+    "usage": {
+      "posting": "Used by automatic posting",
+      "default": "Pre-fills pickers",
+      "manual": "Manual journals only",
+      "belum": "Not used automatically yet"
     }
   },
   "timeline": {
