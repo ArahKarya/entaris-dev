@@ -6595,7 +6595,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Saldo tersimpan dibandingkan dengan jumlah ledger aktif sepanjang masa (semua tahun buku); count = semua akun yang selisih, details paling banyak 50 baris (saldo tersimpan, saldo ledger, selisih, sumbangan tahun tertutup untuk akun laba rugi). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia menimpa kolom saldo tersimpan akun yang selisih (baris ledger tidak berubah) dan butuh capability doc.cancel.",
+      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Saldo tersimpan dibandingkan dengan jumlah ledger aktif sepanjang masa (semua tahun buku); count = semua akun yang selisih, details paling banyak 50 baris (saldo tersimpan, saldo ledger, selisih, sumbangan tahun tertutup untuk akun laba rugi, class closed-year bila selisihnya dijelaskan tutup/buka tahun buku atau unexplained, dan penjelasannya). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia menimpa kolom saldo tersimpan akun yang selisih (baris ledger tidak berubah), butuh capability doc.cancel, dan ditolak seluruhnya (STORED_BALANCE_REVIEW_REQUIRED) selama ada baris unexplained; baris itu ditinjau akuntan lewat skrip e2-stored-balance-recalc.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -13232,7 +13232,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Menetapkan saldo awal sebuah akun detail ke nilai balance. Selisih terhadap saldo sekarang diposting sebagai jurnal Saldo Awal (OB) berlawanan dengan akun Ekuitas Saldo Awal (3.1) pada tahun buku terbuka.",
+      "desc": "Menetapkan saldo awal sebuah akun detail aset, kewajiban, atau ekuitas ke nilai balance. Selisih terhadap saldo sekarang diposting sebagai jurnal Saldo Awal (OB) berlawanan dengan akun Ekuitas Saldo Awal (3.1) pada tahun buku terbuka. Akun pendapatan/beban ditolak (ACCOUNT_ROOT_TYPE): saldo tersimpannya mencakup semua tahun buku, koreksi lewat jurnal di periode berjalan.",
       "risk": "critical",
       "roles": [
         "Admin"
@@ -13267,15 +13267,17 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Jurnal OB-… status Submitted + ledger: akun ASET/BEBAN delta>0 → DR akun / CR 3.1 (delta<0 sebaliknya); akun KEWAJIBAN/EKUITAS/PENDAPATAN delta>0 → CR akun / DR 3.1. Saldo kedua akun diperbarui. Tanpa selisih (<0,01) tidak ada jurnal.",
+      "postingEffect": "Jurnal OB-… status Submitted + ledger: akun ASET delta>0 → DR akun / CR 3.1 (delta<0 sebaliknya); akun KEWAJIBAN/EKUITAS delta>0 → CR akun / DR 3.1. Saldo kedua akun diperbarui. Tanpa selisih (<0,01) tidak ada jurnal.",
       "confirm_template": "Set saldo awal akun {id} menjadi {balance}? Selisih diposting ke Ekuitas Saldo Awal (3.1).",
       "prerequisites": [
         "Ada tahun buku terbuka untuk hari ini.",
         "Akun bukan akun grup.",
+        "Akun bertipe aset, kewajiban, atau ekuitas (bukan pendapatan/beban).",
         "Akun sistem OPENING_EQUITY terpetakan."
       ],
       "errors": [
         "400: akun grup tidak bisa diberi saldo",
+        "400 ACCOUNT_ROOT_TYPE: akun pendapatan/beban tidak bisa diberi saldo awal",
         "400: tidak ada tahun buku terbuka"
       ],
       "related": [
@@ -28009,7 +28011,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja); akun neraca juga wajib bersaldo tersimpan tepat 0, sedangkan saldo tersimpan akun pendapatan/beban (sepanjang masa) tidak dipakai. currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"

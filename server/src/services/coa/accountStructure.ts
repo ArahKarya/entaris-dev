@@ -52,8 +52,9 @@ export async function loadStructureFacts(tx: Db, ids: readonly string[]): Promis
   for (const row of ledger) {
     const f = facts.get(row.accountId)!;
     f.hasLedger = true;
-    // Balance-sheet accounts carry their whole history; revenue/expense are zeroed per year by the
-    // close, so only open years can still block (closed years just show a presentation balance).
+    // Balance-sheet accounts carry their whole history. A revenue/expense account's closed years
+    // are moved to retained earnings by the close and stay only as history (its stored balance
+    // still spans every year), so only open years can still block.
     const pnl = ['REVENUE', 'EXPENSE'].includes(rootTypeOf.get(row.accountId) ?? '');
     if (pnl && closedYear.has(row.fiscalYearId)) continue;
     f.deactivationNet = f.deactivationNet.plus(row._sum.debit ?? 0).minus(row._sum.credit ?? 0);

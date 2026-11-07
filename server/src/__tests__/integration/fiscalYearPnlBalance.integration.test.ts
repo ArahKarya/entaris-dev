@@ -12,6 +12,8 @@
  * - Reopening and closing 2147 again (CLOSE-<name>-R2) leaves revenue and expense as they are;
  *   current profit and retained earnings follow the CLOSE journal; closeJournalPredicate finds
  *   both CLOSE journals of the year.
+ * - PATCH /coa/:id/balance refuses a revenue or expense account (ACCOUNT_ROOT_TYPE) and posts
+ *   nothing: its stored balance spans both years, so `new - stored` would hit the open year.
  * - A reopen without an active CLOSE although the last close recorded a profit logs a warning
  *   and still reopens.
  */
@@ -220,6 +222,27 @@ d('fiscal year close and reopen keep revenue and expense balances (PR-5.5)', () 
         [`CLOSE-${b.fy.name}-R2`, 'Submitted'],
       ]);
       expect(await tx.journalEntry.count({ where: closeJournalPredicate(b.next) })).toBe(0);
+    });
+  });
+
+  it('refuses an opening balance on revenue or expense once a closed year is in the stored balance', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      await post(tx, b.fy, `${Y}-03-15`, b.cashId, b.revenueId, 1000 * JT);
+      await post(tx, b.next, `${Y + 1}-02-10`, b.cashId, b.revenueId, 200 * JT);
+      await post(tx, b.next, `${Y + 1}-02-11`, b.expenseId, b.cashId, 10 * JT);
+      expect((await close(b.fy.id)).status).toBe(200);
+      const journalsBefore = await tx.journalEntry.count();
+
+      for (const id of [b.revenueId, b.expenseId]) {
+        // 250 jt meant as this year's figure would have posted 250 jt - 1.2 M against revenue.
+        const res = await callRoute(coaRouter, 'patch', '/:id/balance', { params: { id }, body: { balance: 250 * JT }, ...asActor() });
+        expect(res.status, JSON.stringify(res.body)).toBe(400);
+        expect(res.body.code).toBe('ACCOUNT_ROOT_TYPE');
+      }
+      expect(await balance(tx, b.revenueId)).toBe(1200 * JT);
+      expect(await balance(tx, b.expenseId)).toBe(10 * JT);
+      expect(await tx.journalEntry.count()).toBe(journalsBefore);
     });
   });
 

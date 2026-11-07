@@ -16,7 +16,7 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 
 1. **Bagan akun (COA)**: pohon akun bernomor bertitik (`1.1.1`, `2.1.1`, ...). Digit pertama menentukan golongan: 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 dan 7 Pendapatan, 5, 6, dan 8 Beban. Tipe akun selalu diturunkan dari digit pertama; nilai `rootType`/`accountType` yang berbeda ditolak. Akun grup (`isGroup`) hanya pengelompok dan tidak boleh dijurnal; transaksi selalu ke akun detail aktif. Cari `accountId` lewat `coa_flat` sebelum membuat jurnal atau pengajuan.
 2. **Jurnal manual**: `je_create` memposting jurnal `JV-…` langsung berstatus Submitted (tidak ada draf). Dipakai untuk koreksi, transfer antar bank, dan penyesuaian. Aturannya sama dengan seluruh posting buku besar: minimal 2 baris bernilai, total debit tepat sama dengan total kredit (tanpa toleransi sen, `JOURNAL_UNBALANCED`), maksimal 2 desimal, akun detail yang aktif. Baris ke akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability `journal.control` (default hanya Admin, `ACCOUNT_CONTROL`); akun Uang Muka Customer/Supplier selalu ditolak, koreksinya lewat modul Uang Muka. Pihak (`partyId`) wajib di baris Piutang Usaha (Customer) dan Hutang Usaha (Supplier) dan dilarang di baris lain (`PARTY_REQUIRED`, `PARTY_NOT_ALLOWED`, `PARTY_TYPE_MISMATCH`); untuk beban, tulis nama Supplier di keterangan. Saldo piutang/hutang pihak dihitung ulang dari dokumen ditambah penyesuaian manual, juga saat jurnal dibatalkan. `je_cancel` hanya membatalkan jurnal buatan manusia: sumber MANUAL (`je_create`), IMPORT, RECURRING, atau CASH_BOOK (Draft Buku Kas), dan butuh capability `doc.cancel`. Jurnal dari modul lain (pembayaran, faktur, STT, HPP, uang muka, tutup buku, penyusutan, saldo awal) dan jurnal lama yang sumbernya tidak tercatat ditolak dengan `JOURNAL_NOT_MANUAL`; batalkan dari dokumen asalnya, atau buat jurnal balik manual dengan `je_create`.
-3. **Saldo awal**: `coa_set_balance` menyetel saldo akun detail ke nilai tertentu. Selisihnya diposting sebagai jurnal `OB-…` melawan Ekuitas Saldo Awal (3.1).
+3. **Saldo awal**: `coa_set_balance` menyetel saldo akun detail aset, kewajiban, atau ekuitas ke nilai tertentu. Selisihnya diposting sebagai jurnal `OB-…` melawan Ekuitas Saldo Awal (3.1). Akun pendapatan/beban ditolak (`ACCOUNT_ROOT_TYPE`): saldo tersimpannya mencakup semua tahun buku, koreksinya lewat jurnal di periode berjalan.
 4. **Tahun buku**: setiap posting wajib jatuh pada tahun buku yang terbuka (`getOpenFiscalYear`). `fy_create` membuat periode; `fy_close` menutup buku (jurnal `CLOSE-<nama>`); `fy_reopen` membukanya lagi. Periode yang ditutup menolak posting baru dengan kode `PERIOD_CLOSED`; tanggal yang tidak tercakup tahun buku mana pun ditolak dengan `FISCAL_YEAR_MISSING`. Di dalam tahun buku yang terbuka berlaku **kunci periode bulanan**: `period_lock_get` menampilkan tanggal kuncinya, dan posting, edit, atau pembatalan bertanggal pada atau sebelum tanggal itu ditolak dengan `PERIOD_LOCKED` (quotation, SO, PO, proforma, inquiry, dan surat jalan sementara dikecualikan karena tanpa efek GL/stok). `period_lock_set` memajukan, memundurkan, atau membuka kunci; butuh capability `period.lock` (default hanya Admin), dan memundurkan atau membuka kunci wajib alasan. Koreksi untuk bulan yang terkunci dibuat di periode terbuka, atau minta pemegang `period.lock` memundurkan kunci. Selama tutup atau buka buku tahun itu masih berjalan, posting ke tahun tersebut menunggu paling lama 3 detik lalu ditolak dengan `PERIOD_BUSY`; tidak ada yang tersimpan, jadi ulangi setelah proses itu selesai.
 5. **Akun sistem**: `sysacct_get`/`sysacct_update` memetakan peran akun (Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, dst.) ke akun COA konkret. Semua auto-posting membaca pemetaan ini.
 6. **Pajak**: `tax_get_config` dan tiga tool tulisnya mengelola tarif (PPN penjualan/pembelian, PPh potong). `tax_report` meringkas PPN keluaran, PPN masukan, dan PPh per bulan dari faktur berstatus Submitted/Paid/PartiallyPaid/Overdue.
@@ -29,10 +29,10 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 |------|-------|--------|---------|
 | `je_create` | sesuai baris | sesuai baris | Total debit tepat = total kredit; satu baris tidak boleh debit sekaligus kredit; akun kontrol butuh `journal.control`, akun uang muka ditolak |
 | `je_cancel` | (membalik) | (membalik) | Saldo akun dibalik, status Cancelled |
-| `coa_set_balance` aset/beban naik | akun | Ekuitas Saldo Awal 3.1 | Turun: kebalikannya |
-| `coa_set_balance` kewajiban/ekuitas/pendapatan naik | Ekuitas Saldo Awal 3.1 | akun | Turun: kebalikannya |
+| `coa_set_balance` aset naik | akun | Ekuitas Saldo Awal 3.1 | Turun: kebalikannya |
+| `coa_set_balance` kewajiban/ekuitas naik | Ekuitas Saldo Awal 3.1 | akun | Turun: kebalikannya |
 | `fy_close` (laba) | Laba Tahun Berjalan 3.4 | Laba Ditahan 3.2 | Rugi: kebalikannya; saldo tersimpan akun pendapatan & beban tidak berubah |
-| `fy_reopen` | (tanpa jurnal baru) | (tanpa jurnal baru) | Jurnal penutup `CLOSE-<nama>` yang aktif dibatalkan, bukan dibalik dan bukan dihapus (status Cancelled beserta alasannya); efeknya pada 3.2 dan 3.4 hilang dan saldo pendapatan/beban kembali. Penutupan berikutnya bernomor `CLOSE-<nama>-R2`, `-R3`, ... |
+| `fy_reopen` | (tanpa jurnal baru) | (tanpa jurnal baru) | Jurnal penutup `CLOSE-<nama>` yang aktif dibatalkan, bukan dibalik dan bukan dihapus (status Cancelled beserta alasannya); efeknya pada 3.2 dan 3.4 hilang; saldo tersimpan akun pendapatan/beban tidak berubah. Penutupan berikutnya bernomor `CLOSE-<nama>-R2`, `-R3`, ... |
 | `fa_depreciate` / bulk | Beban Penyusutan (akun aset) | Akumulasi Penyusutan | Jurnal `DEP-…`; nilai buku aset berkurang |
 
 Akun sistem utama (jangan dihapus/diubah; didefinisikan di `constants/accountNumbers.ts`): 1.1.x Kas/Bank, 1.2.1 Piutang Usaha, 1.3 Uang Muka Pembelian, 1.4.0 Persediaan, 1.5.6 Uang Muka Karyawan, 2.1.1 Hutang Usaha, 2.1.5 Hutang Belum Tagih, 3.1 Ekuitas Saldo Awal, 3.2 Laba Ditahan, 3.4 Laba Tahun Berjalan, 4.1 Penjualan, 4.2 Pendapatan Jasa, 5 HPP, 5.11 Selisih Harga Pembelian.
@@ -53,7 +53,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - **Tahun buku tidak terbuka**: posting jurnal/saldo awal ditolak ("tahun buku tidak ditemukan/ditutup"). Periksa `fy_list` lebih dulu.
 - **Jurnal tidak seimbang**: toleransi hanya 0,01. Jangan memecah satu baris menjadi debit dan kredit sekaligus.
 - **`je_cancel` pada jurnal otomatis** selalu ditolak (`JOURNAL_NOT_MANUAL`); gunakan pembatalan dokumen asal (faktur, pembayaran, aplikasi/offset uang muka) atau jurnal balik manual untuk jurnal lama tanpa sumber.
-- **`coa_update`** hanya menyimpan nomor, nama, status grup, dan aktif; tipe akun dan induk tidak dapat diubah, dan mengganti nama tidak mengubah tipe. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor atau status grup (`ACCOUNT_STRUCTURE_LOCKED`; nomor yang masih dalam golongan yang sama boleh diganti). Menonaktifkan akun ditolak (`ACCOUNT_DEACTIVATE_BLOCKED`) bila saldo tidak tepat nol, akun dipetakan sebagai akun sistem, masih punya sub-akun aktif, atau masih bersaldo di buku besar.
+- **`coa_update`** hanya menyimpan nomor, nama, status grup, dan aktif; tipe akun dan induk tidak dapat diubah, dan mengganti nama tidak mengubah tipe. Nomor akun yang dipetakan sebagai akun sistem tidak boleh diganti; akun grup yang masih punya anak tidak bisa dijadikan akun detail. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor atau status grup (`ACCOUNT_STRUCTURE_LOCKED`; nomor yang masih dalam golongan yang sama boleh diganti). Menonaktifkan akun ditolak (`ACCOUNT_DEACTIVATE_BLOCKED`) bila saldo tersimpan akun neraca tidak tepat nol, akun dipetakan sebagai akun sistem, masih punya sub-akun aktif, atau masih bersaldo di buku besar. Untuk akun pendapatan/beban saldo tersimpan (jumlah sepanjang masa, termasuk tahun tertutup) tidak dipakai; yang menahan hanya saldo buku besarnya di tahun buku terbuka, jadi akun yang hanya bertransaksi di tahun tertutup boleh dinonaktifkan.
 - **`coa_delete`** menolak bila ada sub-akun, pemetaan akun sistem, tautan ke item persediaan/jasa, mutasi buku besar, atau saldo bukan nol.
 - **Tutup buku** mengunci tahun itu dan memindahkan labanya ke Laba Ditahan; saldo tersimpan akun pendapatan/beban (jumlah ledger sepanjang masa) tidak berubah, kolom Saldo COA untuk akun itu menampilkan tahun buku berjalan. Jangan dipanggil sebelum jurnal penyesuaian selesai. Panggil `fy_close_checklist` dulu: `fy_close` ditolak dengan `CLOSE_CHECKLIST_FAILED` selama ada butir yang memblokir (tahun sebelumnya masih terbuka, jurnal/invoice/pembayaran Draft di tahun itu, penyusutan bulan-bulan tahun itu belum diposting, ledger tidak seimbang atau tidak sinkron dengan jurnal, akun sistem penutup belum dipetakan). Peringatan (draft lain, surat jalan belum ditagih) tidak memblokir. Selisih ledger lama yang tercatat di baseline saat rilis tidak memblokir selama nominalnya sama; laporkan butir yang memblokir ke pengguna, jangan mencoba menutup ulang. `fy_reopen` membatalkan jurnal penutupnya (tidak memposting jurnal balik) dan wajib alasan 5-500 karakter. Ditolak dengan `FY_LATER_CLOSED` bila tahun buku sesudahnya masih ditutup (buka kembali tahun itu dulu), dan dengan `PERIOD_LOCKED` bila kunci periode mencakup tanggal akhir tahun buku (mundurkan kunci dulu).
 - **Penyusutan bulk**: baris yang sudah diposting dilewati; hanya aset berstatus Active. Posting penyusutan tidak memeriksa tahun buku tertutup di kode saat ini, jadi pastikan periode yang dimaksud memang masih terbuka.
@@ -320,7 +320,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_set_balance
 
-**Ringkasan:** Menetapkan saldo awal sebuah akun detail ke nilai balance. Selisih terhadap saldo sekarang diposting sebagai jurnal Saldo Awal (OB) berlawanan dengan akun Ekuitas Saldo Awal (3.1) pada tahun buku terbuka.
+**Ringkasan:** Menetapkan saldo awal sebuah akun detail aset, kewajiban, atau ekuitas ke nilai balance. Selisih terhadap saldo sekarang diposting sebagai jurnal Saldo Awal (OB) berlawanan dengan akun Ekuitas Saldo Awal (3.1) pada tahun buku terbuka. Akun pendapatan/beban ditolak (ACCOUNT_ROOT_TYPE): saldo tersimpannya mencakup semua tahun buku, koreksi lewat jurnal di periode berjalan.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -361,7 +361,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 **Isi hasil:** Akun dengan saldo terbaru.
 
-**Efek pembukuan/stok:** Jurnal OB-… status Submitted + ledger: akun ASET/BEBAN delta>0 → DR akun / CR 3.1 (delta<0 sebaliknya); akun KEWAJIBAN/EKUITAS/PENDAPATAN delta>0 → CR akun / DR 3.1. Saldo kedua akun diperbarui. Tanpa selisih (<0,01) tidak ada jurnal.
+**Efek pembukuan/stok:** Jurnal OB-… status Submitted + ledger: akun ASET delta>0 → DR akun / CR 3.1 (delta<0 sebaliknya); akun KEWAJIBAN/EKUITAS delta>0 → CR akun / DR 3.1. Saldo kedua akun diperbarui. Tanpa selisih (<0,01) tidak ada jurnal.
 
 **Teks konfirmasi:** Set saldo awal akun {id} menjadi {balance}? Selisih diposting ke Ekuitas Saldo Awal (3.1).
 
@@ -369,18 +369,20 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 - Ada tahun buku terbuka untuk hari ini.
 - Akun bukan akun grup.
+- Akun bertipe aset, kewajiban, atau ekuitas (bukan pendapatan/beban).
 - Akun sistem OPENING_EQUITY terpetakan.
 
 **Error umum**
 
 - 400: akun grup tidak bisa diberi saldo
+- 400 ACCOUNT_ROOT_TYPE: akun pendapatan/beban tidak bisa diberi saldo awal
 - 400: tidak ada tahun buku terbuka
 
 **Tool terkait:** [`coa_flat`](#coa_flat), [`je_list`](#je_list)
 
 ### coa_update
 
-**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
+**Ringkasan:** Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja); akun neraca juga wajib bersaldo tersimpan tepat 0, sedangkan saldo tersimpan akun pendapatan/beban (sepanjang masa) tidak dipakai. currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)

@@ -132,6 +132,7 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "{0} akun: saldo tersimpan berbeda dengan buku besar": "{0} accounts: the stored balance differs from the ledger",
   "Saldo tersimpan semua akun sama dengan buku besar": "The stored balance of every account matches the ledger",
   "Saldo tersimpan {0} akun diisi ulang dari buku besar": "Refilled the stored balance of {0} accounts from the ledger",
+  "Perbaiki ditolak: {0} akun berselisih tanpa penjelasan tutup/buka tahun buku dan perlu ditinjau akuntan lewat skrip e2-stored-balance-recalc": "Fix refused: {0} accounts differ in a way no fiscal year close or reopen explains and need the accountant's review through the e2-stored-balance-recalc script",
   // health checks: ledger rows per journal, non-journal ledger rows, party outstanding (E2-R14)
   "Baris Buku Besar setiap jurnal sama dengan baris jurnalnya": "The General Ledger rows of every journal match its journal lines",
   "{0} jurnal STT dibatalkan dengan cara lama (jurnal -CXL); menunggu skrip data STT lama": "{0} STT journals were cancelled the old way (a -CXL journal); waiting for the legacy STT data script",

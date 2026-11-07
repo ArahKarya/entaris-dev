@@ -15,6 +15,7 @@ import { systemAccountRenumberError } from '../utils/systemAccountGuard';
 import { planCreate, planUpdate } from '../services/coa/accountRules';
 import { accountIdsWithLedger, loadStructureFacts, lockAccounts } from '../services/coa/accountStructure';
 import { loadPartyRoleMap } from '../services/ledger/partyRules';
+import { OPENING_ACCOUNT_RULE, postableAccountProblem } from '../services/ledger/accountGuard';
 import { currentPnlYear, currentProfit, pnlPeriodBalances } from '../services/coa/pnlPeriodBalances';
 import { businessToday } from '../utils/businessDate';
 
@@ -180,6 +181,12 @@ router.patch('/:id/balance', async (req: AuthRequest, res) => {
       const account = await tx.account.findUnique({ where: { id } });
       if (!account) throw new BusinessError('Akun tidak ditemukan.');
       if (account.isGroup) throw new BusinessError('Tidak bisa set saldo untuk akun grup.');
+      // Revenue/expense accounts are refused ahead of the opening-balance service (5.7a): their stored
+      // balance spans every year, closed ones too (E2-R15), so `new - stored` would post the
+      // difference against a total the COA column (current year only) does not show. Only the root
+      // type of OPENING_ACCOUNT_RULE is checked here; control accounts stay as they were until 5.7a.
+      const rootTypeProblem = postableAccountProblem(account, { ...OPENING_ACCOUNT_RULE, allowGroupOrInactive: true }, null);
+      if (rootTypeProblem) throw new BusinessError(rootTypeProblem.message, rootTypeProblem.code);
 
       const currentBalance = Number(account.balance);
       const newBalance = body.balance;

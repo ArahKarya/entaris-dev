@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const fixes = vi.hoisted(() => ({
+  FIX_ACTION: 'FIX_ACCOUNT_BALANCE_DRIFT',
   previewAccountBalanceDrift: vi.fn(async () => ({ description: 'd', count: 0, details: [] })),
   fixAccountBalanceDrift: vi.fn(async () => ({ fixed: 1, message: 'ok' })),
 }));
