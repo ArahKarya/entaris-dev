@@ -22304,7 +22304,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR 5.12 Biaya Konversi Dibebankan (s.d. total biaya konversi) dan sisanya CR 5.1 HPP Beras; rugi produksi = DR 5.1. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).",
+      "postingEffect": "Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).",
       "confirm_template": "Posting draft produksi {id} menjadi Data Produksi? Stok, WAC, dan jurnal akan terbentuk (non-Admin: masuk antrian persetujuan).",
       "accessNote": "Pembuat draft atau pemegang approval.bypass. Klaim draft atomik sehingga tidak bisa dobel-posting.",
       "prerequisites": [
@@ -22316,7 +22316,8 @@
         "403: hanya pembuat draft yang boleh memostingnya",
         "400: stok input tidak cukup (draft tetap Draft, lastError terisi)",
         "404: draft tidak ditemukan",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain"
       ],
       "related": [
         "prod_draft_get",
@@ -26418,7 +26419,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang langsung (role bypass): JV-RN: DR 4.3 Retur Penjualan (+ DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR HPP. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).",
+      "postingEffect": "Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).",
       "confirm_template": "Buat Retur Penjualan untuk invoice {salesInvoiceId} tanggal {date}?",
       "accessNote": "Role tanpa approval.bypass hanya mengantrikan approval; keputusan oleh Admin/pemegang approval.decide.",
       "prerequisites": [
@@ -26429,7 +26430,7 @@
       "errors": [
         "400: qty retur melebihi sisa yang bisa diretur.",
         "400: invoice sudah dibatalkan.",
-        "400: akun 4.3 tidak ditemukan.",
+        "400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
       ],
@@ -26724,7 +26725,7 @@
       "phase": 3,
       "service": "salesInvoiceSubmit",
       "draftCapable": false,
-      "postingEffect": "GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR 5.1 HPP / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.",
+      "postingEffect": "GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.",
       "confirm_template": "Terbitkan Invoice Penjualan untuk pelanggan {partyId} tanggal {date} (jurnal & stok langsung diposting)?",
       "accessNote": "Risiko direklasifikasi dari write: endpoint ini memposting GL, stok, dan HPP sekaligus.",
       "prerequisites": [
@@ -26736,7 +26737,8 @@
         "400: pelanggan tidak ditemukan/tidak aktif.",
         "400: stok tidak cukup.",
         "400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak"
       ],
       "related": [
         "do_pending",
@@ -28248,6 +28250,7 @@
         "403: bypass stok minus butuh capability.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
+        "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan",
         "403: tanpa capability doc.cancel"
@@ -30852,7 +30855,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR 5.12 Biaya Konversi Dibebankan atau CR/DR 5.1 HPP). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.",
+      "postingEffect": "Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.",
       "confirm_template": "Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).",
       "accessNote": "Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).",
       "prerequisites": [

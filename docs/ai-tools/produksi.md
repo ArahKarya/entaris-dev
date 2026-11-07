@@ -1065,7 +1065,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 **Isi hasil:** Bypass: 201 production run yang dibuat. Non-bypass: 202 {pendingApproval:true, request, message}.
 
-**Efek pembukuan/stok:** Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR 5.12 Biaya Konversi Dibebankan (s.d. total biaya konversi) dan sisanya CR 5.1 HPP Beras; rugi produksi = DR 5.1. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).
+**Efek pembukuan/stok:** Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).
 
 **Teks konfirmasi:** Posting draft produksi {id} menjadi Data Produksi? Stok, WAC, dan jurnal akan terbentuk (non-Admin: masuk antrian persetujuan).
 
@@ -1081,6 +1081,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400: stok input tidak cukup (draft tetap Draft, lastError terisi)
 - 404: draft tidak ditemukan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain
 
 **Tool terkait:** [`prod_draft_get`](#prod_draft_get), [`prod_run_get`](#prod_run_get), [`prod_run_update`](#prod_run_update)
 
@@ -1699,7 +1700,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 **Isi hasil:** Bypass: run hasil edit (200). Non-bypass: 202 {pendingApproval, request}.
 
-**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR 5.12 Biaya Konversi Dibebankan atau CR/DR 5.1 HPP). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.
+**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.
 
 **Teks konfirmasi:** Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).
 
