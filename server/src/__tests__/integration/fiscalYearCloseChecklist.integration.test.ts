@@ -11,6 +11,8 @@
  * - An unbalanced ledger group (lines 100/100, ledger 100/90) blocks through ledger-balanced and
  *   ale-vs-journal; captured in the baseline with the same amount it no longer blocks; once its
  *   amount changes, or a new mismatch appears, the close is refused again.
+ * - A document booked twice (ledger rows of type SalesInvoice next to its journal's twin rows)
+ *   blocks through non-journal-ale-duplicate until the baseline has it.
  * - GET /:id/close-checklist without doc.cancel: 403; an unmapped CURRENT_PROFIT shows up in it.
  *
  * The years are in the far past (1961/1960): every check counts the year's own rows, but
@@ -19,6 +21,7 @@
  * whose `$transaction` is a savepoint; everything runs in a rollback transaction.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
@@ -367,6 +370,31 @@ d('year-close checklist', () => {
       const list = await expectRefused(tx, b.fy);
       expect(failing(list, 'block')).toEqual(['ale-vs-journal']);
       expect(check(list, 'ale-vs-journal').items).toEqual([expect.objectContaining({ key: `${je.id}@${b.fy.id}`, amount: '6000000.00' })]);
+    });
+  });
+
+  it('a document booked twice (its own ledger rows next to its journal) blocks until baselined', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      await post(tx, b.fy, `${Y}-08-05`, b.cashId, b.revenueId, 4 * JT);
+      // Old generator rows on the document itself, twins of the journal's rows (balanced).
+      const docId = randomUUID();
+      const row = { date: new Date(`${Y}-08-05`), referenceType: 'SalesInvoice', referenceId: docId, fiscalYearId: b.fy.id };
+      await tx.accountingLedgerEntry.createMany({
+        data: [{ ...row, accountId: b.cashId, debit: 4 * JT, credit: 0 }, { ...row, accountId: b.revenueId, debit: 0, credit: 4 * JT }],
+      });
+
+      const list = await expectRefused(tx, b.fy);
+      expect(failing(list, 'block')).toEqual(['non-journal-ale-duplicate']);
+      expect(check(list, 'non-journal-ale-duplicate').items).toEqual([
+        { key: `SalesInvoice:${docId}@${b.fy.id}`, kind: 'SalesInvoice', label: docId, date: `${Y}-08-05`, amount: '4000000.00' },
+      ]);
+      expect(check(list, 'ale-vs-journal').status).toBe('ok');
+
+      const captured = await captureCloseBaseline(tx, b.fy, true);
+      expect(captured.map((c) => [c.checkId, c.item.key])).toEqual([['non-journal-ale-duplicate', `SalesInvoice:${docId}@${b.fy.id}`]]);
+      expect((await checklist(b.fy.id)).body).toMatchObject({ canClose: true, blocking: 0 });
+      await expectClosed(b.fy);
     });
   });
 
