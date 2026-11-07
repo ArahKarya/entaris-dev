@@ -53,6 +53,11 @@ const IGNORED = new Set<string>([
   // services/ledger/openingBalanceAuditArgs.ts), CLI only.
   'Use either --apply or --dry-run.',
   '--check-duplicates takes no other argument',
+  // Refusals of the legacy STT cancel repair (scripts/repair/e1-stt-cancel-model.ts,
+  // services/ledger/sttCancelLegacy.ts, services/ledger/sttCancelLegacyArgs.ts), CLI only.
+  '--include-ale-fix only goes with --apply',
+  'No fiscal year named {0}',
+  'Nothing was changed: the ledger rows of {0} changed while the run was planned.',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */
