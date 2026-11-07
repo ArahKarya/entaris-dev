@@ -138,7 +138,7 @@ function stubProfitMapping(id: string) {
     role === 'CURRENT_PROFIT' ? [{ id, accountNumber: id, name: id }] : original(role));
 }
 
-type Row = { id: string; balance: string; periodBalance?: string | null; periodYearName?: string | null; children: Row[] };
+type Row = { id: string; balance: string; periodBalance?: string | null; periodYearName?: string | null; periodApplies?: boolean; children: Row[] };
 const flatten = (rows: Row[]): Row[] => rows.flatMap((r) => [r, ...flatten(r.children)]);
 
 async function coaRows(): Promise<Map<string, Row>> {
@@ -196,11 +196,18 @@ d('COA profit and loss balances of the current fiscal year (E2-R15a)', () => {
     await inRollback(async (tx) => {
       await halfYear(tx, 2, false);
       const revenue = await account(tx, 'REVENUE', numberUnder('4'));
-      clockAt('2160-06-15T05:00:00Z');
+      const profitAcc = await account(tx, 'EQUITY', numberUnder('3'));
+      const cash = await account(tx, 'ASSET', numberUnder('1'));
+      stubProfitMapping(profitAcc.id);
+      clockAt(`${Y}-03-15T05:00:00Z`);
 
-      const row = (await coaRows()).get(revenue.id)!;
-      expect(row.periodBalance).toBeNull();
-      expect(row.periodYearName).toBeNull();
+      const rows = await coaRows();
+      for (const id of [revenue.id, profitAcc.id]) {
+        expect(rows.get(id)!.periodBalance).toBeNull();
+        expect(rows.get(id)!.periodYearName).toBeNull();
+        expect(rows.get(id)!.periodApplies).toBe(true);
+      }
+      expect(rows.get(cash.id)!.periodApplies).toBe(false);
     });
   });
 

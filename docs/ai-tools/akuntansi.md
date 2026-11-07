@@ -314,7 +314,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 }
 ```
 
-**Isi hasil:** Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, periodBalance, periodYearName, children[]. periodBalance = saldo tahun buku berjalan dari buku besar untuk akun pendapatan/beban dan laba tahun berjalan untuk akun CURRENT_PROFIT; null untuk akun neraca lain atau bila tidak ada tahun buku berjalan.
+**Isi hasil:** Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, periodBalance, periodYearName, periodApplies, children[]. periodApplies = true pada akun pendapatan/beban dan CURRENT_PROFIT. periodBalance = saldo tahun buku berjalan dari buku besar untuk akun pendapatan/beban dan laba tahun berjalan untuk akun CURRENT_PROFIT; null untuk akun neraca lain, dan null (dengan periodApplies true) bila tidak ada tahun buku berjalan: saldo tersimpan akun CURRENT_PROFIT bukan laba berjalan.
 
 **Tool terkait:** [`coa_flat`](#coa_flat), [`coa_create`](#coa_create)
 

@@ -31,6 +31,7 @@ function acc(
     balance?: string | number;
     periodBalance?: string | null;
     periodYearName?: string | null;
+    periodApplies?: boolean;
     children?: CoaAccount[];
     active?: boolean;
   } = {},
@@ -46,7 +47,7 @@ function acc(
     isActive: opts.active ?? true,
     balance: opts.balance ?? '0',
     parentId: null,
-    ...(opts.periodBalance !== undefined ? { periodBalance: opts.periodBalance, periodYearName: opts.periodYearName ?? null } : {}),
+    ...(opts.periodBalance !== undefined ? { periodBalance: opts.periodBalance, periodYearName: opts.periodYearName ?? null, ...(opts.periodApplies ? { periodApplies: true } : {}) } : {}),
     children: opts.children ?? [],
   };
 }
@@ -163,6 +164,16 @@ describe('period balance (Saldo column of the current fiscal year)', () => {
     expect(hasDisplayBalance(g)).toBe(false);
     expect(hasDisplayBalance(g.children[0])).toBe(false);
     expect(displayBalance(g.children[0])).toBe(0);
+  });
+
+  it('shows a dash on the current-profit account when no fiscal year holds today, not the stored balance', () => {
+    const [cp] = buildCoaTree([acc('3.4', 'Laba Berjalan', 'EQUITY', { balance: '-500', periodBalance: null, periodApplies: true })]);
+    expect(hasDisplayBalance(cp)).toBe(false);
+    expect(exportRows([cp])[0].balance).toBe('');
+  });
+
+  it('exports the same period figure as the Saldo column', () => {
+    expect(exportRows(pnl)[1].balance).toBe('200');
   });
 
   it('shows the profit on the current-profit equity account', () => {

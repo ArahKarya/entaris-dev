@@ -58,6 +58,8 @@ export interface CoaAccount {
   periodBalance?: number | string | null;
   /** Name of the fiscal year behind periodBalance. */
   periodYearName?: string | null;
+  /** True on revenue, expense and current-profit rows: a null periodBalance then means "no fiscal year", not "balance sheet". */
+  periodApplies?: boolean;
   children?: CoaAccount[];
 }
 
@@ -103,7 +105,7 @@ export function isZero(n: number): boolean {
 function shownOf(acc: CoaAccount, balance: number): number | null {
   if (acc.periodBalance === undefined) return balance;
   if (acc.periodBalance !== null) return toNumber(acc.periodBalance) ?? 0;
-  return acc.rootType === 'REVENUE' || acc.rootType === 'EXPENSE' ? null : balance;
+  return acc.periodApplies || acc.rootType === 'REVENUE' || acc.rootType === 'EXPENSE' ? null : balance;
 }
 
 /**
@@ -342,7 +344,8 @@ export function exportRows(nodes: readonly CoaNode[]) {
     rootType: n.rootType,
     accountType: n.account.accountType,
     isGroup: n.isGroup ? i18n.t('finance:coaTree.yes') : i18n.t('finance:coaTree.no'),
-    balance: n.account.balance,
+    // Same figure as the Saldo column: the period balance when the server sent one, empty when there is no year.
+    balance: n.account.periodBalance === undefined ? n.account.balance : n.shown === null ? '' : n.account.periodBalance,
   }));
 }
 

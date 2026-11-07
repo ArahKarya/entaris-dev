@@ -27,10 +27,10 @@ async function withLocked<T extends { id: string }>(accounts: T[]): Promise<(T &
 }
 
 /**
- * Adds periodBalance (what the Saldo column shows) and periodYearName to each account: for revenue and
+ * Adds periodBalance (what the Saldo column shows), periodYearName and periodApplies to each account: for revenue and
  * expense accounts the ledger balance of the fiscal year holding today; for the CURRENT_PROFIT account
  * the profit of that year; null for balance sheet accounts, and for revenue and expense accounts when no
- * fiscal year holds today. It is read from the ledger, not from accounts.balance (E2-R15a).
+ * fiscal year holds today; periodApplies is true on those rows and on CURRENT_PROFIT. It is read from the ledger, not from accounts.balance (E2-R15a).
  */
 async function withPeriodBalance<T extends { id: string; rootType: string }>(accounts: T[]) {
   const year = await currentPnlYear(prisma, businessToday());
@@ -42,7 +42,9 @@ async function withPeriodBalance<T extends { id: string; rootType: string }>(acc
     const isPnl = acc.rootType === 'REVENUE' || acc.rootType === 'EXPENSE';
     const periodBalance =
       !year ? null : isPnl ? (amountOf.get(acc.id) ?? new Prisma.Decimal(0)).toString() : profitIds.has(acc.id) ? profit : null;
-    return { ...acc, periodBalance, periodYearName: periodBalance === null ? null : year!.name };
+    // periodApplies tells "no year for a period account" (shown as a dash) from a balance sheet account.
+    const periodApplies = isPnl || profitIds.has(acc.id);
+    return { ...acc, periodBalance, periodYearName: periodBalance === null ? null : year!.name, periodApplies };
   });
 }
 
