@@ -177,6 +177,7 @@ async function main() {
     { accountNumber: '2.2.4', name: 'PPh Ps.4(2) Pembelian', accountType: L, rootType: RootType.LIABILITY, isGroup: false, parentNumber: '2.2' },
     { accountNumber: '2.2.5', name: 'Hutang PPh 21', accountType: L, rootType: RootType.LIABILITY, isGroup: false, parentNumber: '2.2' },
     { accountNumber: '2.2.6', name: 'Hutang Gaji Karyawan', accountType: L, rootType: RootType.LIABILITY, isGroup: false, parentNumber: '2.2' },
+    { accountNumber: '2.2.7', name: 'Biaya Masih Harus Dibayar', accountType: L, rootType: RootType.LIABILITY, isGroup: false, parentNumber: '2.2' },
 
     // 2.3 Hutang Jangka Panjang
     { accountNumber: '2.3', name: 'Hutang Jangka Panjang', accountType: L, rootType: RootType.LIABILITY, isGroup: true, parentNumber: '2' },
@@ -395,7 +396,7 @@ async function main() {
     // Akrual & Dibayar Dimuka
     { role: 'PREPAID_EXPENSE', accountNumber: '1.5.1', sortOrder: 0 },
     { role: 'PREPAID_EXPENSE', accountNumber: '1.5.2', sortOrder: 1 },
-    { role: 'ACCRUED_EXPENSE', accountNumber: '2.2.6', sortOrder: 0 },
+    { role: 'ACCRUED_EXPENSE', accountNumber: '2.2.7', sortOrder: 0 },
     // Ekuitas tambahan
     { role: 'OWNER_DRAWING', accountNumber: '3.5', sortOrder: 0 },
     // Pendapatan & Beban Lain-lain
@@ -420,6 +421,12 @@ async function main() {
     // never read, so a leftover row there is dropped before the 5.12 mapping is written.
     if (mapping.role === 'PRODUCTION_CONVERSION') {
       await prisma.systemAccountMapping.deleteMany({ where: { role: mapping.role, accountId: { not: accountId } } });
+    }
+    // ACCRUED_EXPENSE moved from 2.2.6 (payroll payable) to 2.2.7. A re-seed must not add a second
+    // mapping next to a tenant's own choice; the loose SQL 2026110900000 remaps the untouched legacy one.
+    if (mapping.role === 'ACCRUED_EXPENSE'
+      && await prisma.systemAccountMapping.count({ where: { role: mapping.role } }) > 0) {
+      continue;
     }
     await prisma.systemAccountMapping.upsert({
       where: {
