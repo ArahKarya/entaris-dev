@@ -15,6 +15,7 @@ const db = vi.hoisted(() => {
     systemAccountMapping: { findMany: vi.fn() },
     inventoryItem: { findMany: vi.fn() },
     journalEntry: { findMany: vi.fn() },
+    systemAccountRoleMove: { findMany: vi.fn(async () => []) },
   };
   return { ...tx, $transaction: vi.fn(async (fn: any) => fn(tx)), _tx: tx };
 });

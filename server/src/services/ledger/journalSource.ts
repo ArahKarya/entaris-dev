@@ -60,9 +60,15 @@ export const sourceKeys = {
     if (!Number.isInteger(groupNo) || groupNo < 1) throw new Error(`sourceKey import group "${groupNo}" must be a positive integer`);
     return `IMPORT:${fileSha256.slice(0, 16)}:${groupNo}`;
   },
-  /** Balance-sheet reclass when a system account role moves from one account to another. */
-  remap: (role: string, fromAccountId: string, toAccountId: string, day: Date | string): string =>
-    `REMAP:${keyPart(role)}:${keyPart(fromAccountId)}:${keyPart(toAccountId)}:${dayPart(day).replace(/-/g, '')}`,
+  /**
+   * Balance-sheet reclass when a system account role moves from one account to another. A reclass
+   * too long for one journal is split; each piece carries its 1-based part number.
+   */
+  remap: (role: string, fromAccountId: string, toAccountId: string, day: Date | string, part?: number): string => {
+    if (part !== undefined && (!Number.isInteger(part) || part < 1)) throw new Error(`sourceKey remap part "${part}" must be a positive integer`);
+    const key = `REMAP:${keyPart(role)}:${keyPart(fromAccountId)}:${keyPart(toAccountId)}:${dayPart(day).replace(/-/g, '')}`;
+    return part === undefined ? key : `${key}:${part}`;
+  },
   /** Opening balance of an account. */
   openingAccount: (accountId: string): string => `OPENING:ACCOUNT:${keyPart(accountId)}`,
   /** Opening balance of one subledger of a party. */
@@ -83,14 +89,19 @@ export interface RemapKey {
   toAccountId: string;
   /** YYYYMMDD business day of the reclass. */
   day: string;
+  /** Part number of a split reclass; absent for a reclass in one journal. */
+  part?: number;
 }
 
 /** Parts of a remap sourceKey, or null when the key is not one. */
 export function parseRemapSourceKey(key: string | null | undefined): RemapKey | null {
   if (!key?.startsWith(REMAP_KEY_PREFIX)) return null;
   const parts = key.split(':');
-  if (parts.length !== 5 || parts.slice(1).some((p) => !p) || !/^\d{8}$/.test(parts[4])) return null;
-  return { role: parts[1], fromAccountId: parts[2], toAccountId: parts[3], day: parts[4] };
+  if (parts.length !== 5 && parts.length !== 6) return null;
+  if (parts.slice(1).some((p) => !p) || !/^\d{8}$/.test(parts[4])) return null;
+  if (parts.length === 6 && !/^[1-9]\d*$/.test(parts[5])) return null;
+  const key5 = { role: parts[1], fromAccountId: parts[2], toAccountId: parts[3], day: parts[4] };
+  return parts.length === 6 ? { ...key5, part: Number(parts[5]) } : key5;
 }
 
 export type ClassifyConfidence = 'high' | 'medium' | 'low';

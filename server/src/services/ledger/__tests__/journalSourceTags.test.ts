@@ -10,7 +10,6 @@ const SRC = join(__dirname, '../../..');
 /** file (relative to src) -> source type -> number of writers tagged with it. */
 const EXPECTED: Record<string, Record<string, number>> = {
   'services/recurringExecute.ts': { RECURRING: 1 },
-  'routes/import/journals.ts': { IMPORT: 1 },
   'routes/fiscalYears.ts': { FY_CLOSE: 1 },
   'routes/fixedAssets.ts': { DEPRECIATION: 2 },
   'routes/customerDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
@@ -20,6 +19,7 @@ const EXPECTED: Record<string, Record<string, number>> = {
   'routes/import/parties.ts': { OPENING: 3 },
   'services/openingStockImport.ts': { OPENING: 1 },
   'services/cashBookDraftPost.ts': { CASH_BOOK: 1 },
+  'services/systemAccountRemap.ts': { SYSTEM_DOC: 1 },
 };
 
 function count(text: string, needle: string): number {
@@ -79,6 +79,14 @@ describe('journal writers tag their source type', () => {
     const args = callArgs(text, 'createManualJournalInTx');
     expect(args).toHaveLength(1);
     expect(args[0]).toContain("sourceType: 'MANUAL'");
+  });
+
+  it('the journal import posts IMPORT through createManualJournalInTx', () => {
+    const text = readFileSync(join(SRC, 'routes/import/journals.ts'), 'utf8');
+    const args = callArgs(text, 'createManualJournalInTx');
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain("sourceType: 'IMPORT'");
+    expect(args[0]).toContain('sourceKey');
   });
 
   it('the year-close journal posts through postJournal with its fiscal-year key', () => {

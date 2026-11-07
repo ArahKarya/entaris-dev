@@ -7,6 +7,7 @@ import { Save, Loader2, AlertTriangle, Plus, X, ChevronDown, ChevronRight, Check
 import { cn } from '../lib/utils';
 import { ComboboxFilter, EmptyState, LoadingState } from '@/components/shared';
 import { Button } from '@/components/ui/button';
+import { SystemAccountReclassDialog, type ReclassBalance } from '@/components/settings/SystemAccountReclassDialog';
 
 interface RoleMeta {
   key: string;
@@ -15,6 +16,8 @@ interface RoleMeta {
   multiAccount: boolean;
   required: boolean;
   expectedRootType: string;
+  /** Balance-sheet single-account role: moving it reclasses the old account's balance. */
+  balanceMoves?: boolean;
 }
 
 interface MappingEntry {
@@ -29,6 +32,13 @@ interface MappingEntry {
 interface SystemAccountsData {
   mappings: Record<string, MappingEntry[]>;
   roles: RoleMeta[];
+  /** Old accounts of balance-sheet roles still holding a balance after a remap. */
+  formerResidues?: Array<ReclassBalance & { sweepable: boolean }>;
+}
+
+interface SaveError {
+  message?: string;
+  response?: { data?: { error?: string; code?: string; balances?: ReclassBalance[] } };
 }
 
 interface AccountOption {
@@ -79,6 +89,10 @@ export const SystemAccountsTab: React.FC = () => {
   const [hasChanges, setHasChanges] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  // ACCOUNT_HAS_BALANCE answer of the last save, shown in the transfer dialog.
+  const [pendingTransfer, setPendingTransfer] = useState<ReclassBalance[] | null>(null);
+  // Former account residues of one role, shown in the sweep dialog.
+  const [pendingSweep, setPendingSweep] = useState<{ role: string; balances: ReclassBalance[] } | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery<SystemAccountsData>({
     queryKey: ['system-accounts'],
@@ -134,7 +148,7 @@ export const SystemAccountsTab: React.FC = () => {
   };
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (transfer?: { reason: string }) => {
       const mappings: { role: string; accountId: string; sortOrder: number }[] = [];
       const clearRoles: string[] = [];
       for (const [role, accountIds] of Object.entries(editState)) {
@@ -152,18 +166,48 @@ export const SystemAccountsTab: React.FC = () => {
         }
       }
       if (mappings.length === 0 && clearRoles.length === 0) return;
-      await api.put('/system-accounts', { mappings, clearRoles });
+      const body = transfer ? { mappings, clearRoles, transferBalance: true, reason: transfer.reason } : { mappings, clearRoles };
+      await api.put('/system-accounts', body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['system-accounts'] });
       setEditState({});
       setHasChanges(false);
+      setPendingTransfer(null);
       toast.success(t('systemAccountsTab.toast.saved'));
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || error.message || t('systemAccountsTab.toast.saveFailed'));
+    onError: (error: SaveError) => {
+      const data = error.response?.data;
+      if (data?.code === 'ACCOUNT_HAS_BALANCE' && data.balances?.length) {
+        setPendingTransfer(data.balances);
+        return;
+      }
+      toast.error(data?.error || error.message || t('systemAccountsTab.toast.saveFailed'));
     },
   });
+
+  const sweepMutation = useMutation({
+    mutationFn: async ({ role, reason }: { role: string; reason: string }) => {
+      await api.post(`/system-accounts/${encodeURIComponent(role)}/sweep`, { reason });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-accounts'] });
+      setPendingSweep(null);
+      toast.success(t('systemAccountsTab.toast.swept'));
+    },
+    onError: (error: SaveError) => {
+      toast.error(error.response?.data?.error || error.message || t('systemAccountsTab.toast.sweepFailed'));
+    },
+  });
+
+  const residuesByRole = useMemo(() => {
+    const byRole = new Map<string, ReclassBalance[]>();
+    for (const r of data?.formerResidues ?? []) {
+      if (!r.sweepable) continue;
+      byRole.set(r.role, [...(byRole.get(r.role) ?? []), r]);
+    }
+    return byRole;
+  }, [data]);
 
   const getRoleMeta = (key: string): RoleMeta | undefined => {
     return data?.roles.find((r) => r.key === key);
@@ -251,7 +295,7 @@ export const SystemAccountsTab: React.FC = () => {
         </div>
         {hasChanges && (
           <button
-            onClick={() => saveMutation.mutate()}
+            onClick={() => saveMutation.mutate(undefined)}
             disabled={saveMutation.isPending}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary-hover disabled:opacity-50"
           >
@@ -386,6 +430,25 @@ export const SystemAccountsTab: React.FC = () => {
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5 ml-5.5">{meta.description}</p>
+                          {!meta.multiAccount && editState[roleKey] !== undefined && (currentMappings[roleKey] ?? []).length === 1
+                            && selectedIds[0] !== undefined && selectedIds[0] !== currentMappings[roleKey][0] && (
+                            <p className="text-xs text-warning-text mt-1 ml-5.5" data-testid={`role-move-note-${roleKey}`}>
+                              {meta.balanceMoves ? t('systemAccountsTab.moveNote.balance') : t('systemAccountsTab.moveNote.history')}
+                            </p>
+                          )}
+                          {(residuesByRole.get(roleKey) ?? []).length > 0 && (
+                            <div className="mt-1.5 ml-5.5 flex flex-wrap items-center gap-2 text-xs text-warning-text">
+                              <AlertTriangle size={12} aria-hidden />
+                              <span>{t('systemAccountsTab.residue.found', { count: residuesByRole.get(roleKey)!.length })}</span>
+                              <button
+                                type="button"
+                                onClick={() => setPendingSweep({ role: roleKey, balances: residuesByRole.get(roleKey)! })}
+                                className="px-2 py-0.5 rounded-sm border border-warning-border text-warning-text hover:bg-warning-subtle"
+                              >
+                                {t('systemAccountsTab.residue.sweep')}
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex-shrink-0 w-72">
@@ -475,10 +538,27 @@ export const SystemAccountsTab: React.FC = () => {
         );
       })}
 
+      <SystemAccountReclassDialog
+        key={pendingTransfer ? 'transfer-open' : 'transfer-closed'}
+        mode="transfer"
+        balances={pendingTransfer}
+        pending={saveMutation.isPending}
+        onConfirm={(reason) => saveMutation.mutate({ reason })}
+        onCancel={() => setPendingTransfer(null)}
+      />
+      <SystemAccountReclassDialog
+        key={pendingSweep ? `sweep-${pendingSweep.role}` : 'sweep-closed'}
+        mode="sweep"
+        balances={pendingSweep?.balances ?? null}
+        pending={sweepMutation.isPending}
+        onConfirm={(reason) => pendingSweep && sweepMutation.mutate({ role: pendingSweep.role, reason })}
+        onCancel={() => setPendingSweep(null)}
+      />
+
       {/* Floating save button */}
       {hasChanges && (
         <div className="fixed bottom-6 right-6 z-50">
-          <Button size="lg" onClick={() => saveMutation.mutate()} loading={saveMutation.isPending} className="shadow-[var(--shadow-3)]">
+          <Button size="lg" onClick={() => saveMutation.mutate(undefined)} loading={saveMutation.isPending} className="shadow-[var(--shadow-3)]">
             {!saveMutation.isPending && <Save aria-hidden />}
             {t('systemAccountsTab.save')}
           </Button>

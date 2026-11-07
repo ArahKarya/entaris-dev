@@ -110,7 +110,8 @@ function makeDb(opts: { existingRows?: any[]; learned?: any[] } = {}) {
       count: vi.fn(async ({ where }: any) => [...rows.values()].filter((r) => matches(r, where)).length),
     },
     user: { findUnique: vi.fn(async () => ({ id: 'u1', fullName: 'Staf' })) },
-    // By id: the posted rows' journals. Otherwise the remap journals of loadFormerRoleAccounts (none).
+    // By id: the posted rows' journals. Otherwise the remap journals of loadFormerRoleMoves (none).
+    systemAccountRoleMove: { findMany: vi.fn(async () => []) },
     journalEntry: { findMany: vi.fn(async ({ where }: any) => (where.id ? where.id.in.map((id: string) => ({ id, entryNumber: `JV-${id}` })) : [])) },
   };
   const db: any = { ...tx, $transaction: async (fn: any) => fn(tx) };

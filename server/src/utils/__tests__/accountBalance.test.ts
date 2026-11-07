@@ -206,6 +206,7 @@ describe('recalcPartyOutstanding', () => {
       ]),
     },
     journalEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    systemAccountRoleMove: { findMany: vi.fn().mockResolvedValue([]) },
     $queryRaw: vi.fn().mockResolvedValue(adjustment === null ? [] : [{ party_id: 'p1', amount: adjustment }]),
   });
 

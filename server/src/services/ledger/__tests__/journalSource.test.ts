@@ -190,8 +190,17 @@ describe('parseRemapSourceKey', () => {
     });
   });
 
+  it('round-trips the part number of a split reclass', () => {
+    expect(sourceKeys.remap('AR', 'from', 'to', '2170-12-31', 2)).toBe('REMAP:AR:from:to:21701231:2');
+    expect(parseRemapSourceKey(sourceKeys.remap('AR', 'from', 'to', '2170-12-31', 2))).toEqual({
+      role: 'AR', fromAccountId: 'from', toAccountId: 'to', day: '21701231', part: 2,
+    });
+    expect(() => sourceKeys.remap('AR', 'a', 'b', '2170-01-01', 0)).toThrow();
+    expect(() => sourceKeys.remap('AR', 'a', 'b', '2170-01-01', 1.5)).toThrow();
+  });
+
   it('returns null for anything else', () => {
-    for (const key of [null, undefined, '', 'FY_CLOSE:fy-1', 'REMAP:AR:a:b', 'REMAP:AR:a:b:2170-01-01', 'REMAP:AR::b:21700101', 'REMAP:AR:a:b:21700101:x']) {
+    for (const key of [null, undefined, '', 'FY_CLOSE:fy-1', 'REMAP:AR:a:b', 'REMAP:AR:a:b:2170-01-01', 'REMAP:AR::b:21700101', 'REMAP:AR:a:b:21700101:x', 'REMAP:AR:a:b:21700101:0', 'REMAP:AR:a:b:21700101:1:2']) {
       expect(parseRemapSourceKey(key), String(key)).toBeNull();
     }
   });

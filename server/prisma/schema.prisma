@@ -1131,6 +1131,23 @@ model SystemAccountMapping {
   @@map("system_account_mappings")
 }
 
+/// Every move of a balance-sheet single-account system role off an account (E2-R8), with or
+/// without a reclass journal, and a clear (toAccountId null). The old account stays a former role
+/// account for the party subledgers, the control account map, the former account check and the
+/// sweep, even when nothing was left on it to reclass. Append-only; written by PUT /system-accounts.
+model SystemAccountRoleMove {
+  id            String   @id @default(uuid())
+  role          String
+  fromAccountId String   @map("from_account_id")
+  toAccountId   String?  @map("to_account_id")
+  movedBy       String   @map("moved_by")
+  reason        String?
+  movedAt       DateTime @default(now()) @map("moved_at")
+
+  @@index([role, fromAccountId])
+  @@map("system_account_role_moves")
+}
+
 enum JournalSourceType {
   MANUAL
   CASH_BOOK
