@@ -29,6 +29,11 @@ export async function checkPartyOutstandingDrift(scope: { partyIds?: readonly st
       stored: Number(r.stored),
       expected: Number(r.expected),
       difference: Number(r.storedMinusExpected),
+      // A party can be off on one side while its totals agree: the sides show which one.
+      receivable_stored: Number(r.receivable.stored),
+      receivable_expected: Number(r.receivable.expected),
+      payable_stored: Number(r.payable.stored),
+      payable_expected: Number(r.payable.expected),
     })),
     fixable: false,
   };

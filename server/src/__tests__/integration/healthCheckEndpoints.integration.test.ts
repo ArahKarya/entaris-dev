@@ -248,8 +248,29 @@ d('Party Outstanding Drift', () => {
       const fine = await tx.party.create({ data: { name: `IT2142 Fine ${tag()}`, partyType: 'Supplier', outstandingAmount: 250_000, payableOutstanding: 250_000, openingOutstanding: 250_000 } });
       const res = await checkPartyOutstandingDrift({ partyIds: [drifted.id, fine.id] });
       expect(res).toMatchObject({ name: 'Party Outstanding Drift', status: 'warning', count: 1, fixable: false });
-      expect(res.details).toEqual([{ party_name: drifted.name, party_type: 'Customer', stored: 500_000, expected: 0, difference: 500_000 }]);
+      expect(res.details).toEqual([{
+        party_name: drifted.name, party_type: 'Customer', stored: 500_000, expected: 0, difference: 500_000,
+        receivable_stored: 0, receivable_expected: 0, payable_stored: 0, payable_expected: 0,
+      }]);
       expect(await checkPartyOutstandingDrift({ partyIds: [fine.id] })).toMatchObject({ status: 'ok', count: 0 });
+    });
+  });
+
+  it('flags a party off on one side while its totals agree, and the detail shows the side', async () => {
+    await inRollback(async (tx) => {
+      // The opening payable sits on the receivable column: the total is right, both sides are not.
+      const swapped = await tx.party.create({
+        data: {
+          name: `IT2142 Swapped ${tag()}`, partyType: 'Both', openingOutstanding: 2_000_000, openingPayable: 2_000_000,
+          outstandingAmount: 2_000_000, receivableOutstanding: 2_000_000, payableOutstanding: 0,
+        },
+      });
+      const res = await checkPartyOutstandingDrift({ partyIds: [swapped.id] });
+      expect(res).toMatchObject({ status: 'warning', count: 1 });
+      expect(res.details).toEqual([{
+        party_name: swapped.name, party_type: 'Both', stored: 2_000_000, expected: 2_000_000, difference: 0,
+        receivable_stored: 2_000_000, receivable_expected: 0, payable_stored: 0, payable_expected: 2_000_000,
+      }]);
     });
   });
 

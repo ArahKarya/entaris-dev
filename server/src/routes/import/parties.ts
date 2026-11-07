@@ -7,6 +7,7 @@ import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { systemAccounts } from '../../services/systemAccounts';
 import { logger } from '../../lib/logger';
+import { computePartySides } from '../../services/ledger/partySides';
 import { upload, parseFile, sanitizeCellValue } from './shared';
 
 const router = Router();
@@ -125,10 +126,24 @@ router.post(
           const isSupplier = row.partyType === 'Supplier' || row.partyType === 'Both';
           // The opening balance is also the opening outstanding: payments draw it down
           // (paymentSubmit.ts), recalcPartyOutstanding starts from it, and the AR subledger check
-          // counts it for a Customer against the opening journal posted below.
+          // counts it for a Customer against the opening journal posted below. It is not directed to
+          // a side yet (PR-5.12), so the side columns hold it where computePartySides puts an
+          // undirected opening, and a new party matches its recalculation from the start.
+          const sides = computePartySides({
+            partyType: row.partyType,
+            openingReceivable: 0,
+            openingPayable: 0,
+            legacyUnassigned: openingBalance,
+            siOutstanding: 0,
+            piOutstanding: 0,
+            adjAr: 0,
+            adjAp: 0,
+          });
           const newPartyData = {
             ...partyData,
-            outstandingAmount: openingBalance,
+            outstandingAmount: sides.outstanding,
+            receivableOutstanding: sides.receivable,
+            payableOutstanding: sides.payable,
             openingOutstanding: openingBalance,
             depositBalance,
             customerDepositBalance,

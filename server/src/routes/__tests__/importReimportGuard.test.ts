@@ -138,7 +138,10 @@ describe('POST /api/import/parties re-import', () => {
     const res = await post('/api/import/parties');
 
     expect(res.body.success).toBe(1);
-    expect(db._tx.party.create.mock.calls[0][0].data.outstandingAmount).toBe(5000000);
+    // The undirected opening of a Customer is its receivable, as recalcPartyOutstanding computes it.
+    const created = db._tx.party.create.mock.calls[0][0].data;
+    expect([created.outstandingAmount, created.receivableOutstanding, created.payableOutstanding].map(String))
+      .toEqual(['5000000', '5000000', '0']);
     expect(db._tx.journalEntry.create).toHaveBeenCalledTimes(1);
     noDeletes();
   });
