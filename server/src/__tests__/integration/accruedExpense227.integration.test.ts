@@ -11,7 +11,12 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import type { Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
-import { shouldSeedAccruedExpense } from '../../../prisma/seedAccruedExpense';
+
+// prisma/ sits outside tsconfig rootDir (src), so the guard is loaded at runtime.
+const SEED_GUARD_PATH = join(__dirname, '../../../prisma/seedAccruedExpense.ts');
+type SeedGuard = (db: Tx, accountId: string) => Promise<boolean>;
+const shouldSeedAccruedExpense: SeedGuard = (db, id) =>
+  import(/* @vite-ignore */ SEED_GUARD_PATH).then((m) => (m.shouldSeedAccruedExpense as SeedGuard)(db, id));
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
