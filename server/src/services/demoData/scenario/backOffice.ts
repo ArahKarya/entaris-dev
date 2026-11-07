@@ -146,9 +146,8 @@ function scheduleRecurring(ctx: DemoContext, acc: () => BackOfficeAccounts): voi
         ],
       },
     });
-    // The recurring runner always dates its journal today; it reports failures in the body (HTTP 200).
-    const { data: run } = await ctx.api.post<{ success: boolean; error?: string }>(ctx.admin, `/recurring/${data.id}/execute`);
-    if (!run.success) throw new Error(`Transaksi berulang gagal dijalankan: ${run.error ?? '-'}`);
+    // The recurring run always dates its journal today; a run that does not post is a 400 with its code.
+    await ctx.api.post(ctx.admin, `/recurring/${data.id}/execute`);
   });
 }
 

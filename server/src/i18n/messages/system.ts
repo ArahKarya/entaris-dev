@@ -124,6 +124,9 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   // health check: ledger rows vs fiscal year (E2-R5)
   "{0} jurnal: entri Buku Besar tercatat di Tahun Buku yang berbeda dengan tanggal jurnalnya": "{0} journals: General Ledger entries are booked to a Fiscal Year other than the one holding the journal date",
   "Entri Buku Besar semua jurnal tercatat di Tahun Buku sesuai tanggalnya": "General Ledger entries of every journal are booked to the Fiscal Year holding their date",
+  // health check: former system account role accounts (E2-R8)
+  "{0} akun bekas peran akun sistem masih bersaldo; pindahkan sisanya lewat Pengaturan > Akun Sistem": "{0} former system account role accounts still have a balance; move the rest from Settings > System Accounts",
+  "Akun bekas peran akun sistem tidak bersaldo": "No former system account role account has a balance",
   "Dihapus {0} ALE lama, dibuat {1} ALE baru dari JournalItem": "Deleted {0} old ALE entries and created {1} new ALE entries from JournalItem",
   "Dihitung ulang saldo {0} akun dari jurnal": "Recalculated the balances of {0} accounts from journals",
   "{0} entri ALE orphan ditandai sebagai cancelled": "{0} orphan ALE entries marked as cancelled",
@@ -283,7 +286,6 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Akun back office belum dimuat.": "Back-office accounts are not loaded yet.",
   "Pengajuan {0} menunggu persetujuan, tetapi tidak ada pengguna aktif yang berwenang menyetujuinya.": "Request {0} is waiting for approval, but no active user may approve it.",
   "Pertanggungjawaban {0} menunggu atasan, tetapi atasan pengaju tidak aktif.": "Settlement {0} is waiting for the supervisor, but the requester's supervisor is inactive.",
-  "Transaksi berulang gagal dijalankan: {0}": "The recurring transaction failed to run: {0}",
   "Tahun buku untuk {0} sudah ditutup. Buka kembali tahun buku itu sebelum membuat data uji coba.": "The fiscal year for {0} is closed. Reopen it before creating demo data.",
   "Belum ada tahun buku untuk {0}. Buat tahun buku yang mencakup tanggal itu di Pengaturan > Tahun Buku.": "There is no fiscal year for {0}. Create one that covers that date in Settings > Fiscal Years.",
   "Periode s.d. {0} dikunci, sedangkan data uji coba dimulai {1}. Mundurkan kunci periode ke sebelum {1} di Pengaturan > Tahun Buku sebelum membuat data uji coba.": "The period up to {0} is locked, but the demo data starts on {1}. Move the period lock back to before {1} in Settings > Fiscal Years before creating demo data.",

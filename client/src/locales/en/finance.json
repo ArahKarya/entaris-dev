@@ -2114,6 +2114,7 @@
       "status": "Status",
       "actions": "Actions"
     },
+    "lastError": "Run failed {{date}}: {{error}}",
     "rowActions": "Actions for {{name}}",
     "actions": {
       "edit": "Edit",
@@ -2285,7 +2286,9 @@
     "toast": {
       "saved": "System account configuration saved.",
       "saveFailed": "Could not save the configuration.",
-      "noAccountAvailable": "No accounts available to add."
+      "noAccountAvailable": "No accounts available to add.",
+      "swept": "The balance left on the old accounts was moved.",
+      "sweepFailed": "Could not move the balance left on the old accounts."
     },
     "loading": "Loading system accounts…",
     "error": {
@@ -2366,6 +2369,36 @@
         "title": "Equity",
         "description": "Capital, retained earnings, and owner drawing accounts"
       }
+    },
+    "moveNote": {
+      "balance": "Any balance on the old account moves with it through a reclass journal dated today.",
+      "history": "Past transactions stay on the old account; new ones go to the new account."
+    },
+    "residue": {
+      "found_one": "{{count}} old account still has a balance",
+      "found_other": "{{count}} old accounts still have a balance",
+      "sweep": "Move the rest"
+    },
+    "reclass": {
+      "transfer": {
+        "title": "Transfer the old account balance",
+        "description": "The old account of these roles still has a balance. Save by moving it to the new account with a reclass journal, or cancel and restore the account choice.",
+        "confirm": "Transfer balance and save"
+      },
+      "sweep": {
+        "title": "Move the balance left on old accounts",
+        "description": "Old accounts of this role still have a balance after the mapping moved (e.g. an old invoice was cancelled). The rest moves to the account mapped now through a reclass journal.",
+        "confirm": "Move the rest"
+      },
+      "to": "to",
+      "amount": "Balance: {{amount}}",
+      "parties_one": "{{count}} party",
+      "parties_other": "{{count}} parties",
+      "reason": "Reason",
+      "reasonPlaceholder": "E.g. moving to the per-branch receivable account",
+      "reasonTooShort": "The reason must be at least {{min}} characters.",
+      "dateNote": "The reclass journal is dated today and cannot be cancelled from the Journal menu.",
+      "cancel": "Cancel"
     }
   },
   "timeline": {

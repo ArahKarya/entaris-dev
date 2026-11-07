@@ -38,6 +38,11 @@ export interface PostJournalInput {
   entryNumber?: string;
   /** manualJournalRule / TEMPLATE_RULE / DOCUMENT_RULE (services/ledger/accountGuard.ts). */
   accountRule: PostableRule;
+  /**
+   * Rule per account id replacing accountRule for that account. Only the system account remap
+   * reclass passes it (REMAP_SOURCE_RULE on the old account, services/systemAccountRemap.ts).
+   */
+  lineRules?: ReadonlyMap<string, PostableRule>;
   partyRule: PartyRule;
   /** Default 'none'; 'recalc' only for MANUAL / IMPORT / RECURRING. */
   partyEffect?: 'recalc' | 'none';
@@ -83,7 +88,10 @@ export async function postJournal(tx: Tx, input: PostJournalInput): Promise<Post
   // takes generateDocumentNumber first and then updates balances, so the opposite order deadlocks.
   const entryNumber = input.entryNumber ?? (await generateDocumentNumber(tx, 'JV', input.date, fiscalYear.id));
 
-  const accounts = await assertPostableAccounts(tx, lines.map((l) => l.accountId), input.accountRule, { lockRows: true });
+  const accounts = await assertPostableAccounts(tx, lines.map((l) => l.accountId), input.accountRule, {
+    lockRows: true,
+    lineRules: input.lineRules,
+  });
   await assertPartyLines(tx, lines, input.partyRule);
 
   const journal = await tx.journalEntry.create({

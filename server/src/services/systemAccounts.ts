@@ -16,7 +16,8 @@ export interface MappedAccount {
   name: string;
 }
 
-function missingMappingError(role: SystemAccountRole): BusinessError {
+/** BusinessError ACCOUNT_MAPPING_MISSING for an unmapped role (the one message, translated). */
+export function missingMappingError(role: SystemAccountRole): BusinessError {
   return new BusinessError(
     `Akun sistem untuk "${SYSTEM_ACCOUNT_ROLES[role].label}" belum dikonfigurasi. Silakan atur di Pengaturan > Akun Sistem.`,
     ACCOUNT_MAPPING_MISSING,

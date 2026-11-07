@@ -7,6 +7,7 @@ import { systemAccounts } from './systemAccounts';
 import { findAleJournalMismatches } from './ledger/aleSyncCheck';
 import { findUnbalancedAleGroups } from './ledger/ledgerAudit/sections/aleGroups';
 import { SYSTEM_ACCOUNT_ROLES } from '../types/systemAccounts';
+import { DOCUMENT_RULE, postableAccountProblem } from './ledger/accountGuard';
 import { CLOSE_CHECK_ITEM_LIMIT, type CloseCheck, type CloseCheckItem, type CloseCheckOutcome, type CloseCheckYear } from './fiscalYearCloseTypes';
 
 const LIMIT = CLOSE_CHECK_ITEM_LIMIT;
@@ -175,15 +176,26 @@ const aleVsJournal: CloseCheck = {
 
 const CLOSE_ROLES = ['CURRENT_PROFIT', 'RETAINED_EARNINGS'] as const;
 
-/** The close posts to CURRENT_PROFIT and RETAINED_EARNINGS; both must be mapped. */
+/**
+ * The close posts to CURRENT_PROFIT and RETAINED_EARNINGS through postJournal (DOCUMENT_RULE): both
+ * must be mapped to an account that rule accepts (it exists, is a detail account and is active).
+ */
 const systemAccountsMapped: CloseCheck = {
   id: 'system-accounts',
   severity: 'block',
-  async run() {
+  async run(tx) {
     const missing: CloseCheckItem[] = [];
     for (const role of CLOSE_ROLES) {
-      const [account] = await systemAccounts.getAccounts(role);
-      if (!account) missing.push({ key: role, kind: 'SystemAccountRole', label: SYSTEM_ACCOUNT_ROLES[role].label });
+      const [mapped] = await systemAccounts.getAccounts(role);
+      const account = mapped
+        ? await tx.account.findUnique({
+          where: { id: mapped.id },
+          select: { id: true, accountNumber: true, name: true, rootType: true, isGroup: true, isActive: true },
+        })
+        : null;
+      if (!mapped || postableAccountProblem(account, DOCUMENT_RULE, null)) {
+        missing.push({ key: role, kind: 'SystemAccountRole', label: SYSTEM_ACCOUNT_ROLES[role].label });
+      }
     }
     return { count: missing.length, items: missing };
   },

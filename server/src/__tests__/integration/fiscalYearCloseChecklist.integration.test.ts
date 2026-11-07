@@ -388,4 +388,21 @@ d('year-close checklist', () => {
       expect(missing.status).toBe(400);
     });
   });
+
+  it('a close account mapped to an inactive or group account blocks the close before it posts', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      await post(tx, b.fy, `${Y}-06-15`, b.cashId, b.revenueId, 1_000_000);
+      await tx.account.update({ where: { id: b.retainedId }, data: { isActive: false } });
+      await tx.account.update({ where: { id: b.currentProfitId }, data: { isGroup: true } });
+
+      const list = await expectRefused(tx, b.fy);
+      expect(failing(list, 'block')).toEqual(['system-accounts']);
+      expect(check(list, 'system-accounts').items.map((i) => i.key)).toEqual(['CURRENT_PROFIT', 'RETAINED_EARNINGS']);
+
+      await tx.account.update({ where: { id: b.retainedId }, data: { isActive: true } });
+      await tx.account.update({ where: { id: b.currentProfitId }, data: { isGroup: false } });
+      await expectClosed(b.fy);
+    });
+  });
 });

@@ -146,7 +146,7 @@
   },
   "src/routes/recurring.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 7
+      "count": 2
     }
   },
   "src/routes/reports.ts": {
@@ -212,11 +212,6 @@
   "src/services/purchaseInvoiceSubmit.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
-    }
-  },
-  "src/services/recurringRunner.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
     }
   },
   "src/services/stockSnapshot.ts": {

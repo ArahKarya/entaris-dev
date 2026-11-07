@@ -179,8 +179,8 @@ describe('assertPostableAccounts', () => {
         ].filter((a) => args.where.id.in.includes(a.id)),
       'systemAccountMapping.findMany': () => [{ role: 'AR', accountId: 'ar' }, { role: 'CUSTOMER_DEPOSIT', accountId: 'cdep' }],
       'journalEntry.findMany': () => [
-        { sourceKey: sourceKeys.remap('AR', 'old-ar', 'ar', '2170-01-31') },
-        { sourceKey: sourceKeys.remap('CUSTOMER_DEPOSIT', 'old-dep', 'cdep', '2170-01-31') },
+        { sourceKey: sourceKeys.remap('AR', 'old-ar', 'ar', '2170-01-31'), createdAt: new Date('2170-01-31') },
+        { sourceKey: sourceKeys.remap('CUSTOMER_DEPOSIT', 'old-dep', 'cdep', '2170-01-31'), createdAt: new Date('2170-01-31') },
       ],
     });
     expect(await codeOf(assertPostableAccount(t, 'old-ar', manualJournalRule(false)))).toBe(ACCOUNT_CONTROL);
