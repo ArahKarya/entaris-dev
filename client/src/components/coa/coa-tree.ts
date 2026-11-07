@@ -397,3 +397,12 @@ export function openingFieldValue(amount: string | null): string {
 export function openingPayload(parsed: number, reason: string | null) {
   return { balance: parsed.toFixed(2), ...(reason !== null ? { throughLock: { reason } } : {}) };
 }
+
+/** True when the typed amount has more than two decimals; the field rejects it instead of rounding. */
+export function hasExcessDecimals(value: string): boolean {
+  const s = value.trim().replace(/[^0-9.,]/g, '');
+  if (s.includes(',')) return (s.split(',').pop() ?? '').length > 2;
+  const dots = s.split('.').length - 1;
+  if (dots > 1 || /^\d{1,3}\.\d{3}$/.test(s)) return false;
+  return (s.split('.')[1] ?? '').length > 2;
+}

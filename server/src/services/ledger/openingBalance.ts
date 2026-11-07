@@ -277,7 +277,7 @@ export interface OpeningJournalRef {
 export interface AccountOpeningView {
   cutoverDate: string;
   cutoverStored: boolean;
-  /** recordedOpening as a string (normal side), null when the service has no keyed journal for the account. */
+  /** recordedOpening as a string (normal side); without a keyed journal, the ledger opening (openingBase) when not zero; else null. */
   amount: string | null;
   /** The service's own active journals (sourceKey OPENING:ACCOUNT:<id>). */
   journals: OpeningJournalRef[];
@@ -297,12 +297,16 @@ export interface AccountOpeningView {
  */
 export async function describeAccountOpening(db: Db, accountId: string): Promise<AccountOpeningView> {
   const target: OpeningTarget = { kind: 'ACCOUNT', accountId };
-  const [cutover, found, amount, control] = await Promise.all([
+  const [cutover, found, recorded, control] = await Promise.all([
     peekCutoverDate(db),
     findActiveOpeningJournals(db, target),
     recordedOpening(db, target),
     loadControlAccountMap(db as Tx),
   ]);
+  // No keyed journal: the ledger can still hold the opening (earlier rows, a same-day "Setoran modal awal").
+  // The dialog must start from it, or saving the default would post a journal that wipes it.
+  const base = recorded === null ? await openingBase(db, accountId, cutover.day, []) : null;
+  const amount = recorded ?? (base !== null && !base.isZero() ? base : null);
   const account = await db.account.findUnique({
     where: { id: accountId },
     select: { id: true, accountNumber: true, name: true, rootType: true, isGroup: true, isActive: true },

@@ -13,6 +13,7 @@ import {
   normalSide,
   offersOpeningBalance,
   parseBalanceInput,
+  hasExcessDecimals,
   parseExpanded,
   rootTypeFromNumber,
   serializeExpanded,
@@ -397,5 +398,16 @@ describe('offersOpeningBalance', () => {
     expect(offersOpeningBalance(n({ rootType: 'EXPENSE', accountNumber: '5.1' }))).toBe(false);
     expect(offersOpeningBalance(n({ rootType: 'EQUITY', accountNumber: '3.1' }))).toBe(false);
     expect(offersOpeningBalance(n({ rootType: 'EQUITY', accountNumber: '3.4' }))).toBe(false);
+  });
+});
+
+describe('hasExcessDecimals', () => {
+  it('flags more than two decimals and accepts valid forms', () => {
+    expect(hasExcessDecimals('1.000.000,005')).toBe(true);
+    expect(hasExcessDecimals('0,015')).toBe(true);
+    expect(hasExcessDecimals('10.123')).toBe(false); // thousands
+    expect(hasExcessDecimals('1.500.000,25')).toBe(false);
+    expect(hasExcessDecimals('1500000.255')).toBe(true);
+    expect(hasExcessDecimals('1500000')).toBe(false);
   });
 });

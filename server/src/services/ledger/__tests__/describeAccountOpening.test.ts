@@ -25,7 +25,7 @@ const journal = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function makeDb(opts: { cutover?: string | null; journals?: any[]; roleRow?: boolean; account?: any; sameDay?: any[] } = {}) {
+function makeDb(opts: { cutover?: string | null; journals?: any[]; roleRow?: boolean; account?: any; sameDay?: any[]; base?: number } = {}) {
   const cutover = opts.cutover === undefined ? DAY : opts.cutover;
   const account = opts.account === undefined
     ? { id: 'kas', accountNumber: '1.1.1', name: 'Kas', rootType: 'ASSET', isGroup: false, isActive: true }
@@ -49,7 +49,7 @@ function makeDb(opts: { cutover?: string | null; journals?: any[]; roleRow?: boo
       findMany: vi.fn(async ({ where }: any) => (where.OR && where.sourceKey === undefined && where.AND ? (opts.sameDay ?? []) : (opts.journals ?? []))),
     },
     auditLog: { create: write },
-    $queryRaw: vi.fn(async () => [{ debit: D(0), credit: D(0) }]),
+    $queryRaw: vi.fn(async () => [{ debit: D(opts.base ?? 0), credit: D(0) }]),
     $executeRaw: write,
   };
   return db;
@@ -76,6 +76,11 @@ describe('describeAccountOpening', () => {
     const view = await describeAccountOpening(db as any, 'kas');
     expect(view).toMatchObject({ cutoverDate: DAY, cutoverStored: false, amount: null, journals: [], editable: true });
     expect(db.write).not.toHaveBeenCalled();
+  });
+
+  it('starts from the ledger opening when there is no keyed journal (same-day Setoran modal awal)', async () => {
+    const view = await describeAccountOpening(makeDb({ base: 500_000_000, sameDay: [{ entryNumber: 'JV-215001-0009' }] }) as any, 'kas');
+    expect(view).toMatchObject({ amount: '500000000.00', journals: [], sameDayOpeningEquity: ['JV-215001-0009'] });
   });
 
   it('lists unkeyed legacy journals and blocks editing with OPENING_LEGACY_REVIEW', async () => {

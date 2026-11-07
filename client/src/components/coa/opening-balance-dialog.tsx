@@ -23,7 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Field } from '@/components/shared';
-import { apiErrorMessage, normalSide, openingFieldValue, openingPayload, parseBalanceInput, type CoaNode } from './coa-tree';
+import { apiErrorMessage, normalSide, openingFieldValue, openingPayload, hasExcessDecimals, parseBalanceInput, type CoaNode } from './coa-tree';
 
 export interface OpeningBalanceDialogProps {
   node: CoaNode | null;
@@ -142,7 +142,7 @@ function BalanceForm({
   });
 
   const parsed = parseBalanceInput(balance);
-  const valid = !Number.isNaN(parsed);
+  const valid = !Number.isNaN(parsed) && !hasExcessDecimals(balance);
   const lockReason = throughLock ? reason.trim() : null;
   const reasonOk = lockReason === null || lockReason.length >= 10;
   const blocked = !opening.editable;
