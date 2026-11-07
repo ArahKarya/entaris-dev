@@ -1731,11 +1731,11 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 {
   "ok": true,
   "kind": "read",
-  "data": "<{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo iku>"
+  "data": "<{ mappings: per role → akun[], roles: definisi role akun sistem (+ usage: posting = dibaca>"
 }
 ```
 
-**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.
+**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem (+ usage: posting = dibaca posting otomatis, default = pengisi awal pilihan akun, manual = hanya jurnal manual, belum = belum dipakai kode; balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.
 
 **Tool terkait:** [`sysacct_update`](#sysacct_update), [`sysacct_sweep`](#sysacct_sweep)
 

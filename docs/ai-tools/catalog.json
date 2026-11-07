@@ -38782,7 +38782,7 @@
       "output": {
         "mapping": "object"
       },
-      "outputSummary": "{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.",
+      "outputSummary": "{ mappings: per role → akun[], roles: definisi role akun sistem (+ usage: posting = dibaca posting otomatis, default = pengisi awal pilihan akun, manual = hanya jurnal manual, belum = belum dipakai kode; balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.",
       "handler": "GET /api/system-accounts",
       "permAction": "view",
       "enabled": true,
@@ -38793,7 +38793,7 @@
         "sysacct_update",
         "sysacct_sweep"
       ],
-      "doc": "### sysacct_get\n\n**Ringkasan:** Pemetaan akun sistem (role → akun COA) untuk auto-posting GL, mis. Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, serta daftar role yang tersedia dan mana yang wajib.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `settings` / `view`)\n- **Catatan akses:** GET terbuka bagi semua user login (requireWrite settings).\n- **Handler:** `GET /api/system-accounts` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_get\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo iku>\"\n}\n```\n\n**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.\n\n**Tool terkait:** [`sysacct_update`](#sysacct_update), [`sysacct_sweep`](#sysacct_sweep)\n",
+      "doc": "### sysacct_get\n\n**Ringkasan:** Pemetaan akun sistem (role → akun COA) untuk auto-posting GL, mis. Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, serta daftar role yang tersedia dan mana yang wajib.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `settings` / `view`)\n- **Catatan akses:** GET terbuka bagi semua user login (requireWrite settings).\n- **Handler:** `GET /api/system-accounts` (src/routes/systemAccounts.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter:** tidak ada.\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"sysacct_get\",\n  \"args\": {}\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<{ mappings: per role → akun[], roles: definisi role akun sistem (+ usage: posting = dibaca>\"\n}\n```\n\n**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem (+ usage: posting = dibaca posting otomatis, default = pengisi awal pilihan akun, manual = hanya jurnal manual, belum = belum dipakai kode; balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.\n\n**Tool terkait:** [`sysacct_update`](#sysacct_update), [`sysacct_sweep`](#sysacct_sweep)\n",
       "example": {
         "tool": "sysacct_get",
         "args": {}
