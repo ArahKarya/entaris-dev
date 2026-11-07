@@ -13234,14 +13234,15 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Menetapkan saldo awal sebuah akun detail ke nilai balance. Selisih terhadap saldo sekarang diposting sebagai jurnal Saldo Awal (OB) berlawanan dengan akun Ekuitas Saldo Awal (3.1) pada tahun buku terbuka.",
+      "desc": "Menetapkan saldo awal akun neraca (aset, kewajiban, ekuitas) per tanggal cut-over. balance = saldo akun pada tanggal cut-over di sisi normalnya (negatif untuk akun kontra). Selisih terhadap buku besar sebelum tanggal cut-over (ditambah saldo awal yang sudah tercatat dengan cara lain pada hari itu, mis. setoran modal berlawanan 3.1) diposting sebagai satu jurnal saldo awal berlawanan dengan Ekuitas Saldo Awal (3.1). Saldo awal piutang, hutang, dan uang muka diisi per pihak; persediaan lewat impor stok awal.",
       "risk": "critical",
       "roles": [
         "Admin"
       ],
       "input": {
         "id": "string",
-        "balance": "number"
+        "balance": "number",
+        "asOfDate": "string"
       },
       "params": [
         {
@@ -13249,36 +13250,50 @@
           "in": "path",
           "type": "string",
           "required": true,
-          "description": "ID akun detail (bukan grup)."
+          "description": "ID akun detail neraca (bukan grup, bukan akun kontrol, bukan 3.1/3.4)."
         },
         {
           "name": "balance",
           "in": "body",
           "type": "number",
           "required": true,
-          "description": "Saldo akhir yang diinginkan (angka rupiah; bukan selisih)."
+          "description": "Saldo akun pada tanggal cut-over (rupiah, paling banyak 2 desimal; bukan selisih). Negatif untuk saldo kontra."
+        },
+        {
+          "name": "asOfDate",
+          "in": "body",
+          "type": "date",
+          "required": false,
+          "description": "Opsional, YYYY-MM-DD. Harus sama dengan tanggal cut-over; kosongkan untuk memakai tanggal cut-over."
         }
       ],
       "output": {
-        "status": "string"
+        "account": "object",
+        "opening": "object"
       },
-      "outputSummary": "Akun dengan saldo terbaru.",
+      "outputSummary": "Akun terbaru + opening { asOfDate (tanggal cut-over), action posted|replaced|cancelled|unchanged, journalNumber, cancelled (nomor jurnal saldo awal lama yang dibatalkan) }.",
       "handler": "PATCH /api/coa/:id/balance",
       "permAction": "edit",
       "enabled": true,
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Jurnal OB-… status Submitted + ledger: akun ASET/BEBAN delta>0 → DR akun / CR 3.1 (delta<0 sebaliknya); akun KEWAJIBAN/EKUITAS/PENDAPATAN delta>0 → CR akun / DR 3.1. Saldo kedua akun diperbarui. Tanpa selisih (<0,01) tidak ada jurnal.",
-      "confirm_template": "Set saldo awal akun {id} menjadi {balance}? Selisih diposting ke Ekuitas Saldo Awal (3.1).",
+      "postingEffect": "Satu jurnal JV- bersumber OPENING (kunci per akun) bertanggal cut-over: selisih = balance − saldo buku besar sebelum cut-over. Akun ASET selisih>0 → DR akun / CR 3.1 (selisih<0 sebaliknya); KEWAJIBAN/EKUITAS selisih>0 → CR akun / DR 3.1. Bila sudah ada jurnal saldo awal berkunci untuk akun ini, jurnal itu dibatalkan (void) dulu lalu diganti; nilai yang sama tidak menulis apa pun (unchanged). Jurnal saldo awal lama tanpa kunci tidak pernah dibatalkan otomatis; tanggal cut-over tersimpan saat saldo awal pertama diposting.",
+      "confirm_template": "Set saldo awal akun {id} per tanggal cut-over menjadi {balance}? Selisih terhadap buku besar sebelum cut-over diposting ke Ekuitas Saldo Awal (3.1); jurnal saldo awal berkunci yang lama diganti.",
       "prerequisites": [
-        "Ada tahun buku terbuka untuk hari ini.",
-        "Akun bukan akun grup.",
+        "Ada tahun buku terbuka (tanggal cut-over = awal tahun buku terbuka paling awal bila belum tersimpan).",
+        "Akun detail aktif bertipe aset, kewajiban, atau ekuitas; bukan akun kontrol (piutang, hutang, uang muka, hutang belum ditagih, persediaan) dan bukan 3.1/3.4.",
+        "Akun tidak punya jurnal saldo awal lama tanpa kunci (jalankan audit saldo awal dulu).",
         "Akun sistem OPENING_EQUITY terpetakan."
       ],
       "errors": [
-        "400: akun grup tidak bisa diberi saldo",
-        "400: tidak ada tahun buku terbuka"
+        "400: akun grup, tidak aktif, pendapatan/beban, atau akun kontrol/persediaan (ACCOUNT_GROUP, ACCOUNT_INACTIVE, ACCOUNT_ROOT_TYPE, ACCOUNT_CONTROL)",
+        "400: akun Ekuitas Saldo Awal atau Laba Tahun Berjalan (OPENING_ACCOUNT_KIND)",
+        "400: asOfDate bukan tanggal cut-over (OPENING_DATE_MISMATCH)",
+        "400: masih ada jurnal saldo awal lama tanpa kunci (OPENING_LEGACY_REVIEW)",
+        "400: tahun buku tanggal cut-over tertutup (PERIOD_CLOSED) atau bulannya terkunci (PERIOD_LOCKED); AIRA tidak dapat menembus kunci periode",
+        "400: tidak ada tahun buku terbuka (FISCAL_YEAR_MISSING)",
+        "400: balance bukan angka dengan paling banyak 2 desimal"
       ],
       "related": [
         "coa_flat",
