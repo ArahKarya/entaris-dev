@@ -245,7 +245,7 @@ d('Party Outstanding Drift', () => {
   it('flags a party whose stored outstanding differs from its calculation', async () => {
     await inRollback(async (tx) => {
       const drifted = await tx.party.create({ data: { name: `IT2142 Drift ${tag()}`, partyType: 'Customer', outstandingAmount: 500_000 } });
-      const fine = await tx.party.create({ data: { name: `IT2142 Fine ${tag()}`, partyType: 'Supplier', outstandingAmount: 250_000, openingOutstanding: 250_000 } });
+      const fine = await tx.party.create({ data: { name: `IT2142 Fine ${tag()}`, partyType: 'Supplier', outstandingAmount: 250_000, payableOutstanding: 250_000, openingOutstanding: 250_000 } });
       const res = await checkPartyOutstandingDrift({ partyIds: [drifted.id, fine.id] });
       expect(res).toMatchObject({ name: 'Party Outstanding Drift', status: 'warning', count: 1, fixable: false });
       expect(res.details).toEqual([{ party_name: drifted.name, party_type: 'Customer', stored: 500_000, expected: 0, difference: 500_000 }]);
