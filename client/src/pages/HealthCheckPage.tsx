@@ -61,10 +61,10 @@ type CheckKey =
 
 /** Server check name → `auth:healthCheck.checks.<key>` and the fix endpoint key. */
 const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
-  'ALE vs JournalItem Sync': { key: 'aleSync', fixKey: 'ale-sync' },
+  'ALE vs JournalItem Sync': { key: 'aleSync' },
   'Account Balance Drift': { key: 'balanceDrift', fixKey: 'account-balance-drift' },
   'Unbalanced Journal Entries': { key: 'unbalancedJournals' },
-  'Orphan ALE Entries': { key: 'orphanAle', fixKey: 'orphan-ale' },
+  'Orphan ALE Entries': { key: 'orphanAle' },
   'Stock vs Movement Mismatch': { key: 'stockMismatch' },
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
   'AR vs Subledger': { key: 'arSubledger' },
@@ -83,7 +83,7 @@ function checkInfo(name: string): CheckInfo {
   return {
     title,
     fixKey: known.fixKey,
-    fixEffect: i18n.t(`healthCheck.fixEffects.${known.key as 'aleSync' | 'balanceDrift' | 'orphanAle'}`, { ns: 'auth' }),
+    fixEffect: i18n.t(`healthCheck.fixEffects.${known.key as 'balanceDrift'}`, { ns: 'auth' }),
   };
 }
 
@@ -155,6 +155,9 @@ function DetailTable({ rows, caption }: { rows: Record<string, unknown>[]; capti
   );
 }
 
+const serverMessage = (err: unknown): string | undefined =>
+  (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+
 export default function HealthCheckPage() {
   const { t } = useTranslation(['auth', 'common']);
   const queryClient = useQueryClient();
@@ -179,7 +182,7 @@ export default function HealthCheckPage() {
       toast.success(result.message);
       queryClient.invalidateQueries({ queryKey: ['health-check'] });
     },
-    onError: () => toast.error(t('healthCheck.fixFailed')),
+    onError: (err) => toast.error(serverMessage(err) ?? t('healthCheck.fixFailed')),
   });
 
   const data = healthQuery.data;
@@ -311,11 +314,17 @@ export default function HealthCheckPage() {
         description={confirm?.info.fixEffect}
         confirmLabel={t('healthCheck.confirmLabel')}
         loading={previewQuery.isLoading}
-        onConfirm={() => fixMutation.mutateAsync(confirm!.key)}
+        onConfirm={() => {
+          if (previewQuery.isError) {
+            toast.error(serverMessage(previewQuery.error) ?? t('healthCheck.previewFailed'));
+            return;
+          }
+          return fixMutation.mutateAsync(confirm!.key);
+        }}
       >
         <div className="max-h-[50dvh] min-w-0 space-y-3 overflow-y-auto text-sm">
           {previewQuery.isLoading && <p className="text-muted-foreground">{t('healthCheck.previewLoading')}</p>}
-          {previewQuery.isError && <p className="text-danger-text">{t('healthCheck.previewFailed')}</p>}
+          {previewQuery.isError && <p className="text-danger-text">{serverMessage(previewQuery.error) ?? t('healthCheck.previewFailed')}</p>}
           {preview && (
             <>
               <p className="font-medium text-foreground">{preview.description}</p>

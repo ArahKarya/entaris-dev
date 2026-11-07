@@ -53,7 +53,7 @@ Toolset **sistem** memuat fungsi pendukung yang aman diakses agen: Jejak Audit, 
 
 ### Health check (diagnostik integritas)
 
-`hc_run` menjalankan sepuluh pemeriksaan paralel: `ALE vs JournalItem Sync` (kode preview `ale-sync`), `Account Balance Drift` (`account-balance-drift`: saldo tersimpan akun vs hitungan dari item jurnal), `Unbalanced Journal Entries` (jurnal terposting dengan debit != kredit), `Orphan ALE Entries` (`orphan-ale`: entri ledger yang dokumen sumbernya sudah tidak ada), `Stock vs Movement Mismatch` (stok item vs jumlah pergerakan stok), `Drift Stok per Gudang` (stok total item vs jumlah stok per gudang), `AR vs Subledger` (Piutang di Buku Besar vs sisa tagihan invoice per Customer), `Customer Deposit vs Subledger` (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer; kedua cek ini hanya deteksi dan memakai saldo hari ini), `ALE vs Fiscal Year` (baris ledger sebuah jurnal yang dibukukan ke Fiscal Year selain yang memuat hari bisnis WIB-nya; hanya deteksi, tanpa kode `hc_preview` dan tanpa perbaikan; `warning` selama semua tahun terkait masih terbuka, `error` begitu ada tahun yang sudah ditutup), dan `Required Database Triggers` (trigger append-only `audit_trail` ada dan aktif; hanya deteksi, tidak bisa diperbaiki dari aplikasi, pesannya menyebut langkah pemulihan). Status keseluruhan: `ok`, `warning`, atau `error`. `hc_preview` (`check` = `ale-sync`, `account-balance-drift`, `orphan-ale`) menunjukkan apa yang akan diubah perbaikan otomatis. Perbaikan (`POST /health-check/fix/:check`) sengaja tidak tersedia untuk agen: ia memutasi data massal tanpa dokumen sumber dan harus dijalankan Admin setelah meninjau pratinjau. Perbaikan `ale-sync` dan `orphan-ale` saat ini dinonaktifkan di aplikasi (selalu ditolak 400) karena bisa mengubah buku besar tahun yang sudah ditutup; selisihnya dikoreksi lewat jurnal di periode berjalan.
+`hc_run` menjalankan sepuluh pemeriksaan paralel: `ALE vs JournalItem Sync`, `Account Balance Drift` (`account-balance-drift`: saldo tersimpan akun vs hitungan dari item jurnal), `Unbalanced Journal Entries` (jurnal terposting dengan debit != kredit), `Orphan ALE Entries` (entri ledger yang dokumen sumbernya sudah tidak ada), `Stock vs Movement Mismatch` (stok item vs jumlah pergerakan stok), `Drift Stok per Gudang` (stok total item vs jumlah stok per gudang), `AR vs Subledger` (Piutang di Buku Besar vs sisa tagihan invoice per Customer), `Customer Deposit vs Subledger` (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer; kedua cek ini hanya deteksi dan memakai saldo hari ini), `ALE vs Fiscal Year` (baris ledger sebuah jurnal yang dibukukan ke Fiscal Year selain yang memuat hari bisnis WIB-nya; hanya deteksi, tanpa kode `hc_preview` dan tanpa perbaikan; `warning` selama semua tahun terkait masih terbuka, `error` begitu ada tahun yang sudah ditutup), dan `Required Database Triggers` (trigger append-only `audit_trail` ada dan aktif; hanya deteksi, tidak bisa diperbaiki dari aplikasi, pesannya menyebut langkah pemulihan). Status keseluruhan: `ok`, `warning`, atau `error`. Semua pemeriksaan hanya mendeteksi; koreksi selisih lewat jurnal di periode berjalan atau skrip perbaikan. Satu-satunya perbaikan otomatis adalah hitung ulang saldo akun (`account-balance-drift`): `hc_preview` (`check` = `account-balance-drift`; check lain ditolak 400) menunjukkan apa yang akan diubah. Perbaikan (`POST /health-check/fix/:check`) sengaja tidak tersedia untuk agen: ia menimpa saldo tersimpan, butuh capability `doc.cancel` (tanpa itu 403), dan ditolak sementara (400 `FIX_DRIFT_CLOSED_YEARS`) bila ada tahun buku tertutup yang punya ALE laba rugi; Admin menjalankannya setelah meninjau pratinjau. Perbaikan massal ALE (`ale-sync`, `orphan-ale`) sudah dihapus.
 
 ### Lampiran (metadata saja)
 
@@ -532,7 +532,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 ### hc_preview
 
-**Ringkasan:** Pratinjau (tanpa mengubah data) perubahan yang akan dilakukan perbaikan otomatis. Hanya untuk check: ale-sync, account-balance-drift, orphan-ale. Perbaikan itu sendiri (fix) tidak tersedia sebagai tool; perbaikan ale-sync dan orphan-ale juga dinonaktifkan di aplikasi karena bisa mengubah tahun buku tertutup, jadi pratinjaunya hanya informasi.
+**Ringkasan:** Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia butuh capability doc.cancel dan ditolak sementara bila ada tahun buku tertutup ber-ALE laba rugi (FIX_DRIFT_CLOSED_YEARS).
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin (modul `audit` / `view`)
@@ -543,7 +543,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| `check` | path | enum: `ale-sync`, `account-balance-drift`, `orphan-ale` | ya | Kode check: ale-sync \| account-balance-drift \| orphan-ale |
+| `check` | path | enum: `account-balance-drift` | ya | Kode check: account-balance-drift |
 
 **Contoh pemanggilan**
 
@@ -551,7 +551,7 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 {
   "tool": "hc_preview",
   "args": {
-    "check": "ale-sync"
+    "check": "account-balance-drift"
   }
 }
 ```
@@ -570,7 +570,8 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 
 **Error umum**
 
-- 400: check tidak dapat di-preview
+- 400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)
+- 400 FIX_DRIFT_CLOSED_YEARS: hitung ulang saldo ditutup sementara karena ada tahun buku tertutup ber-ALE laba rugi
 
 **Tool terkait:** [`hc_run`](#hc_run)
 
