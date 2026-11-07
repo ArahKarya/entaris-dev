@@ -934,6 +934,7 @@
       "actions": "Actions"
     },
     "by": "by {{name}}",
+    "reversedBy": "Reversed by {{number}}",
     "moreLines_one": "+{{count}} more",
     "moreLines_other": "+{{count}} more",
     "rowActions": "Actions for {{number}}",
@@ -994,7 +995,8 @@
     "attachments_one": "Attachment ({{count}})",
     "attachments_other": "Attachments ({{count}})",
     "noAttachments": "No attachments yet.",
-    "download": "Download {{name}}"
+    "download": "Download {{name}}",
+    "reversedBy": "Reversed by {{number}}; together they net to zero."
   },
   "journalEntryModal": {
     "saveFailed": "Could not save the journal.",

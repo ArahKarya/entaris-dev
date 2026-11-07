@@ -34,6 +34,12 @@ import {
 
 const router = Router();
 
+/**
+ * The journal that reverses this one (reversedById; today only legacy STT cancels paired by
+ * scripts/repair/e1-stt-cancel-model.ts): such an original stays Submitted and nets to zero with it.
+ */
+const REVERSED_BY = { select: { id: true, entryNumber: true } } as const;
+
 // GET /api/journals — list journal entries (filters/sort: services/journalList.ts)
 router.get('/', async (req, res) => {
   try {
@@ -51,6 +57,7 @@ router.get('/', async (req, res) => {
         include: {
           items: { include: { account: { select: { accountNumber: true, name: true } } } },
           user: { select: { fullName: true } },
+          reversedBy: REVERSED_BY,
         },
         orderBy: journalOrderBy(sort),
         skip,
@@ -106,6 +113,7 @@ router.get('/:id', async (req: AuthRequest, res) => {
       include: {
         items: { include: { account: { select: { id: true, accountNumber: true, name: true, rootType: true } } } },
         user: { select: { fullName: true } },
+        reversedBy: REVERSED_BY,
       },
     });
     if (!entry) return res.status(404).json({ error: 'Jurnal tidak ditemukan.' });
