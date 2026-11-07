@@ -26,12 +26,15 @@ export const PARTY_NOT_ALLOWED = 'PARTY_NOT_ALLOWED';
 export const PARTY_TYPE_MISMATCH = 'PARTY_TYPE_MISMATCH';
 export const PARTY_NOT_FOUND = 'PARTY_NOT_FOUND';
 export const PARTY_ROLE_AMBIGUOUS = 'PARTY_ROLE_AMBIGUOUS';
+/** Journal import: a party name that two parties share cannot say which one a line means. */
+export const PARTY_AMBIGUOUS_NAME = 'PARTY_AMBIGUOUS_NAME';
 
 export type PartyProblemCode =
   | typeof PARTY_REQUIRED
   | typeof PARTY_NOT_ALLOWED
   | typeof PARTY_TYPE_MISMATCH
-  | typeof PARTY_NOT_FOUND;
+  | typeof PARTY_NOT_FOUND
+  | typeof PARTY_AMBIGUOUS_NAME;
 
 export interface PartyProblem {
   code: PartyProblemCode;

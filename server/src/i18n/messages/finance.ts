@@ -477,6 +477,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Baris dengan ref \"{0}\" harus memiliki tanggal dan narasi yang sama dengan baris pertama kelompok (baris {1}).": "Rows with ref \"{0}\" must have the same date and narration as the first row of the group (row {1}).",
   "File tidak bisa dibaca: {0}": "The file could not be read: {0}",
   "Kolom \"accountNumber\" harus berformat teks: angka di sel Excel kehilangan nol di belakang (5.10 terbaca {0}). Ubah format sel menjadi Text.": "Column \"accountNumber\" must be text: a number in an Excel cell loses trailing zeros (5.10 reads as {0}). Set the cell format to Text.",
+  "Nama pihak \"{0}\" dipakai lebih dari satu pihak; isi kolom \"partyCode\" dengan ID pihak.": "The party name \"{0}\" is used by more than one party; fill column \"partyCode\" with the party ID.",
+  "Pihak \"{0}\" tidak ditemukan; isi kolom \"partyCode\" dengan nama persis atau ID pihak.": "Party \"{0}\" was not found; fill column \"partyCode\" with the exact name or the party ID.",
   "Tanggal tidak valid.": "The date is invalid.",
   "Tanggal \"{0}\" tidak ada di kalender.": "The date \"{0}\" does not exist on the calendar.",
   "Format tanggal \"{0}\" bisa dibaca dua cara. Tulis YYYY-MM-DD atau DD/MM/YYYY.": "The date format \"{0}\" can be read two ways. Write YYYY-MM-DD or DD/MM/YYYY.",

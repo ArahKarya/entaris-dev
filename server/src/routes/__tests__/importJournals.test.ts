@@ -5,6 +5,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { BusinessError } from '../../utils/errors';
+import { Prisma } from '@prisma/client';
 import { businessDayOf } from '../../utils/businessDate';
 
 const db = vi.hoisted(() => {
@@ -17,6 +18,13 @@ const db = vi.hoisted(() => {
     calls: [] as string[],
     closedDays: new Set<string>(),
     journals: [] as Array<{ id: string; sourceKey: string | null; status: string; date: Date; items: any[] }>,
+    posts: [] as Array<{ input: any; opts: any }>,
+    parties: [
+      { id: 'p-1', name: 'PT Maju', partyType: 'Customer' },
+      { id: 'p-2', name: 'PT Kembar', partyType: 'Customer' },
+      { id: 'p-3', name: 'pt kembar', partyType: 'Customer' },
+      { id: 'p-4', name: 'CV Pemasok', partyType: 'Supplier' },
+    ] as Array<{ id: string; name: string; partyType: string }>,
   };
   const accounts = [
     { id: 'a-kas', accountNumber: '1.1.1', name: 'Kas', rootType: 'ASSET', isGroup: false, isActive: true },
@@ -34,25 +42,30 @@ const db = vi.hoisted(() => {
         state.calls.push('lookup');
         return state.journals.filter((j) => where.sourceKey.in.includes(j.sourceKey) && j.status !== 'Cancelled').map((j) => ({ sourceKey: j.sourceKey }));
       }),
-      create: vi.fn(async ({ data }: any) => {
-        const items = data.items.create.map((c: any, i: number) => ({ id: `ji-${seq}-${i}`, partyId: null, ...c }));
-        const row = { id: `je-${++seq}`, sourceKey: data.sourceKey, status: data.status, date: data.date, items };
-        state.journals.push(row);
-        return { ...row, entryNumber: data.entryNumber, items };
-      }),
     },
-    accountingLedgerEntry: { createMany: vi.fn(async () => ({ count: 0 })) },
+    party: { findMany: vi.fn(async () => state.parties) },
   };
+  // The shared posting path is covered by its own tests; here it records what the import hands it.
+  const createJournal = vi.fn(async (_tx: any, input: any, opts: any) => {
+    state.posts.push({ input, opts });
+    const items = input.items.map((c: any, i: number) => ({
+      id: `ji-${seq}-${i}`, ...c, debit: new Prisma.Decimal(c.debit ?? 0), credit: new Prisma.Decimal(c.credit ?? 0),
+    }));
+    const row = { id: `je-${++seq}`, sourceKey: opts.sourceKey, status: 'Submitted', date: new Date(input.date), items };
+    state.journals.push(row);
+    return { journal: { ...row, entryNumber: `JV-${seq}` }, fiscalYear: { id: 'fy-1' } };
+  });
   return {
     state,
     accounts,
     tx,
+    createJournal,
     $transaction: vi.fn(async (fn: any) => {
       // Real rollback: undo journals created by a transaction that throws.
       const before = state.journals.length;
       try { return await fn(tx); } catch (e) { state.journals.length = before; throw e; }
     }),
-    reset() { seq = 0; state.journals.length = 0; },
+    reset() { seq = 0; state.journals.length = 0; state.posts.length = 0; },
   };
 });
 
@@ -67,8 +80,12 @@ vi.mock('../import/shared', () => ({
   sanitizeCellValue: (v: unknown) => String(v ?? ''),
 }));
 vi.mock('../../services/permissionService', () => ({ hasCap: vi.fn(async () => db.state.canControl) }));
-vi.mock('../../utils/documentNumber', () => ({ generateDocumentNumber: vi.fn(async () => `JV-${db.state.journals.length + 1}`) }));
-vi.mock('../../utils/accountBalance', () => ({ updateBalancesForItems: vi.fn(async () => undefined) }));
+vi.mock('../../services/manualJournal', () => ({ createManualJournalInTx: db.createJournal }));
+vi.mock('../../services/ledger/partyRules', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/ledger/partyRules')>()),
+  // a-ar is the receivables account: the only one with a party role
+  loadPartyRoleMap: vi.fn(async () => new Map([['a-ar', 'AR']])),
+}));
 vi.mock('../../utils/periodGuard', () => ({
   PERIOD_BUSY: 'PERIOD_BUSY',
   assertPeriodOpen: vi.fn(async (_tx: any, ref: { date: Date }) => {
@@ -131,21 +148,21 @@ describe('POST /api/import/journals line checks', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(0);
     expect(res.body.errors).toEqual([expect.objectContaining({ row: 2, message: expect.stringContaining('debit dan kredit sekaligus') })]);
-    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(db.createJournal).not.toHaveBeenCalled();
   });
 
   it('a negative debit is an error', async () => {
     setFile([row('2026-03-05', 'Minus', '1.1.1', '-5000000', '0'), row('2026-03-05', 'Minus', '4.1', '0', '5000000')]);
     const res = await post();
     expect(res.body.errors).toEqual([expect.objectContaining({ row: 2, message: expect.stringContaining('negatif') })]);
-    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(db.createJournal).not.toHaveBeenCalled();
   });
 
   it('a thousands-separated text amount is refused instead of read as 5', async () => {
     setFile([row('2026-03-05', 'Titik', '1.1.1', '5.000.000', '0'), row('2026-03-05', 'Titik', '4.1', '0', '5000000')]);
     const res = await post();
     expect(res.body.errors.map((e: any) => e.row)).toEqual([2]);
-    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(db.createJournal).not.toHaveBeenCalled();
   });
 
   it('reads 05/03/2026 as 5 March', async () => {
@@ -232,9 +249,9 @@ describe('POST /api/import/journals all-or-nothing', () => {
   });
 
   it('a control account needs journal.control, and deposit-style refusals stay with the guard', async () => {
-    setFile([row('2026-03-05', 'Piutang', '1.2.1', '10', '0'), row('2026-03-05', 'Piutang', '4.1', '0', '10')]);
+    setFile([row('2026-03-05', 'Piutang', '1.2.1', '10', '0', { partyCode: 'PT Maju' }), row('2026-03-05', 'Piutang', '4.1', '0', '10')]);
     const denied = await post();
-    expect(denied.body.errors).toEqual([expect.objectContaining({ row: 2, message: expect.stringContaining('journal.control') })]);
+    expect(denied.body.errors).toEqual([expect.objectContaining({ row: 2, code: 'ACCOUNT_CONTROL', message: expect.stringContaining('journal.control') })]);
 
     db.state.canControl = true;
     expect((await post()).body.success).toBe(1);
@@ -252,7 +269,7 @@ describe('POST /api/import/journals all-or-nothing', () => {
 
   it('rolls back journals already written when a later write fails', async () => {
     setFile([...sale('Satu'), ...sale('Dua', '100', '2026-03-06')]);
-    db.tx.journalEntry.create.mockImplementationOnce(db.tx.journalEntry.create.getMockImplementation()!)
+    db.createJournal.mockImplementationOnce(db.createJournal.getMockImplementation()!)
       .mockImplementationOnce(async () => { throw new Error('boom'); });
     const res = await post();
     expect(res.status).toBe(500);
@@ -344,7 +361,7 @@ describe('POST /api/import/journals review fixes', () => {
     const res = await post();
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('PERIOD_BUSY');
-    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(db.createJournal).not.toHaveBeenCalled();
   });
 
   it('a numeric accountNumber cell is refused instead of read as another account', async () => {
@@ -352,7 +369,7 @@ describe('POST /api/import/journals review fixes', () => {
     const res = await post();
     expect(res.body.success).toBe(0);
     expect(res.body.errors[0]).toMatchObject({ row: 2, message: expect.stringContaining('berformat teks') });
-    expect(db.tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(db.createJournal).not.toHaveBeenCalled();
   });
 
   it('a large formula amount with float noise is accepted', async () => {
@@ -370,5 +387,83 @@ describe('POST /api/import/journals review fixes', () => {
     const res = await post();
     expect(res.body.errors).toHaveLength(1);
     expect(res.body.errors[0].row).toBe(3);
+  });
+});
+
+describe('POST /api/import/journals party column', () => {
+  const receivable = (partyCode: string | undefined, narration = 'Piutang'): Row[] => [
+    row('2026-03-05', narration, '1.2.1', '10000000', '0', partyCode === undefined ? {} : { partyCode }),
+    row('2026-03-05', narration, '4.1', '0', '10000000'),
+  ];
+
+  beforeEach(() => { db.state.canControl = true; });
+
+  it('posts through createManualJournalInTx as IMPORT with the party resolved from its name, ignoring case', async () => {
+    setFile(receivable('pt maju'));
+    const res = await post();
+    expect(res.body).toMatchObject({ success: 1, failed: 0, errors: [] });
+    expect(db.state.posts).toHaveLength(1);
+    const { input, opts } = db.state.posts[0];
+    expect(opts).toMatchObject({ sourceType: 'IMPORT', canControl: true, userId: 'u-1' });
+    expect(opts.sourceKey).toMatch(/^IMPORT:/);
+    expect(input.items.map((i: any) => [i.accountId, i.debit, i.credit, i.partyId])).toEqual([
+      ['a-ar', '10000000.00', '0.00', 'p-1'],
+      ['a-jual', '0.00', '10000000.00', null],
+    ]);
+  });
+
+  it('takes a party id as well, and the id and the name make the same journal', async () => {
+    setFile(receivable('p-1'));
+    expect((await post()).body.success).toBe(1);
+    setFile(receivable('PT Maju'));
+    const again = await post();
+    expect(again.body).toMatchObject({ success: 0, failed: 0 });
+    expect(again.body.alreadyImported).toHaveLength(1);
+  });
+
+  it('a name shared by two parties is an error on its row, naming the id alternative', async () => {
+    setFile(receivable('PT Kembar'));
+    const res = await post();
+    expect(res.body.success).toBe(0);
+    expect(res.body.errors).toEqual([expect.objectContaining({ row: 2, code: 'PARTY_AMBIGUOUS_NAME', message: expect.stringContaining('ID pihak') })]);
+    expect(db.createJournal).not.toHaveBeenCalled();
+    setFile(receivable('p-2'));
+    expect((await post()).body.success).toBe(1);
+  });
+
+  it('an unknown party is an error on its row', async () => {
+    setFile(receivable('PT Hantu'));
+    const res = await post();
+    expect(res.body.errors).toEqual([expect.objectContaining({ row: 2, code: 'PARTY_NOT_FOUND' })]);
+    expect(db.createJournal).not.toHaveBeenCalled();
+  });
+
+  it('a receivable line without a party is PARTY_REQUIRED on its row', async () => {
+    setFile(receivable(undefined));
+    const res = await post();
+    expect(res.body.errors).toEqual([expect.objectContaining({ row: 2, code: 'PARTY_REQUIRED' })]);
+  });
+
+  it('a supplier on the receivable account and a party on a plain account are refused', async () => {
+    setFile(receivable('CV Pemasok'));
+    expect((await post()).body.errors).toEqual([expect.objectContaining({ row: 2, code: 'PARTY_TYPE_MISMATCH' })]);
+    setFile([row('2026-03-05', 'Kas', '1.1.1', '10', '0', { partyCode: 'PT Maju' }), row('2026-03-05', 'Kas', '4.1', '0', '10')]);
+    expect((await post()).body.errors).toEqual([expect.objectContaining({ row: 2, code: 'PARTY_NOT_ALLOWED' })]);
+    expect(db.createJournal).not.toHaveBeenCalled();
+  });
+
+  it('one bad party stops the other journals too (all-or-nothing)', async () => {
+    setFile([...sale('Baik'), ...receivable('PT Hantu', 'Buruk')]);
+    const res = await post();
+    expect(res.body).toMatchObject({ success: 0, failed: 2 });
+    expect(db.state.journals).toHaveLength(0);
+  });
+
+  it('the preview shows the party code and posts nothing', async () => {
+    setFile(receivable('PT Maju'));
+    const res = await post('?preview=true');
+    expect(res.body.errors).toEqual([]);
+    expect(res.body.data[0].items[0]).toMatchObject({ accountNumber: '1.2.1', partyCode: 'PT Maju' });
+    expect(db.createJournal).not.toHaveBeenCalled();
   });
 });

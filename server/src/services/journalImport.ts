@@ -8,6 +8,8 @@ import { parseImportAmount, parseImportDate } from '../utils/importDate';
 export interface ImportRowError {
   row: number;
   message: string;
+  /** Machine code of an account or party refusal (ACCOUNT_CONTROL, PARTY_REQUIRED, ...); absent for format errors. */
+  code?: string;
 }
 
 export interface ImportItem {
@@ -15,6 +17,8 @@ export interface ImportItem {
   debit: string;
   credit: string;
   description?: string;
+  /** What the sheet's partyCode cell says: a party id or an exact party name; resolved by journalImportParties. */
+  partyCode?: string;
   /** 1-based sheet row (header = row 1). */
   rowNum: number;
 }
@@ -59,6 +63,7 @@ export function parseJournalRows(
     const accountNumber = (r.accountNumber || r.account_number || '').trim();
     const description = sanitize(r.description);
     const ref = sanitize(r.ref);
+    const partyCode = sanitize(r.partyCode ?? r.party_code).trim();
 
     const date = rawDate ? parseImportDate(rawDate) : null;
     // A bad row still taints its journal: judging the balance of the leftover lines would mislead.
@@ -104,7 +109,7 @@ export function parseJournalRows(
       group.broken = true;
       return;
     }
-    group.items.push({ accountNumber, debit: debit.value, credit: credit.value, description: description || undefined, rowNum });
+    group.items.push({ accountNumber, debit: debit.value, credit: credit.value, description: description || undefined, partyCode: partyCode || undefined, rowNum });
   });
 
   return { groups: [...groups.values()], errors };
@@ -129,6 +134,8 @@ export function checkGroupLines(groups: readonly ImportGroup[]): { checked: Chec
       accountId: i.accountNumber,
       debit: i.debit,
       credit: i.credit,
+      // Likewise a carrier: the raw partyCode, replaced by the resolved party id before hashing and posting.
+      partyId: i.partyCode ?? null,
       description: i.description,
     })));
     if (result.ok) {
@@ -149,7 +156,7 @@ export function checkGroupLines(groups: readonly ImportGroup[]): { checked: Chec
 /**
  * Hash of what the group says (ref, day, narration, lines sorted by account and amount), so the same
  * journal in a corrected or reordered file keeps its hash and a changed journal gets a new one.
- * Lines carry the account number in `accountId` (see checkGroupLines).
+ * Lines carry the account number in `accountId` (see checkGroupLines) and the resolved party id in `partyId`.
  */
 export function groupContentHash(group: ImportGroup, lines: readonly NormalizedJournalLine[]): string {
   const normalized = lines
