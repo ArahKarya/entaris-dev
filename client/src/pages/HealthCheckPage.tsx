@@ -56,6 +56,7 @@ type CheckKey =
   | 'arSubledger'
   | 'customerDepositSubledger'
   | 'aleFiscalYear'
+  | 'formerRoleAccounts'
   | 'requiredTriggers';
 
 /** Server check name → `auth:healthCheck.checks.<key>` and the fix endpoint key. */
@@ -69,6 +70,7 @@ const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
   'AR vs Subledger': { key: 'arSubledger' },
   'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
   'ALE vs Fiscal Year': { key: 'aleFiscalYear' },
+  'Former Role Accounts': { key: 'formerRoleAccounts' },
   'Required Database Triggers': { key: 'requiredTriggers' },
 };
 

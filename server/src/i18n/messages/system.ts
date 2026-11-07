@@ -124,6 +124,9 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   // health check: ledger rows vs fiscal year (E2-R5)
   "{0} jurnal: entri Buku Besar tercatat di Tahun Buku yang berbeda dengan tanggal jurnalnya": "{0} journals: General Ledger entries are booked to a Fiscal Year other than the one holding the journal date",
   "Entri Buku Besar semua jurnal tercatat di Tahun Buku sesuai tanggalnya": "General Ledger entries of every journal are booked to the Fiscal Year holding their date",
+  // health check: former system account role accounts (E2-R8)
+  "{0} akun bekas peran akun sistem masih bersaldo; pindahkan sisanya lewat Pengaturan > Akun Sistem": "{0} former system account role accounts still have a balance; move the rest from Settings > System Accounts",
+  "Akun bekas peran akun sistem tidak bersaldo": "No former system account role account has a balance",
   "Dihapus {0} ALE lama, dibuat {1} ALE baru dari JournalItem": "Deleted {0} old ALE entries and created {1} new ALE entries from JournalItem",
   "Dihitung ulang saldo {0} akun dari jurnal": "Recalculated the balances of {0} accounts from journals",
   "{0} entri ALE orphan ditandai sebagai cancelled": "{0} orphan ALE entries marked as cancelled",

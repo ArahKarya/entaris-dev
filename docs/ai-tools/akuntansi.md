@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/akuntansi` · 37 tool (read 16, write 8, critical 13)
+Endpoint MCP target: `/mcp/akuntansi` · 38 tool (read 16, write 8, critical 14)
 
 ## Tujuan
 
@@ -114,6 +114,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | [`period_lock_get`](#period_lock_get) | read | - | `GET /api/period-lock` |
 | [`period_lock_set`](#period_lock_set) | critical | tidak | `PUT /api/period-lock` |
 | [`sysacct_get`](#sysacct_get) | read | - | `GET /api/system-accounts` |
+| [`sysacct_sweep`](#sysacct_sweep) | critical | tidak | `POST /api/system-accounts/:role/sweep` |
 | [`sysacct_update`](#sysacct_update) | critical | tidak | `PUT /api/system-accounts` |
 | [`tax_create_config`](#tax_create_config) | write | tidak | `POST /api/tax/config` |
 | [`tax_delete_config`](#tax_delete_config) | critical | tidak | `DELETE /api/tax/config/:id` |
@@ -1728,17 +1729,81 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 {
   "ok": true,
   "kind": "read",
-  "data": "<{ mappings: per role → akun[], roles: definisi role akun sistem }.>"
+  "data": "<{ mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo iku>"
 }
 ```
 
-**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem }.
+**Isi hasil:** { mappings: per role → akun[], roles: definisi role akun sistem (+ balanceMoves: saldo ikut dipindah), formerResidues: akun lama role neraca yang masih bersaldo }.
 
-**Tool terkait:** [`sysacct_update`](#sysacct_update)
+**Tool terkait:** [`sysacct_update`](#sysacct_update), [`sysacct_sweep`](#sysacct_sweep)
+
+### sysacct_sweep
+
+**Ringkasan:** Memindahkan sisa saldo di akun lama sebuah role neraca (akun asal jurnal reklas pemetaan akun sistem sebelumnya, mis. setelah invoice lama dibatalkan) ke akun yang dipetakan sekarang, lewat jurnal reklas SYSTEM_DOC bertanggal hari ini (per pihak untuk Piutang/Hutang/Uang Muka). Hanya role Admin. Tanpa sisa saldo tidak memposting apa pun. Daftar sisa saldo ada di sysacct_get (formerResidues) dan cek kesehatan 'Former Role Accounts'.
+
+- **Risk / tier:** `critical` / Wajib-Approve
+- **Draft-capable:** tidak (efek langsung)
+- **Roles & izin:** Admin (modul `settings` / `edit`)
+- **Handler:** `POST /api/system-accounts/:role/sweep` (src/routes/systemAccounts.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `role` | path | `string` | ya | Kunci role neraca satu-akun, mis. AR, AP, INVENTORY, CUSTOMER_DEPOSIT. |
+| `reason` | body | `string` | ya | Alasan reklas (min 5 karakter), masuk narasi jurnal. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "sysacct_sweep",
+  "args": {
+    "role": "<role>",
+    "reason": "<reason>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "action",
+  "status": "pending_approval",
+  "approvalId": "<id>",
+  "confirm": "Pindahkan sisa saldo akun lama role <role> ke akun yang dipetakan sekarang? Alasan: <reason>"
+}
+```
+
+**Isi hasil:** { message, transfers: [{ role, fromAccount, toAccount, amount, partyCount, journalNumbers }] } (kosong bila tidak ada sisa).
+
+**Efek pembukuan/stok:** Memposting jurnal reklas SYSTEM_DOC (akun lama ke akun yang dipetakan sekarang, hari ini) untuk setiap akun lama role ini yang masih bersaldo. Tidak bisa dibatalkan dari menu Jurnal.
+
+**Teks konfirmasi:** Pindahkan sisa saldo akun lama role {role} ke akun yang dipetakan sekarang? Alasan: {reason}
+
+**Prasyarat**
+
+- Role dipetakan ke tepat satu akun detail aktif.
+- Tahun buku hari ini terbuka dan tidak terkunci.
+
+**Error umum**
+
+- 403: hanya Admin
+- 400: role tidak valid / reason kurang dari 5 karakter
+- 400 SWEEP_ROLE_INVALID: role bukan role neraca satu-akun (role laba rugi tidak direklas)
+- 400 ACCOUNT_MAPPING_MISSING: role belum dipetakan
+- 400 ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun yang dipetakan sekarang bukan akun detail aktif
+- 400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting
+- 400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; ulangi
+
+**Tool terkait:** [`sysacct_get`](#sysacct_get), [`sysacct_update`](#sysacct_update)
 
 ### sysacct_update
 
-**Ringkasan:** Mengubah pemetaan akun sistem (mappings: role+accountId+sortOrder; clearRoles: melepas role non-wajib). Hanya role Admin (dicek eksplisit). Mempengaruhi SEMUA posting otomatis berikutnya.
+**Ringkasan:** Mengubah pemetaan akun sistem (mappings: role+accountId+sortOrder; clearRoles: melepas role non-wajib). Hanya role Admin (dicek eksplisit). Mempengaruhi SEMUA posting otomatis berikutnya. Memindah role neraca satu-akun (mis. Piutang, Hutang, Persediaan, Uang Muka) dari akun yang masih bersaldo ditolak kecuali transferBalance=true dengan reason: saldo seluruh riwayat akun lama direklas ke akun baru (per pihak untuk Piutang/Hutang/Uang Muka) dalam satu jurnal SYSTEM_DOC bertanggal hari ini. Role laba rugi (mis. HPP, Retur Penjualan) dipindah tanpa reklas; riwayat tetap di akun lama.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1755,6 +1820,8 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | `mappings[].accountId` | body | `uuid` | ya |  |
 | `mappings[].sortOrder` | body | `number` | tidak |  |
 | `clearRoles` | body | `array<string>` | tidak | Roles yang ingin dilepas total (set ke kosong). Tidak boleh role wajib. |
+| `transferBalance` | body | `boolean` | tidak | Pindahkan saldo akun lama role neraca ke akun baru lewat jurnal reklas hari ini. Wajib dengan reason. |
+| `reason` | body | `string` | tidak | Alasan reklas (min 5 karakter), masuk narasi jurnal. Wajib bila transferBalance. |
 
 **Contoh pemanggilan**
 
@@ -1781,20 +1848,21 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Ubah pemetaan akun sistem ([...] pemetaan, lepas [...])? Berdampak pada semua posting otomatis."
+  "confirm": "Ubah pemetaan akun sistem ([...] pemetaan, lepas [...], pindahkan saldo: {transferBalance})? Berdampak pada semua posting otomatis."
 }
 ```
 
-**Isi hasil:** Pemetaan terbaru.
+**Isi hasil:** Pemetaan terbaru + transfers (reklas per role: akun lama/baru, jumlah, jumlah pihak, nomor jurnal).
 
-**Efek pembukuan/stok:** Tidak memposting jurnal, tetapi menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.
+**Efek pembukuan/stok:** Dengan transferBalance memposting jurnal reklas SYSTEM_DOC (akun lama ke akun baru, hari ini) untuk role neraca yang dipindah; tanpa itu tidak memposting. Menentukan akun DR/CR semua jurnal otomatis berikutnya (penjualan, pembelian, HPP, uang muka, penutupan buku). Salah petakan = pembukuan salah.
 
-**Teks konfirmasi:** Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles})? Berdampak pada semua posting otomatis.
+**Teks konfirmasi:** Ubah pemetaan akun sistem ({mappings} pemetaan, lepas {clearRoles}, pindahkan saldo: {transferBalance})? Berdampak pada semua posting otomatis.
 
 **Prasyarat**
 
 - Akun tujuan aktif, bukan akun grup, dan bertipe akar sesuai role (hanya pasangan role-akun yang berubah diperiksa).
 - Role wajib tidak boleh dikosongkan.
+- Role neraca yang dipindah dari akun bersaldo butuh transferBalance=true dan reason; tahun buku hari ini harus terbuka dan tidak terkunci.
 
 **Error umum**
 
@@ -1802,8 +1870,16 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 - 400: role tidak valid / role wajib dilepas
 - 400 ACCOUNT_GROUP / ACCOUNT_INACTIVE / ACCOUNT_ROOT_TYPE: akun baru untuk sebuah role adalah akun grup, nonaktif, atau bertipe akar berbeda dari yang diharapkan role
 - 400 ACCOUNT_ROLE_CONFLICT: dua role berbeda arti (mis. Piutang dan Persediaan) dipetakan ke satu akun
+- 400 ACCOUNT_HAS_BALANCE: akun lama role neraca masih bersaldo; respons memuat balances (role, akun lama/baru, jumlah, jumlah pihak). Ulangi dengan transferBalance=true dan reason, atau jangan pindahkan role itu
+- 400: transferBalance tanpa reason (min 5 karakter)
+- 400 PERIOD_CLOSED / PERIOD_LOCKED / FISCAL_YEAR_MISSING: tanggal hari ini tidak bisa diposting; pemetaan tidak berubah
+- 400 REMAP_BALANCE_CHANGED: ada posting ke akun lama selama reklas; tidak ada yang disimpan, ulangi
+- 400 ACCOUNT_SHARED_WITH_ROLE: akun lama juga dipakai role lain (saldo tidak bisa dipisah per role; simpan tanpa transferBalance), atau dua role bersaldo meninggalkan satu akun sekaligus (pindahkan satu per satu)
+- 400 REMAP_CHAIN: role neraca pindah ke akun yang ditinggalkan role neraca lain dalam simpanan yang sama (mis. tukar akun); pindahkan satu role per simpan
+- 400 ROLE_CLEAR_HAS_BALANCE: role neraca dilepas padahal akunnya masih bersaldo; pindahkan ke akun lain beserta saldonya
+- 400 INVENTORY_ACCOUNT_ITEMS: Persediaan dipindah sementara barang bersaldo stok memakai akun lama sebagai akun persediaannya sendiri; kosongkan akun barang itu dulu
 
-**Tool terkait:** [`sysacct_get`](#sysacct_get), [`coa_flat`](#coa_flat)
+**Tool terkait:** [`sysacct_get`](#sysacct_get), [`coa_flat`](#coa_flat), [`sysacct_sweep`](#sysacct_sweep)
 
 ### tax_create_config
 

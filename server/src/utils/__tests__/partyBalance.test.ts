@@ -12,7 +12,8 @@ const makeTx = () => ({
     ]),
   },
   // A remap moved AR off 'ar-old': its lines still count as receivable.
-  journalEntry: { findMany: vi.fn().mockResolvedValue([{ sourceKey: 'REMAP:AR:ar-old:ar:20260101' }]) },
+  journalEntry: { findMany: vi.fn().mockResolvedValue([{ sourceKey: 'REMAP:AR:ar-old:ar:20260101', createdAt: new Date('2026-01-01') }]) },
+  systemAccountRoleMove: { findMany: vi.fn().mockResolvedValue([]) },
   party: { update: vi.fn().mockResolvedValue({}) },
 });
 
@@ -25,7 +26,7 @@ const updates = (tx: ReturnType<typeof makeTx>) =>
 describe('reverseManualDepositLines', () => {
   it('undoes only deposit lines, by the account party role (former deposit accounts included)', async () => {
     const tx = makeTx();
-    tx.journalEntry.findMany.mockResolvedValue([{ sourceKey: 'REMAP:CUSTOMER_DEPOSIT:cdep-old:cdep:20260101' }]);
+    tx.journalEntry.findMany.mockResolvedValue([{ sourceKey: 'REMAP:CUSTOMER_DEPOSIT:cdep-old:cdep:20260101', createdAt: new Date('2026-01-01') }]);
     await reverseManualDepositLines(tx as any, [
       { partyId: 'c1', accountId: 'ar', debit: '100.10', credit: 0 },
       { partyId: 's1', accountId: 'ap', debit: 0, credit: 40 },

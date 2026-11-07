@@ -43,7 +43,8 @@ describe('manualPartyAdjustments', () => {
     const queryRaw = vi.fn().mockResolvedValue([{ party_id: 'p1', amount: '5000000.00' }]);
     const tx = {
       systemAccountMapping: { findMany: vi.fn().mockResolvedValue([{ role: 'AR', accountId: 'ar-1', account: { accountNumber: '1.2.1', name: 'Piutang' } }]) },
-      journalEntry: { findMany: vi.fn().mockResolvedValue([{ sourceKey: 'REMAP:AR:ar-old:ar-1:20260101' }]) },
+      journalEntry: { findMany: vi.fn().mockResolvedValue([{ sourceKey: 'REMAP:AR:ar-old:ar-1:20260101', createdAt: new Date('2026-01-01') }]) },
+      systemAccountRoleMove: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: queryRaw,
     } as unknown as Prisma.TransactionClient;
     const out = await manualPartyAdjustments(tx, 'AR', ['p1']);

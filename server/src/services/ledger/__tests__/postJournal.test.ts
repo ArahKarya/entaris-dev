@@ -35,6 +35,7 @@ function makeTx(accounts = [acc('ar', 'ASSET'), acc('rev', 'REVENUE'), acc('exp'
     },
     inventoryItem: { findMany: vi.fn(async () => []) },
     party: { findMany: vi.fn(async () => [{ id: 'cust', partyType: 'Customer' }, { id: 'supp', partyType: 'Supplier' }]) },
+    systemAccountRoleMove: { findMany: vi.fn(async () => []) },
     journalEntry: {
       findMany: vi.fn(async () => []),
       create: vi.fn(async ({ data }: any) => {

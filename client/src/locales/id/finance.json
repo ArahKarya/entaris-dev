@@ -2285,7 +2285,9 @@
     "toast": {
       "saved": "Konfigurasi akun sistem disimpan.",
       "saveFailed": "Gagal menyimpan konfigurasi.",
-      "noAccountAvailable": "Tidak ada akun tersedia untuk ditambahkan."
+      "noAccountAvailable": "Tidak ada akun tersedia untuk ditambahkan.",
+      "swept": "Sisa saldo akun lama dipindahkan.",
+      "sweepFailed": "Gagal memindahkan sisa saldo akun lama."
     },
     "loading": "Memuat akun sistem…",
     "error": {
@@ -2366,6 +2368,36 @@
         "title": "Ekuitas",
         "description": "Akun modal, laba ditahan, dan prive pemilik"
       }
+    },
+    "moveNote": {
+      "balance": "Saldo akun lama ikut dipindah lewat jurnal reklas hari ini bila masih ada.",
+      "history": "Riwayat transaksi tetap di akun lama; transaksi berikutnya masuk akun baru."
+    },
+    "residue": {
+      "found_one": "{{count}} akun lama masih bersaldo",
+      "found_other": "{{count}} akun lama masih bersaldo",
+      "sweep": "Pindahkan sisa"
+    },
+    "reclass": {
+      "transfer": {
+        "title": "Pindahkan saldo akun lama",
+        "description": "Akun lama peran berikut masih bersaldo. Simpan dengan memindahkan saldonya ke akun baru lewat jurnal reklas, atau batalkan lalu kembalikan pilihan akunnya.",
+        "confirm": "Pindahkan saldo dan simpan"
+      },
+      "sweep": {
+        "title": "Pindahkan sisa saldo akun lama",
+        "description": "Akun lama peran ini masih bersaldo setelah pemetaan dipindah (mis. invoice lama dibatalkan). Sisanya dipindahkan ke akun yang dipetakan sekarang lewat jurnal reklas.",
+        "confirm": "Pindahkan sisa"
+      },
+      "to": "ke",
+      "amount": "Saldo: {{amount}}",
+      "parties_one": "{{count}} pihak",
+      "parties_other": "{{count}} pihak",
+      "reason": "Alasan",
+      "reasonPlaceholder": "Mis. pindah ke akun piutang per cabang",
+      "reasonTooShort": "Alasan minimal {{min}} karakter.",
+      "dateNote": "Jurnal reklas bertanggal hari ini dan tidak dapat dibatalkan dari menu Jurnal.",
+      "cancel": "Batal"
     }
   },
   "timeline": {

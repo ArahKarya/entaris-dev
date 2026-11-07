@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **512** tool (read 236 · write 165 · critical 111); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **513** tool (read 236 · write 165 · critical 112); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -12,7 +12,7 @@ Total **512** tool (read 236 · write 165 · critical 111); semuanya aktif secar
 | [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
-| [Akuntansi](akuntansi.md) | 37 | 16 | 8 | 13 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
+| [Akuntansi](akuntansi.md) | 38 | 16 | 8 | 14 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
 | [Kas & Bank](kas-bank.md) | 37 | 15 | 13 | 9 | Pembayaran/penerimaan, rekonsiliasi bank, transaksi berulang, uang jaminan proyek. |
 | [Aset & Umum (EAM)](aset-umum.md) | 141 | 49 | 68 | 24 | Aset, kendaraan, gedung, equipment, maintenance, dokumen legal, inventaris umum, MR. |
 | [Pengajuan Pembayaran](pengajuan-pembayaran.md) | 32 | 9 | 11 | 12 | Pengajuan pembayaran, verifikasi, pembayaran, pertanggungjawaban, antrian Tagihan EAM. |
@@ -510,6 +510,7 @@ Total **512** tool (read 236 · write 165 · critical 111); semuanya aktif secar
 | [`svc_list`](master-data.md#svc_list) | master-data | read | - | Admin, Accountant, Viewer | `GET /api/service-items` |
 | [`svc_update`](master-data.md#svc_update) | master-data | write | tidak | Admin, Accountant | `PATCH /api/service-items/:id` |
 | [`sysacct_get`](akuntansi.md#sysacct_get) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/system-accounts` |
+| [`sysacct_sweep`](akuntansi.md#sysacct_sweep) | akuntansi | critical | tidak | Admin | `POST /api/system-accounts/:role/sweep` |
 | [`sysacct_update`](akuntansi.md#sysacct_update) | akuntansi | critical | tidak | Admin | `PUT /api/system-accounts` |
 | [`tax_create_config`](akuntansi.md#tax_create_config) | akuntansi | write | tidak | Admin | `POST /api/tax/config` |
 | [`tax_delete_config`](akuntansi.md#tax_delete_config) | akuntansi | critical | tidak | Admin | `DELETE /api/tax/config/:id` |
