@@ -1113,6 +1113,9 @@ model CompanySettings {
   invoiceSettings      Json?     @map("invoice_settings")
   /// Penyiapan awal (onboarding wizard) selesai/dilewati admin. NULL = belum.
   onboardedAt          DateTime? @map("onboarded_at")
+  /// Cut-over date of every opening balance (E2-R11): set once by the first opening balance posted
+  /// (services/ledger/openingBalance.ts), the start of the earliest open fiscal year then. NULL = not yet.
+  cutoverDate          DateTime? @map("cutover_date") @db.Date
 
   @@map("company_settings")
 }
