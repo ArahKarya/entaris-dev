@@ -108,48 +108,11 @@ export async function updateBalancesForItems(
 }
 
 /**
- * Recalculate account balances from the sum of all active (non-cancelled) journal entries.
- * This fixes any drift caused by incremental balance updates.
- *
- * @param accountIds - Array of account IDs to recalculate. If empty, recalculates ALL accounts.
+ * Recalculate account balances from the active ledger rows of every year (the one stored-balance
+ * rule, services/ledger/storedBalances.ts): locks the accounts, writes only those that differ.
+ * No ids, or an empty list, recalculates ALL accounts.
  */
-export async function recalculateAccountBalances(
-  tx: Prisma.TransactionClient,
-  accountIds?: string[]
-): Promise<void> {
-  const whereClause = accountIds?.length ? { id: { in: accountIds } } : {};
-  const accounts = await tx.account.findMany({
-    where: whereClause,
-    select: { id: true, rootType: true },
-  });
-
-  for (const account of accounts) {
-    // Source of truth is accounting_ledger_entries (ALE), which every official report reads.
-    // journal_entry_accounts has diverged, so recalculating from it would drift from the reports.
-    const totals = await tx.accountingLedgerEntry.aggregate({
-      where: {
-        accountId: account.id,
-        isCancelled: false,
-      },
-      _sum: { debit: true, credit: true },
-    });
-
-    const totalDebit = new Decimal((totals._sum.debit ?? 0).toString());
-    const totalCredit = new Decimal((totals._sum.credit ?? 0).toString());
-
-    let balance: number;
-    if (account.rootType === 'ASSET' || account.rootType === 'EXPENSE') {
-      balance = totalDebit.minus(totalCredit).toNumber();
-    } else {
-      balance = totalCredit.minus(totalDebit).toNumber();
-    }
-
-    await tx.account.update({
-      where: { id: account.id },
-      data: { balance },
-    });
-  }
-}
+export { recalculateAccountBalances } from '../services/ledger/storedBalances';
 
 /**
  * Recalculate the balance of revenue/expense accounts from the ledger rows of OPEN fiscal years
