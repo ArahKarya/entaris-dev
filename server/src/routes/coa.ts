@@ -15,7 +15,7 @@ import { loadPartyRoleMap } from '../services/ledger/partyRules';
 import { currentPnlYear, currentProfit, pnlPeriodBalances } from '../services/coa/pnlPeriodBalances';
 import { businessToday } from '../utils/businessDate';
 import { hasCap } from '../services/permissionService';
-import { OPENING_LOCK_RIGHT, setOpeningBalanceInTx } from '../services/ledger/openingBalance';
+import { describeAccountOpening, OPENING_LOCK_RIGHT, setOpeningBalanceInTx } from '../services/ledger/openingBalance';
 
 const router = Router();
 
@@ -165,6 +165,20 @@ router.put('/:id', async (req, res) => {
     if (error.code === 'P2025') return res.status(404).json({ error: 'Akun tidak ditemukan.' });
     if (error.code === 'P2002') return res.status(409).json({ error: 'Nomor akun sudah digunakan.' });
     return res.status(500).json({ error: 'Gagal mengupdate akun.' });
+  }
+});
+
+// GET /api/coa/:id/opening: what the opening balance dialog shows (recorded opening, cut-over date,
+// the old journals still to be decided by the accountant). Reads only; never stores the cut-over date.
+router.get('/:id/opening', async (req, res) => {
+  try {
+    const id = req.params.id as string;
+    if (!(await prisma.account.findUnique({ where: { id }, select: { id: true } }))) {
+      return res.status(404).json({ error: 'Akun tidak ditemukan.' });
+    }
+    return res.json(await describeAccountOpening(prisma, id));
+  } catch (error) {
+    return handleRouteError(res, error, 'GET /coa/:id/opening', 'Gagal mengambil saldo awal akun.');
   }
 });
 

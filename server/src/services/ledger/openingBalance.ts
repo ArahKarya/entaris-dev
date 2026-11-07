@@ -24,7 +24,7 @@ import { FISCAL_YEAR_MISSING, fiscalYearOn, fiscalYearRange, type PeriodGuardOpt
 import { cancelTrail, type CancelTrail } from '../../utils/cancelClaim';
 import { mappedAccount } from '../systemAccounts';
 import { lockAccounts } from '../coa/accountStructure';
-import { assertPostableAccount, DOCUMENT_RULE, OPENING_ACCOUNT_RULE } from './accountGuard';
+import { assertPostableAccount, DOCUMENT_RULE, loadControlAccountMap, OPENING_ACCOUNT_RULE, postableAccountProblem } from './accountGuard';
 import { cancelJournalsInTx, type JournalWithItems } from './cancelJournals';
 import { classifyLegacyJournal, sourceKeys, type OpeningPartyKind } from './journalSource';
 import { postJournal } from './postJournal';
@@ -265,6 +265,90 @@ export async function recordedOpening(db: Db, target: OpeningTarget): Promise<De
   return keyed
     .flatMap((j) => j.items.filter((i) => i.accountId === accountId))
     .reduce((sum, i) => sum.add(signed(account.rootType, i.debit, i.credit)), base);
+}
+
+export interface OpeningJournalRef {
+  id: string;
+  entryNumber: string;
+  date: string;
+  amount: string;
+}
+
+export interface AccountOpeningView {
+  cutoverDate: string;
+  cutoverStored: boolean;
+  /** recordedOpening as a string (normal side); without a keyed journal, the ledger opening (openingBase) when not zero; else null. */
+  amount: string | null;
+  /** The service's own active journals (sourceKey OPENING:ACCOUNT:<id>). */
+  journals: OpeningJournalRef[];
+  /** Active unkeyed opening journals; the opening audit must decide on them before the balance can change. */
+  legacyJournals: OpeningJournalRef[];
+  /** Entry numbers of other-way openings on the cut-over day (against the opening equity) that openingBase already counts. */
+  sameDayOpeningEquity: string[];
+  editable: boolean;
+  /** Error code the PATCH would refuse with (account rule code, OPENING_ACCOUNT_KIND, OPENING_LEGACY_REVIEW); null when editable. */
+  reason: string | null;
+}
+
+/**
+ * What the opening balance dialog shows for an account, without writing anything (the cut-over date
+ * is peeked, never stored). `editable`/`reason` mirror the refusals of setOpeningBalanceInTx that
+ * depend on the account and its journals; period and lock state are decided by the PATCH.
+ */
+export async function describeAccountOpening(db: Db, accountId: string): Promise<AccountOpeningView> {
+  const target: OpeningTarget = { kind: 'ACCOUNT', accountId };
+  const [cutover, found, recorded, control] = await Promise.all([
+    peekCutoverDate(db),
+    findActiveOpeningJournals(db, target),
+    recordedOpening(db, target),
+    loadControlAccountMap(db as Tx),
+  ]);
+  // No keyed journal: the ledger can still hold the opening (earlier rows, a same-day "Setoran modal awal").
+  // The dialog must start from it, or saving the default would post a journal that wipes it.
+  const base = recorded === null ? await openingBase(db, accountId, cutover.day, []) : null;
+  const amount = recorded ?? (base !== null && !base.isZero() ? base : null);
+  const account = await db.account.findUnique({
+    where: { id: accountId },
+    select: { id: true, accountNumber: true, name: true, rootType: true, isGroup: true, isActive: true },
+  });
+  const role = await db.systemAccountMapping.findFirst({
+    where: { accountId, role: { in: ['OPENING_EQUITY', 'CURRENT_PROFIT'] } },
+    select: { id: true },
+  });
+  const ruleProblem = postableAccountProblem(account, OPENING_ACCOUNT_RULE, control.get(accountId) ?? null);
+  const reason = ruleProblem?.code ?? (role ? OPENING_ACCOUNT_KIND : found.legacy.length > 0 ? OPENING_LEGACY_REVIEW : null);
+  const ref = (j: JournalWithItems): OpeningJournalRef => ({
+    id: j.id,
+    entryNumber: j.entryNumber,
+    date: businessDayOf(j.date),
+    amount: j.items
+      .filter((i) => i.accountId === accountId)
+      .reduce((sum, i) => sum.add(signed(account?.rootType ?? 'ASSET', i.debit, i.credit)), ZERO)
+      .toFixed(2),
+  });
+  const equity = await db.systemAccountMapping.findFirst({ where: { role: 'OPENING_EQUITY' }, orderBy: { sortOrder: 'asc' }, select: { accountId: true } });
+  const sameDay = equity && equity.accountId !== accountId
+    ? await db.journalEntry.findMany({
+        where: {
+          status: { not: 'Cancelled' },
+          date: { gte: openingJournalInstant(cutover.day), lt: openingJournalInstant(addDays(cutover.day, 1)) },
+          AND: [{ items: { some: { accountId } } }, { items: { some: { accountId: equity.accountId } } }],
+          OR: [{ sourceKey: null }, { NOT: { sourceKey: { startsWith: 'OPENING:' } } }],
+        },
+        select: { entryNumber: true },
+        orderBy: { entryNumber: 'asc' },
+      })
+    : [];
+  return {
+    cutoverDate: cutover.day,
+    cutoverStored: cutover.stored,
+    amount: amount ? amount.toFixed(2) : null,
+    journals: found.keyed.map(ref),
+    legacyJournals: found.legacy.map(ref),
+    sameDayOpeningEquity: sameDay.map((j) => j.entryNumber),
+    editable: reason === null,
+    reason,
+  };
 }
 
 /** The keyed journal already holds exactly the wanted line: one journal, on the day, target + equity. */
