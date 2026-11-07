@@ -23,7 +23,7 @@ const db = vi.hoisted(() => {
 vi.mock('../../lib/prisma', () => ({ prisma: db }));
 vi.mock('../import/shared', () => ({
   upload: { single: () => (req: any, _res: any, next: any) => { req.file = { buffer: Buffer.from(''), originalname: 'x.csv' }; next(); } },
-  parseFile: vi.fn(async () => db.rows),
+  parseFileDetailed: vi.fn(async () => ({ rows: db.rows, numericCells: db.rows.map(() => ({})) })),
   sanitizeCellValue: (v: unknown) => String(v ?? ''),
 }));
 vi.mock('../../utils/fiscalYear', () => ({ getOpenFiscalYear: vi.fn(async () => ({ id: 'fy-1' })) }));

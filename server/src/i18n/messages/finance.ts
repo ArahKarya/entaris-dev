@@ -15,6 +15,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Gagal mengupdate akun.": "Failed to update the account.",
   "Tidak bisa set saldo untuk akun grup.": "Cannot set a balance on a group account.",
   "Gagal mengatur saldo awal.": "Failed to set the opening balance.",
+  "Gagal mengambil saldo awal akun.": "Failed to load the account opening balance.",
   "Tidak dapat menghapus akun yang masih memiliki sub-akun. Hapus sub-akun terlebih dahulu.": "Cannot delete an account that still has sub-accounts. Delete the sub-accounts first.",
   "Tidak dapat menghapus akun ini karena dipakai sebagai Akun Sistem ({0}). Lepaskan dulu pemetaannya di Pengaturan → Akun Sistem.": "Cannot delete this account because it is used as a System Account ({0}). Remove the mapping first in Settings → System Accounts.",
   "Tidak dapat menghapus akun ini karena masih ditautkan ke {0}. Ubah akun pada item tersebut terlebih dahulu.": "Cannot delete this account because it is still linked to {0}. Change the account on those records first.",
@@ -374,7 +375,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Pengajuan hanya rupiah": "Payment requests are in rupiah only",
   // Document journal void (services/ledger/cancelJournals.ts)
   "Jurnal {0} sudah dibalik dengan jurnal lain, jadi tidak dibatalkan lagi. Periksa jurnal pembaliknya di Buku Besar.": "Journal {0} has already been reversed by another journal, so it is not cancelled again. Check its reversing journal in the General Ledger.",
-  "saldo awal sudah tercatat di jurnal {0}. Impor ulang tidak mengubah saldo awal; koreksi lewat jurnal manual.": "the opening balance is already recorded in journal {0}. Re-importing does not change opening balances; correct it with a manual journal.",
   "Akun \"{0}\" disimpan, tetapi {1}": "Account \"{0}\" was saved, but {1}",
   "Mitra \"{0}\" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.": "Partner \"{0}\" already exists: profile updated, opening balance unchanged. Correct the balance with a manual journal.",
   // Period guard (utils/periodGuard.ts); the {label} nouns below translate inside the patterns.
@@ -492,7 +492,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Pihak hanya boleh diisi di baris akun Piutang Usaha, Hutang Usaha, atau Uang Muka; kosongkan pihak di baris ini.": "A party can only be set on an Accounts Receivable, Accounts Payable or deposit account line; clear the party on this line.",
   "Baris ke akun {0} wajib memilih {1}.": "A line to the {0} account needs a {1}.",
   "Akun {0} hanya menerima {1}; pihak yang dipilih bertipe {2}.": "The {0} account only accepts a {1}; the selected party is of type {2}.",
-  "Akun {0} hanya menerima {1}; mitra yang terdaftar sebagai Customer sekaligus Supplier belum bisa dipakai di jurnal manual.": "The {0} account only accepts a {1}; a partner registered as both Customer and Supplier cannot be used in a manual journal yet.",
   "Akun {0} {1} dipetakan ke dua peran pihak ({2} dan {3}). Perbaiki pemetaan di Pengaturan > Akun Sistem.": "Account {0} {1} is mapped to two party roles ({2} and {3}). Fix the mapping in Settings > System Accounts.",
   "Akun {0} {1} memegang dua peran pihak ({2} dan {3}) lewat pemindahan akun sistem. Satu akun hanya boleh memegang satu peran pihak; pilih akun lain di Pengaturan > Akun Sistem.": "Account {0} {1} has held two party roles ({2} and {3}) through a system account move. One account can hold only one party role; choose another account in Settings > System Accounts.",
   // import journals (E7-R9, routes/import/journals.ts, services/journalImport.ts, utils/importDate.ts)
@@ -508,4 +507,25 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Tanggal \"{0}\" tidak valid. Tulis YYYY-MM-DD atau DD/MM/YYYY.": "The date \"{0}\" is invalid. Write YYYY-MM-DD or DD/MM/YYYY.",
   "Nilai \"{0}\" bukan angka dengan paling banyak 2 desimal.": "The value \"{0}\" is not a number with at most 2 decimals.",
   "Nilai \"{0}\" bukan angka yang valid. Tulis angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal.": "The value \"{0}\" is not a valid number. Write the number without thousands separators, with a dot as the decimal mark.",
+  // opening balance (E2-R11): services/ledger/openingBalance.ts, OPENING_ACCOUNT_RULE, routes/coa.ts, utils/schemas.ts
+  "Belum ada tahun buku terbuka; tanggal cut-over saldo awal diambil dari awal tahun buku terbuka paling awal. Buat tahun buku terlebih dahulu.": "There is no open fiscal year; the opening balance cut-over date is the start of the earliest open fiscal year. Create a fiscal year first.",
+  "Saldo awal pihak belum didukung oleh layanan saldo awal.": "Party opening balances are not supported by the opening balance service yet.",
+  "Saldo awal dicatat per tanggal cut-over {0}; tanggal {1} tidak bisa dipakai. Isi saldo per tanggal cut-over.": "Opening balances are recorded as of the cut-over date {0}; the date {1} cannot be used. Enter the balance as of the cut-over date.",
+  "Tahun buku untuk tanggal cut-over {0} tidak ditemukan. Buat tahun buku untuk tanggal ini terlebih dahulu.": "No fiscal year covers the cut-over date {0}. Create a fiscal year for this date first.",
+  "Akun {0} masih memiliki jurnal saldo awal lama tanpa kunci ({1}). Jalankan audit saldo awal; akuntan menentukan jurnal ini sebelum saldo awal diubah.": "Account {0} still has old opening balance journals without a key ({1}). Run the opening balance audit; the accountant decides on these journals before the opening balance can change.",
+  "Tanggal cut-over berubah menjadi {0} saat saldo awal diproses. Ulangi penyimpanan.": "The cut-over date changed to {0} while the opening balance was processed. Save again.",
+  "Akun {0} {1} adalah akun {2} dan tidak diberi saldo awal.": "Account {0} {1} is the {2} account and takes no opening balance.",
+  "Ekuitas Saldo Awal": "Opening Balance Equity",
+  "Laba Tahun Berjalan": "Current Year Profit",
+  "AIRA tidak dapat menembus kunci periode untuk saldo awal.": "AIRA cannot post an opening balance through the period lock.",
+  "Menembus kunci periode untuk saldo awal butuh hak Kunci Periode (period.lock).": "Posting an opening balance through the period lock requires the Period Lock right (period.lock).",
+  "Saldo harus angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal dan paling banyak 2 angka desimal.": "The balance must be a number without thousands separators, with a dot as the decimal mark and at most 2 decimal places.",
+  "Tanggal saldo awal harus berformat YYYY-MM-DD.": "The opening balance date must be YYYY-MM-DD.",
+  "Alasan menembus kunci periode minimal 10 karakter.": "The reason for posting through the period lock needs at least 10 characters.",
+  // opening balance (E2-R11): COA import (routes/import/coa.ts, services/coa/coaImport.ts)
+  "openingBalance: {0}": "openingBalance: {0}",
+  "openingDate: {0}": "openingDate: {0}",
+  "saldo awal tercatat {0} akan diganti {1}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance {0} would be replaced by {1}. Tick this account's confirmation on the import screen to replace it.",
+  "saldo awal tercatat akan diganti {0}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance would be replaced by {0}. Tick this account's confirmation on the import screen to replace it.",
+  "nilai {0} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over {1}. Isi saldo per tanggal cut-over, atau centang konfirmasi akun ini bila nilai ini memang saldo awalnya.": "the value {0} equals the account's running balance, not the balance at the cut-over date {1}. Enter the balance at the cut-over date, or tick this account's confirmation if this value really is the opening balance.",
 };

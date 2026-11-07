@@ -2,6 +2,7 @@ import { Prisma, type RootType } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { logger } from '../lib/logger';
 import { manualPartyAdjustments } from '../services/ledger/partyAdjustments';
+import { loadPartySides, writePartySides } from '../services/ledger/partySides';
 import { PARTY_ROLE_AMBIGUOUS, type PartyRole } from '../services/ledger/partyRules';
 import { BusinessError } from './errors';
 
@@ -123,68 +124,40 @@ export { recalculateAccountBalances } from '../services/ledger/storedBalances';
 async function partyAdjustmentOrNone(
   tx: Prisma.TransactionClient,
   role: PartyRole,
-  partyId: string,
-): Promise<Prisma.Decimal | undefined> {
+  partyIds?: readonly string[],
+): Promise<Map<string, Prisma.Decimal> | undefined> {
   try {
-    return (await manualPartyAdjustments(tx, role, [partyId])).get(partyId);
+    return await manualPartyAdjustments(tx, role, partyIds);
   } catch (err) {
     if (!(err instanceof BusinessError) || err.code !== PARTY_ROLE_AMBIGUOUS) throw err;
-    logger.error({ partyId, role, err: err.message }, 'recalcPartyOutstanding: party role mapping is ambiguous, manual adjustment left out');
+    logger.error({ partyIds, role, err: err.message }, 'recalcPartyOutstanding: party role mapping is ambiguous, manual adjustment left out');
     return undefined;
   }
 }
 
 /**
- * Recalculate party outstanding_amount from the documents: opening outstanding plus the outstanding
- * of non-cancelled invoices, plus the manual party adjustment (services/ledger/partyAdjustments.ts:
- * hand-made journal lines with this party on the receivable or payable accounts). A Customer adds
- * the receivable adjustment, a Supplier the payable one. A party typed Both keeps the old formula
- * (no adjustment) until it gets separate receivable and payable columns (E2-PR9).
+ * Recalculate a party's receivable_outstanding, payable_outstanding and outstanding_amount (their
+ * sum) from its opening amounts, the outstanding of its invoices (not Draft or Cancelled) and its
+ * manual party adjustment (services/ledger/partyAdjustments.ts: hand-made journal lines with this
+ * party on the receivable or payable accounts), per side as services/ledger/partySides.ts
+ * computePartySides defines it. Written as Decimal, only when a column changes.
  * This is the source-of-truth approach that prevents drift from increment/decrement logic.
  */
 export async function recalcPartyOutstanding(
   tx: Prisma.TransactionClient,
   partyId: string
 ): Promise<void> {
-  const party = await tx.party.findUnique({
-    where: { id: partyId },
-    select: { partyType: true, outstandingAmount: true, openingOutstanding: true },
-  });
-  if (!party) return;
+  const figures = (await loadPartySides(tx, [partyId], {
+    adjustments: (role, ids) => partyAdjustmentOrNone(tx, role, ids),
+  })).get(partyId);
+  if (!figures) return;
 
-  let newOutstanding = new Decimal(party.openingOutstanding.toString());
-
-  if (party.partyType === 'Supplier' || party.partyType === 'Both') {
-    const piSum = await tx.purchaseInvoice.aggregate({
-      where: { partyId, status: { not: 'Cancelled' } },
-      _sum: { outstanding: true },
-    });
-    newOutstanding = newOutstanding.plus(new Decimal((piSum._sum.outstanding ?? 0).toString()));
-  }
-
-  if (party.partyType === 'Customer' || party.partyType === 'Both') {
-    const siSum = await tx.salesInvoice.aggregate({
-      where: { partyId, status: { not: 'Cancelled' } },
-      _sum: { outstanding: true },
-    });
-    newOutstanding = newOutstanding.plus(new Decimal((siSum._sum.outstanding ?? 0).toString()));
-  }
-
-  if (party.partyType === 'Customer' || party.partyType === 'Supplier') {
-    const adjustment = await partyAdjustmentOrNone(tx, party.partyType === 'Customer' ? 'AR' : 'AP', partyId);
-    if (adjustment) newOutstanding = newOutstanding.plus(adjustment.toString());
-  }
-
-  const oldOutstanding = new Decimal(party.outstandingAmount.toString());
-  if (!oldOutstanding.eq(newOutstanding)) {
+  const old = new Decimal(figures.party.outstandingAmount.toString());
+  if (!old.eq(figures.sides.outstanding.toString())) {
     logger.info(
-      { partyId, old: oldOutstanding.toNumber(), new: newOutstanding.toNumber() },
+      { partyId, old: old.toNumber(), new: figures.sides.outstanding.toNumber() },
       'recalcPartyOutstanding: correcting drift'
     );
   }
-
-  await tx.party.update({
-    where: { id: partyId },
-    data: { outstandingAmount: newOutstanding.toNumber() },
-  });
+  await writePartySides(tx, figures);
 }

@@ -19,6 +19,7 @@ import {
   hasDisplayBalance,
   isZero,
   normalSide,
+  offersOpeningBalance,
   rootTypeLabel,
   splitHighlight,
   type CoaNode,
@@ -347,7 +348,7 @@ export function CoaTreeTable({
                 {
                   label: t('coaTreeTable.actions.setBalance'),
                   icon: Wallet,
-                  hidden: !canEdit || node.isGroup,
+                  hidden: !canEdit || !offersOpeningBalance(node),
                   onSelect: () => onSetBalance(node),
                 },
                 {

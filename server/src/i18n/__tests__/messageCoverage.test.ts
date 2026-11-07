@@ -39,7 +39,8 @@ const IGNORED = new Set<string>([
   'The baseline already has rows for {0}; a check is captured once.',
   'The baseline already has {0} row(s); it is captured once. To capture a check added later, pass --check <id> --allow-existing.',
   // Refusals of the --apply repairs without an approver (services/salesInvoiceAudit.ts,
-  // scripts/repair/e5-pi-approval-amount.ts, scripts/repair/e2-rupiah-only-check.ts), CLI only.
+  // scripts/repair/e5-pi-approval-amount.ts, scripts/repair/e2-rupiah-only-check.ts), and the audit
+  // user of the party side recalculation (services/ledger/partySides.ts), CLI only.
   '--apply needs --approved-by "<accountant name>"',
   'No active Admin user to record the audit rows under.',
   // Refusals of the read-only ledger audit command line (scripts/repair/e2-ledger-audit.ts,
@@ -50,7 +51,7 @@ const IGNORED = new Set<string>([
   '--gate must be one of: {0}',
   'Unknown argument: {0}',
   // Refusals of the opening-balance audit command line (scripts/repair/e2-opening-balance-audit.ts,
-  // services/ledger/openingBalanceAuditArgs.ts), CLI only.
+  // services/ledger/openingBalanceAuditArgs.ts) and of scripts/repair/e2-party-side-recalc.ts, CLI only.
   'Use either --apply or --dry-run.',
   '--check-duplicates takes no other argument',
   // Refusal of the legacy STT cancel command line (services/ledger/sttCancelLegacyArgs.ts), CLI only.

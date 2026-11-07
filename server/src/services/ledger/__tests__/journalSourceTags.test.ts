@@ -14,8 +14,6 @@ const EXPECTED: Record<string, Record<string, number>> = {
   'routes/fixedAssets.ts': { DEPRECIATION: 2 },
   'routes/customerDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
   'routes/vendorDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
-  'routes/coa.ts': { OPENING: 1 },
-  'routes/import/coa.ts': { OPENING: 1 },
   'routes/import/parties.ts': { OPENING: 3 },
   'services/openingStockImport.ts': { OPENING: 1 },
   'services/cashBookDraftPost.ts': { CASH_BOOK: 1 },
@@ -95,6 +93,16 @@ describe('journal writers tag their source type', () => {
     expect(args[0]).toContain("sourceType: 'FY_CLOSE'");
     expect(args[0]).toContain('sourceKey: sourceKeys.close(year.id)');
     expect(args[0]).toContain('periodOptions: { ignoreLock: true }');
+  });
+
+  it('the account opening balance posts OPENING through postJournal with its account key, not from the COA routes', () => {
+    const args = callArgs(readFileSync(join(SRC, 'services/ledger/openingBalance.ts'), 'utf8'), 'postJournal');
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain("sourceType: 'OPENING'");
+    expect(args[0]).toContain('sourceKey: sourceKeys.openingAccount(accountId)');
+    for (const file of ['routes/coa.ts', 'routes/import/coa.ts']) {
+      expect(readFileSync(join(SRC, file), 'utf8'), file).not.toMatch(/sourceType:/);
+    }
   });
 
   it('recurring templates post RECURRING only through recurringExecute.ts', () => {

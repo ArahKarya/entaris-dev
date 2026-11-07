@@ -80,7 +80,8 @@ export interface PeriodGuardOptions {
    * a GL or stock effect, which use the fiscal year for numbering alone: quotation, sales order,
    * proforma, inquiry, purchase order, temporary delivery note, and demo data. Also the year-end
    * CLOSE journal: the close locks the whole year itself, and a reopen requires the lock date to be
-   * moved back before the year's last day first (assertYearEndNotLocked).
+   * moved back before the year's last day first (assertYearEndNotLocked). And an opening balance a
+   * period.lock holder posts through the lock with a reason (services/ledger/openingBalance.ts).
    */
   ignoreLock?: boolean;
 }

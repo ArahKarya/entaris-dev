@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **513** tool (read 236 · write 165 · critical 112); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **514** tool (read 237 · write 165 · critical 112); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -12,7 +12,7 @@ Total **513** tool (read 236 · write 165 · critical 112); semuanya aktif secar
 | [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
 | [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
-| [Akuntansi](akuntansi.md) | 38 | 16 | 8 | 14 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
+| [Akuntansi](akuntansi.md) | 39 | 17 | 8 | 14 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
 | [Kas & Bank](kas-bank.md) | 37 | 15 | 13 | 9 | Pembayaran/penerimaan, rekonsiliasi bank, transaksi berulang, uang jaminan proyek. |
 | [Aset & Umum (EAM)](aset-umum.md) | 141 | 49 | 68 | 24 | Aset, kendaraan, gedung, equipment, maintenance, dokumen legal, inventaris umum, MR. |
 | [Pengajuan Pembayaran](pengajuan-pembayaran.md) | 32 | 9 | 11 | 12 | Pengajuan pembayaran, verifikasi, pembayaran, pertanggungjawaban, antrian Tagihan EAM. |
@@ -64,6 +64,7 @@ Total **513** tool (read 236 · write 165 · critical 112); semuanya aktif secar
 | [`coa_create`](akuntansi.md#coa_create) | akuntansi | write | tidak | Admin | `POST /api/coa` |
 | [`coa_delete`](akuntansi.md#coa_delete) | akuntansi | critical | tidak | Admin | `DELETE /api/coa/:id` |
 | [`coa_flat`](akuntansi.md#coa_flat) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/coa/flat` |
+| [`coa_get_opening`](akuntansi.md#coa_get_opening) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/coa/:id/opening` |
 | [`coa_list`](akuntansi.md#coa_list) | akuntansi | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/coa` |
 | [`coa_set_balance`](akuntansi.md#coa_set_balance) | akuntansi | critical | tidak | Admin | `PATCH /api/coa/:id/balance` |
 | [`coa_update`](akuntansi.md#coa_update) | akuntansi | write | tidak | Admin | `PUT /api/coa/:id` |

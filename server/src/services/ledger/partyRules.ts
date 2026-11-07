@@ -230,8 +230,8 @@ export interface PartyLineInput {
 /**
  * Why a line's party does not fit its account under the rule, or null. `role` = the account's
  * party role from loadPartyRoleMap (undefined for any other account). A party registered as both
- * customer and supplier is refused under strict (manual journal) until party-role columns exist
- * (E2-PR9), because the line cannot say which side of that party it adjusts.
+ * customer and supplier fits every party role: the account says which side of the party the line
+ * adjusts (the party carries its receivable and payable apart, services/ledger/partySides.ts).
  */
 export function partyLineProblem(line: PartyLineInput, role: PartyRole | undefined, rule: PartyRule): PartyProblem | null {
   if (rule === 'off') return null;
@@ -248,13 +248,7 @@ export function partyLineProblem(line: PartyLineInput, role: PartyRole | undefin
     return { code: PARTY_REQUIRED, message: `Baris ke akun ${ROLE_LABELS[role]} wajib memilih ${expected}.` };
   }
   if (!line.partyType) return { code: PARTY_NOT_FOUND, message: 'Pihak tidak ditemukan.' };
-  if (line.partyType === 'Both') {
-    if (rule === 'allowedOnly') return null;
-    return {
-      code: PARTY_TYPE_MISMATCH,
-      message: `Akun ${ROLE_LABELS[role]} hanya menerima ${expected}; mitra yang terdaftar sebagai Customer sekaligus Supplier belum bisa dipakai di jurnal manual.`,
-    };
-  }
+  if (line.partyType === 'Both') return null;
   if (line.partyType !== expected) {
     return {
       code: PARTY_TYPE_MISMATCH,

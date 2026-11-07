@@ -108,8 +108,11 @@ d('demo data (exclusive mode)', () => {
       data: { userId: admin.id, action: 'CREATE', entityType: 'it-demo-wipe-keep', entityId: `${Date.now()}` },
     });
 
+    // The demo's opening balances go with it, so does the cut-over date they fixed (E2-R11).
+    await prisma.companySettings.updateMany({ where: { slug: 'default' }, data: { cutoverDate: new Date('2026-01-01') } });
     try {
       await wipeDemoData();
+      expect((await prisma.companySettings.findFirst({ where: { slug: 'default' } }))?.cutoverDate ?? null).toBeNull();
       expect(await prisma.auditLog.findUnique({ where: { id: kept.id } })).not.toBeNull();
     } finally {
       await purgeAuditRows(prisma, { id: kept.id });

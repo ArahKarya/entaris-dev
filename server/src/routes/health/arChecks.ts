@@ -9,21 +9,15 @@ import type { CheckResult } from './checks';
 
 const DETAIL_LIMIT = 20;
 
-/**
- * Detail rows for the client table; the bucket without a party is labelled "(tanpa Customer)". The
- * client takes its columns from the first row, so once any listed party has an ignored opening
- * outstanding every row carries the column (null where there is none).
- */
+/** Detail rows for the client table; the bucket without a party is labelled "(tanpa Customer)". */
 export function detailRows(rows: readonly PartySubledgerDiff[]) {
   const listed = rows.slice(0, DETAIL_LIMIT);
-  const showIgnored = listed.some((r) => r.openingIgnored);
   return listed.map((r) => ({
     party_name: r.partyName ?? '(tanpa Customer)',
     party_type: r.partyType,
     gl: r.gl.toNumber(),
     subledger: r.subledger.toNumber(),
     difference: r.difference.toNumber(),
-    ...(showIgnored ? { opening_outstanding_ignored: r.openingIgnored?.toNumber() ?? null } : {}),
   }));
 }
 

@@ -62,14 +62,21 @@ describe('partyLineProblem', () => {
     expect(codeOf('p', 'Supplier', 'AR', 'off')).toBeNull();
   });
 
-  it('a receivable line with a Supplier or Both party is a type mismatch under strict', () => {
+  it('a receivable line with a Supplier party is a type mismatch under strict', () => {
     expect(partyLineProblem(line('s', 'Supplier'), 'AR', 'strict')).toEqual({
       code: 'PARTY_TYPE_MISMATCH',
       message: 'Akun Piutang Usaha hanya menerima Customer; pihak yang dipilih bertipe Supplier.',
     });
-    expect(codeOf('b', 'Both', 'AR', 'strict')).toBe('PARTY_TYPE_MISMATCH');
     expect(codeOf('c', 'Customer', 'AP', 'strict')).toBe('PARTY_TYPE_MISMATCH');
     expect(codeOf('c', 'Customer', 'VENDOR_DEPOSIT', 'strict')).toBe('PARTY_TYPE_MISMATCH');
+  });
+
+  it('a Both party fits every party role under strict and allowedOnly', () => {
+    for (const role of PARTY_ROLES) {
+      expect(codeOf('b', 'Both', role, 'strict')).toBeNull();
+      expect(codeOf('b', 'Both', role, 'allowedOnly')).toBeNull();
+    }
+    expect(codeOf('b', 'Both', undefined, 'strict')).toBe('PARTY_NOT_ALLOWED');
   });
 
   it('allowedOnly: Both is accepted (documents), the wrong single type is not', () => {
@@ -92,9 +99,6 @@ describe('partyLineProblem', () => {
     );
     expect(translateMessage(partyLineProblem(line('s', 'Supplier'), 'CUSTOMER_DEPOSIT', 'strict')!.message, 'en')).toBe(
       'The Customer deposit account only accepts a Customer; the selected party is of type Supplier.',
-    );
-    expect(translateMessage(partyLineProblem(line('b', 'Both'), 'AR', 'strict')!.message, 'en')).toBe(
-      'The Accounts Receivable account only accepts a Customer; a partner registered as both Customer and Supplier cannot be used in a manual journal yet.',
     );
     expect(translateMessage(partyLineProblem(line('p', 'Customer'), undefined, 'strict')!.message, 'en')).toBe(
       'A party can only be set on an Accounts Receivable, Accounts Payable or deposit account line; clear the party on this line.',
