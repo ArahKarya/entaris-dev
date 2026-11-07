@@ -100,6 +100,7 @@ d('POST /fix/account-balance-drift (PR-5.0)', () => {
   it('refuses with FIX_DRIFT_CLOSED_YEARS while a closed year holds revenue/expense rows', async () => {
     await inRollback(async (tx) => {
       const b = await books(tx);
+      await tx.fiscalYear.updateMany({ where: { isClosed: true, NOT: { id: b.fy.id } }, data: { isClosed: false } });
       await tx.fiscalYear.update({ where: { id: b.fy.id }, data: { isClosed: true, closedAt: new Date() } });
       await tx.account.update({ where: { id: b.revenueId }, data: { balance: 7 } });
       const { userId, role } = await createCapUser(tx, ['doc.cancel']);

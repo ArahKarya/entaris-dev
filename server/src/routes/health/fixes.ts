@@ -13,7 +13,10 @@ export const FIX_DRIFT_CLOSED_YEARS = 'FIX_DRIFT_CLOSED_YEARS';
  * while closing a year subtracts its revenue/expense from accounts.balance, so one click would put
  * closed years back and a later reopen would add them again.
  */
-async function assertNoClosedPnlYears(db: Prisma.TransactionClient | typeof prisma): Promise<void> {
+async function assertNoClosedPnlYears(db: Prisma.TransactionClient | typeof prisma, lockYears = false): Promise<void> {
+  // Close/reopen lock the year FOR UPDATE; sharing the rows makes a close in flight finish first
+  // (and be seen here) or wait for this fix.
+  if (lockYears) await db.$queryRaw`SELECT id FROM fiscal_years FOR SHARE`;
   const rows = await db.$queryRaw<Array<{ one: number }>>`
     SELECT 1 AS one
       FROM accounting_ledger_entries ale
@@ -84,7 +87,7 @@ export async function previewAccountBalanceDrift(): Promise<{ description: strin
  */
 export async function fixAccountBalanceDrift(): Promise<{ fixed: number; message: string; snapshot: unknown }> {
   return await prisma.$transaction(async (tx) => {
-    await assertNoClosedPnlYears(tx);
+    await assertNoClosedPnlYears(tx, true);
     // Capture drifted accounts BEFORE recalculation (rootType-aware formula)
     const beforeDrift = await tx.$queryRaw<Array<{
       account_code: string;
