@@ -12,7 +12,10 @@ type MappingRow = { account: { id: string; accountNumber: string; name: string }
 
 function fakeTx(byRole: Record<string, MappingRow>) {
   const findFirst = vi.fn(async ({ where }: { where: { role: string } }) => byRole[where.role] ?? null);
-  return { tx: { systemAccountMapping: { findFirst } } as any, findFirst };
+  const findUnique = vi.fn(async ({ where }: { where: { id: string } }) => ({
+    id: where.id, accountNumber: where.id, name: where.id, rootType: 'EXPENSE', isGroup: false, isActive: true,
+  }));
+  return { tx: { systemAccountMapping: { findFirst }, account: { findUnique } } as any, findFirst };
 }
 
 const acct = (id: string, accountNumber: string) => ({ account: { id, accountNumber, name: `Acct ${accountNumber}` } });

@@ -166,6 +166,7 @@ describe('sales return restock movements', () => {
           },
         ],
       }),
+      'account.findUnique': ({ where }) => ({ id: where.id, accountNumber: where.id, name: where.id, rootType: 'EXPENSE', isGroup: false, isActive: true }),
       'journalEntry.create': ({ data }) => ({ id: `je-${data.entryNumber}` }),
     });
     await submitSalesReturnInTx(tx, { salesInvoiceId: 'si-1', date: '2026-10-10', items: [{ salesInvoiceItemId: 'sii-1', quantity: 2 }] }, 'u1');
