@@ -50,6 +50,14 @@ export interface CoaAccount {
   description?: string | null;
   /** An active ledger row freezes the number prefix and the group flag. */
   locked?: boolean;
+  /**
+   * What the Saldo column shows when the server sends it: the current fiscal year from the ledger for
+   * revenue and expense accounts, the year's profit for the current-profit account. Null on a balance
+   * sheet account, and on a revenue/expense account when no fiscal year holds today. Absent on an older payload.
+   */
+  periodBalance?: number | string | null;
+  /** Name of the fiscal year behind periodBalance. */
+  periodYearName?: string | null;
   children?: CoaAccount[];
 }
 
@@ -64,6 +72,15 @@ export interface CoaNode {
   balance: number;
   /** Own balance plus all descendants, in this account's normal direction. */
   subtotal: number;
+  /**
+   * Own amount of the Saldo column: periodBalance when the server sent one, else the stored balance;
+   * null for a revenue/expense account without a fiscal year to show.
+   */
+  shown: number | null;
+  /** shown plus all descendants' (like subtotal); null when shown is null. */
+  shownSubtotal: number | null;
+  /** Fiscal year behind a period amount, null when shown is the stored balance. */
+  periodYearName: string | null;
   /** 0 for top-level accounts. */
   depth: number;
   parentId: string | null;
@@ -82,6 +99,13 @@ export function isZero(n: number): boolean {
   return Math.abs(n) < 0.005;
 }
 
+/** Own Saldo-column amount: the period balance if sent, null for P&L without a year, else the stored balance. */
+function shownOf(acc: CoaAccount, balance: number): number | null {
+  if (acc.periodBalance === undefined) return balance;
+  if (acc.periodBalance !== null) return toNumber(acc.periodBalance) ?? 0;
+  return acc.rootType === 'REVENUE' || acc.rootType === 'EXPENSE' ? null : balance;
+}
+
 /**
  * Builds the normalised tree with depth and group subtotals. A child whose
  * normal side differs from its parent's is subtracted (keeps the subtotal in
@@ -96,6 +120,15 @@ export function buildCoaTree(accounts: readonly CoaAccount[], depth = 0): CoaNod
       (sum, child) => sum + (normalSide(child.rootType) === side ? child.subtotal : -child.subtotal),
       balance,
     );
+    const shown = shownOf(acc, balance);
+    const shownSubtotal =
+      shown === null
+        ? null
+        : children.reduce(
+            (sum, child) =>
+              sum + (normalSide(child.rootType) === side ? (child.shownSubtotal ?? 0) : -(child.shownSubtotal ?? 0)),
+            shown,
+          );
     const { children: _omit, ...account } = acc;
     void _omit;
     return {
@@ -107,6 +140,9 @@ export function buildCoaTree(accounts: readonly CoaAccount[], depth = 0): CoaNod
       isActive: acc.isActive,
       balance,
       subtotal,
+      shown,
+      shownSubtotal,
+      periodYearName: acc.periodBalance != null ? (acc.periodYearName ?? null) : null,
       depth,
       parentId: acc.parentId,
       account,
@@ -115,9 +151,14 @@ export function buildCoaTree(accounts: readonly CoaAccount[], depth = 0): CoaNod
   });
 }
 
-/** Amount shown in the Saldo column: subtotal for groups, own balance for details. */
+/** Amount shown in the Saldo column: subtotal for groups, own amount for details (0 when there is none to show). */
 export function displayBalance(node: CoaNode): number {
-  return node.isGroup || node.children.length > 0 ? node.subtotal : node.balance;
+  return (node.isGroup || node.children.length > 0 ? node.shownSubtotal : node.shown) ?? 0;
+}
+
+/** False for a revenue/expense row with no fiscal year to show; the Saldo cell then reads "—". */
+export function hasDisplayBalance(node: CoaNode): boolean {
+  return (node.isGroup || node.children.length > 0 ? node.shownSubtotal : node.shown) !== null;
 }
 
 /** Depth-first, in tree order. */

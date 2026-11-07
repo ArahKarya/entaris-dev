@@ -507,6 +507,8 @@
       "label": "Sistem"
     },
     "oppositeBalance": "(saldo berlawanan dengan saldo normal)",
+    "periodBalanceTitle": "Saldo tahun buku {{year}}",
+    "noPeriodYear": "Tidak ada tahun buku yang memuat hari ini",
     "deleteBlock": {
       "system": "akun sistem",
       "children": "masih punya sub-akun"
