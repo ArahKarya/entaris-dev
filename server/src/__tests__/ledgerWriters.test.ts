@@ -21,7 +21,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'routes/coa.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/customerDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
   'routes/fixedAssets.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
-  'routes/health/fixes.ts': { 'accountingLedgerEntry.deleteMany': 1, 'accountingLedgerEntry.create': 1, 'sql:UPDATE accounting_ledger_entries': 1 },
   'routes/import/coa.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/import/parties.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
   'routes/inventory/movements.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2, 'accountingLedgerEntry.updateMany': 2, 'journalEntry.update': 2 },
@@ -38,6 +37,8 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/gaFinance.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'services/gaVehicleServiceJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/goodsReceiptSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
+  // One-off repair (plan step 5 PR-5.6): keys approved legacy opening journals. Remove with scripts/repair/e2-opening-balance-audit.ts.
+  'services/ledger/openingBalanceAudit.ts': { 'journalEntry.updateMany': 1 },
   // One-off repair (scripts/repair/e2-orphan-ale-repair.ts): cancels orphan ledger groups whole. Remove with the script.
   'services/ledger/orphanAleRepair.ts': { 'sql:UPDATE accounting_ledger_entries': 1 },
   'services/ledger/postJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },

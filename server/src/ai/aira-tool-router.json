@@ -2407,7 +2407,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Bagan akun (COA) dalam bentuk pohon bertingkat (children) terurut nomor akun, termasuk akun nonaktif dan saldo berjalan tiap akun.",
+      "desc": "Bagan akun (COA) dalam bentuk pohon bertingkat (children) terurut nomor akun, termasuk akun nonaktif, saldo tersimpan tiap akun, dan untuk akun pendapatan/beban saldo tahun buku berjalan dari buku besar (periodBalance).",
       "risk": "read",
       "roles": [
         "Admin",
@@ -2420,7 +2420,7 @@
       "output": {
         "accounts": "array"
       },
-      "outputSummary": "Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, children[].",
+      "outputSummary": "Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, periodBalance, periodYearName, periodApplies, children[]. periodApplies = true pada akun pendapatan/beban dan CURRENT_PROFIT. periodBalance = saldo tahun buku berjalan dari buku besar untuk akun pendapatan/beban dan laba tahun berjalan untuk akun CURRENT_PROFIT; null untuk akun neraca lain, dan null (dengan periodApplies true) bila tidak ada tahun buku berjalan: saldo tersimpan akun CURRENT_PROFIT bukan laba berjalan.",
       "handler": "GET /api/coa",
       "permAction": "view",
       "enabled": true,
@@ -6571,7 +6571,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Jalankan 11 diagnostik integritas data secara paralel: sinkron ledger, selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), akun lama role neraca akun sistem yang masih bersaldo setelah pemindahan pemetaan (Former Role Accounts, pindahkan lewat sysacct_sweep), dan trigger database wajib (jejak audit hanya-tambah). Cek AR, Uang Muka Customer, Tahun Buku, dan akun bekas peran hanya deteksi (tanpa perbaikan otomatis; cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup); cek AR dan Uang Muka Customer memakai saldo hari ini. Hanya membaca.",
+      "desc": "Jalankan 13 diagnostik integritas data secara paralel: sinkron ledger per jurnal dengan sebab (ALE vs JournalItem Sync), selisih saldo akun, jurnal tak seimbang, ledger yatim, selisih stock movement, selisih stok gudang, Piutang di Buku Besar vs sisa tagihan invoice per Customer (AR vs Subledger), Uang Muka Customer di Buku Besar vs sisa uang muka per Customer (Customer Deposit vs Subledger), entri Buku Besar jurnal yang tercatat di Tahun Buku berbeda dengan tanggalnya (ALE vs Fiscal Year), akun lama role neraca akun sistem yang masih bersaldo setelah pemindahan pemetaan (Former Role Accounts, pindahkan lewat sysacct_sweep), baris Buku Besar bertipe dokumen di luar jurnal per tipe dan berapa dokumen yang juga tercatat lewat jurnal (Non-Journal Ledger Entries), sisa saldo tersimpan mitra vs hitungannya (Party Outstanding Drift), dan trigger database wajib (jejak audit hanya-tambah). Semua cek selain selisih saldo akun hanya deteksi (tanpa perbaikan otomatis). Sinkron ledger: warning bila semua temuan adalah STT yang dibatalkan dengan cara lama (jurnal -CXL) di tahun terbuka, error untuk sebab lain atau tahun tertutup; detail memuat sebab (no-ledger, ledger-without-journal, cancelled-active-ale, legacy-stt-pair, draft-with-ale, amount-differs). Cek Tahun Buku berstatus error bila melibatkan tahun buku tertutup; cek AR dan Uang Muka Customer memakai saldo hari ini. count adalah jumlah temuan seluruhnya; details paling banyak 20 baris. Hanya membaca.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -6595,7 +6595,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Pratinjau (tanpa mengubah data) perubahan yang akan dilakukan perbaikan otomatis. Hanya untuk check: ale-sync, account-balance-drift, orphan-ale. Perbaikan itu sendiri (fix) tidak tersedia sebagai tool; perbaikan ale-sync dan orphan-ale juga dinonaktifkan di aplikasi karena bisa mengubah tahun buku tertutup, jadi pratinjaunya hanya informasi.",
+      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia butuh capability doc.cancel dan ditolak sementara bila ada tahun buku tertutup ber-ALE laba rugi (FIX_DRIFT_CLOSED_YEARS).",
       "risk": "read",
       "roles": [
         "Admin"
@@ -6610,11 +6610,9 @@
           "type": "enum",
           "required": true,
           "enum": [
-            "ale-sync",
-            "account-balance-drift",
-            "orphan-ale"
+            "account-balance-drift"
           ],
-          "description": "Kode check: ale-sync | account-balance-drift | orphan-ale"
+          "description": "Kode check: account-balance-drift"
         }
       ],
       "output": {},
@@ -6625,7 +6623,8 @@
       "level": 1,
       "phase": 6,
       "errors": [
-        "400: check tidak dapat di-preview"
+        "400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)",
+        "400 FIX_DRIFT_CLOSED_YEARS: hitung ulang saldo ditutup sementara karena ada tahun buku tertutup ber-ALE laba rugi"
       ],
       "related": [
         "hc_run"
@@ -17443,7 +17442,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "settings",
-      "desc": "Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Pemeriksaan tambahan: ar-subledger (Piutang di Buku Besar vs sisa tagihan invoice + saldo awal per Customer, block) dan customer-deposit-subledger (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer, block); keduanya memakai saldo hari ini, hanya untuk Customer yang punya baris ledger atau dokumen (invoice, uang muka, pemakaian uang muka) di tahun itu, butir berkunci Party:<id> atau Party:none:<id tahun buku> (baris tanpa party bertanggal di tahun itu). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir; untuk kedua cek ini selisih bertanda sama yang tidak lebih besar dari baseline juga baselined.",
+      "desc": "Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), non-journal-ale-duplicate (dokumen yang punya baris ledger sendiri di samping jurnalnya sendiri di tahun buku yang sama (JV-<nomor> atau jurnal pembayarannya) sehingga laba tahun itu terhitung dua kali, butir berkunci <tipe>:<id>@<id tahun buku>, block; baris yang hanya mirip baris jurnal lain dengan nominal sama hanya dilaporkan di Pemeriksaan Sistem dan audit ledger), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Pemeriksaan tambahan: ar-subledger (Piutang di Buku Besar vs sisa tagihan invoice + saldo awal per Customer, block) dan customer-deposit-subledger (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer, block); keduanya memakai saldo hari ini, hanya untuk Customer yang punya baris ledger atau dokumen (invoice, uang muka, pemakaian uang muka) di tahun itu, butir berkunci Party:<id> atau Party:none:<id tahun buku> (baris tanpa party bertanggal di tahun itu). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir; untuk kedua cek ini selisih bertanda sama yang tidak lebih besar dari baseline juga baselined.",
       "risk": "read",
       "roles": [
         "Admin",
@@ -25882,7 +25881,7 @@
       "group": "Bank & Kas",
       "toolset": "kas-bank",
       "module": "recurring",
-      "desc": "Menjalankan satu template berulang sekarang. Tipe journal diposting lewat jalur posting bersama sebagai Jurnal Umum bertanggal hari ini (WIB), sumber RECURRING dengan kunci RECURRING:<id template>:<tanggal>. Setelah berhasil, lastRunDate dan nextRunDate maju satu periode dan lastError dikosongkan. Bila gagal, tidak ada jurnal, jadwal tidak maju, alasan disimpan di lastError template, dan Admin/Akuntan mendapat satu notifikasi per template per hari.",
+      "desc": "Menjalankan satu template berulang sekarang. Tipe journal diposting lewat jalur posting bersama sebagai Jurnal Umum bertanggal hari ini (WIB), sumber RECURRING dengan kunci RECURRING:<id template>:<tanggal>. Setelah berhasil, lastRunDate dan nextRunDate maju satu periode dan lastError dikosongkan. Bila gagal, tidak ada jurnal, jadwal tidak maju, alasan disimpan di lastError template, dan Admin/Akuntan mendapat satu notifikasi per template per hari. Satu template hanya diposting sekali per hari bisnis: selama jurnal aktif hari itu ada, eksekusi kedua tidak memposting apa pun (RECURRING_ALREADY_RAN); batalkan jurnal itu dulu bila ingin menjalankan ulang.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -25903,7 +25902,7 @@
       "output": {
         "status": "string"
       },
-      "outputSummary": "{ success: true, result (jurnal) }; gagal = HTTP 400 { error, code } (alasan juga tersimpan di lastError template).",
+      "outputSummary": "{ success: true, result (jurnal) }; sudah dijalankan hari ini = HTTP 200 { success: false, code: RECURRING_ALREADY_RAN, message, result (jurnal hari itu) } tanpa posting; gagal = HTTP 400 { error, code } (alasan juga tersimpan di lastError template).",
       "handler": "POST /api/recurring/:id/execute",
       "permAction": "edit",
       "enabled": true,
@@ -25923,7 +25922,8 @@
         "400 ACCOUNT_CONTROL / ACCOUNT_INACTIVE / ACCOUNT_GROUP / ACCOUNT_NOT_FOUND: akun template tidak boleh diposting (akun kontrol/pajak, nonaktif, grup, atau terhapus)",
         "400 RECURRING_TYPE_MISMATCH: data template tidak sesuai tipenya",
         "400 RECURRING_TYPE_UNSUPPORTED: tipe selain journal belum bisa dieksekusi",
-        "400 FISCAL_YEAR_MISSING / PERIOD_CLOSED / PERIOD_LOCKED: belum ada tahun buku untuk hari ini, tahun bukunya tertutup, atau tanggal hari ini terkunci"
+        "400 FISCAL_YEAR_MISSING / PERIOD_CLOSED / PERIOD_LOCKED: belum ada tahun buku untuk hari ini, tahun bukunya tertutup, atau tanggal hari ini terkunci",
+        "200 RECURRING_ALREADY_RAN: template sudah dijalankan hari ini (jurnal aktif ada); tidak ada posting, jadwal dan lastError tidak berubah. Batalkan jurnal itu dulu bila ingin menjalankan ulang"
       ],
       "related": [
         "rec_list",

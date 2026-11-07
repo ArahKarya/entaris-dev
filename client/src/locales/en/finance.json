@@ -507,6 +507,8 @@
       "label": "System"
     },
     "oppositeBalance": "(balance opposite to the normal balance)",
+    "periodBalanceTitle": "Balance of fiscal year {{year}}",
+    "noPeriodYear": "No fiscal year holds today",
     "deleteBlock": {
       "system": "system account",
       "children": "still has sub-accounts"
@@ -2100,6 +2102,7 @@
     },
     "toast": {
       "executed": "Template run.",
+      "alreadyRan": "The template has already run today; cancel its journal first to run it again.",
       "executeFailed": "Could not run the template.",
       "statusUpdated": "Template status updated.",
       "statusFailed": "Could not change the template status."

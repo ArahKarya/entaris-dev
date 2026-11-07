@@ -10,6 +10,7 @@ import { FISCAL_YEAR_MISSING, PERIOD_CLOSED, assertPeriodOpen, fiscalYearRange }
 import { SAFETY_BACKUP_FAILED, createBackup, invalidateRuntimeCaches } from '../../services/backupService';
 import { canManageDemoData } from '../../services/demoData/guard';
 import { resetTables } from '../../services/demoData/tables';
+import { DUMMY_GROUP_SHARED, assertNoSharedLedgerGroups } from '../../services/dummyLedgerGroups';
 import { DUMMY_LEDGER_MARKERS, matchGenericDummyJournals, specificDummyNarrations } from '../../services/dummyJournalMatch';
 
 const router = Router();
@@ -147,8 +148,9 @@ router.post('/delete-dummy', requirePerm('settings'), async (req: AuthRequest, r
             ...(journalIds.length > 0 ? [{ referenceType: 'JournalEntry', referenceId: { in: journalIds } }] : []),
           ],
         },
-        select: { ...dated, accountId: true },
+        select: { ...dated, accountId: true, referenceType: true, referenceId: true },
       });
+      await assertNoSharedLedgerGroups(tx, ledgerRows);
 
       const dummyProdItems = itemIds.length > 0
         ? await tx.productionRunItem.findMany({ where: { itemId: { in: itemIds } }, select: { productionRunId: true } })
@@ -206,7 +208,7 @@ router.post('/delete-dummy', requirePerm('settings'), async (req: AuthRequest, r
     logger.info({ results }, 'Dummy data deleted');
     return res.json({ message: 'Data dummy dihapus.', results });
   } catch (error) {
-    if (error instanceof BusinessError && error.code === PERIOD_CLOSED) {
+    if (error instanceof BusinessError && (error.code === PERIOD_CLOSED || error.code === DUMMY_GROUP_SHARED)) {
       return res.status(409).json({ error: error.message, code: error.code });
     }
     return handleRouteError(res, error, 'POST /settings/delete-dummy error', 'Gagal menghapus data dummy.');

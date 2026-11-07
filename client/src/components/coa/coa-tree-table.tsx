@@ -16,6 +16,7 @@ import { RowActions } from '@/components/shared';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   displayBalance,
+  hasDisplayBalance,
   isZero,
   normalSide,
   rootTypeLabel,
@@ -84,11 +85,22 @@ export function SystemAccountBadge({ roles, className }: { roles: string[]; clas
 
 function BalanceCell({ node }: { node: CoaNode }) {
   const { t } = useTranslation('finance');
+  if (!hasDisplayBalance(node)) {
+    return (
+      <span className="num text-muted-foreground" title={t('coaTreeTable.noPeriodYear')}>
+        —
+      </span>
+    );
+  }
   const amount = displayBalance(node);
   const zero = isZero(amount);
   const negative = !zero && amount < 0;
+  const yearName = node.periodYearName;
   return (
-    <span className={cn('num', zero && 'text-muted-foreground', negative && 'text-danger-text')}>
+    <span
+      className={cn('num', zero && 'text-muted-foreground', negative && 'text-danger-text')}
+      title={yearName ? t('coaTreeTable.periodBalanceTitle', { year: yearName }) : undefined}
+    >
       {formatRupiah(zero ? 0 : amount, { symbol: false, negative: 'parens' })}
       {negative && <span className="sr-only"> {t('coaTreeTable.oppositeBalance')}</span>}
     </span>

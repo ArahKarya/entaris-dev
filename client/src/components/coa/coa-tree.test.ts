@@ -9,6 +9,7 @@ import {
   filterCoaTree,
   flattenVisible,
   hasActiveFilter,
+  hasDisplayBalance,
   normalSide,
   parseBalanceInput,
   parseExpanded,
@@ -28,6 +29,9 @@ function acc(
   opts: {
     group?: boolean;
     balance?: string | number;
+    periodBalance?: string | null;
+    periodYearName?: string | null;
+    periodApplies?: boolean;
     children?: CoaAccount[];
     active?: boolean;
   } = {},
@@ -43,6 +47,7 @@ function acc(
     isActive: opts.active ?? true,
     balance: opts.balance ?? '0',
     parentId: null,
+    ...(opts.periodBalance !== undefined ? { periodBalance: opts.periodBalance, periodYearName: opts.periodYearName ?? null, ...(opts.periodApplies ? { periodApplies: true } : {}) } : {}),
     children: opts.children ?? [],
   };
 }
@@ -113,6 +118,68 @@ describe('buildCoaTree', () => {
 
   it('strips children from the raw account kept for dialogs', () => {
     expect(byNumber('1').account.children).toBeUndefined();
+  });
+});
+
+describe('period balance (Saldo column of the current fiscal year)', () => {
+  const pnl = buildCoaTree([
+    acc('4', 'Pendapatan', 'REVENUE', {
+      group: true,
+      periodBalance: '0',
+      periodYearName: 'FY 2145',
+      children: [
+        acc('4.1', 'Penjualan', 'REVENUE', { balance: '1200', periodBalance: '200', periodYearName: 'FY 2145' }),
+        acc('4.2', 'Lain', 'REVENUE', { balance: '50', periodBalance: '30', periodYearName: 'FY 2145' }),
+      ],
+    }),
+  ]);
+
+  it('shows the period amount and subtotal from periodBalance and keeps the stored balance', () => {
+    const [group] = pnl;
+    expect(group.subtotal).toBe(1250);
+    expect(group.shownSubtotal).toBe(230);
+    expect(displayBalance(group)).toBe(230);
+    expect(displayBalance(group.children[0])).toBe(200);
+    expect(group.children[0].balance).toBe(1200);
+    expect(group.children[0].periodYearName).toBe('FY 2145');
+  });
+
+  it('falls back to the stored balance when the payload has no periodBalance', () => {
+    const [g] = buildCoaTree([acc('4', 'P', 'REVENUE', { group: true, children: [acc('4.1', 'Jual', 'REVENUE', { balance: '700' })] })]);
+    expect(displayBalance(g)).toBe(700);
+    expect(g.children[0].shown).toBe(700);
+    expect(g.children[0].periodYearName).toBeNull();
+  });
+
+  it('uses the stored balance for a balance sheet account whose periodBalance is null', () => {
+    const [a] = buildCoaTree([acc('1.1', 'Kas', 'ASSET', { balance: '10', periodBalance: null })]);
+    expect(displayBalance(a)).toBe(10);
+    expect(hasDisplayBalance(a)).toBe(true);
+  });
+
+  it('has nothing to show for revenue and expense accounts when no fiscal year holds today', () => {
+    const [g] = buildCoaTree([
+      acc('4', 'P', 'REVENUE', { group: true, periodBalance: null, children: [acc('4.1', 'Jual', 'REVENUE', { balance: '700', periodBalance: null })] }),
+    ]);
+    expect(hasDisplayBalance(g)).toBe(false);
+    expect(hasDisplayBalance(g.children[0])).toBe(false);
+    expect(displayBalance(g.children[0])).toBe(0);
+  });
+
+  it('shows a dash on the current-profit account when no fiscal year holds today, not the stored balance', () => {
+    const [cp] = buildCoaTree([acc('3.4', 'Laba Berjalan', 'EQUITY', { balance: '-500', periodBalance: null, periodApplies: true })]);
+    expect(hasDisplayBalance(cp)).toBe(false);
+    expect(exportRows([cp])[0].balance).toBe('');
+  });
+
+  it('exports the same period figure as the Saldo column', () => {
+    expect(exportRows(pnl)[1].balance).toBe('200');
+  });
+
+  it('shows the profit on the current-profit equity account', () => {
+    const [cp] = buildCoaTree([acc('3.4', 'Laba Berjalan', 'EQUITY', { balance: '-900', periodBalance: '150', periodYearName: 'FY 2145' })]);
+    expect(displayBalance(cp)).toBe(150);
+    expect(cp.balance).toBe(-900);
   });
 });
 

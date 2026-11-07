@@ -285,7 +285,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_list
 
-**Ringkasan:** Bagan akun (COA) dalam bentuk pohon bertingkat (children) terurut nomor akun, termasuk akun nonaktif dan saldo berjalan tiap akun.
+**Ringkasan:** Bagan akun (COA) dalam bentuk pohon bertingkat (children) terurut nomor akun, termasuk akun nonaktif, saldo tersimpan tiap akun, dan untuk akun pendapatan/beban saldo tahun buku berjalan dari buku besar (periodBalance).
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `coa` / `view`)
@@ -314,7 +314,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 }
 ```
 
-**Isi hasil:** Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, children[].
+**Isi hasil:** Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, periodBalance, periodYearName, periodApplies, children[]. periodApplies = true pada akun pendapatan/beban dan CURRENT_PROFIT. periodBalance = saldo tahun buku berjalan dari buku besar untuk akun pendapatan/beban dan laba tahun berjalan untuk akun CURRENT_PROFIT; null untuk akun neraca lain, dan null (dengan periodApplies true) bila tidak ada tahun buku berjalan: saldo tersimpan akun CURRENT_PROFIT bukan laba berjalan.
 
 **Tool terkait:** [`coa_flat`](#coa_flat), [`coa_create`](#coa_create)
 
@@ -1178,7 +1178,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### fy_close_checklist
 
-**Ringkasan:** Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Pemeriksaan tambahan: ar-subledger (Piutang di Buku Besar vs sisa tagihan invoice + saldo awal per Customer, block) dan customer-deposit-subledger (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer, block); keduanya memakai saldo hari ini, hanya untuk Customer yang punya baris ledger atau dokumen (invoice, uang muka, pemakaian uang muka) di tahun itu, butir berkunci Party:<id> atau Party:none:<id tahun buku> (baris tanpa party bertanggal di tahun itu). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir; untuk kedua cek ini selisih bertanda sama yang tidak lebih besar dari baseline juga baselined.
+**Ringkasan:** Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), non-journal-ale-duplicate (dokumen yang punya baris ledger sendiri di samping jurnalnya sendiri di tahun buku yang sama (JV-<nomor> atau jurnal pembayarannya) sehingga laba tahun itu terhitung dua kali, butir berkunci <tipe>:<id>@<id tahun buku>, block; baris yang hanya mirip baris jurnal lain dengan nominal sama hanya dilaporkan di Pemeriksaan Sistem dan audit ledger), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Pemeriksaan tambahan: ar-subledger (Piutang di Buku Besar vs sisa tagihan invoice + saldo awal per Customer, block) dan customer-deposit-subledger (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer, block); keduanya memakai saldo hari ini, hanya untuk Customer yang punya baris ledger atau dokumen (invoice, uang muka, pemakaian uang muka) di tahun itu, butir berkunci Party:<id> atau Party:none:<id tahun buku> (baris tanpa party bertanggal di tahun itu). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir; untuk kedua cek ini selisih bertanda sama yang tidak lebih besar dari baseline juga baselined.
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin, Accountant (modul `settings` / `view`, capability `doc.cancel`)

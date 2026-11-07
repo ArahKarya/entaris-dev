@@ -6,6 +6,9 @@ const placeholders = (s: string) => (s.match(/\{\d+\}/g) ?? []).sort();
 describe('translateMessage', () => {
   it('translates exact entries to English', () => {
     expect(translateMessage('Akun tidak ditemukan.', 'en')).toBe('Account not found.');
+    expect(translateMessage('Jurnal tidak seimbang di buku besar; transaksi dibatalkan.', 'en')).toBe(
+      'The journal is unbalanced in the General Ledger; the transaction was rolled back.',
+    );
     expect(translateMessage('Customer wajib dipilih.', 'en')).toBe('Customer is required.');
   });
 

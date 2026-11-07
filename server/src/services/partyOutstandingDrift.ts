@@ -89,24 +89,29 @@ export function buildDriftRows(parties: readonly DriftParty[], sums: DriftSums):
   });
 }
 
-/** Loads the real (non-dummy) parties and their sums, then builds the drift rows. */
-export async function computePartyOutstandingDrift(db: Db = prisma): Promise<DriftRow[]> {
+/**
+ * Loads the real (non-dummy) parties and their sums, then builds the drift rows. `partyIds` limits
+ * the run to those parties (an empty list matches nothing).
+ */
+export async function computePartyOutstandingDrift(db: Db = prisma, opts: { partyIds?: readonly string[] } = {}): Promise<DriftRow[]> {
+  if (opts.partyIds && opts.partyIds.length === 0) return [];
+  const only = opts.partyIds ? { in: [...opts.partyIds] } : undefined;
   const [arIds, apIds] = await Promise.all([systemAccounts.getAccountIds('AR'), systemAccounts.getAccountIds('AP')]);
   const [parties, si, pi, ledger, arManual, apManual] = await Promise.all([
     db.party.findMany({
-      where: { isDummy: false },
+      where: { isDummy: false, ...(only ? { id: only } : {}) },
       select: { id: true, name: true, partyType: true, outstandingAmount: true, openingOutstanding: true },
       orderBy: { name: 'asc' },
     }),
-    db.salesInvoice.groupBy({ by: ['partyId'], where: { status: { not: 'Cancelled' } }, _sum: { outstanding: true } }),
-    db.purchaseInvoice.groupBy({ by: ['partyId'], where: { status: { not: 'Cancelled' } }, _sum: { outstanding: true } }),
+    db.salesInvoice.groupBy({ by: ['partyId'], where: { status: { not: 'Cancelled' }, ...(only ? { partyId: only } : {}) }, _sum: { outstanding: true } }),
+    db.purchaseInvoice.groupBy({ by: ['partyId'], where: { status: { not: 'Cancelled' }, ...(only ? { partyId: only } : {}) }, _sum: { outstanding: true } }),
     db.accountingLedgerEntry.groupBy({
       by: ['partyId', 'accountId'],
-      where: { isCancelled: false, partyId: { not: null }, accountId: { in: [...arIds, ...apIds] } },
+      where: { isCancelled: false, partyId: only ?? { not: null }, accountId: { in: [...arIds, ...apIds] } },
       _sum: { debit: true, credit: true },
     }),
-    manualPartyAdjustments(db, 'AR'),
-    manualPartyAdjustments(db, 'AP'),
+    manualPartyAdjustments(db, 'AR', opts.partyIds),
+    manualPartyAdjustments(db, 'AP', opts.partyIds),
   ]);
   const arLedger = new Map<string, Dec>();
   const apLedger = new Map<string, Dec>();
