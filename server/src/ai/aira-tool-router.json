@@ -6595,7 +6595,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia butuh capability doc.cancel dan ditolak sementara bila ada tahun buku tertutup ber-ALE laba rugi (FIX_DRIFT_CLOSED_YEARS).",
+      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Saldo tersimpan dibandingkan dengan jumlah ledger aktif sepanjang masa (semua tahun buku); count = semua akun yang selisih, details paling banyak 50 baris (saldo tersimpan, saldo ledger, selisih, sumbangan tahun tertutup untuk akun laba rugi). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia menimpa kolom saldo tersimpan akun yang selisih (baris ledger tidak berubah) dan butuh capability doc.cancel.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -6623,8 +6623,7 @@
       "level": 1,
       "phase": 6,
       "errors": [
-        "400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)",
-        "400 FIX_DRIFT_CLOSED_YEARS: hitung ulang saldo ditutup sementara karena ada tahun buku tertutup ber-ALE laba rugi"
+        "400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)"
       ],
       "related": [
         "hc_run"
@@ -17516,7 +17515,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup tetapi saldo tetap direset.",
+      "postingEffect": "Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo tersimpan akun pendapatan & beban tidak berubah (saldo akun = jumlah ledger aktif sepanjang masa; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup.",
       "confirm_template": "TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.",
       "prerequisites": [
         "Capability doc.cancel.",
@@ -17579,7 +17578,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), mengembalikan saldo berjalan akun pendapatan & beban, membuka periode, dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...",
+      "postingEffect": "Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), membuka periode (saldo tersimpan akun pendapatan & beban tidak berubah), dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...",
       "confirm_template": "BUKA KEMBALI tahun buku {id} dengan alasan \"{reason}\"? Jurnal penutup akan dibatalkan.",
       "prerequisites": [
         "Capability doc.cancel.",
