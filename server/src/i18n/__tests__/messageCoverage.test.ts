@@ -54,6 +54,8 @@ const IGNORED = new Set<string>([
   // services/ledger/openingBalanceAuditArgs.ts) and of scripts/repair/e2-party-side-recalc.ts, CLI only.
   'Use either --apply or --dry-run.',
   '--check-duplicates takes no other argument',
+  // Refusal of the legacy STT cancel command line (services/ledger/sttCancelLegacyArgs.ts), CLI only.
+  '--include-ale-fix only goes with --apply',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */

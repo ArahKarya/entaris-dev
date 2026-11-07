@@ -8378,7 +8378,7 @@
       "output": {
         "items": "array"
       },
-      "outputSummary": "{ data: jurnal[] (header + baris item per akun), total, page, limit }.",
+      "outputSummary": "{ data: jurnal[] (header + baris item per akun, reversedBy { id, entryNumber } bila jurnal ini dibalik oleh jurnal lain, mis. pasangan JV-…-CXL), total, page, limit }.",
       "handler": "GET /api/journals",
       "permAction": "view",
       "enabled": true,
@@ -8416,7 +8416,7 @@
       "output": {
         "journal": "object"
       },
-      "outputSummary": "Jurnal lengkap (entryNumber, date, narration, status, items[]).",
+      "outputSummary": "Jurnal lengkap (entryNumber, date, narration, status, items[], reversedBy { id, entryNumber } atau null: jurnal pembalik; jurnal Submitted yang dibalik bernilai nol bersama pembaliknya).",
       "handler": "GET /api/journals/:id",
       "permAction": "view",
       "enabled": true,
@@ -17508,7 +17508,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "settings",
-      "desc": "Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), non-journal-ale-duplicate (dokumen yang punya baris ledger sendiri di samping jurnalnya sendiri di tahun buku yang sama (JV-<nomor> atau jurnal pembayarannya) sehingga laba tahun itu terhitung dua kali, butir berkunci <tipe>:<id>@<id tahun buku>, block; baris yang hanya mirip baris jurnal lain dengan nominal sama hanya dilaporkan di Pemeriksaan Sistem dan audit ledger), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Pemeriksaan tambahan: ar-subledger (Piutang di Buku Besar vs sisa tagihan invoice + saldo awal per Customer, block) dan customer-deposit-subledger (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer, block); keduanya memakai saldo hari ini, hanya untuk Customer yang punya baris ledger atau dokumen (invoice, uang muka, pemakaian uang muka) di tahun itu, butir berkunci Party:<id> atau Party:none:<id tahun buku> (baris tanpa party bertanggal di tahun itu). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir; untuk kedua cek ini selisih bertanda sama yang tidak lebih besar dari baseline juga baselined.",
+      "desc": "Daftar cek tutup buku satu tahun buku (pratinjau, tidak mengubah data): butir yang memblokir tutup buku (block) dan yang hanya peringatan (warn), per pemeriksaan. Pemeriksaan bawaan: prev-year-open (tahun buku sebelumnya masih terbuka, block), drafts-ledger (jurnal/invoice/pembayaran Draft bertanggal di tahun ini, block), drafts-other (draft buku kas, draft produksi, transfer stok, dan stok opname Draft, warn), depreciation-unposted (penyusutan aset aktif bulan-bulan tahun ini belum diposting, block), ledger-balanced (baris ledger aktif per dokumen tidak seimbang, block), ale-vs-journal (baris ledger tidak sama dengan baris jurnal per jurnal dan akun, block), non-journal-ale-duplicate (dokumen yang punya baris ledger sendiri di samping jurnalnya sendiri di tahun buku yang sama (JV-<nomor> atau jurnal pembayarannya) sehingga laba tahun itu terhitung dua kali, butir berkunci <tipe>:<id>@<id tahun buku>, block; baris yang hanya mirip baris jurnal lain dengan nominal sama hanya dilaporkan di Pemeriksaan Sistem dan audit ledger), legacy-stt-cancel (STT yang dibatalkan dengan cara lama: jurnal asli Cancelled di samping JV-<STT>-CXL dan belum dipasangkan, kelas A/B/C/REVIEW, butir berkunci GoodsReceipt:<id>, warn; dibereskan dengan skrip e1-stt-cancel-model atas persetujuan akuntan), system-accounts (Laba Tahun Berjalan / Laba Ditahan belum dipetakan, block), do-uninvoiced (surat jalan Submitted s.d. akhir tahun yang belum ditagih, warn). Pemeriksaan tambahan: ar-subledger (Piutang di Buku Besar vs sisa tagihan invoice + saldo awal per Customer, block) dan customer-deposit-subledger (Uang Muka Customer di Buku Besar vs sisa uang muka per Customer, block); keduanya memakai saldo hari ini, hanya untuk Customer yang punya baris ledger atau dokumen (invoice, uang muka, pemakaian uang muka) di tahun itu, butir berkunci Party:<id> atau Party:none:<id tahun buku> (baris tanpa party bertanggal di tahun itu). Selisih ledger lama yang tercatat di baseline dengan nominal yang sama ditandai baselined dan tidak memblokir; untuk kedua cek ini selisih bertanda sama yang tidak lebih besar dari baseline juga baselined.",
       "risk": "read",
       "roles": [
         "Admin",

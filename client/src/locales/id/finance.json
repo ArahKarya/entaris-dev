@@ -934,6 +934,7 @@
       "actions": "Aksi"
     },
     "by": "oleh {{name}}",
+    "reversedBy": "Dibalik oleh {{number}}",
     "moreLines_one": "+{{count}} lainnya",
     "moreLines_other": "+{{count}} lainnya",
     "rowActions": "Aksi untuk {{number}}",
@@ -994,7 +995,8 @@
     "attachments_one": "Lampiran ({{count}})",
     "attachments_other": "Lampiran ({{count}})",
     "noAttachments": "Belum ada lampiran.",
-    "download": "Unduh {{name}}"
+    "download": "Unduh {{name}}",
+    "reversedBy": "Dibalik oleh {{number}}; keduanya bernilai nol bersama."
   },
   "journalEntryModal": {
     "saveFailed": "Gagal menyimpan jurnal.",

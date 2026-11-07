@@ -9,8 +9,8 @@ import { subledgerBaselineCovers } from '../ledger/arSubledgerCloseChecks';
 describe('close check plug-ins', () => {
   it('registers ar-subledger and customer-deposit-subledger after the built-in checks', () => {
     const ids = closeChecks().map((c) => c.id);
-    expect(ids.slice(0, 9)).toContain('do-uninvoiced');
-    expect(ids.slice(9)).toEqual(['ar-subledger', 'customer-deposit-subledger']);
+    expect(ids.slice(0, 10)).toContain('do-uninvoiced');
+    expect(ids.slice(10)).toEqual(['ar-subledger', 'customer-deposit-subledger']);
   });
 
   it('makes both blocking and baseline-aware', () => {
