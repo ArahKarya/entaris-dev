@@ -10,6 +10,9 @@
  *   template per business day (a second failure the same day adds none).
  * - The next successful run clears lastError.
  * - The due run posts only due journal templates and reports other types as skipped.
+ * - Once per business day (owner decision #8, PR-5.6): a second manual run the same day answers
+ *   already_ran (route: 200 RECURRING_ALREADY_RAN) and posts nothing, records nothing, moves nothing;
+ *   the due run on that day posts nothing either; after the day's journal is cancelled it runs again.
  *
  * Fixture year 2187 (unique to this file). Everything runs in one rollback transaction; lib/prisma
  * is the route harness proxy, so each run's own `$transaction` is a savepoint that a failure rolls
@@ -32,6 +35,7 @@ vi.mock('../../services/telegramService', () => ({
 }));
 
 import { runDueTemplates, runRecurringTemplate, RECURRING_FAILED_NOTIFICATION } from '../../services/recurringExecute';
+import { voidJournalInTx } from '../../utils/journalCancel';
 import recurringRouter from '../../routes/recurring';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -266,6 +270,75 @@ d('recurring template execution (E2-R3)', () => {
       expect(await recurringJournals(tx, later.id)).toHaveLength(0);
       const inv = await tx.recurringTemplate.findUniqueOrThrow({ where: { id: invoice.id } });
       expect(inv).toMatchObject({ nextRunDate: NEXT, lastError: null });
+    });
+  });
+
+  it('a second manual run the same day answers already_ran and posts, records and moves nothing', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const t = await template(tx, b, rent(b));
+
+      const first = await runRecurringTemplate(t.id, { userId: b.userId, now: NOW });
+      expect(first.outcome).toBe('posted');
+      const afterFirst = await tx.recurringTemplate.findUniqueOrThrow({ where: { id: t.id } });
+
+      const later = new Date(NOW.getTime() + 3 * 60 * 60 * 1000);
+      const second = await runRecurringTemplate(t.id, { userId: b.userId, now: later });
+      expect(second.outcome).toBe('already_ran');
+      expect(second.outcome === 'already_ran' && second.journal.id).toBe(first.outcome === 'posted' && first.journal.id);
+
+      // The route runs at the clock's now: only Date is faked, so the database driver keeps its timers.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(later);
+      const route = await callRoute(recurringRouter, 'post', '/:id/execute', { userId: b.userId, params: { id: t.id } })
+        .finally(() => vi.useRealTimers());
+      expect(route.status).toBe(200);
+      expect(route.body).toMatchObject({ success: false, code: 'RECURRING_ALREADY_RAN' });
+      expect(route.body.result.id).toBe(first.outcome === 'posted' && first.journal.id);
+
+      expect(await recurringJournals(tx, t.id)).toHaveLength(1);
+      expect(await balance(tx, b.expenseId)).toBe(7_500_000);
+      const after = await tx.recurringTemplate.findUniqueOrThrow({ where: { id: t.id } });
+      expect(after).toMatchObject({ lastRunDate: afterFirst.lastRunDate, nextRunDate: afterFirst.nextRunDate, lastError: null });
+      expect(await failureNotices(tx, t.id)).toHaveLength(0);
+    });
+  });
+
+  it('runs again the same day once that day\'s journal is cancelled', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const t = await template(tx, b, rent(b));
+
+      const first = await runRecurringTemplate(t.id, { userId: b.userId, now: NOW });
+      if (first.outcome !== 'posted') throw new Error(`first run ${first.outcome}`);
+      expect(await voidJournalInTx(tx, first.journal)).toBe(true);
+      expect(await balance(tx, b.expenseId)).toBe(0);
+
+      const again = await runRecurringTemplate(t.id, { userId: b.userId, now: new Date(NOW.getTime() + 60 * 60 * 1000) });
+      expect(again.outcome).toBe('posted');
+      const journals = await recurringJournals(tx, t.id);
+      expect(journals.map((j) => j.status).sort()).toEqual(['Cancelled', 'Submitted']);
+      expect(journals.every((j) => j.sourceKey === `RECURRING:${t.id}:${DAY}`)).toBe(true);
+      expect(await balance(tx, b.expenseId)).toBe(7_500_000);
+    });
+  });
+
+  it('the due run does not post a template a second time on a day it already ran', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      await tx.recurringTemplate.updateMany({ where: { isActive: true }, data: { isActive: false } });
+      const t = await template(tx, b, rent(b));
+
+      expect((await runRecurringTemplate(t.id, { userId: b.userId, now: NOW })).outcome).toBe('posted');
+      // The schedule is put back to due today (an edit, or a run that moved it before the cron).
+      await tx.recurringTemplate.update({ where: { id: t.id }, data: { nextRunDate: NEXT } });
+
+      const results = await runDueTemplates(b.userId, new Date(NOW.getTime() + 60 * 60 * 1000));
+      expect(results.find((r) => r.templateId === t.id)).toBeUndefined();
+      expect(await recurringJournals(tx, t.id)).toHaveLength(1);
+      const after = await tx.recurringTemplate.findUniqueOrThrow({ where: { id: t.id } });
+      expect(after).toMatchObject({ nextRunDate: NEXT, lastError: null });
+      expect(await failureNotices(tx, t.id)).toHaveLength(0);
     });
   });
 });

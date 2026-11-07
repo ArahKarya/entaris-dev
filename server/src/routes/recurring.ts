@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
 import { CreateRecurringSchema, UpdateRecurringSchema, parseTemplateData, type RecurringTemplateType } from '../utils/schemas';
-import { checkNextRunDate, validateJournalTemplateData, RECURRING_TYPE_MISMATCH } from '../utils/recurringRules';
+import { checkNextRunDate, validateJournalTemplateData, RECURRING_ALREADY_RAN, RECURRING_TYPE_MISMATCH } from '../utils/recurringRules';
 import { assertPostableAccounts, TEMPLATE_RULE } from '../services/ledger/accountGuard';
 import { runDueTemplates, runRecurringTemplate } from '../services/recurringExecute';
 import { BusinessError, handleRouteError } from '../utils/errors';
@@ -139,12 +139,21 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST /api/recurring/:id/execute: run one template now (services/recurringExecute.ts). A run that
-// does not post is refused with its code (400) and recorded on the template (lastError).
+// does not post is refused with its code (400) and recorded on the template (lastError). A template
+// already run today answers 200 with RECURRING_ALREADY_RAN and that journal: nothing posted, nothing recorded.
 router.post('/:id/execute', async (req: AuthRequest, res) => {
   try {
     const run = await runRecurringTemplate(req.params.id as string, { userId: req.user!.userId });
     if (run.outcome === 'not_found') return res.status(404).json({ error: 'Template tidak ditemukan.' });
     if (run.outcome === 'failed') return handleRouteError(res, run.error, 'POST /recurring/:id/execute', 'Gagal mengeksekusi template.');
+    if (run.outcome === 'already_ran') {
+      return res.json({
+        success: false,
+        code: RECURRING_ALREADY_RAN,
+        message: 'Template sudah dijalankan hari ini; batalkan jurnalnya dulu bila ingin menjalankan ulang.',
+        result: run.journal,
+      });
+    }
     return res.json({ success: true, result: run.outcome === 'posted' ? run.journal : null });
   } catch (error) {
     return handleRouteError(res, error, 'POST /recurring/:id/execute', 'Gagal mengeksekusi template.');

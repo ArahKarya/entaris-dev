@@ -2100,6 +2100,7 @@
     },
     "toast": {
       "executed": "Template dijalankan.",
+      "alreadyRan": "Template sudah dijalankan hari ini; batalkan jurnalnya dulu bila ingin menjalankan ulang.",
       "executeFailed": "Gagal mengeksekusi template.",
       "statusUpdated": "Status template diperbarui.",
       "statusFailed": "Gagal mengubah status template."

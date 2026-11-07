@@ -1664,7 +1664,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 ### rec_execute
 
-**Ringkasan:** Menjalankan satu template berulang sekarang. Tipe journal diposting lewat jalur posting bersama sebagai Jurnal Umum bertanggal hari ini (WIB), sumber RECURRING dengan kunci RECURRING:<id template>:<tanggal>. Setelah berhasil, lastRunDate dan nextRunDate maju satu periode dan lastError dikosongkan. Bila gagal, tidak ada jurnal, jadwal tidak maju, alasan disimpan di lastError template, dan Admin/Akuntan mendapat satu notifikasi per template per hari.
+**Ringkasan:** Menjalankan satu template berulang sekarang. Tipe journal diposting lewat jalur posting bersama sebagai Jurnal Umum bertanggal hari ini (WIB), sumber RECURRING dengan kunci RECURRING:<id template>:<tanggal>. Setelah berhasil, lastRunDate dan nextRunDate maju satu periode dan lastError dikosongkan. Bila gagal, tidak ada jurnal, jadwal tidak maju, alasan disimpan di lastError template, dan Admin/Akuntan mendapat satu notifikasi per template per hari. Satu template hanya diposting sekali per hari bisnis: selama jurnal aktif hari itu ada, eksekusi kedua tidak memposting apa pun (RECURRING_ALREADY_RAN); batalkan jurnal itu dulu bila ingin menjalankan ulang.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1701,7 +1701,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 }
 ```
 
-**Isi hasil:** { success: true, result (jurnal) }; gagal = HTTP 400 { error, code } (alasan juga tersimpan di lastError template).
+**Isi hasil:** { success: true, result (jurnal) }; sudah dijalankan hari ini = HTTP 200 { success: false, code: RECURRING_ALREADY_RAN, message, result (jurnal hari itu) } tanpa posting; gagal = HTTP 400 { error, code } (alasan juga tersimpan di lastError template).
 
 **Efek pembukuan/stok:** Tipe journal: membuat Jurnal Umum berstatus Submitted dan memposting ke buku besar sesuai baris template (DR/CR menurut templateData); saldo akun diperbarui. Saat dieksekusi, template diperiksa ulang: seimbang tepat, maksimal 2 desimal, tanpa pihak, tanpa akun kontrol/pajak, tahun buku dan kunci periode hari ini. Tipe invoice: tidak ada efek (RECURRING_TYPE_UNSUPPORTED).
 
@@ -1721,6 +1721,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400 RECURRING_TYPE_MISMATCH: data template tidak sesuai tipenya
 - 400 RECURRING_TYPE_UNSUPPORTED: tipe selain journal belum bisa dieksekusi
 - 400 FISCAL_YEAR_MISSING / PERIOD_CLOSED / PERIOD_LOCKED: belum ada tahun buku untuk hari ini, tahun bukunya tertutup, atau tanggal hari ini terkunci
+- 200 RECURRING_ALREADY_RAN: template sudah dijalankan hari ini (jurnal aktif ada); tidak ada posting, jadwal dan lastError tidak berubah. Batalkan jurnal itu dulu bila ingin menjalankan ulang
 
 **Tool terkait:** [`rec_list`](#rec_list), [`rec_update`](#rec_update)
 

@@ -74,7 +74,11 @@ export const RecurringTransactions = () => {
 
   const executeMutation = useMutation({
     mutationFn: (id: string) => api.post(`/recurring/${id}/execute`),
-    onSuccess: () => toast.success(t('recurringTransactions.toast.executed')),
+    // A template already run today answers 200 RECURRING_ALREADY_RAN and posts nothing.
+    onSuccess: (res) =>
+      res.data?.code === 'RECURRING_ALREADY_RAN'
+        ? toast.info(t('recurringTransactions.toast.alreadyRan'))
+        : toast.success(t('recurringTransactions.toast.executed')),
     onError: (e) => toast.error(errorMessage(e, t('recurringTransactions.toast.executeFailed'))),
     // A failed run is a 400 but still stores lastError on the template, so the list refetches either way.
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['recurring-templates'] }),

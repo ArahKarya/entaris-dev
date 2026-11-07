@@ -2100,6 +2100,7 @@
     },
     "toast": {
       "executed": "Template run.",
+      "alreadyRan": "The template has already run today; cancel its journal first to run it again.",
       "executeFailed": "Could not run the template.",
       "statusUpdated": "Template status updated.",
       "statusFailed": "Could not change the template status."

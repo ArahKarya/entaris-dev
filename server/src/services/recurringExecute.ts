@@ -6,6 +6,9 @@
 // A run that fails posts nothing, keeps the schedule where it was, stores the reason on the
 // template (lastError) and notifies Admin and Accountant once per template per business day, so a
 // failing template is never a silent stop. The next successful run clears the reason.
+// A template runs at most once per business day (owner decision #8, plan step 5 PR-5.6): while an
+// active journal carries that day's sourceKey, a manual run answers already_ran and the due run
+// not_due, without recording a failure. Cancelling that journal allows the run again.
 
 import type { Prisma, RecurringTemplate } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -104,6 +107,8 @@ export async function executeJournalTemplateInTx(
 
 export type TemplateRun =
   | { outcome: 'posted'; journal: PostedJournal['journal'] }
+  /** A manual run on a day that already has an active journal of this template: nothing posted. */
+  | { outcome: 'already_ran'; journal: PostedJournal['journal'] }
   | { outcome: 'failed'; code: string | null; message: string; error: unknown }
   | { outcome: 'not_due' }
   | { outcome: 'not_found' };
@@ -118,7 +123,9 @@ export interface RunTemplateOptions {
 /**
  * Runs one template in its own transaction: the template row is locked first, so a manual run and
  * the due run never post from the same stale row, then the journal is posted and the schedule
- * moves one period from now. A failure is recorded (recordTemplateFailure) and returned, never thrown.
+ * moves one period from now. A day that already has an active journal of the template posts
+ * nothing and moves nothing (already_ran, or not_due for the due run). A failure is recorded
+ * (recordTemplateFailure) and returned, never thrown.
  */
 export async function runRecurringTemplate(templateId: string, opts: RunTemplateOptions): Promise<TemplateRun> {
   const now = opts.now ?? new Date();
@@ -129,7 +136,15 @@ export async function runRecurringTemplate(templateId: string, opts: RunTemplate
       if (!template) return { outcome: 'not_found' };
       if (opts.onlyIfDue && (!template.isActive || template.nextRunDate > now)) return { outcome: 'not_due' };
 
-      const { journal } = await executeJournalTemplateInTx(tx, template, { userId: opts.userId, runDate: businessToday(now) });
+      const runDate = businessToday(now);
+      // Read under the template lock, so two runs of the same template cannot both miss it.
+      const ran = await tx.journalEntry.findFirst({
+        where: { sourceKey: sourceKeys.recurring(template.id, runDate), status: { not: 'Cancelled' } },
+        include: { items: true },
+      });
+      if (ran) return opts.onlyIfDue ? { outcome: 'not_due' } : { outcome: 'already_ran', journal: ran };
+
+      const { journal } = await executeJournalTemplateInTx(tx, template, { userId: opts.userId, runDate });
       await tx.recurringTemplate.update({
         where: { id: template.id },
         data: {
