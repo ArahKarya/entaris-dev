@@ -462,6 +462,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // PAYMENT_REQUEST_RULE (payment request and settlement expense lines)
   "Akun biaya": "Expense account",
   " Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.": " Payment requests cannot use control or tax accounts; use the Payments or Deposits module.",
+  // OPENING_ACCOUNT_RULE (opening balance of an account, plan step 5 §2.4)
+  "Akun saldo awal": "Opening balance account",
+  " Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.": " Receivable, payable and deposit openings are set through the party opening balance; inventory through the opening stock import.",
   // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
   "Baris {0}: {1}": "Line {0}: {1}",
   "kredit": "credit",
