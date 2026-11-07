@@ -95,7 +95,7 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Didebit saat Pengajuan Pembayaran jenis uang muka / perjalanan dinas dibayar',
     multiAccount: false,
     required: false,
-    usage: 'default' as RoleUsage,
+    usage: 'posting' as RoleUsage,
     expectedRootType: 'ASSET' as const,
   },
   COGS: {
@@ -417,7 +417,7 @@ export type SystemAccountRole = keyof typeof SYSTEM_ACCOUNT_ROLES;
 export const POSTING_SYSTEM_ROLES = [
   'CASH', 'AR', 'AP', 'INVENTORY', 'SALES', 'SERVICE_REVENUE', 'VENDOR_DEPOSIT', 'CUSTOMER_DEPOSIT',
   'COGS', 'OPENING_EQUITY', 'RETAINED_EARNINGS', 'CURRENT_PROFIT', 'TAX_OUTPUT', 'ACCRUED_PAYABLE',
-  'PROJECT_GUARANTEE', 'INVENTORY_VARIANCE', 'OTHER_EXPENSE',
+  'PROJECT_GUARANTEE', 'INVENTORY_VARIANCE', 'OTHER_EXPENSE', 'EMPLOYEE_ADVANCE',
   'SALES_RETURN', 'PRODUCTION_CONVERSION', 'PURCHASE_PRICE_VARIANCE',
 ] as const satisfies readonly SystemAccountRole[];
 

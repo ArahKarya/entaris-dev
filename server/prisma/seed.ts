@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import bcrypt from 'bcrypt';
 import "dotenv/config";
+import { shouldSeedAccruedExpense } from './seedAccruedExpense';
 
 // Kept in sync with prisma/migrations/2026100700000_payment_requests.sql (the
 // runtime image ships prisma/ but not src/, so this cannot import from src).
@@ -422,10 +423,8 @@ async function main() {
     if (mapping.role === 'PRODUCTION_CONVERSION') {
       await prisma.systemAccountMapping.deleteMany({ where: { role: mapping.role, accountId: { not: accountId } } });
     }
-    // ACCRUED_EXPENSE moved from 2.2.6 (payroll payable) to 2.2.7. A re-seed must not add a second
-    // mapping next to a tenant's own choice; the loose SQL 2026110900000 remaps the untouched legacy one.
-    if (mapping.role === 'ACCRUED_EXPENSE'
-      && await prisma.systemAccountMapping.count({ where: { role: mapping.role } }) > 0) {
+    // ACCRUED_EXPENSE moved from 2.2.6 (payroll payable) to 2.2.7; see seedAccruedExpense.ts.
+    if (mapping.role === 'ACCRUED_EXPENSE' && !(await shouldSeedAccruedExpense(prisma, accountId))) {
       continue;
     }
     await prisma.systemAccountMapping.upsert({

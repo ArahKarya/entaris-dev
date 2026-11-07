@@ -3,7 +3,9 @@
 -- masih harus dibayar. DB baru sudah mendapat 2.2.7 dari seed; file ini menyamakan DB lama.
 -- Dua langkah, keduanya hanya berbuat bila aman, dan idempoten (dijalankan ulang tidak mengubah apa pun):
 --   1. Buat 2.2.7 bila belum ada dan induk 2.2 ada.
---   2. Pindahkan pemetaan ACCRUED_EXPENSE dari 2.2.6 ke 2.2.7 hanya bila role itu masih tepat di
+--   2. Pindahkan pemetaan ACCRUED_EXPENSE dari 2.2.6 ke 2.2.7 hanya bila 2.2.7 memang akun milik file
+--      ini (nama 'Biaya Masih Harus Dibayar' di bawah 2.2; 2.2.7 buatan tenant dengan nama lain tidak
+--      disentuh) dan role itu masih tepat di
 --      2.2.6 dan 2.2.6 belum punya baris buku besar (ALE) maupun baris jurnal (JI). Akun 2.2.6 yang
 --      sudah dipakai tidak dipindah; itu pilihan akuntan (e2-system-account-audit melaporkannya).
 
@@ -34,8 +36,10 @@ DECLARE
   new_id TEXT;
   old_id TEXT;
 BEGIN
-  SELECT id INTO new_id FROM accounts
-   WHERE "accountNumber" = '2.2.7' AND "isGroup" = false AND "isActive" = true AND "rootType" = 'LIABILITY';
+  SELECT a.id INTO new_id FROM accounts a
+   WHERE a."accountNumber" = '2.2.7' AND a."isGroup" = false AND a."isActive" = true AND a."rootType" = 'LIABILITY'
+     AND a.name = 'Biaya Masih Harus Dibayar'
+     AND a."parentId" = (SELECT id FROM accounts WHERE "accountNumber" = '2.2' LIMIT 1);
   SELECT id INTO old_id FROM accounts WHERE "accountNumber" = '2.2.6';
   IF new_id IS NULL OR old_id IS NULL THEN
     RETURN;

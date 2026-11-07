@@ -1,6 +1,7 @@
 /**
  * PR-4.14: the loose SQL that creates account 2.2.7 and moves ACCRUED_EXPENSE off 2.2.6.
- * Runs inside a rolled-back transaction, builds its own accounts; the ledger-entry case uses fixture year 2167.
+ * Also the seed guard for the ACCRUED_EXPENSE mapping.
+ * Runs inside a rolled-back transaction, builds its own accounts; the ledger-entry case uses fixture year 2168.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -10,6 +11,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import type { Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
+import { shouldSeedAccruedExpense } from '../../../prisma/seedAccruedExpense';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -96,10 +98,10 @@ d('accrued_expense_227 loose SQL', () => {
       const parent = await ensureParent(tx);
       const legacy = await tx.account.create({ data: { name: 'IT-4.14 gaji', accountNumber: '2.2.6', ...LIAB, parentId: parent.id } });
       await tx.systemAccountMapping.create({ data: { role: 'ACCRUED_EXPENSE', accountId: legacy.id } });
-      const fy = await createFiscalYear(tx, { year: 2167 });
+      const fy = await createFiscalYear(tx, { year: 2168 });
       await tx.accountingLedgerEntry.create({
         data: {
-          accountId: legacy.id, debit: 0, credit: 10, date: new Date('2167-01-15T00:00:00Z'),
+          accountId: legacy.id, debit: 0, credit: 10, date: new Date('2168-01-15T00:00:00Z'),
           referenceType: 'IT414', referenceId: 'IT414-1', fiscalYearId: fy.id,
         },
       });
@@ -124,6 +126,20 @@ d('accrued_expense_227 loose SQL', () => {
     });
   });
 
+  it('leaves ACCRUED_EXPENSE on 2.2.6 when 2.2.7 is a tenant account with another name', async () => {
+    await inRollback(async (tx) => {
+      await resetScene(tx);
+      const parent = await ensureParent(tx);
+      const legacy = await tx.account.create({ data: { name: 'IT-4.14 gaji', accountNumber: '2.2.6', ...LIAB, parentId: parent.id } });
+      await tx.account.create({ data: { name: 'Hutang BPJS', accountNumber: '2.2.7', ...LIAB, parentId: parent.id } });
+      await tx.systemAccountMapping.create({ data: { role: 'ACCRUED_EXPENSE', accountId: legacy.id } });
+
+      await tx.$executeRawUnsafe(MIGRATION_SQL);
+      expect(await mapped(tx)).toEqual(['2.2.6']);
+      expect(await tx.account.findFirst({ where: { accountNumber: '2.2.7' } })).toMatchObject({ name: 'Hutang BPJS' });
+    });
+  });
+
   it('does nothing when the parent 2.2 is missing', async () => {
     await inRollback(async (tx) => {
       await resetScene(tx);
@@ -131,6 +147,40 @@ d('accrued_expense_227 loose SQL', () => {
       if (parent) await tx.account.update({ where: { id: parent.id }, data: { accountNumber: `OLD-2.2-${parent.id.slice(0, 6)}` } });
       await tx.$executeRawUnsafe(MIGRATION_SQL);
       expect(await tx.account.count({ where: { accountNumber: '2.2.7' } })).toBe(0);
+    });
+  });
+});
+
+d('ACCRUED_EXPENSE seed guard', () => {
+  const SEED_SRC = readFileSync(join(__dirname, '../../../prisma/seed.ts'), 'utf8');
+
+  it('seed maps ACCRUED_EXPENSE to 2.2.7 only', () => {
+    expect(SEED_SRC).toContain("{ role: 'ACCRUED_EXPENSE', accountNumber: '2.2.7', sortOrder: 0 }");
+    expect(SEED_SRC.match(/'ACCRUED_EXPENSE'/g)).toHaveLength(2); // the entry and the guard
+    expect(SEED_SRC).toContain('shouldSeedAccruedExpense');
+  });
+
+  it('maps a fresh seeded 2.2.7 and adds nothing when a mapping already exists', async () => {
+    await inRollback(async (tx) => {
+      await resetScene(tx);
+      const parent = await ensureParent(tx);
+      const target = await tx.account.create({
+        data: { name: 'Biaya Masih Harus Dibayar', accountNumber: '2.2.7', ...LIAB, parentId: parent.id },
+      });
+      expect(await shouldSeedAccruedExpense(tx, target.id)).toBe(true);
+
+      const legacy = await tx.account.create({ data: { name: 'IT-4.14 gaji', accountNumber: '2.2.6', ...LIAB, parentId: parent.id } });
+      await tx.systemAccountMapping.create({ data: { role: 'ACCRUED_EXPENSE', accountId: legacy.id } });
+      expect(await shouldSeedAccruedExpense(tx, target.id)).toBe(false);
+    });
+  });
+
+  it('does not map a tenant-owned 2.2.7 with another name', async () => {
+    await inRollback(async (tx) => {
+      await resetScene(tx);
+      const parent = await ensureParent(tx);
+      const own = await tx.account.create({ data: { name: 'Hutang BPJS', accountNumber: '2.2.7', ...LIAB, parentId: parent.id } });
+      expect(await shouldSeedAccruedExpense(tx, own.id)).toBe(false);
     });
   });
 });
