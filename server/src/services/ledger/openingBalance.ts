@@ -210,9 +210,10 @@ const signed = (rootType: string, debit: Prisma.Decimal.Value, credit: Prisma.De
 /**
  * The account's balance at the cut-over day before this service's own journals, normal side,
  * from the ledger: every active ledger row dated before openingJournalInstant(day), plus the
- * active rows ON that day of unkeyed journals that also touch the opening equity account (an
- * opening balance entered another way, e.g. "Setoran modal awal" against 3.1 on 1 January).
- * Journals in `excludeJournalIds` are left out.
+ * active rows ON that day of journals that also touch the opening equity account and are not an
+ * OPENING:* journal of this service (an opening balance entered another way, e.g. "Setoran modal
+ * awal" against 3.1 on 1 January, or the same entry from a journal import or a recurring template,
+ * which carry an IMPORT:/RECURRING: key). Journals in `excludeJournalIds` are left out.
  */
 export async function openingBase(tx: Db, accountId: string, day: string, excludeJournalIds: readonly string[]): Promise<Decimal> {
   const [account, equity] = await Promise.all([
@@ -236,7 +237,8 @@ export async function openingBase(tx: Db, accountId: string, day: string, exclud
           AND ale.reference_type = 'JournalEntry'
           AND EXISTS (
             SELECT 1 FROM journal_entries je
-            WHERE je.id = ale.reference_id AND je.source_key IS NULL
+            WHERE je.id = ale.reference_id
+              AND (je.source_key IS NULL OR je.source_key NOT LIKE 'OPENING:%')
               AND EXISTS (
                 SELECT 1 FROM journal_entry_accounts ji
                 WHERE ji.journal_entry_id = je.id AND ji.account_id = ${equity?.accountId ?? ''} AND ji.account_id <> ${accountId}

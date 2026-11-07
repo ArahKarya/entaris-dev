@@ -105,7 +105,7 @@ async function post(
   debitId: string,
   creditId: string,
   amount: number,
-  extra: { entryNumber?: string; narration?: string; sourceType?: 'OPENING' | 'MANUAL' | null; sourceKey?: string | null } = {},
+  extra: { entryNumber?: string; narration?: string; sourceType?: 'OPENING' | 'MANUAL' | 'IMPORT' | null; sourceKey?: string | null } = {},
 ) {
   const je = await tx.journalEntry.create({
     data: {
@@ -230,6 +230,24 @@ d('account opening balance at the cut-over date', () => {
       const kas = await asset(tx);
       const equity = await mappedAccount(tx, 'OPENING_EQUITY');
       await post(tx, fy, new Date(`${Y}-01-01`), kas.id, equity.id, 500 * JT, { narration: 'Setoran modal awal', sourceType: null });
+
+      const r = await setBalance(kas.id, { balance: 500 * JT });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.opening).toMatchObject({ action: 'unchanged', journalNumber: null });
+      expect(await journalsOf(tx, kas.id)).toHaveLength(1);
+      expect((await ledgerNet(tx, kas.id)).toFixed(2)).toBe('500000000.00');
+    });
+  });
+
+  it('counts an imported journal against opening equity on the cut-over day as opening already', async () => {
+    await inRollback(async (tx) => {
+      const fy = await createFiscalYear(tx, { year: Y });
+      await setCutover(tx, `${Y}-01-01`);
+      const kas = await asset(tx);
+      const equity = await mappedAccount(tx, 'OPENING_EQUITY');
+      await post(tx, fy, new Date(`${Y}-01-01`), kas.id, equity.id, 500 * JT, {
+        narration: 'Neraca awal', sourceType: 'IMPORT', sourceKey: sourceKeys.importGroup('a'.repeat(64), 1),
+      });
 
       const r = await setBalance(kas.id, { balance: 500 * JT });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
