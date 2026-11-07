@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { JournalSourceType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
@@ -11,6 +11,7 @@ import { cancelTrail } from '../utils/cancelClaim';
 import { systemAccounts } from '../services/systemAccounts';
 import { DOCUMENT_RULE } from '../services/ledger/accountGuard';
 import { sourceKeys } from '../services/ledger/journalSource';
+import { closeJournalPredicate } from '../services/ledger/closeJournals';
 import { postJournal } from '../services/ledger/postJournal';
 import { CloseChecklistFailedError, assertCloseChecklistPasses, runCloseChecklist } from '../services/fiscalYearClose';
 import { ACCOUNT_MAPPING_MISSING, SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../types/systemAccounts';
@@ -37,18 +38,6 @@ async function mappedAccountId(role: SystemAccountRole): Promise<string> {
   return account.id;
 }
 
-/**
- * CLOSE journals of a year in any status: tagged FY_CLOSE, or numbered CLOSE-<name> / CLOSE-<name>-R<n>
- * for rows the source backfill has not tagged.
- */
-function closeJournalsWhere(year: { id: string; name: string }): Prisma.JournalEntryWhereInput {
-  const base = `CLOSE-${year.name}`;
-  return {
-    fiscalYearId: year.id,
-    OR: [{ sourceType: JournalSourceType.FY_CLOSE }, { entryNumber: base }, { entryNumber: { startsWith: `${base}-R` } }],
-  };
-}
-
 interface CloseJournalInput {
   year: { id: string; name: string; endDate: Date };
   /** Revenue minus expense of the year; not zero. */
@@ -68,7 +57,7 @@ interface CloseJournalInput {
  */
 async function postCloseJournalInTx(tx: Tx, input: CloseJournalInput): Promise<{ id: string; entryNumber: string }> {
   const { year, profit, userId } = input;
-  const earlier = await tx.journalEntry.count({ where: closeJournalsWhere(year) });
+  const earlier = await tx.journalEntry.count({ where: closeJournalPredicate(year) });
   const entryNumber = earlier === 0 ? `CLOSE-${year.name}` : `CLOSE-${year.name}-R${earlier + 1}`;
   const zero = new Prisma.Decimal(0);
   const amount = profit.abs();
@@ -93,6 +82,25 @@ async function postCloseJournalInTx(tx: Tx, input: CloseJournalInput): Promise<{
     expectFiscalYearId: year.id,
   });
   return { id: journal.id, entryNumber };
+}
+
+/**
+ * A reopen finds no active CLOSE journal: right for a year closed at zero profit, but a year whose
+ * last close recorded a profit lost its CLOSE some other way (deleted before reopen kept it). Logged
+ * for the accountant, not refused.
+ */
+async function warnIfCloseJournalMissing(tx: Tx, year: { id: string; name: string }): Promise<void> {
+  const lastClose = await tx.fiscalYearEvent.findFirst({
+    where: { fiscalYearId: year.id, action: 'close' },
+    orderBy: { createdAt: 'desc' },
+    select: { profit: true },
+  });
+  if (lastClose?.profit && !lastClose.profit.isZero()) {
+    logger.warn(
+      { fiscalYearId: year.id, fiscalYear: year.name, profit: lastClose.profit.toString() },
+      'Reopen: no active CLOSE journal although the last close recorded a profit',
+    );
+  }
 }
 
 // GET /api/fiscal-years
@@ -159,6 +167,9 @@ router.post('/', async (req, res) => {
 
 // POST /api/fiscal-years/:id/close: requires settings edit permission and the doc.cancel capability.
 // Refused with CLOSE_CHECKLIST_FAILED (and the checklist) while a blocking check fails.
+// An account's stored balance is the sum of its active ledger rows over every year
+// (services/ledger/storedBalances.ts); the close does not change it. The year's profit moves to
+// retained earnings through the CLOSE journal only, and the profit and loss accounts keep their rows.
 router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const userId = req.user!.userId;
@@ -199,40 +210,6 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
         ? null
         : await postCloseJournalInTx(tx, { year, profit, currentProfitAccountId, retainedEarningsAccountId, userId });
 
-      // Decrement Revenue/Expense balances by this FY's contribution only.
-      const fyAccountSums = await tx.accountingLedgerEntry.groupBy({
-        by: ['accountId'],
-        where: {
-          fiscalYearId: id,
-          isCancelled: false,
-          account: { OR: [{ rootType: 'REVENUE' as any }, { rootType: 'EXPENSE' as any }] },
-        },
-        _sum: { debit: true, credit: true },
-      });
-
-      const fyAccounts = await tx.account.findMany({
-        where: { id: { in: fyAccountSums.map((e) => e.accountId) } },
-        select: { id: true, rootType: true },
-      });
-      const fyAccountMap = new Map(fyAccounts.map((a) => [a.id, a]));
-
-      for (const entry of fyAccountSums) {
-        const acct = fyAccountMap.get(entry.accountId);
-        if (!acct) continue;
-        const debit = Number(entry._sum.debit || 0);
-        const credit = Number(entry._sum.credit || 0);
-        // Reverse the impact this FY contributed to the running balance
-        const impact = acct.rootType === 'ASSET' || acct.rootType === 'EXPENSE'
-          ? debit - credit
-          : credit - debit;
-        if (impact !== 0) {
-          await tx.account.update({
-            where: { id: entry.accountId },
-            data: { balance: { decrement: impact } },
-          });
-        }
-      }
-
       await tx.fiscalYearEvent.create({
         data: { fiscalYearId: id, action: 'close', userId, closeJournalId: closeJournal?.id ?? null, profit },
       });
@@ -255,6 +232,7 @@ router.post('/:id/close', requireCap('doc.cancel'), async (req: AuthRequest, res
 // POST /api/fiscal-years/:id/reopen: requires settings edit permission and the doc.cancel capability.
 // Body { reason } (5..500). Cancels the active CLOSE journal (kept, status Cancelled, with the reason)
 // instead of deleting it, and refuses while a later year is closed or the lock date covers the year end.
+// Stored account balances do not change (see POST /:id/close).
 router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const fyId = req.params.id as string;
   const body = validateBody(ReopenFiscalYearSchema, req.body ?? {}, res);
@@ -290,7 +268,7 @@ router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, re
 
       // The active CLOSE journal(s); ones cancelled by earlier reopens stay as they are.
       const closeJournals = await tx.journalEntry.findMany({
-        where: { ...closeJournalsWhere(year), status: 'Submitted' },
+        where: { ...closeJournalPredicate(year), status: 'Submitted' },
         include: { items: true },
         orderBy: { createdAt: 'asc' },
       });
@@ -299,38 +277,7 @@ router.post('/:id/reopen', requireCap('doc.cancel'), async (req: AuthRequest, re
         await voidJournalInTx(tx, journal, 'jurnal', trail);
       }
 
-      const fyAccountSums = await tx.accountingLedgerEntry.groupBy({
-        by: ['accountId'],
-        where: {
-          fiscalYearId: fyId,
-          isCancelled: false,
-          account: { OR: [{ rootType: 'REVENUE' as any }, { rootType: 'EXPENSE' as any }] },
-        },
-        _sum: { debit: true, credit: true },
-      });
-
-      const fyAccounts = await tx.account.findMany({
-        where: { id: { in: fyAccountSums.map((e) => e.accountId) } },
-        select: { id: true, rootType: true },
-      });
-      const fyAccountMap = new Map(fyAccounts.map((a) => [a.id, a]));
-
-      for (const entry of fyAccountSums) {
-        const acct = fyAccountMap.get(entry.accountId);
-        if (!acct) continue;
-        const debit = Number(entry._sum.debit || 0);
-        const credit = Number(entry._sum.credit || 0);
-        // Re-add the impact that was decremented during closing
-        const impact = acct.rootType === 'ASSET' || acct.rootType === 'EXPENSE'
-          ? debit - credit
-          : credit - debit;
-        if (impact !== 0) {
-          await tx.account.update({
-            where: { id: entry.accountId },
-            data: { balance: { increment: impact } },
-          });
-        }
-      }
+      if (closeJournals.length === 0) await warnIfCloseJournalMissing(tx, year);
 
       await tx.fiscalYearEvent.create({
         data: { fiscalYearId: fyId, action: 'reopen', userId, reason: trail.cancelReason, closeJournalId: closeJournals[0]?.id ?? null },

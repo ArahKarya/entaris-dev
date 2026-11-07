@@ -5,7 +5,7 @@
 //   childVsParent       root type differs from the parent's: fix by hand
 //   groupWithLedger, inactiveWithLedger, dottedOrphan   information only
 // The repair changes how an amount is presented, not the profit of any fiscal year. accounts.balance
-// is recalculated from the open fiscal years. An account with ledger rows in a CLOSED year is not
+// is recalculated from the ledger rows of every year. An account with ledger rows in a CLOSED year is not
 // touched unless --include-closed-years acknowledges that those years then show the amount as revenue.
 // --apply needs --approved-by "<accountant name>"; the name goes on one audit row per account and in
 // the CSV, which --apply always writes (default file name when --out is not given) before the
