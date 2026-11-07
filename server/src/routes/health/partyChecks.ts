@@ -14,7 +14,8 @@ export async function checkPartyOutstandingDrift(scope: { partyIds?: readonly st
   // error, not the whole health check's.
   const all = await rowsOrAmbiguous('Party Outstanding Drift', () => computePartyOutstandingDrift(prisma, scope));
   if (!Array.isArray(all)) return all;
-  const rows = all.filter((r) => Number(r.storedMinusExpected) !== 0);
+  const rows = all.filter((r) =>
+    [r.storedMinusExpected, r.receivable.storedMinusExpected, r.payable.storedMinusExpected].some((d) => Number(d) !== 0));
   return {
     name: 'Party Outstanding Drift',
     status: rows.length > 0 ? 'warning' : 'ok',
@@ -28,6 +29,11 @@ export async function checkPartyOutstandingDrift(scope: { partyIds?: readonly st
       stored: Number(r.stored),
       expected: Number(r.expected),
       difference: Number(r.storedMinusExpected),
+      // A party can be off on one side while its totals agree: the sides show which one.
+      receivable_stored: Number(r.receivable.stored),
+      receivable_expected: Number(r.receivable.expected),
+      payable_stored: Number(r.payable.stored),
+      payable_expected: Number(r.payable.expected),
     })),
     fixable: false,
   };

@@ -1,14 +1,16 @@
-// Read-only comparison of each real party's stored outstanding amount (E7-R13). The old dummy
-// generator and delete-dummy recalculated every party from open invoices alone, which dropped
-// opening outstanding balances. Shown per party: the stored amount, the amount recalcPartyOutstanding
-// would compute (opening + outstanding of non-cancelled invoices + manual party adjustment), and the party's AR/AP ledger
-// balance. The ledger column is indicative only until opening balances are journaled per party
-// (E2-R11). Nothing is changed here; corrections go through the accountant.
+// Read-only comparison of each real party's stored outstanding amount (E7-R13), per side since
+// E2-R13 (services/ledger/partySides.ts). The old dummy generator and delete-dummy recalculated every
+// party from open invoices alone, which dropped opening outstanding balances. Shown per party and
+// side: the stored amount, the amount recalcPartyOutstanding would compute (computePartySides:
+// opening + outstanding of invoices not Draft or Cancelled + manual party adjustment), and the
+// party's AR/AP ledger balance. The ledger column is indicative only until opening balances are
+// journaled per party (E2-R11). Nothing is changed here; corrections go through the accountant.
 
-import { Prisma } from '@prisma/client';
+import { Prisma, type PartyType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { systemAccounts } from './systemAccounts';
 import { manualPartyAdjustments } from './ledger/partyAdjustments';
+import { computePartySides, legacyUnassignedOf, NON_OUTSTANDING_INVOICE_STATUSES } from './ledger/partySides';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 type Dec = Prisma.Decimal;
@@ -17,9 +19,13 @@ const D = (v: Prisma.Decimal.Value | null | undefined): Dec => new Prisma.Decima
 export interface DriftParty {
   id: string;
   name: string;
-  partyType: string;
+  partyType: PartyType;
   outstandingAmount: Prisma.Decimal.Value;
+  receivableOutstanding: Prisma.Decimal.Value;
+  payableOutstanding: Prisma.Decimal.Value;
   openingOutstanding: Prisma.Decimal.Value;
+  openingReceivable: Prisma.Decimal.Value;
+  openingPayable: Prisma.Decimal.Value;
 }
 
 /** Per-party sums the comparison needs, keyed by party id. */
@@ -30,16 +36,13 @@ export interface DriftSums {
   arLedger: ReadonlyMap<string, Dec>;
   /** AP credit − debit. */
   apLedger: ReadonlyMap<string, Dec>;
-  /** Manual party adjustment on AR (services/ledger/partyAdjustments.ts); counts for a Customer only. */
+  /** Manual party adjustment on AR (services/ledger/partyAdjustments.ts); counts for a Customer or Both. */
   arManual?: ReadonlyMap<string, Dec>;
-  /** Manual party adjustment on AP; counts for a Supplier only. */
+  /** Manual party adjustment on AP; counts for a Supplier or Both. */
   apManual?: ReadonlyMap<string, Dec>;
 }
 
-export interface DriftRow {
-  partyId: string;
-  name: string;
-  partyType: string;
+export interface DriftSide {
   stored: string;
   expected: string;
   ledger: string;
@@ -47,44 +50,71 @@ export interface DriftRow {
   expectedMinusLedger: string;
 }
 
-const isCustomer = (t: string) => t === 'Customer' || t === 'Both';
-const isSupplier = (t: string) => t === 'Supplier' || t === 'Both';
+export interface DriftRow extends DriftSide {
+  partyId: string;
+  name: string;
+  partyType: string;
+  receivable: DriftSide;
+  payable: DriftSide;
+  /** Opening outstanding not directed to a side (partySides legacyUnassigned). */
+  legacyUnassigned: string;
+}
+
+const hasReceivable = (t: string) => t === 'Customer' || t === 'Both';
+const hasPayable = (t: string) => t === 'Supplier' || t === 'Both';
+
+function side(stored: Dec, expected: Dec, ledger: Dec): DriftSide & { clean: boolean } {
+  const storedDiff = stored.minus(expected);
+  const ledgerDiff = expected.minus(ledger);
+  return {
+    stored: stored.toFixed(2),
+    expected: expected.toFixed(2),
+    ledger: ledger.toFixed(2),
+    storedMinusExpected: storedDiff.toFixed(2),
+    expectedMinusLedger: ledgerDiff.toFixed(2),
+    clean: storedDiff.isZero() && ledgerDiff.isZero(),
+  };
+}
+
+const strip = ({ clean: _clean, ...rest }: DriftSide & { clean: boolean }): DriftSide => rest;
 
 /**
- * One row per party whose stored amount differs from the expected one, or whose expected amount
- * differs from its ledger balance. Expected follows recalcPartyOutstanding: opening outstanding
- * plus sales invoices (Customer/Both) plus purchase invoices (Supplier/Both), plus the manual party
- * adjustment on AR for a Customer and on AP for a Supplier (not for Both); the ledger adds AR and AP
- * the same way.
+ * One row per party whose stored amount differs from the expected one on a side, or whose expected
+ * amount differs from its ledger balance. Expected is computePartySides, the formula of
+ * recalcPartyOutstanding; the ledger is AR on the receivable side of a Customer or Both and AP on
+ * the payable side of a Supplier or Both. The top-level figures are the totals (stored =
+ * outstanding_amount).
  */
 export function buildDriftRows(parties: readonly DriftParty[], sums: DriftSums): DriftRow[] {
   const zero = D(0);
   return parties.flatMap((p) => {
-    const stored = D(p.outstandingAmount);
-    let expected = D(p.openingOutstanding);
-    let ledger = zero;
-    if (isCustomer(p.partyType)) {
-      expected = expected.plus(sums.salesOutstanding.get(p.id) ?? zero);
-      ledger = ledger.plus(sums.arLedger.get(p.id) ?? zero);
-    }
-    if (isSupplier(p.partyType)) {
-      expected = expected.plus(sums.purchaseOutstanding.get(p.id) ?? zero);
-      ledger = ledger.plus(sums.apLedger.get(p.id) ?? zero);
-    }
-    if (p.partyType === 'Customer') expected = expected.plus(sums.arManual?.get(p.id) ?? zero);
-    if (p.partyType === 'Supplier') expected = expected.plus(sums.apManual?.get(p.id) ?? zero);
-    const storedDiff = stored.minus(expected);
-    const ledgerDiff = expected.minus(ledger);
-    if (storedDiff.isZero() && ledgerDiff.isZero()) return [];
+    const legacy = legacyUnassignedOf({
+      openingOutstanding: D(p.openingOutstanding), openingReceivable: D(p.openingReceivable), openingPayable: D(p.openingPayable),
+    });
+    const expected = computePartySides({
+      partyType: p.partyType,
+      openingReceivable: p.openingReceivable,
+      openingPayable: p.openingPayable,
+      legacyUnassigned: legacy,
+      siOutstanding: sums.salesOutstanding.get(p.id) ?? zero,
+      piOutstanding: sums.purchaseOutstanding.get(p.id) ?? zero,
+      adjAr: sums.arManual?.get(p.id) ?? zero,
+      adjAp: sums.apManual?.get(p.id) ?? zero,
+    });
+    const arLedger = hasReceivable(p.partyType) ? (sums.arLedger.get(p.id) ?? zero) : zero;
+    const apLedger = hasPayable(p.partyType) ? (sums.apLedger.get(p.id) ?? zero) : zero;
+    const receivable = side(D(p.receivableOutstanding), expected.receivable, arLedger);
+    const payable = side(D(p.payableOutstanding), expected.payable, apLedger);
+    const total = side(D(p.outstandingAmount), expected.outstanding, arLedger.plus(apLedger));
+    if (receivable.clean && payable.clean && total.clean) return [];
     return [{
       partyId: p.id,
       name: p.name,
       partyType: p.partyType,
-      stored: stored.toFixed(2),
-      expected: expected.toFixed(2),
-      ledger: ledger.toFixed(2),
-      storedMinusExpected: storedDiff.toFixed(2),
-      expectedMinusLedger: ledgerDiff.toFixed(2),
+      ...strip(total),
+      receivable: strip(receivable),
+      payable: strip(payable),
+      legacyUnassigned: legacy.toFixed(2),
     }];
   });
 }
@@ -96,15 +126,19 @@ export function buildDriftRows(parties: readonly DriftParty[], sums: DriftSums):
 export async function computePartyOutstandingDrift(db: Db = prisma, opts: { partyIds?: readonly string[] } = {}): Promise<DriftRow[]> {
   if (opts.partyIds && opts.partyIds.length === 0) return [];
   const only = opts.partyIds ? { in: [...opts.partyIds] } : undefined;
+  const invoiceWhere = { status: { notIn: [...NON_OUTSTANDING_INVOICE_STATUSES] }, ...(only ? { partyId: only } : {}) };
   const [arIds, apIds] = await Promise.all([systemAccounts.getAccountIds('AR'), systemAccounts.getAccountIds('AP')]);
   const [parties, si, pi, ledger, arManual, apManual] = await Promise.all([
     db.party.findMany({
       where: { isDummy: false, ...(only ? { id: only } : {}) },
-      select: { id: true, name: true, partyType: true, outstandingAmount: true, openingOutstanding: true },
+      select: {
+        id: true, name: true, partyType: true, outstandingAmount: true, receivableOutstanding: true, payableOutstanding: true,
+        openingOutstanding: true, openingReceivable: true, openingPayable: true,
+      },
       orderBy: { name: 'asc' },
     }),
-    db.salesInvoice.groupBy({ by: ['partyId'], where: { status: { not: 'Cancelled' }, ...(only ? { partyId: only } : {}) }, _sum: { outstanding: true } }),
-    db.purchaseInvoice.groupBy({ by: ['partyId'], where: { status: { not: 'Cancelled' }, ...(only ? { partyId: only } : {}) }, _sum: { outstanding: true } }),
+    db.salesInvoice.groupBy({ by: ['partyId'], where: invoiceWhere, _sum: { outstanding: true } }),
+    db.purchaseInvoice.groupBy({ by: ['partyId'], where: invoiceWhere, _sum: { outstanding: true } }),
     db.accountingLedgerEntry.groupBy({
       by: ['partyId', 'accountId'],
       where: { isCancelled: false, partyId: only ?? { not: null }, accountId: { in: [...arIds, ...apIds] } },

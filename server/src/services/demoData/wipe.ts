@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { recalculateAccountBalances } from '../../utils/accountBalance';
+import { OPENING_ONLY_SIDES_SET_SQL } from '../ledger/partySides';
 import { DATA_TABLES, DEMO_MASTER_TABLES } from './tables';
 
 export interface WipeResult {
@@ -55,7 +56,7 @@ export async function wipeDemoData(): Promise<WipeResult> {
 export async function resetDerivedBalances(tx: Prisma.TransactionClient): Promise<void> {
   await recalculateAccountBalances(tx);
   await tx.$executeRawUnsafe(
-    'UPDATE "parties" SET "outstanding_amount" = "opening_outstanding", "deposit_balance" = 0, "customer_deposit_balance" = 0',
+    `UPDATE "parties" SET ${OPENING_ONLY_SIDES_SET_SQL}, "deposit_balance" = 0, "customer_deposit_balance" = 0`,
   );
   await tx.$executeRawUnsafe('UPDATE "inventory_items" SET "current_stock" = 0');
   // The demo's opening balances are gone with its journals, so the cut-over date they fixed goes too

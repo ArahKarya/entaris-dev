@@ -192,13 +192,18 @@ describe('applyAccountImpacts', () => {
 // recalcPartyOutstanding
 
 describe('recalcPartyOutstanding', () => {
-  const makeTx = (partyType: string, adjustment: string | null) => ({
+  const D = (v: number | string) => new Prisma.Decimal(v);
+  const makeTx = (partyType: string, adjustment: string | null, stored: Partial<Record<string, number>> = {}) => ({
     party: {
-      findUnique: vi.fn().mockResolvedValue({ partyType, outstandingAmount: 0, openingOutstanding: 1000 }),
+      findMany: vi.fn().mockResolvedValue([{
+        id: 'p1', name: 'P1', partyType, isDummy: false,
+        outstandingAmount: D(stored.outstanding ?? 0), receivableOutstanding: D(stored.receivable ?? 0), payableOutstanding: D(stored.payable ?? 0),
+        openingOutstanding: D(1000), openingReceivable: D(0), openingPayable: D(0),
+      }]),
       update: vi.fn().mockResolvedValue({}),
     },
-    purchaseInvoice: { aggregate: vi.fn().mockResolvedValue({ _sum: { outstanding: 200 } }) },
-    salesInvoice: { aggregate: vi.fn().mockResolvedValue({ _sum: { outstanding: 300 } }) },
+    purchaseInvoice: { groupBy: vi.fn().mockResolvedValue([{ partyId: 'p1', _sum: { outstanding: D(200) } }]) },
+    salesInvoice: { groupBy: vi.fn().mockResolvedValue([{ partyId: 'p1', _sum: { outstanding: D(300) } }]) },
     systemAccountMapping: {
       findMany: vi.fn().mockResolvedValue([
         { role: 'AR', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
@@ -209,11 +214,16 @@ describe('recalcPartyOutstanding', () => {
     systemAccountRoleMove: { findMany: vi.fn().mockResolvedValue([]) },
     $queryRaw: vi.fn().mockResolvedValue(adjustment === null ? [] : [{ party_id: 'p1', amount: adjustment }]),
   });
+  const written = (tx: ReturnType<typeof makeTx>) => {
+    const data = tx.party.update.mock.calls[0]?.[0]?.data as Record<string, Prisma.Decimal> | undefined;
+    return data && Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v.toFixed(2)]));
+  };
 
   it('adds the receivable manual adjustment for a Customer', async () => {
     const tx = makeTx('Customer', '5000000.00');
     await recalcPartyOutstanding(tx as any, 'p1');
-    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 5001300 } });
+    expect(written(tx)).toEqual({ receivableOutstanding: '5001300.00', payableOutstanding: '0.00', outstandingAmount: '5001300.00' });
+    expect(tx.party.update.mock.calls[0][0].where).toEqual({ id: 'p1' });
     const [, sql] = tx.$queryRaw.mock.calls[0] as [unknown, Prisma.Sql];
     expect(sql.values).toEqual(['ar', 'p1']);
   });
@@ -221,9 +231,16 @@ describe('recalcPartyOutstanding', () => {
   it('adds the payable manual adjustment for a Supplier', async () => {
     const tx = makeTx('Supplier', '-50.00');
     await recalcPartyOutstanding(tx as any, 'p1');
-    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 1150 } });
-    const [, sql] = tx.$queryRaw.mock.calls[0] as [unknown, Prisma.Sql];
+    expect(written(tx)).toEqual({ receivableOutstanding: '0.00', payableOutstanding: '1150.00', outstandingAmount: '1150.00' });
+    const [, sql] = tx.$queryRaw.mock.calls[1] as [unknown, Prisma.Sql];
     expect(sql.values).toEqual(['ap', 'p1']);
+  });
+
+  it('leaves Draft and Cancelled invoices out', async () => {
+    const tx = makeTx('Customer', null);
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.salesInvoice.groupBy.mock.calls[0][0].where).toEqual({ status: { notIn: ['Draft', 'Cancelled'] }, partyId: { in: ['p1'] } });
+    expect(tx.purchaseInvoice.groupBy.mock.calls[0][0].where).toEqual({ status: { notIn: ['Draft', 'Cancelled'] }, partyId: { in: ['p1'] } });
   });
 
   it('a party role conflict elsewhere (AP and VENDOR_DEPOSIT on one account) does not stop a Customer recalc', async () => {
@@ -234,7 +251,7 @@ describe('recalcPartyOutstanding', () => {
       { role: 'VENDOR_DEPOSIT', accountId: 'ap', account: { accountNumber: '2.1.1', name: 'Hutang' } },
     ]);
     await recalcPartyOutstanding(tx as any, 'p1');
-    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 5001300 } });
+    expect(written(tx)).toMatchObject({ receivableOutstanding: '5001300.00', outstandingAmount: '5001300.00' });
   });
 
   it('a conflict on its own role leaves the manual adjustment out instead of failing the document', async () => {
@@ -244,14 +261,20 @@ describe('recalcPartyOutstanding', () => {
       { role: 'CUSTOMER_DEPOSIT', accountId: 'ar', account: { accountNumber: '1.2.1', name: 'Piutang' } },
     ]);
     await recalcPartyOutstanding(tx as any, 'p1');
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 1300 } });
+    expect(written(tx)).toMatchObject({ receivableOutstanding: '1300.00', outstandingAmount: '1300.00' });
   });
 
-  it('keeps the old formula for a party typed Both', async () => {
+  it('a party typed Both gets both sides, each with its own manual adjustment', async () => {
     const tx = makeTx('Both', '999');
     await recalcPartyOutstanding(tx as any, 'p1');
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(tx.party.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { outstandingAmount: 1500 } });
+    // Undirected opening 1000 on the receivable side: 1000 + 300 + 999; payable 200 + 999.
+    expect(written(tx)).toEqual({ receivableOutstanding: '2299.00', payableOutstanding: '1199.00', outstandingAmount: '3498.00' });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('writes nothing when the stored columns already match', async () => {
+    const tx = makeTx('Customer', null, { receivable: 1300, outstanding: 1300 });
+    await recalcPartyOutstanding(tx as any, 'p1');
+    expect(tx.party.update).not.toHaveBeenCalled();
   });
 });
