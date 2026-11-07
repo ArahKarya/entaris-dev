@@ -1,8 +1,33 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AuthRequest } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
+import { peekCutoverDate, recordedOpening } from '../../services/ledger/openingBalance';
+import { sourceKeys } from '../../services/ledger/journalSource';
+
+type Db = typeof prisma;
+
+/**
+ * recordedOpening of every account that has an active keyed opening journal (OPENING:ACCOUNT:<id>);
+ * accounts without one are absent and export a blank cell.
+ */
+async function recordedAccountOpenings(db: Db): Promise<Map<string, Prisma.Decimal>> {
+  const prefix = sourceKeys.openingAccount('x').slice(0, -1);
+  const keyed = await db.journalEntry.findMany({
+    where: { status: { not: 'Cancelled' }, sourceKey: { startsWith: prefix } },
+    select: { sourceKey: true },
+    distinct: ['sourceKey'],
+  });
+  const result = new Map<string, Prisma.Decimal>();
+  for (const { sourceKey } of keyed) {
+    const accountId = sourceKey!.slice(prefix.length);
+    const amount = await recordedOpening(db, { kind: 'ACCOUNT', accountId });
+    if (amount !== null) result.set(accountId, amount);
+  }
+  return result;
+}
 
 const router = Router();
 
@@ -32,8 +57,14 @@ router.get(
           include: { parent: { select: { accountNumber: true } } },
           orderBy: { accountNumber: 'asc' },
         });
+        const openings = await recordedAccountOpenings(prisma);
+        const cutover = await peekCutoverDate(prisma).catch(() => null);
+        sheet.getCell('G1').note = cutover
+          ? `Saldo awal per tanggal cut-over ${cutover.day}, bukan saldo berjalan. Kosong = saldo awal tidak diubah.`
+          : 'Saldo awal per tanggal cut-over, bukan saldo berjalan. Kosong = saldo awal tidak diubah.';
 
         for (const acc of accounts) {
+          const opening = openings.get(acc.id);
           sheet.addRow({
             accountNumber: acc.accountNumber,
             name: acc.name,
@@ -41,7 +72,9 @@ router.get(
             accountType: acc.accountType,
             parentNumber: acc.parent?.accountNumber ?? '',
             isGroup: acc.isGroup ? 'true' : 'false',
-            openingBalance: Number(acc.balance),
+            // The recorded opening at the cut-over date, never accounts.balance (the running balance):
+            // re-importing the file unchanged then changes nothing.
+            openingBalance: opening ? Number(opening.toFixed(2)) : '',
           });
         }
       } else if (type === 'parties') {
