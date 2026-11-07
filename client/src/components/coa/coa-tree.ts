@@ -370,7 +370,30 @@ export function parseBalanceInput(value: string): number {
   return negative ? -n : n;
 }
 
+/** Accounts that never take an opening balance: opening equity (3.1) and current profit (3.4). */
+const NO_OPENING_NUMBERS: ReadonlySet<string> = new Set(['3.1', '3.4']);
+
+/**
+ * Whether the opening balance action is offered: balance sheet detail accounts except 3.1/3.4.
+ * Control accounts are not known here; GET /coa/:id/opening says so (editable) and the server decides.
+ */
+export function offersOpeningBalance(node: Pick<CoaNode, 'isGroup' | 'rootType' | 'accountNumber'>): boolean {
+  if (node.isGroup) return false;
+  if (node.rootType === 'REVENUE' || node.rootType === 'EXPENSE') return false;
+  return !NO_OPENING_NUMBERS.has(node.accountNumber);
+}
+
 /** Server error message ({ error }) or a fallback. */
 export function apiErrorMessage(e: unknown, fallback: string): string {
   return (e as { response?: { data?: { error?: string } } })?.response?.data?.error || fallback;
+}
+
+/** "500000000.00" -> "500000000": the plain number the field starts with. */
+export function openingFieldValue(amount: string | null): string {
+  return amount === null ? '0' : amount.replace(/\.00$/, '');
+}
+
+/** The exact amount PATCH /coa/:id/balance receives: a string with two decimals, no float noise. */
+export function openingPayload(parsed: number, reason: string | null) {
+  return { balance: parsed.toFixed(2), ...(reason !== null ? { throughLock: { reason } } : {}) };
 }

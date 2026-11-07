@@ -11,6 +11,7 @@ import {
   hasActiveFilter,
   hasDisplayBalance,
   normalSide,
+  offersOpeningBalance,
   parseBalanceInput,
   parseExpanded,
   rootTypeFromNumber,
@@ -381,5 +382,20 @@ describe('parseBalanceInput (Indonesian number format)', () => {
   it('returns NaN for input without digits', () => {
     expect(Number.isNaN(parseBalanceInput('abc'))).toBe(true);
     expect(Number.isNaN(parseBalanceInput(''))).toBe(true);
+  });
+});
+
+describe('offersOpeningBalance', () => {
+  const n = (over: Record<string, unknown>) => ({ isGroup: false, rootType: 'ASSET', accountNumber: '1.1.1', ...over }) as Parameters<typeof offersOpeningBalance>[0];
+  it('offers detail balance sheet accounts', () => {
+    expect(offersOpeningBalance(n({}))).toBe(true);
+    expect(offersOpeningBalance(n({ rootType: 'EQUITY', accountNumber: '3.2' }))).toBe(true);
+  });
+  it('hides groups, revenue/expense, 3.1 and 3.4', () => {
+    expect(offersOpeningBalance(n({ isGroup: true }))).toBe(false);
+    expect(offersOpeningBalance(n({ rootType: 'REVENUE', accountNumber: '4.1' }))).toBe(false);
+    expect(offersOpeningBalance(n({ rootType: 'EXPENSE', accountNumber: '5.1' }))).toBe(false);
+    expect(offersOpeningBalance(n({ rootType: 'EQUITY', accountNumber: '3.1' }))).toBe(false);
+    expect(offersOpeningBalance(n({ rootType: 'EQUITY', accountNumber: '3.4' }))).toBe(false);
   });
 });
