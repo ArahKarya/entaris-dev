@@ -385,7 +385,7 @@ d('ledger audit', () => {
       const before = await counts(tx);
       const res = await runLedgerAudit(tx, {});
       expect(res.sections.map((s) => s.id)).toEqual([
-        'aleGroups', 'journalSubCent', 'journalTooFewLines', 'ledgerOnGroupOrInactive', 'manualPartyLines', 'recurringTemplates', 'sourceNull',
+        'aleGroups', 'journalSubCent', 'journalTooFewLines', 'ledgerOnGroupOrInactive', 'manualPartyLines', 'nonJournalAle', 'recurringTemplates', 'sourceNull',
       ]);
       expect(await counts(tx)).toEqual(before);
     });

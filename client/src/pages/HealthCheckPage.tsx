@@ -57,6 +57,8 @@ type CheckKey =
   | 'customerDepositSubledger'
   | 'aleFiscalYear'
   | 'formerRoleAccounts'
+  | 'nonJournalAle'
+  | 'partyOutstandingDrift'
   | 'requiredTriggers';
 
 /** Server check name → `auth:healthCheck.checks.<key>` and the fix endpoint key. */
@@ -71,6 +73,8 @@ const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
   'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
   'ALE vs Fiscal Year': { key: 'aleFiscalYear' },
   'Former Role Accounts': { key: 'formerRoleAccounts' },
+  'Non-Journal Ledger Entries': { key: 'nonJournalAle' },
+  'Party Outstanding Drift': { key: 'partyOutstandingDrift' },
   'Required Database Triggers': { key: 'requiredTriggers' },
 };
 
@@ -112,8 +116,14 @@ function formatColumnName(key: string): string {
   return key.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function formatCellValue(val: unknown): string {
+/** Causes of the ALE vs JournalItem check (server aleSyncCheck.ts): `auth:healthCheck.cause.<cause>`. */
+const CAUSES = new Set(['no-ledger', 'ledger-without-journal', 'cancelled-active-ale', 'legacy-stt-pair', 'draft-with-ale', 'amount-differs']);
+
+function formatCellValue(val: unknown, key?: string): string {
   if (val === null || val === undefined) return '—';
+  if (key === 'cause' && typeof val === 'string' && CAUSES.has(val)) {
+    return i18n.t(`healthCheck.cause.${val as 'no-ledger'}`, { ns: 'auth' });
+  }
   if (typeof val === 'number') {
     return Number.isInteger(val) ? formatNumber(val) : formatNumber(val, { decimals: 2 });
   }
@@ -144,7 +154,7 @@ function DetailTable({ rows, caption }: { rows: Record<string, unknown>[]; capti
             <tr key={i} className="border-t border-border">
               {keys.map((k) => (
                 <td key={k} className="whitespace-nowrap px-3 py-1.5 text-foreground">
-                  {formatCellValue(row[k])}
+                  {formatCellValue(row[k], k)}
                 </td>
               ))}
             </tr>

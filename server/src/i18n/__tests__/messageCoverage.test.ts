@@ -31,6 +31,8 @@ const IGNORED = new Set<string>([
   'sourceKey import hash must be lowercase SHA-256 hex',
   'sourceKey import group "{0}" must be a positive integer',
   'sourceKey remap part "{0}" must be a positive integer',
+  // Programming error of the legacy cancel pair SQL fragment (services/ledger/legacyCxlPair.ts), never reaches a client.
+  'Invalid SQL alias {0}',
   // Refusals of the one-time baseline capture script (scripts/repair/e1-close-baseline.ts), CLI only.
   '{0} is not a baseline-aware close check (known: {1})',
   '--allow-existing only goes with --check <id>',

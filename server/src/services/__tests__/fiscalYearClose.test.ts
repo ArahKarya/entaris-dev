@@ -33,13 +33,14 @@ function mapped() {
 describe('close check registry', () => {
   it('registers the built-in checks first, in order', () => {
     // The plug-in checks below register while the file is collected, so they come after these.
-    expect(closeChecks().slice(0, 8).map((c) => [c.id, c.severity, !!c.baselineAware])).toEqual([
+    expect(closeChecks().slice(0, 9).map((c) => [c.id, c.severity, !!c.baselineAware])).toEqual([
       ['prev-year-open', 'block', false],
       ['drafts-ledger', 'block', false],
       ['drafts-other', 'warn', false],
       ['depreciation-unposted', 'block', false],
       ['ledger-balanced', 'block', true],
       ['ale-vs-journal', 'block', true],
+      ['non-journal-ale-duplicate', 'block', true],
       ['system-accounts', 'block', false],
       ['do-uninvoiced', 'warn', false],
     ]);
@@ -207,7 +208,7 @@ describe('runCloseChecklist', () => {
     it('refuses an id that is unknown or not baseline-aware', () => {
       expect(() => baselineCaptureChecks(['inventory-vs-gl'])).toThrow(/not a baseline-aware close check/);
       expect(() => baselineCaptureChecks(['system-accounts'])).toThrow(/not a baseline-aware close check/);
-      expect(baselineCaptureChecks().map((c) => c.id)).toEqual(['ledger-balanced', 'ale-vs-journal', blockCheck.id]);
+      expect(baselineCaptureChecks().map((c) => c.id)).toEqual(['ledger-balanced', 'ale-vs-journal', 'non-journal-ale-duplicate', blockCheck.id]);
     });
 
     it('a second full capture is refused; --allow-existing needs --check', async () => {
