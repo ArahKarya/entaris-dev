@@ -12,7 +12,8 @@
  * - The due run posts only due journal templates and reports other types as skipped.
  * - Once per business day (owner decision #8, PR-5.6): a second manual run the same day answers
  *   already_ran (route: 200 RECURRING_ALREADY_RAN) and posts nothing, records nothing, moves nothing;
- *   the due run on that day posts nothing either; after the day's journal is cancelled it runs again.
+ *   the due run on that day posts nothing either and moves a still-due schedule one period on, so the
+ *   next day's due run posts nothing; after the day's journal is cancelled it runs again.
  *
  * Fixture year 2187 (unique to this file). Everything runs in one rollback transaction; lib/prisma
  * is the route harness proxy, so each run's own `$transaction` is a savepoint that a failure rolls
@@ -34,7 +35,7 @@ vi.mock('../../services/telegramService', () => ({
   pushTelegramToUser: vi.fn(async () => undefined),
 }));
 
-import { runDueTemplates, runRecurringTemplate, RECURRING_FAILED_NOTIFICATION } from '../../services/recurringExecute';
+import { calculateNextRunDate, runDueTemplates, runRecurringTemplate, RECURRING_FAILED_NOTIFICATION } from '../../services/recurringExecute';
 import { voidJournalInTx } from '../../utils/journalCancel';
 import recurringRouter from '../../routes/recurring';
 
@@ -333,12 +334,20 @@ d('recurring template execution (E2-R3)', () => {
       // The schedule is put back to due today (an edit, or a run that moved it before the cron).
       await tx.recurringTemplate.update({ where: { id: t.id }, data: { nextRunDate: NEXT } });
 
-      const results = await runDueTemplates(b.userId, new Date(NOW.getTime() + 60 * 60 * 1000));
+      const cronAt = new Date(NOW.getTime() + 60 * 60 * 1000);
+      const results = await runDueTemplates(b.userId, cronAt);
       expect(results.find((r) => r.templateId === t.id)).toBeUndefined();
       expect(await recurringJournals(tx, t.id)).toHaveLength(1);
+      // The schedule moves one period on, as the run of that day did, without a failure.
       const after = await tx.recurringTemplate.findUniqueOrThrow({ where: { id: t.id } });
-      expect(after).toMatchObject({ nextRunDate: NEXT, lastError: null });
+      expect(after).toMatchObject({ nextRunDate: calculateNextRunDate(t.frequency, cronAt, t.dayOfMonth), lastError: null });
+      expect(after.nextRunDate.getTime()).toBeGreaterThan(cronAt.getTime() + 24 * 60 * 60 * 1000);
       expect(await failureNotices(tx, t.id)).toHaveLength(0);
+
+      // The next day's cron finds nothing due, so the period is not posted twice.
+      const nextDay = await runDueTemplates(b.userId, new Date(NOW.getTime() + 24 * 60 * 60 * 1000));
+      expect(nextDay.find((r) => r.templateId === t.id)).toBeUndefined();
+      expect(await recurringJournals(tx, t.id)).toHaveLength(1);
     });
   });
 });

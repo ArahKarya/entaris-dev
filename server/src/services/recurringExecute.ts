@@ -124,7 +124,8 @@ export interface RunTemplateOptions {
  * Runs one template in its own transaction: the template row is locked first, so a manual run and
  * the due run never post from the same stale row, then the journal is posted and the schedule
  * moves one period from now. A day that already has an active journal of the template posts
- * nothing and moves nothing (already_ran, or not_due for the due run). A failure is recorded
+ * nothing: a manual run returns already_ran and moves nothing; the due run returns not_due and moves
+ * a schedule still due one period on from now. A failure is recorded
  * (recordTemplateFailure) and returned, never thrown.
  */
 export async function runRecurringTemplate(templateId: string, opts: RunTemplateOptions): Promise<TemplateRun> {
@@ -142,7 +143,14 @@ export async function runRecurringTemplate(templateId: string, opts: RunTemplate
         where: { sourceKey: sourceKeys.recurring(template.id, runDate), status: { not: 'Cancelled' } },
         include: { items: true },
       });
-      if (ran) return opts.onlyIfDue ? { outcome: 'not_due' } : { outcome: 'already_ran', journal: ran };
+      if (ran && !opts.onlyIfDue) return { outcome: 'already_ran', journal: ran };
+      if (ran) {
+        // The schedule says due although today already ran (it was edited back): move it one period on,
+        // as today's run did, so tomorrow's due run does not post the period again. No failure, no notice.
+        const next = calculateNextRunDate(template.frequency, now, template.dayOfMonth);
+        if (next > template.nextRunDate) await tx.recurringTemplate.update({ where: { id: template.id }, data: { nextRunDate: next } });
+        return { outcome: 'not_due' };
+      }
 
       const { journal } = await executeJournalTemplateInTx(tx, template, { userId: opts.userId, runDate });
       await tx.recurringTemplate.update({

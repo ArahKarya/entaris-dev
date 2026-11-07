@@ -8,12 +8,13 @@
 // modal awal"), active OPENING/RECURRING sourceKeys held by more than one journal (the gate of the
 // unique index, PR-5.14) and parties whose opening_outstanding differs from their opening journals.
 //
-// The one write gives a legacy journal its sourceKey (and source_type OPENING), so the opening
+// The one write gives a legacy journal its sourceKey (and source_type OPENING when NULL), so the opening
 // balance service may later replace it. Automatically only for class single-two-line-opening: the
 // only opening of its target, two lines (target + OPENING_EQUITY), and no other activity on the
-// target before it, so its amount is the real opening balance and not an old PATCH delta against
+// target dated or entered before it, so its amount is the real opening balance and not an old PATCH delta against
 // the running balance. Any other journal only when the accountant names it (keyJournals). Nothing
-// is ever cancelled or re-dated here, and no ledger row or balance changes.
+// is ever cancelled or re-dated here, and no ledger row or balance changes. A journal owned by a
+// deposit Payment is never keyed: it is cancelled only with its Payment (PR-5.11 decides how).
 
 import { Prisma, type DocumentStatus, type JournalSourceType, type PrismaClient } from '@prisma/client';
 import { addDays, businessDayOf } from '../../utils/businessDate';
@@ -80,12 +81,18 @@ export interface LegacyOpeningRow {
   twoLine: boolean;
   /** Dated after the cut-over day (an opening normally sits on it). */
   afterCutover: boolean;
-  /** Active non-opening ledger rows on the target dated before the journal. */
+  /**
+   * Active non-opening ledger rows on the target dated before the journal, or created before it
+   * whatever their date (the old PATCH posted the difference against the running balance of that
+   * moment, which already held every row entered by then).
+   */
   priorActivity: boolean;
   /** Active unkeyed opening journals of the same target, this one included. */
   openingsForTarget: number;
   /** Another active journal already holds the proposed key. */
   keyedActive: boolean;
+  /** Owned by a deposit Payment: cancelled only with that Payment, so never keyed here (PR-5.11). */
+  paymentLinked: boolean;
   ruleProblem: string | null;
   cls: OpeningAuditClass;
   proposedKey: string | null;
@@ -275,8 +282,17 @@ function targetKey(t: OpeningAuditTarget): string {
   return t.kind === 'ACCOUNT' ? sourceKeys.openingAccount(t.accountId) : sourceKeys.openingParty(t.partyId, t.subledger);
 }
 
-/** Active ledger rows on the target before `before` that come from neither an opening journal nor the excluded ids. */
-async function hasPriorActivity(db: Db, target: OpeningAuditTarget, before: Date, openingIds: readonly string[], roles: RoleAccounts): Promise<boolean> {
+/**
+ * Active ledger rows on the target dated before `before.date` or created before `before.createdAt`
+ * that come from neither an opening journal nor the excluded ids.
+ */
+async function hasPriorActivity(
+  db: Db,
+  target: OpeningAuditTarget,
+  before: { date: Date; createdAt: Date },
+  openingIds: readonly string[],
+  roles: RoleAccounts,
+): Promise<boolean> {
   const where = target.kind === 'ACCOUNT'
     ? Prisma.sql`a.account_id = ${target.accountId}`
     : Prisma.sql`a.party_id = ${target.partyId} AND a.account_id = ANY(${roles.kindAccounts.get(target.subledger) ?? []}::text[])`;
@@ -284,7 +300,7 @@ async function hasPriorActivity(db: Db, target: OpeningAuditTarget, before: Date
     SELECT EXISTS (
       SELECT 1 FROM accounting_ledger_entries a
       LEFT JOIN journal_entries je ON a.reference_type = 'JournalEntry' AND je.id = a.reference_id
-      WHERE ${where} AND NOT a.is_cancelled AND a.date < ${before}
+      WHERE ${where} AND NOT a.is_cancelled AND (a.date < ${before.date} OR a.created_at < ${before.createdAt})
         AND (je.id IS NULL OR (je.source_type IS DISTINCT FROM 'OPENING' AND NOT (je.id = ANY(${openingIds}::text[]))))
     ) AS found`;
   return Boolean(row?.found);
@@ -340,12 +356,13 @@ async function legacyRows(
 
   const rows: LegacyOpeningRow[] = [];
   for (const { j, detection, targets } of legacy) {
+    const paymentLinked = j.payment !== null;
     const isDeposit = detection === 'deposit-narration' || j.payment?.paymentType === 'VendorDeposit' || j.payment?.paymentType === 'CustomerDeposit';
     const day = businessDayOf(j.date);
     const base = {
       journalId: j.id, entryNumber: j.entryNumber, date: j.date, day, status: j.status, sourceType: j.sourceType,
       narration: j.narration, fiscalYearClosed: j.fiscalYear.isClosed, detection, lineCount: j.items.length,
-      targetCount: targets.length, afterCutover: cutoverDay !== null && day > cutoverDay,
+      targetCount: targets.length, afterCutover: cutoverDay !== null && day > cutoverDay, paymentLinked,
     };
     if (targets.length === 0) {
       const row = { ...base, target: null, accountNumber: null, accountName: null, partyName: null, amount: ZERO, twoLine: false,
@@ -364,7 +381,7 @@ async function legacyRows(
         partyName: t.target.kind === 'PARTY' ? partyName.get(t.target.partyId) ?? null : null,
         amount: t.amount,
         twoLine: j.items.length === 2 && targets.length === 1 && j.items.some((i) => roles.openingEquity.has(i.accountId)),
-        priorActivity: await hasPriorActivity(db, t.target, j.date, openingIds, roles),
+        priorActivity: await hasPriorActivity(db, t.target, j, openingIds, roles),
         openingsForTarget: perTarget.get(key) ?? 0,
         keyedActive: activeKeys.has(key),
         ruleProblem: t.target.kind === 'ACCOUNT' ? problems.get(t.target.accountId) ?? null : null,
@@ -486,18 +503,17 @@ function explicitProblem(entryNumber: string, rows: readonly LegacyOpeningRow[],
   if (own.length > 1 || !own[0]!.target) return `${entryNumber}: touches ${own.length > 1 ? 'several targets' : 'no target'}; one key cannot cover it`;
   const row = own[0]!;
   if (row.status !== 'Submitted') return `${entryNumber}: status ${row.status}, only a submitted journal is keyed`;
-  if (row.sourceType !== null && row.sourceType !== 'OPENING' && row.sourceType !== 'SYSTEM_DOC') {
-    return `${entryNumber}: source type ${row.sourceType} is not an opening`;
-  }
+  if (row.paymentLinked) return `${entryNumber}: owned by a deposit payment; it is replaced through the deposit (PR-5.11), not keyed here`;
+  if (row.sourceType !== null && row.sourceType !== 'OPENING') return `${entryNumber}: source type ${row.sourceType} is not an opening`;
   if (row.keyedActive || takenKeys.has(row.proposedKey as string)) return `${entryNumber}: another active journal holds ${row.proposedKey}`;
   return null;
 }
 
 /**
- * Gives sourceKey (and source_type OPENING) to every single-two-line-opening journal and to the
+ * Gives sourceKey (and source_type OPENING when it is NULL) to every single-two-line-opening journal and to the
  * journals the accountant names, in the caller's transaction. The plan is made again inside it,
  * so the classes are those of the moment of writing. A named journal that cannot be keyed (not an
- * unkeyed opening, several targets, a draft, or its key already held) refuses the whole run before
+ * unkeyed opening, several targets, a draft, owned by a deposit payment, or its key already held) refuses the whole run before
  * anything is written. One audit row per keyed journal, naming the accountant.
  */
 export async function applyOpeningKeys(tx: Tx, opts: ApplyOpeningKeysOptions): Promise<ApplyOpeningKeysResult> {
@@ -521,7 +537,7 @@ export async function applyOpeningKeys(tx: Tx, opts: ApplyOpeningKeysOptions): P
   }
   if (problems.length > 0) throw new OpeningAuditRefusal(`Nothing was keyed:\n  ${problems.join('\n  ')}`);
   for (const row of report.openings) {
-    if (row.cls !== 'single-two-line-opening' || named.includes(row.entryNumber)) continue;
+    if (row.cls !== 'single-two-line-opening' || row.paymentLinked || named.includes(row.entryNumber)) continue;
     planned.push({ journalId: row.journalId, entryNumber: row.entryNumber, sourceKey: row.proposedKey as string, cls: row.cls, explicit: false });
   }
   if (!opts.write || planned.length === 0) return { report, keyed: planned };
@@ -536,9 +552,10 @@ export async function applyOpeningKeys(tx: Tx, opts: ApplyOpeningKeysOptions): P
     const before = report.openings.find((r) => r.journalId === p.journalId)!;
     const holder = await tx.journalEntry.findFirst({ where: { sourceKey: p.sourceKey, status: { not: 'Cancelled' } }, select: { entryNumber: true } });
     if (holder) throw new OpeningAuditRefusal(`Nothing was keyed: ${holder.entryNumber} took ${p.sourceKey} while the run was planned.`);
+    // source_type is only filled when empty (explicitProblem lets nothing but NULL or OPENING through).
     const { count } = await tx.journalEntry.updateMany({
-      where: { id: p.journalId, sourceKey: null, status: 'Submitted' },
-      data: { sourceKey: p.sourceKey, sourceType: 'OPENING' },
+      where: { id: p.journalId, sourceKey: null, status: 'Submitted', OR: [{ sourceType: null }, { sourceType: 'OPENING' }] },
+      data: { sourceKey: p.sourceKey, ...(before.sourceType === null ? { sourceType: 'OPENING' as const } : {}) },
     });
     if (count !== 1) throw new OpeningAuditRefusal(`Nothing was keyed: ${p.entryNumber} changed while the run was planned.`);
     await tx.auditLog.create({

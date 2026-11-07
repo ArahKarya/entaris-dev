@@ -15,6 +15,8 @@
  *   row each naming the accountant; --key-journal keys a named patch-delta journal; a named journal
  *   with several targets, or two journals of one target, refuse the run and nothing is keyed.
  * - Duplicate active RECURRING keys are found (exit 1 of the script), and are gone once one is cancelled.
+ * - A row entered before an old PATCH opening, though dated after it, makes the opening patch-delta.
+ * - A deposit opening owned by a deposit Payment (SYSTEM_DOC) is never keyed nor retyped, even when named.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient, type FiscalYear, type JournalSourceType, type DocumentStatus } from '@prisma/client';
@@ -23,6 +25,7 @@ import { Pool } from 'pg';
 import type { Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
+import { openingAuditExitCode } from '../../services/ledger/openingBalanceAuditArgs';
 import {
   applyOpeningKeys,
   findActiveDuplicateKeys,
@@ -77,6 +80,8 @@ interface JournalSpec {
   sourceType?: JournalSourceType | null;
   sourceKey?: string | null;
   status?: DocumentStatus;
+  /** Entry time of the journal and its ledger rows (default: now). */
+  createdAt?: Date;
   lines: Line[];
 }
 
@@ -122,6 +127,7 @@ async function books(tx: Tx): Promise<Books> {
           createdBy: userId,
           sourceType: spec.sourceType ?? null,
           sourceKey: spec.sourceKey ?? null,
+          ...(spec.createdAt ? { createdAt: spec.createdAt } : {}),
           items: { create: spec.lines.map((l) => ({ accountId: l.accountId, partyId: l.partyId ?? null, debit: l.debit ?? 0, credit: l.credit ?? 0 })) },
         },
       });
@@ -130,6 +136,7 @@ async function books(tx: Tx): Promise<Books> {
           data: spec.lines.map((l) => ({
             date, accountId: l.accountId, partyId: l.partyId ?? null, debit: l.debit ?? 0, credit: l.credit ?? 0,
             referenceType: 'JournalEntry', referenceId: j.id, fiscalYearId: fy.id,
+            ...(spec.createdAt ? { createdAt: spec.createdAt } : {}),
           })),
         });
       }
@@ -329,11 +336,68 @@ d('legacy opening-balance audit (E2-R11 migration, PR-5.6)', () => {
 
       const dup = (await findActiveDuplicateKeys(tx)).find((r) => r.sourceKey === key);
       expect(dup).toMatchObject({ sourceType: 'RECURRING', entryNumbers: [first.entryNumber, second.entryNumber].sort() });
-      expect((await planOpeningBalanceAudit(tx, opts)).duplicates.some((r) => r.sourceKey === key)).toBe(true);
+      const report = await planOpeningBalanceAudit(tx, opts);
+      expect(report.duplicates.some((r) => r.sourceKey === key)).toBe(true);
+      expect(openingAuditExitCode(report.duplicates)).toBe(1);
 
       await tx.journalEntry.update({ where: { id: second.id }, data: { status: 'Cancelled' } });
       await tx.accountingLedgerEntry.updateMany({ where: { referenceId: second.id }, data: { isCancelled: true } });
       expect((await findActiveDuplicateKeys(tx)).some((r) => r.sourceKey === key)).toBe(false);
+    });
+  });
+
+  it('a row entered before an old PATCH opening but dated after it makes the opening patch-delta', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const account = await b.account();
+      const other = await b.account();
+      // 5 March 08:00 WIB: a purchase dated 31 March is entered first ...
+      await b.journal({
+        day: `${Y}-03-31`, narration: 'Pembelian', createdAt: new Date(`${Y}-03-05T01:00:00.000Z`),
+        lines: [{ accountId: account, debit: 400_000 }, { accountId: other, credit: 400_000 }],
+      });
+      // ... then the opening is set on the COA screen: the PATCH posted the target minus that purchase.
+      const patch = await opening(b, account, 9_600_000, `${Y}-03-05`, { createdAt: new Date(`${Y}-03-05T02:00:00.000Z`) });
+      // An account whose only other row was entered after the opening keeps the automatic class.
+      const clean = await b.account();
+      const cleanOpening = await opening(b, clean, 1_000_000, `${Y}-03-05`, { createdAt: new Date(`${Y}-03-05T02:00:00.000Z`) });
+      await b.journal({
+        day: `${Y}-03-31`, narration: 'Pembelian', createdAt: new Date(`${Y}-03-06T01:00:00.000Z`),
+        lines: [{ accountId: clean, debit: 400_000 }, { accountId: other, credit: 400_000 }],
+      });
+
+      const report = await planOpeningBalanceAudit(tx, opts);
+      expect(rowsOf(report, patch.id)[0]).toMatchObject({ cls: 'patch-delta', priorActivity: true });
+      expect(rowsOf(report, cleanOpening.id)[0]).toMatchObject({ cls: 'single-two-line-opening', priorActivity: false });
+      const applied = await applyOpeningKeys(tx, { ...opts, approvedBy: 'Bu Sari', write: true });
+      expect(applied.keyed.some((k) => k.journalId === patch.id)).toBe(false);
+      expect((await keyOf(tx, patch.id)).sourceKey).toBeNull();
+    });
+  });
+
+  it('never keys a deposit opening owned by a deposit payment, even when named', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const cash = await b.account();
+      const supplier = await tx.party.create({ data: { name: `IT-OBA Supplier ${tag()}`, partyType: 'Supplier', depositBalance: 250_000 } });
+      const day = `${Y}-02-15`;
+      // The deposit screen's opening: a Payment owning its journal, typed SYSTEM_DOC by the E1 backfill.
+      const journal = await b.journal({
+        number: `JV-PAY-OBA-${tag()}`, day, narration: `Saldo Awal Uang Muka Vendor: PAY-OBA - ${supplier.name}`, sourceType: 'SYSTEM_DOC',
+        lines: [{ accountId: b.vendorDepositId, partyId: supplier.id, debit: 250_000 }, { accountId: b.equityId, credit: 250_000 }],
+      });
+      await tx.payment.create({
+        data: {
+          paymentNumber: `PAY-OBA-${tag()}`, date: new Date(`${day}T03:00:00.000Z`), paymentType: 'VendorDeposit', partyId: supplier.id,
+          accountId: cash, amount: 250_000, status: 'Submitted', createdBy: b.userId, fiscalYearId: b.fy.id, journalEntryId: journal.id,
+        },
+      });
+
+      const report = await planOpeningBalanceAudit(tx, opts);
+      expect(rowsOf(report, journal.id)[0]).toMatchObject({ cls: 'deposit-legacy', paymentLinked: true, sourceType: 'SYSTEM_DOC' });
+      await expect(applyOpeningKeys(tx, { ...opts, approvedBy: 'Bu Sari', keyJournals: [journal.entryNumber], write: true }))
+        .rejects.toThrow(/owned by a deposit payment/);
+      expect(await keyOf(tx, journal.id)).toEqual({ sourceKey: null, sourceType: 'SYSTEM_DOC' });
     });
   });
 });

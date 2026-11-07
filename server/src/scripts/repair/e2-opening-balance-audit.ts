@@ -7,7 +7,8 @@
 //                            activity on the target: --apply gives it its sourceKey
 //   patch-delta, multi, multi-line, deposit-legacy, refused-account, not-submitted
 //                            CSV only; the accountant keys one with --key-journal <number>
-// Keying sets source_key (OPENING:ACCOUNT:<id> / OPENING:PARTY:<id>:<kind>) and source_type OPENING;
+// Keying sets source_key (OPENING:ACCOUNT:<id> / OPENING:PARTY:<id>:<kind>) and source_type OPENING
+// when it is NULL; a journal owned by a deposit Payment is refused (replaced through the deposit, PR-5.11);
 // no ledger row, balance or date changes. Until a journal is keyed, the opening-balance service
 // refuses to replace that target's opening (OPENING_LEGACY_REVIEW).
 // --apply needs --approved-by "<accountant name>"; the name goes on one audit row per keyed journal
@@ -33,35 +34,7 @@ import {
   type DuplicateKeyRow,
   type OpeningAuditReport,
 } from '../../services/ledger/openingBalanceAudit';
-
-interface Options {
-  apply: boolean;
-  approvedBy: string | null;
-  keyJournals: string[];
-  checkDuplicates: boolean;
-  out: string | null;
-}
-
-function parseArgs(argv: readonly string[]): Options {
-  const opts: Options = { apply: false, approvedBy: null, keyJournals: [], checkDuplicates: false, out: null };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--apply') opts.apply = true;
-    else if (a === '--dry-run') opts.apply = false;
-    else if (a === '--approved-by') opts.approvedBy = argv[++i]?.trim() || null;
-    else if (a === '--key-journal') {
-      const no = argv[++i]?.trim();
-      if (!no) throw new Error('--key-journal needs a journal number');
-      opts.keyJournals.push(no);
-    } else if (a === '--check-duplicates') opts.checkDuplicates = true;
-    else if (a === '--out') opts.out = argv[++i] ?? null;
-    else throw new Error(`Unknown argument: ${a}`);
-  }
-  if (argv.includes('--apply') && argv.includes('--dry-run')) throw new Error('Use either --apply or --dry-run.');
-  if (opts.apply && !opts.approvedBy) throw new Error('--apply needs --approved-by "<accountant name>"');
-  if (opts.checkDuplicates && argv.length > 1) throw new Error('--check-duplicates takes no other argument');
-  return opts;
-}
+import { openingAuditExitCode, parseOpeningAuditArgs } from '../../services/ledger/openingBalanceAuditArgs';
 
 const HEADER = [
   'section', 'class', 'journal_id', 'entry_number', 'date', 'status', 'source_type', 'detection', 'narration',
@@ -119,11 +92,11 @@ function printReport(report: OpeningAuditReport) {
 }
 
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const opts = parseOpeningAuditArgs(process.argv.slice(2));
   if (opts.checkDuplicates) {
     const duplicates = await findActiveDuplicateKeys(prisma);
     printDuplicates(duplicates);
-    if (duplicates.length > 0) process.exitCode = 1;
+    process.exitCode = openingAuditExitCode(duplicates);
     return;
   }
 
@@ -151,7 +124,7 @@ async function main() {
   }
 
   if (out) writeCsv(out, report, keyed, opts.approvedBy);
-  if (report.duplicates.length > 0) process.exitCode = 1;
+  process.exitCode = openingAuditExitCode(report.duplicates);
 }
 
 main()
