@@ -95,6 +95,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Satu baris jurnal tidak boleh memiliki debit dan kredit sekaligus.": "A journal line cannot have both a debit and a credit.",
   "Jurnal tidak seimbang. Total Debit ({0}) ≠ Total Kredit ({1}).": "Journal is not balanced. Total Debit ({0}) ≠ Total Credit ({1}).",
   "Gagal menyimpan jurnal.": "Failed to save the journal.",
+  "Jurnal tidak seimbang di buku besar; transaksi dibatalkan.": "The journal is unbalanced in the General Ledger; the transaction was rolled back.",
   "Jurnal sudah dibatalkan.": "Journal is already cancelled.",
   "Alasan pembatalan maksimal 500 karakter.": "The cancel reason can be at most 500 characters.",
   "Status pengajuan sudah berubah. Muat ulang halaman lalu coba lagi.": "The status has already changed. Reload the page and try again.",
@@ -373,7 +374,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Pengajuan hanya rupiah": "Payment requests are in rupiah only",
   // Document journal void (services/ledger/cancelJournals.ts)
   "Jurnal {0} sudah dibalik dengan jurnal lain, jadi tidak dibatalkan lagi. Periksa jurnal pembaliknya di Buku Besar.": "Journal {0} has already been reversed by another journal, so it is not cancelled again. Check its reversing journal in the General Ledger.",
-  "Perbaikan otomatis ini dinonaktifkan karena bisa mengubah buku besar tahun yang sudah ditutup. Koreksi selisih lewat jurnal di periode berjalan.": "This automatic fix is disabled because it can change the ledger of closed fiscal years. Correct differences with a journal in the current period.",
   "saldo awal sudah tercatat di jurnal {0}. Impor ulang tidak mengubah saldo awal; koreksi lewat jurnal manual.": "the opening balance is already recorded in journal {0}. Re-importing does not change opening balances; correct it with a manual journal.",
   "Akun \"{0}\" disimpan, tetapi {1}": "Account \"{0}\" was saved, but {1}",
   "Mitra \"{0}\" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.": "Partner \"{0}\" already exists: profile updated, opening balance unchanged. Correct the balance with a manual journal.",
@@ -462,6 +462,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // PAYMENT_REQUEST_RULE (payment request and settlement expense lines)
   "Akun biaya": "Expense account",
   " Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.": " Payment requests cannot use control or tax accounts; use the Payments or Deposits module.",
+  // OPENING_ACCOUNT_RULE (opening balance of an account, plan step 5 §2.4)
+  "Akun saldo awal": "Opening balance account",
+  " Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.": " Receivable, payable and deposit openings are set through the party opening balance; inventory through the opening stock import.",
   // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
   "Baris {0}: {1}": "Line {0}: {1}",
   "kredit": "credit",
@@ -482,6 +485,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // recurring runs (E2-R3, services/recurringExecute.ts)
   "Transaksi Berulang Gagal": "Recurring transaction failed",
   "Template \"{0}\" tidak diposting: {1} Jadwalnya tidak maju sampai template diperbaiki.": "Template \"{0}\" was not posted: {1} Its schedule does not move until the template is fixed.",
+  "Template sudah dijalankan hari ini; batalkan jurnalnya dulu bila ingin menjalankan ulang.": "The template has already run today; cancel its journal first to run it again.",
   // postJournal (E2-R3, services/ledger/postJournal.ts)
   "Tanggal jurnal {0} masuk tahun buku {1}, bukan tahun buku yang diharapkan.": "The journal date {0} falls in fiscal year {1}, not the expected fiscal year.",
   // party rules (E2-R4, services/ledger/partyRules.ts); role names translate inside the patterns.
@@ -505,8 +509,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Nilai \"{0}\" bukan angka dengan paling banyak 2 desimal.": "The value \"{0}\" is not a number with at most 2 decimals.",
   "Nilai \"{0}\" bukan angka yang valid. Tulis angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal.": "The value \"{0}\" is not a valid number. Write the number without thousands separators, with a dot as the decimal mark.",
   // opening balance (E2-R11): services/ledger/openingBalance.ts, OPENING_ACCOUNT_RULE, routes/coa.ts, utils/schemas.ts
-  "Akun saldo awal": "Opening balance account",
-  " Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.": " Receivable, payable and deposit opening balances are entered per party; inventory through the opening stock import.",
   "Belum ada tahun buku terbuka; tanggal cut-over saldo awal diambil dari awal tahun buku terbuka paling awal. Buat tahun buku terlebih dahulu.": "There is no open fiscal year; the opening balance cut-over date is the start of the earliest open fiscal year. Create a fiscal year first.",
   "Saldo awal pihak belum didukung oleh layanan saldo awal.": "Party opening balances are not supported by the opening balance service yet.",
   "Saldo awal dicatat per tanggal cut-over {0}; tanggal {1} tidak bisa dipakai. Isi saldo per tanggal cut-over.": "Opening balances are recorded as of the cut-over date {0}; the date {1} cannot be used. Enter the balance as of the cut-over date.",

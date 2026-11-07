@@ -149,6 +149,7 @@ model AccountingLedgerEntry {
   @@index([date])
   @@index([fiscalYearId])
   @@index([referenceId])
+  @@index([referenceType, referenceId], map: "ale_ref_type_id_idx")
   @@index([partyId])
   @@map("accounting_ledger_entries")
 }

@@ -8,6 +8,7 @@ import { journalSubCentSection } from './sections/journalSubCent';
 import { journalTooFewLinesSection } from './sections/journalTooFewLines';
 import { ledgerOnGroupOrInactiveSection } from './sections/ledgerOnGroupOrInactive';
 import { manualPartyLinesSection } from './sections/manualPartyLines';
+import { nonJournalAleSection } from './sections/nonJournalAle';
 import { recurringTemplatesSection } from './sections/recurringTemplates';
 import { sourceNullSection } from './sections/sourceNull';
 import { AUDIT_CSV_COLUMNS, type AuditOptions, type AuditRow, type AuditSection, type GateName, type Tx } from './types';
@@ -20,6 +21,7 @@ export const LEDGER_AUDIT_SECTIONS: readonly AuditSection[] = [
   journalTooFewLinesSection,
   ledgerOnGroupOrInactiveSection,
   manualPartyLinesSection,
+  nonJournalAleSection,
   recurringTemplatesSection,
   sourceNullSection,
 ];

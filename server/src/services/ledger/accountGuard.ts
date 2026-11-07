@@ -133,14 +133,12 @@ export const PAYMENT_REQUEST_RULE: PostableRule = {
   controlHint: 'Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.',
 };
 
-/** System journals whose accounts are all chosen by code (year-end close, reclass target side). Not the cash book or payment requests. */
-export const DOCUMENT_RULE: PostableRule = { label: 'Akun posting', allowControl: true };
-
 /**
- * The account of an account opening balance (E2-R11, services/ledger/openingBalance.ts): balance
- * sheet accounts only, never a control account (receivables, payables and deposits open per party,
- * inventory through the opening stock import). Tax accounts and fixed assets are allowed (owner
- * decisions #2b, #11). The equity accounts the opening journal itself uses are refused by the service.
+ * Accounts an opening balance may be set on (plan step 5 §2.4): asset, liability and equity detail
+ * accounts, tax accounts included (owner decision #2b). Never a control account: receivable,
+ * payable and deposit openings go through the party opening balance, inventory through the opening
+ * stock import. The opening-balance service checks the target with it; the legacy opening audit
+ * (services/ledger/openingBalanceAudit.ts) reports old openings on accounts it refuses.
  */
 export const OPENING_ACCOUNT_RULE: PostableRule = {
   label: 'Akun saldo awal',
@@ -149,6 +147,9 @@ export const OPENING_ACCOUNT_RULE: PostableRule = {
   alsoRestrict: [],
   controlHint: 'Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.',
 };
+
+/** System journals whose accounts are all chosen by code (year-end close, reclass target side). Not the cash book or payment requests. */
+export const DOCUMENT_RULE: PostableRule = { label: 'Akun posting', allowControl: true };
 
 export interface AccountLite {
   id: string;

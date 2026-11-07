@@ -549,6 +549,10 @@
           "title": "Ledger matches journals",
           "hint": "The ledger rows of this journal differ from its journal lines."
         },
+        "non-journal-ale-duplicate": {
+          "title": "Documents booked twice in the ledger",
+          "hint": "This document has ledger rows of its own next to its journal's rows, so this year's profit counts it twice. Old differences reviewed by the accountant are in the baseline."
+        },
         "system-accounts": {
           "title": "Year-close system accounts",
           "hint": "Map Current Year Profit and Retained Earnings to active detail accounts in Settings > System Accounts."

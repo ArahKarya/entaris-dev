@@ -115,7 +115,7 @@ menandai migrasi gagal (P3009) dan container restart-loop.
    docker compose run --rm app sh -c "cd /app/server && npx prisma migrate resolve --rolled-back 20261106000000_audit_trail_append_only"
    docker compose restart app
    ```
-4. Buka halaman Pemeriksaan Sistem: cek "Trigger database wajib (jejak audit)" harus OK.
+4. Buka halaman Pemeriksaan Sistem: cek "Trigger database wajib" harus OK.
 
 Kalau cek itu merah padahal migrasi sudah tercatat berhasil, restart tidak membantu
 (`prisma migrate deploy` melewati migrasi yang sudah tercatat). Ikuti pesan cek itu:
@@ -139,6 +139,54 @@ Catatan: setelah restore cadangan lama (dibuat sebelum trigger ada), cek itu mer
 dimulai ulang, karena migrasi baru berjalan lagi saat boot. Migrasi SQL lepas yang mengubah
 `audit_trail` wajib menjalankan `SELECT set_config('entaris.audit_purge', 'on', true)` di awal
 transaksinya sendiri (`BEGIN; ... COMMIT;`), seperti `20261003000000_scrub_ai_service_token_audit.sql`.
+
+### Migrasi trigger buku besar (`ledger_balance_triggers`)
+
+Migrasi ini (belum dirilis; di-gate di rencana langkah 5) hanya DDL: dua trigger tertunda yang
+menolak transaksi yang membuat satu grup buku besar (`accounting_ledger_entries`, per
+`reference_type` + `reference_id`) tidak seimbang atau terpecah tahun buku, dan jurnal
+(`journal_entry_accounts`) yang debit dan kreditnya berbeda walau 0,01. Penolakan terjadi saat
+COMMIT dan sampai ke klien sebagai 409 `LEDGER_UNBALANCED`. Penyebab gagal yang paling mungkin sama
+dengan trigger jejak audit: user database aplikasi bukan pemilik tabel (`CREATE TRIGGER` butuh
+owner), sehingga Prisma menandai migrasi gagal (P3009) dan container restart-loop.
+
+1. Baca galatnya: `docker compose logs app`.
+2. Perbaiki penyebabnya, mis. `ALTER TABLE accounting_ledger_entries OWNER TO <user_aplikasi>;` dan
+   `ALTER TABLE journal_entry_accounts OWNER TO <user_aplikasi>;` sebagai superuser.
+3. Tandai migrasi gagal itu sebagai dibatalkan, lalu restart agar dijalankan ulang:
+   ```bash
+   docker compose run --rm app sh -c "cd /app/server && npx prisma migrate resolve --rolled-back <folder_migrasi_trigger_buku_besar>"
+   docker compose restart app
+   ```
+4. Buka halaman Pemeriksaan Sistem: cek "Trigger database wajib" harus OK.
+
+Darurat (trigger menolak koreksi yang sah, dan datanya sudah diperiksa akuntan): matikan trigger
+sebagai pemilik tabel, jalankan koreksinya, lalu aktifkan lagi. Cek "Trigger database wajib" merah
+selama trigger nonaktif, dan itu disengaja.
+
+```sql
+ALTER TABLE accounting_ledger_entries DISABLE TRIGGER trg_ale_group_balanced;
+-- koreksi data di sini
+ALTER TABLE accounting_ledger_entries ENABLE TRIGGER trg_ale_group_balanced;
+```
+
+Kalau cek itu merah padahal migrasi sudah tercatat berhasil, restart tidak membantu:
+
+- **Trigger nonaktif**: `ALTER TABLE <tabel> ENABLE TRIGGER <nama>;` untuk tiap trigger yang disebut
+  pesan cek (tabel dan nama tertulis di sana).
+- **Trigger hilang** (di-drop manual): jalankan ulang SQL migrasinya. SQL itu aman diulang
+  (`CREATE OR REPLACE FUNCTION`, `DROP TRIGGER IF EXISTS` lalu `CREATE CONSTRAINT TRIGGER`):
+  ```bash
+  docker compose run --rm app sh -c "cd /app/server && npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/<folder_migrasi_trigger_buku_besar>/migration.sql"
+  ```
+
+Catatan restore: cadangan dibuat dengan `pg_dump --clean --if-exists` (`services/backupService.ts`).
+Restore dump yang dibuat sebelum trigger buku besar ada menghapus trigger itu dari database,
+sedangkan `_prisma_migrations` ikut kembali ke keadaan dump. Cek "Trigger database wajib" merah
+sampai aplikasi dimulai ulang dan `prisma migrate deploy` menjalankan migrasinya lagi saat boot.
+
+Gerbang sebelum migrasi ini dirilis: audit buku besar harian (contoh cron:
+`scripts/ops/ledger-audit-daily.sh`) harus bersih selama satu siklus rilis.
 
 ## Backup rutin
 

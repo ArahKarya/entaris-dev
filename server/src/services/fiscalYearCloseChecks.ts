@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { businessDayOf } from '../utils/businessDate';
 import { systemAccounts } from './systemAccounts';
 import { findAleJournalMismatches } from './ledger/aleSyncCheck';
+import { findNonJournalAle } from './ledger/nonJournalAle';
 import { findUnbalancedAleGroups } from './ledger/ledgerAudit/sections/aleGroups';
 import { SYSTEM_ACCOUNT_ROLES } from '../types/systemAccounts';
 import { DOCUMENT_RULE, postableAccountProblem } from './ledger/accountGuard';
@@ -174,6 +175,37 @@ const aleVsJournal: CloseCheck = {
   },
 };
 
+/**
+ * Documents of the year booked twice: ledger rows of the document itself (reference_type other than
+ * JournalEntry, left from old generators) next to its own journal in the same year (JV-<number> or
+ * the payment's journal). Rows that only look like an unrelated journal's (twin rows) are reported by
+ * the health check and the ledger audit but do not block: a later posting with the same amount could
+ * otherwise add an item after the baseline was captured, with no way to baseline it. The close
+ * profit adds every reference type, and ale-vs-journal and ledger-balanced do not see the double (it
+ * is balanced and not a journal's), so without this check Retained Earnings would take the double
+ * and lock it.
+ * Items are keyed `<type>:<id>@<fiscal year id>`, amount = the document rows' debit; baseline-aware,
+ * so an old double the accountant accepted does not block.
+ */
+const nonJournalAleDuplicate: CloseCheck = {
+  id: 'non-journal-ale-duplicate',
+  severity: 'block',
+  baselineAware: true,
+  async run(tx, fy) {
+    const { rows } = await findNonJournalAle(tx, { fiscalYearId: fy.id, duplicatesOnly: true });
+    return {
+      count: rows.length,
+      items: rows.map((r) => ({
+        key: `${r.referenceType}:${r.referenceId}@${fy.id}`,
+        kind: r.referenceType,
+        label: r.label,
+        date: day(r.date),
+        amount: money(r.debit),
+      })),
+    };
+  },
+};
+
 const CLOSE_ROLES = ['CURRENT_PROFIT', 'RETAINED_EARNINGS'] as const;
 
 /**
@@ -222,6 +254,7 @@ export const BUILT_IN_CLOSE_CHECKS: readonly CloseCheck[] = [
   depreciationUnposted,
   ledgerBalanced,
   aleVsJournal,
+  nonJournalAleDuplicate,
   systemAccountsMapped,
   deliveryOrdersUninvoiced,
 ];

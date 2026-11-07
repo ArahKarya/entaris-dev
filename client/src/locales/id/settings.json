@@ -549,6 +549,10 @@
           "title": "Buku besar sesuai jurnal",
           "hint": "Baris buku besar jurnal ini tidak sama dengan baris jurnalnya."
         },
+        "non-journal-ale-duplicate": {
+          "title": "Dokumen tercatat ganda di buku besar",
+          "hint": "Dokumen ini punya baris buku besar sendiri di samping baris jurnalnya, sehingga laba tahun ini terhitung dua kali. Selisih lama yang sudah ditinjau akuntan tercatat di baseline."
+        },
         "system-accounts": {
           "title": "Akun sistem tutup buku",
           "hint": "Petakan Laba Tahun Berjalan dan Laba Ditahan ke akun detail yang aktif di Pengaturan > Akun Sistem."

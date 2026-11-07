@@ -57,20 +57,24 @@ type CheckKey =
   | 'customerDepositSubledger'
   | 'aleFiscalYear'
   | 'formerRoleAccounts'
+  | 'nonJournalAle'
+  | 'partyOutstandingDrift'
   | 'requiredTriggers';
 
 /** Server check name → `auth:healthCheck.checks.<key>` and the fix endpoint key. */
 const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
-  'ALE vs JournalItem Sync': { key: 'aleSync', fixKey: 'ale-sync' },
+  'ALE vs JournalItem Sync': { key: 'aleSync' },
   'Account Balance Drift': { key: 'balanceDrift', fixKey: 'account-balance-drift' },
   'Unbalanced Journal Entries': { key: 'unbalancedJournals' },
-  'Orphan ALE Entries': { key: 'orphanAle', fixKey: 'orphan-ale' },
+  'Orphan ALE Entries': { key: 'orphanAle' },
   'Stock vs Movement Mismatch': { key: 'stockMismatch' },
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
   'AR vs Subledger': { key: 'arSubledger' },
   'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
   'ALE vs Fiscal Year': { key: 'aleFiscalYear' },
   'Former Role Accounts': { key: 'formerRoleAccounts' },
+  'Non-Journal Ledger Entries': { key: 'nonJournalAle' },
+  'Party Outstanding Drift': { key: 'partyOutstandingDrift' },
   'Required Database Triggers': { key: 'requiredTriggers' },
 };
 
@@ -83,7 +87,7 @@ function checkInfo(name: string): CheckInfo {
   return {
     title,
     fixKey: known.fixKey,
-    fixEffect: i18n.t(`healthCheck.fixEffects.${known.key as 'aleSync' | 'balanceDrift' | 'orphanAle'}`, { ns: 'auth' }),
+    fixEffect: i18n.t(`healthCheck.fixEffects.${known.key as 'balanceDrift'}`, { ns: 'auth' }),
   };
 }
 
@@ -112,8 +116,14 @@ function formatColumnName(key: string): string {
   return key.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function formatCellValue(val: unknown): string {
+/** Causes of the ALE vs JournalItem check (server aleSyncCheck.ts): `auth:healthCheck.cause.<cause>`. */
+const CAUSES = new Set(['no-ledger', 'ledger-without-journal', 'cancelled-active-ale', 'legacy-stt-pair', 'draft-with-ale', 'amount-differs']);
+
+function formatCellValue(val: unknown, key?: string): string {
   if (val === null || val === undefined) return '—';
+  if (key === 'cause' && typeof val === 'string' && CAUSES.has(val)) {
+    return i18n.t(`healthCheck.cause.${val as 'no-ledger'}`, { ns: 'auth' });
+  }
   if (typeof val === 'number') {
     return Number.isInteger(val) ? formatNumber(val) : formatNumber(val, { decimals: 2 });
   }
@@ -144,7 +154,7 @@ function DetailTable({ rows, caption }: { rows: Record<string, unknown>[]; capti
             <tr key={i} className="border-t border-border">
               {keys.map((k) => (
                 <td key={k} className="whitespace-nowrap px-3 py-1.5 text-foreground">
-                  {formatCellValue(row[k])}
+                  {formatCellValue(row[k], k)}
                 </td>
               ))}
             </tr>
@@ -154,6 +164,9 @@ function DetailTable({ rows, caption }: { rows: Record<string, unknown>[]; capti
     </div>
   );
 }
+
+const serverMessage = (err: unknown): string | undefined =>
+  (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
 
 export default function HealthCheckPage() {
   const { t } = useTranslation(['auth', 'common']);
@@ -179,7 +192,7 @@ export default function HealthCheckPage() {
       toast.success(result.message);
       queryClient.invalidateQueries({ queryKey: ['health-check'] });
     },
-    onError: () => toast.error(t('healthCheck.fixFailed')),
+    onError: (err) => toast.error(serverMessage(err) ?? t('healthCheck.fixFailed')),
   });
 
   const data = healthQuery.data;
@@ -311,11 +324,17 @@ export default function HealthCheckPage() {
         description={confirm?.info.fixEffect}
         confirmLabel={t('healthCheck.confirmLabel')}
         loading={previewQuery.isLoading}
-        onConfirm={() => fixMutation.mutateAsync(confirm!.key)}
+        onConfirm={() => {
+          if (previewQuery.isError) {
+            toast.error(serverMessage(previewQuery.error) ?? t('healthCheck.previewFailed'));
+            return;
+          }
+          return fixMutation.mutateAsync(confirm!.key);
+        }}
       >
         <div className="max-h-[50dvh] min-w-0 space-y-3 overflow-y-auto text-sm">
           {previewQuery.isLoading && <p className="text-muted-foreground">{t('healthCheck.previewLoading')}</p>}
-          {previewQuery.isError && <p className="text-danger-text">{t('healthCheck.previewFailed')}</p>}
+          {previewQuery.isError && <p className="text-danger-text">{serverMessage(previewQuery.error) ?? t('healthCheck.previewFailed')}</p>}
           {preview && (
             <>
               <p className="font-medium text-foreground">{preview.description}</p>

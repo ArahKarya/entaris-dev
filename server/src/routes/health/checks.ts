@@ -1,6 +1,7 @@
 // Diagnostic checks for /api/health-check. Each returns a CheckResult with
 // (name, status, message, count, details, fixable). Lifted out of the main
-// route file to keep that under the 800-line target.
+// route file to keep that under the 800-line target. Ledger row checks are in
+// aleChecks.ts, party checks in partyChecks.ts.
 import { prisma } from '../../lib/prisma';
 
 export interface CheckResult {
@@ -12,64 +13,8 @@ export interface CheckResult {
   fixable: boolean;
 }
 
-export async function checkAleSync(): Promise<CheckResult> {
-  const mismatches = await prisma.$queryRaw<Array<{
-    account_id: string;
-    account_code: string;
-    account_name: string;
-    ji_debit: number;
-    ji_credit: number;
-    ale_debit: number;
-    ale_credit: number;
-  }>>`
-    WITH ji_totals AS (
-      SELECT jea.account_id,
-             SUM(jea.debit)  AS total_debit,
-             SUM(jea.credit) AS total_credit
-        FROM journal_entry_accounts jea
-        JOIN journal_entries je ON je.id = jea.journal_entry_id
-       WHERE je.status != 'Cancelled'
-       GROUP BY jea.account_id
-    ),
-    ale_totals AS (
-      SELECT ale.account_id,
-             SUM(ale.debit)  AS total_debit,
-             SUM(ale.credit) AS total_credit
-        FROM accounting_ledger_entries ale
-       WHERE ale.reference_type = 'JournalEntry'
-         AND ale.is_cancelled = false
-       GROUP BY ale.account_id
-    )
-    SELECT COALESCE(ji.account_id, ale.account_id) AS account_id,
-           a."accountNumber" AS account_code,
-           a.name AS account_name,
-           COALESCE(ji.total_debit, 0)  AS ji_debit,
-           COALESCE(ji.total_credit, 0) AS ji_credit,
-           COALESCE(ale.total_debit, 0) AS ale_debit,
-           COALESCE(ale.total_credit, 0) AS ale_credit
-      FROM ji_totals ji
-      FULL OUTER JOIN ale_totals ale ON ji.account_id = ale.account_id
-      JOIN accounts a ON a.id = COALESCE(ji.account_id, ale.account_id)
-     WHERE COALESCE(ji.total_debit, 0) != COALESCE(ale.total_debit, 0)
-        OR COALESCE(ji.total_credit, 0) != COALESCE(ale.total_credit, 0)
-     ORDER BY a."accountNumber"
-  `;
-
-  return {
-    name: 'ALE vs JournalItem Sync',
-    status: mismatches.length > 0 ? 'error' : 'ok',
-    message: mismatches.length > 0
-      ? `${mismatches.length} akun memiliki perbedaan antara ALE dan JournalItem`
-      : 'ALE dan JournalItem sinkron',
-    count: mismatches.length,
-    details: mismatches.slice(0, 20),
-    // Auto-fix disabled: rebuilding ALE across all years rewrites closed periods (audit G-26).
-    fixable: false,
-  };
-}
-
 /**
- * 2. Account balance drift
+ * Account balance drift
  * Compare accounts.balance against computed balance from JournalItems.
  */
 export async function checkAccountBalanceDrift(): Promise<CheckResult> {
@@ -123,7 +68,7 @@ export async function checkAccountBalanceDrift(): Promise<CheckResult> {
 }
 
 /**
- * 3. Unbalanced journal entries
+ * Unbalanced journal entries
  * Find posted journals where total debit != total credit.
  */
 export async function checkUnbalancedJournals(): Promise<CheckResult> {
@@ -133,12 +78,14 @@ export async function checkUnbalancedJournals(): Promise<CheckResult> {
     total_debit: number;
     total_credit: number;
     difference: number;
+    total: bigint;
   }>>`
     SELECT je.id AS journal_id,
            je.entry_number,
            SUM(jea.debit)  AS total_debit,
            SUM(jea.credit) AS total_credit,
-           ABS(SUM(jea.debit) - SUM(jea.credit)) AS difference
+           ABS(SUM(jea.debit) - SUM(jea.credit)) AS difference,
+           COUNT(*) OVER () AS total
       FROM journal_entries je
       JOIN journal_entry_accounts jea ON jea.journal_entry_id = je.id
      WHERE je.status = 'Submitted'
@@ -147,70 +94,29 @@ export async function checkUnbalancedJournals(): Promise<CheckResult> {
      ORDER BY difference DESC
      LIMIT 20
   `;
+  // Tolerance 0.01 stays until the zero-tolerance trigger decision (PR-4.6b).
+  const total = unbalanced.length > 0 ? Number(unbalanced[0]!.total) : 0;
 
   return {
     name: 'Unbalanced Journal Entries',
-    status: unbalanced.length > 0 ? 'error' : 'ok',
-    message: unbalanced.length > 0
-      ? `${unbalanced.length} jurnal tidak balance (debit ≠ kredit)`
+    status: total > 0 ? 'error' : 'ok',
+    message: total > 0
+      ? `${total} jurnal tidak balance (debit ≠ kredit)`
       : 'Semua jurnal balance',
-    count: unbalanced.length,
-    details: unbalanced,
+    count: total,
+    details: unbalanced.map((r) => ({
+      journal_id: r.journal_id,
+      entry_number: r.entry_number,
+      total_debit: r.total_debit,
+      total_credit: r.total_credit,
+      difference: r.difference,
+    })),
     fixable: false,
   };
 }
 
 /**
- * 4. Orphan ALE entries
- * ALE entries whose source record no longer exists.
- */
-export async function checkOrphanAle(): Promise<CheckResult> {
-  const orphans = await prisma.$queryRaw<Array<{
-    ale_id: string;
-    reference_type: string;
-    reference_id: string;
-    account_code: string;
-    debit: number;
-    credit: number;
-  }>>`
-    SELECT ale.id AS ale_id,
-           ale.reference_type,
-           ale.reference_id,
-           a."accountNumber" AS account_code,
-           ale.debit,
-           ale.credit
-      FROM accounting_ledger_entries ale
-      JOIN accounts a ON a.id = ale.account_id
-     WHERE ale.is_cancelled = false
-       AND (
-         (ale.reference_type = 'JournalEntry'
-           AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.id = ale.reference_id))
-         OR
-         (ale.reference_type = 'StockMovement'
-           AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.id = ale.reference_id))
-         OR
-         (ale.reference_type = 'StockOpname'
-           AND NOT EXISTS (SELECT 1 FROM stock_opnames so WHERE so.id = ale.reference_id))
-       )
-     ORDER BY ale.reference_type
-     LIMIT 30
-  `;
-
-  return {
-    name: 'Orphan ALE Entries',
-    status: orphans.length > 0 ? 'warning' : 'ok',
-    message: orphans.length > 0
-      ? `${orphans.length} entri ALE merujuk ke record yang tidak ada`
-      : 'Tidak ada ALE orphan',
-    count: orphans.length,
-    details: orphans.slice(0, 20),
-    // Auto-fix disabled: it cancels ALE in closed fiscal years (audit G-26).
-    fixable: false,
-  };
-}
-
-/**
- * 5. Stock vs movement mismatch
+ * Stock vs movement mismatch
  * Compare product currentStock against sum of stock movements.
  */
 export async function checkStockMovementMismatch(): Promise<CheckResult> {

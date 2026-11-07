@@ -11,6 +11,9 @@
  * - An unbalanced ledger group (lines 100/100, ledger 100/90) blocks through ledger-balanced and
  *   ale-vs-journal; captured in the baseline with the same amount it no longer blocks; once its
  *   amount changes, or a new mismatch appears, the close is refused again.
+ * - A document booked twice (ledger rows of type SalesInvoice next to its own JV-<number> journal)
+ *   blocks through non-journal-ale-duplicate until the baseline has it; document rows that only
+ *   look like an unrelated journal's rows (same account, day and amount) do not block.
  * - GET /:id/close-checklist without doc.cancel: 403; an unmapped CURRENT_PROFIT shows up in it.
  *
  * The years are in the far past (1961/1960): every check counts the year's own rows, but
@@ -19,6 +22,7 @@
  * whose `$transaction` is a savepoint; everything runs in a rollback transaction.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
@@ -367,6 +371,43 @@ d('year-close checklist', () => {
       const list = await expectRefused(tx, b.fy);
       expect(failing(list, 'block')).toEqual(['ale-vs-journal']);
       expect(check(list, 'ale-vs-journal').items).toEqual([expect.objectContaining({ key: `${je.id}@${b.fy.id}`, amount: '6000000.00' })]);
+    });
+  });
+
+  it('a document booked twice (its own ledger rows next to its journal) blocks until baselined', async () => {
+    await inRollback(async (tx) => {
+      const b = await books(tx);
+      const invoice = await tx.salesInvoice.create({
+        data: {
+          invoiceNumber: `SI-IT-FYC-${tag()}`, date: new Date(`${Y}-08-05`), partyId: await party(tx), grandTotal: 4 * JT,
+          outstanding: 0, fiscalYearId: b.fy.id, createdBy: actor.userId, status: 'Submitted',
+        },
+      });
+      const je = await post(tx, b.fy, `${Y}-08-05`, b.cashId, b.revenueId, 4 * JT);
+      await tx.journalEntry.update({ where: { id: je.id }, data: { entryNumber: `JV-${invoice.invoiceNumber}` } });
+      // Old generator rows on the invoice itself next to its journal JV-<number> (balanced), and rows of
+      // an unknown document that only match that journal's rows (same account, day and amount).
+      const docRows = (referenceId: string) => {
+        const row = { date: new Date(`${Y}-08-05`), referenceType: 'SalesInvoice', referenceId, fiscalYearId: b.fy.id };
+        return tx.accountingLedgerEntry.createMany({
+          data: [{ ...row, accountId: b.cashId, debit: 4 * JT, credit: 0 }, { ...row, accountId: b.revenueId, debit: 0, credit: 4 * JT }],
+        });
+      };
+      await docRows(invoice.id);
+      const lookalike = randomUUID();
+      await docRows(lookalike);
+
+      const list = await expectRefused(tx, b.fy);
+      expect(failing(list, 'block')).toEqual(['non-journal-ale-duplicate']);
+      expect(check(list, 'non-journal-ale-duplicate').items).toEqual([
+        { key: `SalesInvoice:${invoice.id}@${b.fy.id}`, kind: 'SalesInvoice', label: invoice.invoiceNumber, date: `${Y}-08-05`, amount: '4000000.00' },
+      ]);
+      expect(check(list, 'ale-vs-journal').status).toBe('ok');
+
+      const captured = await captureCloseBaseline(tx, b.fy, true);
+      expect(captured.map((c) => [c.checkId, c.item.key])).toEqual([['non-journal-ale-duplicate', `SalesInvoice:${invoice.id}@${b.fy.id}`]]);
+      expect((await checklist(b.fy.id)).body).toMatchObject({ canClose: true, blocking: 0 });
+      await expectClosed(b.fy);
     });
   });
 
