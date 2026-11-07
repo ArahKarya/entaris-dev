@@ -285,7 +285,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_list
 
-**Ringkasan:** Bagan akun (COA) dalam bentuk pohon bertingkat (children) terurut nomor akun, termasuk akun nonaktif dan saldo berjalan tiap akun.
+**Ringkasan:** Bagan akun (COA) dalam bentuk pohon bertingkat (children) terurut nomor akun, termasuk akun nonaktif, saldo tersimpan tiap akun, dan untuk akun pendapatan/beban saldo tahun buku berjalan dari buku besar (periodBalance).
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `coa` / `view`)
@@ -314,7 +314,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 }
 ```
 
-**Isi hasil:** Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, children[].
+**Isi hasil:** Array akar pohon; tiap node: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, periodBalance, periodYearName, children[]. periodBalance = saldo tahun buku berjalan dari buku besar untuk akun pendapatan/beban dan laba tahun berjalan untuk akun CURRENT_PROFIT; null untuk akun neraca lain atau bila tidak ada tahun buku berjalan.
 
 **Tool terkait:** [`coa_flat`](#coa_flat), [`coa_create`](#coa_create)
 

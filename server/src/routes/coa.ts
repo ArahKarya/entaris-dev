@@ -15,6 +15,8 @@ import { systemAccountRenumberError } from '../utils/systemAccountGuard';
 import { planCreate, planUpdate } from '../services/coa/accountRules';
 import { accountIdsWithLedger, loadStructureFacts, lockAccounts } from '../services/coa/accountStructure';
 import { loadPartyRoleMap } from '../services/ledger/partyRules';
+import { currentPnlYear, currentProfit, pnlPeriodBalances } from '../services/coa/pnlPeriodBalances';
+import { businessToday } from '../utils/businessDate';
 
 const router = Router();
 
@@ -24,10 +26,31 @@ async function withLocked<T extends { id: string }>(accounts: T[]): Promise<(T &
   return accounts.map((a) => ({ ...a, locked: ids.has(a.id) }));
 }
 
-// GET /api/coa — hierarchical account tree
+/**
+ * Adds periodBalance (what the Saldo column shows) and periodYearName to each account: for revenue and
+ * expense accounts the ledger balance of the fiscal year holding today; for the CURRENT_PROFIT account
+ * the profit of that year; null for balance sheet accounts, and for revenue and expense accounts when no
+ * fiscal year holds today. It is read from the ledger, not from accounts.balance (E2-R15a).
+ */
+async function withPeriodBalance<T extends { id: string; rootType: string }>(accounts: T[]) {
+  const year = await currentPnlYear(prisma, businessToday());
+  const balances = year ? await pnlPeriodBalances(prisma, year.id) : [];
+  const amountOf = new Map(balances.map((b) => [b.accountId, b.amount]));
+  const profitIds = new Set((await systemAccounts.getAccounts('CURRENT_PROFIT')).map((a) => a.id));
+  const profit = currentProfit(balances).toString();
+  return accounts.map((acc) => {
+    const isPnl = acc.rootType === 'REVENUE' || acc.rootType === 'EXPENSE';
+    const periodBalance =
+      !year ? null : isPnl ? (amountOf.get(acc.id) ?? new Prisma.Decimal(0)).toString() : profitIds.has(acc.id) ? profit : null;
+    return { ...acc, periodBalance, periodYearName: periodBalance === null ? null : year!.name };
+  });
+}
+
+// GET /api/coa — hierarchical account tree. The response stays a plain array; each row carries
+// periodBalance / periodYearName (see withPeriodBalance).
 router.get('/', async (req, res) => {
   try {
-    const allAccounts = await withLocked(await prisma.account.findMany());
+    const allAccounts = await withPeriodBalance(await withLocked(await prisma.account.findMany()));
     allAccounts.sort((a, b) => compareAccountNumber(a.accountNumber, b.accountNumber));
 
     const buildTree = (accounts: typeof allAccounts, parentId: string | null = null): any[] =>
