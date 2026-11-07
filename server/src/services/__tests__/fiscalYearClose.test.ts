@@ -33,7 +33,7 @@ function mapped() {
 describe('close check registry', () => {
   it('registers the built-in checks first, in order', () => {
     // The plug-in checks below register while the file is collected, so they come after these.
-    expect(closeChecks().slice(0, 9).map((c) => [c.id, c.severity, !!c.baselineAware])).toEqual([
+    expect(closeChecks().slice(0, 10).map((c) => [c.id, c.severity, !!c.baselineAware])).toEqual([
       ['prev-year-open', 'block', false],
       ['drafts-ledger', 'block', false],
       ['drafts-other', 'warn', false],
@@ -41,6 +41,7 @@ describe('close check registry', () => {
       ['ledger-balanced', 'block', true],
       ['ale-vs-journal', 'block', true],
       ['non-journal-ale-duplicate', 'block', true],
+      ['legacy-stt-cancel', 'warn', false],
       ['system-accounts', 'block', false],
       ['do-uninvoiced', 'warn', false],
     ]);

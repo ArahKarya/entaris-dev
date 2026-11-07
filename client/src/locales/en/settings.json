@@ -553,6 +553,10 @@
           "title": "Documents booked twice in the ledger",
           "hint": "This document has ledger rows of its own next to its journal's rows, so this year's profit counts it twice. Old differences reviewed by the accountant are in the baseline."
         },
+        "legacy-stt-cancel": {
+          "title": "STTs cancelled the old way",
+          "hint": "This STT journal was cancelled with a -CXL reversing journal and is not paired yet. Class B (its ledger rows were cancelled too) leaves Inventory and the uninvoiced payable off by the STT amount. Run the e1-stt-cancel-model script once the accountant has approved its CSV."
+        },
         "system-accounts": {
           "title": "Year-close system accounts",
           "hint": "Map Current Year Profit and Retained Earnings to active detail accounts in Settings > System Accounts."
