@@ -526,7 +526,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // opening balance (E2-R11): COA import (routes/import/coa.ts, services/coa/coaImport.ts)
   "openingBalance: {0}": "openingBalance: {0}",
   "openingDate: {0}": "openingDate: {0}",
-  "saldo awal tercatat {0} akan diganti {1}. Centang konfirmasi penggantian saldo awal di layar impor untuk menggantinya.": "the recorded opening balance {0} would be replaced by {1}. Tick the opening balance replacement confirmation on the import screen to replace it.",
-  "saldo awal tercatat akan diganti {0}. Centang konfirmasi penggantian saldo awal di layar impor untuk menggantinya.": "the recorded opening balance would be replaced by {0}. Tick the opening balance replacement confirmation on the import screen to replace it.",
-  "nilai {0} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over {1}. Isi saldo per tanggal cut-over, atau centang konfirmasi bila nilai ini memang saldo awalnya.": "the value {0} equals the account's running balance, not the balance at the cut-over date {1}. Enter the balance at the cut-over date, or tick the confirmation if this value really is the opening balance.",
+  "saldo awal tercatat {0} akan diganti {1}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance {0} would be replaced by {1}. Tick this account's confirmation on the import screen to replace it.",
+  "saldo awal tercatat akan diganti {0}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance would be replaced by {0}. Tick this account's confirmation on the import screen to replace it.",
+  "nilai {0} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over {1}. Isi saldo per tanggal cut-over, atau centang konfirmasi akun ini bila nilai ini memang saldo awalnya.": "the value {0} equals the account's running balance, not the balance at the cut-over date {1}. Enter the balance at the cut-over date, or tick this account's confirmation if this value really is the opening balance.",
 };

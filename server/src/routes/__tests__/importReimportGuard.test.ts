@@ -40,8 +40,15 @@ vi.mock('../../services/systemAccounts', () => ({
   systemAccounts: { getAccount: vi.fn(async (role: string) => ({ id: `acc-${role}` })) },
 }));
 
-const opening = vi.hoisted(() => ({ previewAccountOpening: vi.fn(), setOpeningBalanceInTx: vi.fn() }));
+const opening = vi.hoisted(() => ({
+  previewAccountOpening: vi.fn(),
+  setOpeningBalanceInTx: vi.fn(),
+  OPENING_DATE_MISMATCH: 'OPENING_DATE_MISMATCH',
+  OPENING_LOCK_RIGHT: 'OPENING_LOCK_RIGHT',
+}));
 vi.mock('../../services/ledger/openingBalance', () => opening);
+const perms = vi.hoisted(() => ({ hasCap: vi.fn(async () => false) }));
+vi.mock('../../services/permissionService', () => perms);
 
 import { BusinessError } from '../../utils/errors';
 import coaRouter, { OPENING_REPLACE_UNCONFIRMED, OPENING_RUNNING_BALANCE } from '../import/coa';
@@ -52,7 +59,7 @@ let base: string;
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
-  app.use((req: any, _res, next) => { req.user = { userId: 'u-1' }; next(); });
+  app.use((req: any, _res, next) => { req.user = { userId: 'u-1', role: 'Admin', ...(req.get('x-via') ? { via: req.get('x-via') } : {}) }; next(); });
   app.use('/api/import', coaRouter);
   app.use('/api/import', partiesRouter);
   server = http.createServer(app);
@@ -61,8 +68,11 @@ beforeAll(async () => {
 });
 afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
-const post = async (url: string) => {
-  const r = await fetch(base + url, { method: 'POST' });
+const post = async (url: string, body?: Record<string, unknown>, headers: Record<string, string> = {}) => {
+  const r = await fetch(base + url, {
+    method: 'POST',
+    ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } } : { headers }),
+  });
   return { status: r.status, body: (await r.json()) as any };
 };
 
@@ -76,6 +86,7 @@ const noDeletes = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  perms.hasCap.mockResolvedValue(false);
   db.account.findUnique.mockResolvedValue({ id: 'parent-1' });
   db.account.findMany.mockResolvedValue([{ id: 'parent-1', accountNumber: '1.1', rootType: 'ASSET', isGroup: true, parentId: null }]);
   db.accountingLedgerEntry.groupBy.mockResolvedValue([]);
@@ -97,17 +108,29 @@ describe('POST /api/import/coa re-import', () => {
     opening.setOpeningBalanceInTx.mockResolvedValue(outcome());
   });
 
-  it('same amount: the service reports unchanged, nothing is posted or deleted', async () => {
+  it('same amount as the recorded opening: unchanged without calling the service, nothing is posted or deleted', async () => {
     const res = await post('/api/import/coa');
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ success: 1, failed: 0, errors: [] });
-    expect(res.body.openings).toEqual([{ row: 2, accountNumber: '1.1.1', action: 'unchanged', journalNumber: 'JV-202601-0001', cancelled: [] }]);
-    // The opening is set on the saved account by its id (never matched by number prefix: 1.1.1 vs 1.1.10).
-    expect(opening.setOpeningBalanceInTx.mock.calls[0][1]).toMatchObject({ target: { kind: 'ACCOUNT', accountId: 'acc-cash' }, amount: '500000', userId: 'u-1' });
-    expect(opening.setOpeningBalanceInTx.mock.calls[0][1].asOfDate).toBeUndefined();
+    expect(res.body.openings).toEqual([{ row: 2, accountNumber: '1.1.1', action: 'unchanged', journalNumber: null, cancelled: [] }]);
+    // A keyed journal dated after the cut-over day must not be voided and posted again for the same value.
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
     expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
     noDeletes();
+  });
+
+  it('a new amount goes to the saved account by its id', async () => {
+    opening.previewAccountOpening.mockResolvedValue(preview({ action: 'post', recorded: null }));
+    opening.setOpeningBalanceInTx.mockResolvedValue(outcome({ action: 'posted' }));
+
+    const res = await post('/api/import/coa');
+
+    expect(res.body.errors).toEqual([]);
+    // Never matched by number prefix: 1.1.1 vs 1.1.10.
+    expect(opening.setOpeningBalanceInTx.mock.calls[0][1]).toMatchObject({ target: { kind: 'ACCOUNT', accountId: 'acc-cash' }, amount: '500000', userId: 'u-1' });
+    expect(opening.setOpeningBalanceInTx.mock.calls[0][1].asOfDate).toBeUndefined();
+    expect(opening.setOpeningBalanceInTx.mock.calls[0][1].throughLock).toBeUndefined();
   });
 
   it('a blank opening balance cell leaves the opening balance alone', async () => {
@@ -137,10 +160,82 @@ describe('POST /api/import/coa re-import', () => {
     opening.previewAccountOpening.mockResolvedValue(preview({ action: 'replace', recorded: '400000.00' }));
     opening.setOpeningBalanceInTx.mockResolvedValue(outcome({ action: 'replaced', journal: { entryNumber: 'JV-202601-0002' }, cancelled: ['JV-202601-0001'] }));
 
-    const res = await post('/api/import/coa?confirmReplace=true');
+    const res = await post('/api/import/coa?confirmReplace=1.1.1');
 
     expect(res.body.errors).toEqual([]);
     expect(res.body.openings[0]).toMatchObject({ action: 'replaced', journalNumber: 'JV-202601-0002', cancelled: ['JV-202601-0001'] });
+  });
+
+  it('confirms per account: confirming another account does not let this row through', async () => {
+    db.rows = [
+      { accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '600000' },
+      { accountNumber: '1.1.2', name: 'Bank', rootType: 'ASSET', openingBalance: '700000' },
+    ];
+    opening.previewAccountOpening.mockImplementation(async (_db: unknown, acc: { accountNumber: string }) =>
+      acc.accountNumber === '1.1.1' ? preview({ action: 'replace', recorded: '500000.00' }) : preview({ action: 'post', recorded: null, runningBalance: true }));
+    opening.setOpeningBalanceInTx.mockResolvedValue(outcome({ action: 'replaced', cancelled: ['JV-202601-0001'] }));
+
+    const res = await post('/api/import/coa', { confirmReplace: ['1.1.1'] });
+
+    expect(res.body.openings.map((o: any) => o.accountNumber)).toEqual(['1.1.1']);
+    expect(res.body.errors).toEqual([expect.objectContaining({ row: 3, code: OPENING_RUNNING_BALANCE })]);
+    expect(opening.setOpeningBalanceInTx).toHaveBeenCalledTimes(1);
+    // The old request-wide flag confirms nothing.
+    vi.clearAllMocks();
+    db.account.upsert.mockResolvedValue({ id: 'acc-cash', rootType: 'ASSET' });
+    const old = await post('/api/import/coa?confirmReplace=true');
+    expect(old.body.errors.map((e: any) => e.code)).toEqual([OPENING_REPLACE_UNCONFIRMED, OPENING_RUNNING_BALANCE]);
+    expect(opening.setOpeningBalanceInTx).not.toHaveBeenCalled();
+  });
+
+  it('a date other than the cut-over goes to the service, which refuses it, also for the same amount', async () => {
+    db.rows = [{ accountNumber: '1.1.1', name: 'Kas Kecil', rootType: 'ASSET', openingBalance: '500000', openingDate: '2026-02-01' }];
+    opening.previewAccountOpening.mockResolvedValue(preview({ allowed: false, reason: 'OPENING_DATE_MISMATCH' }));
+    opening.setOpeningBalanceInTx.mockRejectedValue(new BusinessError('Saldo awal dicatat per tanggal cut-over 2026-01-01; tanggal 2026-02-01 tidak bisa dipakai. Isi saldo per tanggal cut-over.', 'OPENING_DATE_MISMATCH'));
+
+    const shown = await post('/api/import/coa?preview=true');
+    expect(opening.previewAccountOpening.mock.calls[0][3]).toBe('2026-02-01');
+    expect(shown.body.data[0].opening).toMatchObject({ allowed: false, reason: 'OPENING_DATE_MISMATCH', needsConfirm: false });
+
+    const res = await post('/api/import/coa');
+    expect(res.body.errors[0]).toMatchObject({ row: 2, code: 'OPENING_DATE_MISMATCH' });
+    expect(res.body.openings).toEqual([]);
+  });
+
+  describe('throughLockReason (owner decision #10)', () => {
+    beforeEach(() => {
+      opening.previewAccountOpening.mockResolvedValue(preview({ action: 'post', recorded: null }));
+      opening.setOpeningBalanceInTx.mockResolvedValue(outcome({ action: 'posted' }));
+    });
+
+    it('needs period.lock', async () => {
+      const res = await post('/api/import/coa', { throughLockReason: 'Saldo awal Januari dari akuntan' });
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('OPENING_LOCK_RIGHT');
+      expect(perms.hasCap).toHaveBeenCalledWith('Admin', 'period.lock');
+      expect(db._tx.account.upsert).not.toHaveBeenCalled();
+    });
+
+    it('is never open to AIRA', async () => {
+      perms.hasCap.mockResolvedValue(true);
+      const res = await post('/api/import/coa', { throughLockReason: 'Saldo awal Januari dari akuntan' }, { 'x-via': 'mcp' });
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('OPENING_LOCK_RIGHT');
+    });
+
+    it('needs a reason of at least 10 characters', async () => {
+      perms.hasCap.mockResolvedValue(true);
+      const res = await post('/api/import/coa', { throughLockReason: 'pendek' });
+      expect(res.status).toBe(400);
+      expect(db._tx.account.upsert).not.toHaveBeenCalled();
+    });
+
+    it('a period.lock holder passes the reason to the opening service', async () => {
+      perms.hasCap.mockResolvedValue(true);
+      const res = await post('/api/import/coa', { throughLockReason: '  Saldo awal Januari dari akuntan ' });
+      expect(res.body.errors).toEqual([]);
+      expect(opening.setOpeningBalanceInTx.mock.calls[0][1].throughLock).toEqual({ reason: 'Saldo awal Januari dari akuntan' });
+    });
   });
 
   it('refuses a value that equals the running balance unless confirmed', async () => {

@@ -12,6 +12,11 @@
  * - An old template with running balances: the replacement is refused without confirmReplace and a
  *   value equal to the running balance on an account without an opening is refused too; nothing posts.
  * - A replacement in a closed year is refused (PERIOD_CLOSED) and the balance sheet stays.
+ * - A keyed opening journal dated after the cut-over day (old import, keyed by the opening audit):
+ *   the template round trip leaves it as it is, also when another row of the file is confirmed;
+ *   confirmation is per account, so a confirmed replacement never lets a running balance through.
+ * - The preview flags an openingDate other than the cut-over; a locked cut-over month is refused
+ *   (PERIOD_LOCKED) unless a period.lock holder gives throughLockReason (audit row with the reason).
  * - No journal or ledger row is ever deleted (row counts never drop; a replaced journal is Cancelled).
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -34,9 +39,9 @@ import { invalidatePermissionCache } from '../../services/permissionService';
 import { updateAccountBalance } from '../../utils/accountBalance';
 import { computeBalanceSheet } from '../../services/reports/balanceSheet';
 import { asOfBound } from '../../utils/businessDate';
-import { setOpeningBalanceInTx } from '../../services/ledger/openingBalance';
+import { OPENING_DATE_MISMATCH, OPENING_LOCK_RIGHT, OPENING_THROUGH_LOCK_ACTION, setOpeningBalanceInTx } from '../../services/ledger/openingBalance';
 import { sourceKeys } from '../../services/ledger/journalSource';
-import { PERIOD_CLOSED } from '../../utils/periodGuard';
+import { PERIOD_CLOSED, PERIOD_LOCKED } from '../../utils/periodGuard';
 import coaImportRouter, { OPENING_REPLACE_UNCONFIRMED, OPENING_RUNNING_BALANCE } from '../../routes/import/coa';
 import templateRouter from '../../routes/import/template';
 
@@ -130,6 +135,25 @@ async function move(tx: Tx, fy: FiscalYear, date: Date, debitId: string, creditI
   await updateAccountBalance(tx, creditId, 0, amount);
 }
 
+/** An opening journal keyed OPENING:ACCOUNT:<id> but dated `date` (the old import posted at input time). */
+async function keyedOpeningOn(tx: Tx, fy: FiscalYear, date: Date, accountId: string, amount: number) {
+  const equity = await tx.systemAccountMapping.findFirstOrThrow({ where: { role: 'OPENING_EQUITY' }, orderBy: { sortOrder: 'asc' } });
+  const je = await tx.journalEntry.create({
+    data: {
+      entryNumber: `IT-ICO-OB-${tag()}`, date, narration: 'Saldo awal akun (impor lama)', status: 'Submitted', fiscalYearId: fy.id,
+      createdBy: actor.userId, submittedAt: new Date(), sourceType: 'OPENING', sourceKey: sourceKeys.openingAccount(accountId),
+      items: { create: [{ accountId, debit: amount, credit: 0 }, { accountId: equity.accountId, debit: 0, credit: amount }] },
+    },
+  });
+  const row = { date, referenceType: 'JournalEntry', referenceId: je.id, fiscalYearId: fy.id };
+  await tx.accountingLedgerEntry.createMany({
+    data: [{ ...row, accountId, debit: amount, credit: 0 }, { ...row, accountId: equity.accountId, debit: 0, credit: amount }],
+  });
+  await updateAccountBalance(tx, accountId, amount, 0);
+  await updateAccountBalance(tx, equity.accountId, 0, amount);
+  return je;
+}
+
 const setOpening = (tx: Tx, accountId: string, amount: number) =>
   setOpeningBalanceInTx(tx, { target: { kind: 'ACCOUNT', accountId }, amount, userId: actor.userId });
 
@@ -137,11 +161,14 @@ const csv = (rows: Array<[string, string, string]>) =>
   Buffer.from(['accountNumber,name,rootType,accountType,parentNumber,isGroup,openingBalance',
     ...rows.map(([n, name, ob]) => `${n},${name},ASSET,ASSET,,false,${ob}`)].join('\n'));
 
-async function importFile(buffer: Buffer, originalname: string, query: Record<string, string> = {}) {
+async function importFile(buffer: Buffer, originalname: string, query: Record<string, string> = {}, body: Record<string, unknown> = {}) {
   state.file = { buffer, originalname };
-  const r = await callRoute(coaImportRouter, 'post', '/coa', { userId: actor.userId, role: actor.role, query });
+  const r = await callRoute(coaImportRouter, 'post', '/coa', { userId: actor.userId, role: actor.role, query, body });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
-  return r.body as { success: number; errors: Array<{ row: number; message: string; code?: string }>; openings: Array<{ accountNumber: string; action: string }> };
+  return r.body as {
+    success: number; errors: Array<{ row: number; message: string; code?: string }>; openings: Array<{ accountNumber: string; action: string }>;
+    data?: Array<{ accountNumber: string; opening: { allowed: boolean; reason: string | null; action: string } | null }>;
+  };
 }
 
 async function exportTemplate(): Promise<Buffer> {
@@ -249,7 +276,7 @@ d('COA import opening balances through the opening balance service', () => {
       expect(await rowCounts(tx)).toEqual(counts);
       expect(await balanceSheet(tx)).toBe(sheet);
 
-      const confirmed = await importFile(csv([[f.p1.accountNumber, f.p1.name, String(600 * JT)]]), 'fix.csv', { confirmReplace: 'true' });
+      const confirmed = await importFile(csv([[f.p1.accountNumber, f.p1.name, String(600 * JT)]]), 'fix.csv', { confirmReplace: f.p1.accountNumber });
       expect(confirmed.errors).toEqual([]);
       expect(confirmed.openings).toEqual([expect.objectContaining({ action: 'replaced' })]);
       expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: oldJournal.id } })).status).toBe('Cancelled');
@@ -269,12 +296,97 @@ d('COA import opening balances through the opening balance service', () => {
       const counts = await rowCounts(tx);
       const sheet = await balanceSheet(tx);
 
-      const body = await importFile(csv([[f.p1.accountNumber, f.p1.name, String(650 * JT)]]), 'coa.csv', { confirmReplace: 'true' });
+      const body = await importFile(csv([[f.p1.accountNumber, f.p1.name, String(650 * JT)]]), 'coa.csv', { confirmReplace: f.p1.accountNumber });
       expect(body.success).toBe(1);
       expect(rowErrors(body, f.p1.accountNumber).map((e) => e.code)).toEqual([PERIOD_CLOSED]);
       expect(await rowCounts(tx)).toEqual(counts);
       expect(await balanceSheet(tx)).toBe(sheet);
       expect(await ledgerNet(tx, f.p1.id)).toBe('500000000.00');
+    });
+  });
+
+  it('a keyed opening dated after the cut-over day survives the template round trip, also when another row is confirmed', async () => {
+    await inRollback(async (tx) => {
+      const f = await setup(tx);
+      const old = await keyedOpeningOn(tx, f.fy, new Date(`${Y}-03-10T09:00:00+07:00`), f.p1.id, 500 * JT);
+      await setOpening(tx, f.p2.id, 100 * JT);
+      await move(tx, f.fy, new Date(`${Y}-04-02T09:00:00+07:00`), f.other.id, f.p2.id, 40 * JT);
+
+      const template = await exportTemplate();
+      expect(await templateCell(template, f.p1.accountNumber)).toBe(500 * JT);
+      const counts = await rowCounts(tx);
+      const sheet = await balanceSheet(tx);
+
+      const shown = await importFile(template, 'template_coa.xlsx', { preview: 'true' });
+      expect(shown.data?.find((r) => r.accountNumber === f.p1.accountNumber)?.opening).toMatchObject({ action: 'unchanged' });
+      const roundTrip = await importFile(template, 'template_coa.xlsx');
+      for (const acc of [f.p1, f.p2]) expect(rowErrors(roundTrip, acc.accountNumber)).toEqual([]);
+      expect(roundTrip.openings.find((o) => o.accountNumber === f.p1.accountNumber)?.action).toBe('unchanged');
+      expect(await rowCounts(tx)).toEqual(counts);
+      expect(await balanceSheet(tx)).toBe(sheet);
+
+      // Ticking p2's replacement: p1 (same value) is not voided and posted again on the cut-over day.
+      const file = csv([[f.p1.accountNumber, f.p1.name, String(500 * JT)], [f.p2.accountNumber, f.p2.name, String(150 * JT)]]);
+      const body = await importFile(file, 'fix.csv', {}, { confirmReplace: [f.p2.accountNumber] });
+      expect(body.errors).toEqual([]);
+      expect(body.openings.map((o) => [o.accountNumber, o.action])).toEqual([[f.p1.accountNumber, 'unchanged'], [f.p2.accountNumber, 'replaced']]);
+      expect((await activeOpenings(tx, f.p1.id)).map((j) => j.id)).toEqual([old.id]);
+      expect(await ledgerNet(tx, f.p1.id)).toBe('500000000.00');
+      expect(await ledgerNet(tx, f.p2.id)).toBe('110000000.00');
+    });
+  });
+
+  it('confirming one replacement does not post a running balance on another account', async () => {
+    await inRollback(async (tx) => {
+      const f = await setup(tx);
+      await setOpening(tx, f.p1.id, 500 * JT);
+      await move(tx, f.fy, new Date(`${Y}-03-11T09:00:00+07:00`), f.p2.id, f.other.id, 300 * JT);
+      const counts = await rowCounts(tx);
+
+      const file = csv([[f.p1.accountNumber, f.p1.name, String(600 * JT)], [f.p2.accountNumber, f.p2.name, String(300 * JT)]]);
+      const body = await importFile(file, 'old.csv', {}, { confirmReplace: [f.p1.accountNumber] });
+      expect(body.openings).toEqual([expect.objectContaining({ accountNumber: f.p1.accountNumber, action: 'replaced' })]);
+      expect(rowErrors(body, f.p2.accountNumber).map((e) => e.code)).toEqual([OPENING_RUNNING_BALANCE]);
+      expect(await ledgerNet(tx, f.p2.id)).toBe('300000000.00');
+      expect((await rowCounts(tx)).je).toBe(counts.je + 1);
+    });
+  });
+
+  it('the preview flags an openingDate other than the cut-over date', async () => {
+    await inRollback(async (tx) => {
+      const f = await setup(tx);
+      const file = Buffer.from(['accountNumber,name,rootType,accountType,parentNumber,isGroup,openingBalance,openingDate',
+        `${f.p1.accountNumber},${f.p1.name},ASSET,ASSET,,false,500000,${Y}-02-01`].join('\n'));
+      const shown = await importFile(file, 'coa.csv', { preview: 'true' });
+      expect(shown.data?.[0].opening).toMatchObject({ allowed: false, reason: OPENING_DATE_MISMATCH });
+      const body = await importFile(file, 'coa.csv');
+      expect(rowErrors(body, f.p1.accountNumber).map((e) => e.code)).toEqual([OPENING_DATE_MISMATCH]);
+      expect(await ledgerNet(tx, f.p1.id)).toBe('0.00');
+    });
+  });
+
+  it('a locked cut-over month: refused without throughLockReason; a period.lock holder posts with the reason audited', async () => {
+    await inRollback(async (tx) => {
+      const f = await setup(tx);
+      await tx.$executeRaw`INSERT INTO period_lock (id, lock_date) VALUES (1, ${`${Y}-01-31`}::date)
+        ON CONFLICT (id) DO UPDATE SET lock_date = EXCLUDED.lock_date`;
+      const file = csv([[f.p1.accountNumber, f.p1.name, String(500 * JT)]]);
+
+      const refused = await importFile(file, 'coa.csv');
+      expect(rowErrors(refused, f.p1.accountNumber).map((e) => e.code)).toEqual([PERIOD_LOCKED]);
+
+      state.file = { buffer: file, originalname: 'coa.csv' };
+      const noRight = await callRoute(coaImportRouter, 'post', '/coa', { userId: actor.userId, role: actor.role, body: { throughLockReason: 'Saldo awal dari akuntan' } });
+      expect(noRight.status).toBe(403);
+      expect((noRight.body as { code: string }).code).toBe(OPENING_LOCK_RIGHT);
+
+      actor = await createCapUser(tx, ['period.lock']);
+      const body = await importFile(file, 'coa.csv', {}, { throughLockReason: 'Saldo awal dari akuntan' });
+      expect(body.errors).toEqual([]);
+      expect(body.openings).toEqual([expect.objectContaining({ action: 'posted' })]);
+      expect(await ledgerNet(tx, f.p1.id)).toBe('500000000.00');
+      const audit = await tx.auditLog.findFirstOrThrow({ where: { action: OPENING_THROUGH_LOCK_ACTION, entityId: f.p1.id } });
+      expect(audit.newValues).toMatchObject({ reason: 'Saldo awal dari akuntan', asOfDate: CUTOVER });
     });
   });
 });

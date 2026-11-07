@@ -383,9 +383,23 @@ export interface OpeningPreviewAccount {
 /**
  * Compares `amount` with the account's opening balance without writing anything (the import
  * preview and the import's confirmation check). The refusals come from the rules of
- * setOpeningBalanceInTx: describeAccountOpening for a stored account, OPENING_ACCOUNT_RULE for a new one.
+ * setOpeningBalanceInTx: describeAccountOpening for a stored account, OPENING_ACCOUNT_RULE for a new one,
+ * and OPENING_DATE_MISMATCH for an `asOfDate` that is not the cut-over date.
  */
-export async function previewAccountOpening(db: Db, account: OpeningPreviewAccount, amount: Prisma.Decimal.Value): Promise<OpeningChangePreview> {
+export async function previewAccountOpening(
+  db: Db,
+  account: OpeningPreviewAccount,
+  amount: Prisma.Decimal.Value,
+  asOfDate: string | null = null,
+): Promise<OpeningChangePreview> {
+  const preview = await previewAccountAmount(db, account, amount);
+  if (asOfDate !== null && preview.cutoverDate !== null && asOfDate !== preview.cutoverDate) {
+    return { ...preview, allowed: false, reason: OPENING_DATE_MISMATCH };
+  }
+  return preview;
+}
+
+async function previewAccountAmount(db: Db, account: OpeningPreviewAccount, amount: Prisma.Decimal.Value): Promise<OpeningChangePreview> {
   const wanted = new Prisma.Decimal(amount);
   const firstAction: OpeningImportAction = wanted.isZero() ? 'unchanged' : 'post';
   let view: AccountOpeningView | null = null;

@@ -8,7 +8,10 @@ import { upload, parseFileDetailed, sanitizeCellValue } from './shared';
 import { ACCOUNT_PARENT_NOT_FOUND } from '../../services/coa/accountRules';
 import { loadImportFacts, lockAccounts } from '../../services/coa/accountStructure';
 import { parseCoaRows, replanImportRow, validateCoaRows, type CoaImportRow } from '../../services/coa/coaImport';
+import { hasCap } from '../../services/permissionService';
 import {
+  OPENING_DATE_MISMATCH,
+  OPENING_LOCK_RIGHT,
   previewAccountOpening,
   setOpeningBalanceInTx,
   type OpeningChangePreview,
@@ -17,16 +20,30 @@ import {
 
 const router = Router();
 
-/** A row would replace a recorded opening balance, and the request did not confirm replacing. */
+/** A row would replace a recorded opening balance, and the request did not confirm that row. */
 export const OPENING_REPLACE_UNCONFIRMED = 'OPENING_REPLACE_UNCONFIRMED';
-/** A row's amount equals the account's running balance (old template), and the request did not confirm it. */
+/** A row's amount equals the account's running balance (old template), and the request did not confirm that row. */
 export const OPENING_RUNNING_BALANCE = 'OPENING_RUNNING_BALANCE';
 
-/** Rows that change an opening balance already in the ledger need `confirmReplace`. */
+/** Rows that change an opening balance already in the ledger need their account number in `confirmReplace`. */
 const needsConfirm = (p: OpeningChangePreview): boolean =>
   p.allowed && (p.action === 'replace' || (p.action === 'post' && p.runningBalance));
 
-const isTrue = (v: unknown): boolean => v === true || v === 'true';
+/**
+ * The account numbers the user confirmed one by one: repeated form fields, or one comma-separated
+ * value (body or query). Each row is confirmed on its own, so ticking one replacement never lets
+ * another row (a running balance further down the file) through.
+ */
+function confirmedAccounts(...values: unknown[]): Set<string> {
+  const out = new Set<string>();
+  for (const v of values.flat()) {
+    if (typeof v !== 'string') continue;
+    for (const n of v.split(',')) if (n.trim()) out.add(n.trim());
+  }
+  return out;
+}
+
+const THROUGH_LOCK_MIN = 10;
 
 function previewAccount(row: CoaImportRow, id: string | null) {
   return { id, accountNumber: row.accountNumber, name: row.name, rootType: row.rootType, isGroup: row.isGroup };
@@ -35,28 +52,36 @@ function previewAccount(row: CoaImportRow, id: string | null) {
 /**
  * The row's opening balance through the opening balance service, in its own transaction after the
  * account is saved. Returns null when there is nothing to write: a blank cell, or the same amount
- * (also zero) on an account that takes no opening balance. Throws a BusinessError with a code for
- * a refusal; the account itself stays saved.
+ * (also zero) on an account that takes no opening balance. The same amount as the recorded opening
+ * is 'unchanged' without calling the service: a keyed journal dated after the cut-over day (an old
+ * import, keyed by the opening audit) must not be voided and posted again on the cut-over day.
+ * Throws a BusinessError with a code for a refusal; the account itself stays saved.
  */
 async function importOpening(
   row: CoaImportRow,
   accountId: string,
   userId: string,
-  confirmReplace: boolean,
+  confirmed: boolean,
+  throughLock: { reason: string } | undefined,
 ): Promise<OpeningOutcome | null> {
   if (row.openingBalance === null) return null;
   const amount = row.openingBalance;
   return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    const preview = await previewAccountOpening(tx, previewAccount(row, accountId), amount);
-    if (!preview.allowed && preview.action === 'unchanged') return null;
-    if (needsConfirm(preview) && !confirmReplace) {
+    const preview = await previewAccountOpening(tx, previewAccount(row, accountId), amount, row.openingDate);
+    // A wrong date goes on to the service, which refuses it with OPENING_DATE_MISMATCH.
+    if (preview.action === 'unchanged' && preview.reason !== OPENING_DATE_MISMATCH) {
+      if (!preview.allowed) return null;
+      const same: OpeningOutcome = { action: 'unchanged', asOfDate: preview.cutoverDate!, amount: new Prisma.Decimal(amount), journal: null, cancelled: [] };
+      return same;
+    }
+    if (needsConfirm(preview) && !confirmed) {
       throw preview.action === 'replace'
         ? new BusinessError(
-            `saldo awal tercatat ${preview.recorded} akan diganti ${amount}. Centang konfirmasi penggantian saldo awal di layar impor untuk menggantinya.`,
+            `saldo awal tercatat ${preview.recorded} akan diganti ${amount}. Centang konfirmasi akun ini di layar impor untuk menggantinya.`,
             OPENING_REPLACE_UNCONFIRMED,
           )
         : new BusinessError(
-            `nilai ${amount} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over ${preview.cutoverDate}. Isi saldo per tanggal cut-over, atau centang konfirmasi bila nilai ini memang saldo awalnya.`,
+            `nilai ${amount} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over ${preview.cutoverDate}. Isi saldo per tanggal cut-over, atau centang konfirmasi akun ini bila nilai ini memang saldo awalnya.`,
             OPENING_RUNNING_BALANCE,
           );
     }
@@ -65,11 +90,12 @@ async function importOpening(
       amount,
       asOfDate: row.openingDate ?? undefined,
       userId,
+      throughLock,
     });
     // The preview ran before the service took its locks; a keyed journal that appeared since is still a replacement.
-    if (outcome.cancelled.length > 0 && !confirmReplace) {
+    if (outcome.cancelled.length > 0 && !confirmed) {
       throw new BusinessError(
-        `saldo awal tercatat akan diganti ${amount}. Centang konfirmasi penggantian saldo awal di layar impor untuk menggantinya.`,
+        `saldo awal tercatat akan diganti ${amount}. Centang konfirmasi akun ini di layar impor untuk menggantinya.`,
         OPENING_REPLACE_UNCONFIRMED,
       );
     }
@@ -80,7 +106,9 @@ async function importOpening(
 // POST /api/import/coa
 // Accounts first (structure rules, one transaction per row), then each row's opening balance at
 // the cut-over date through the opening balance service. ?preview=true writes nothing and shows per
-// row what the opening balance would do; a row that replaces a recorded opening needs confirmReplace.
+// row what the opening balance would do; a row that replaces a recorded opening, or that equals the
+// running balance, needs its account number in confirmReplace. throughLockReason posts into a locked
+// month: period.lock holders only, never AIRA, the reason goes to the audit trail (owner decision #10).
 router.post(
   '/coa',
   upload.single('file'),
@@ -88,9 +116,24 @@ router.post(
     if (!req.file) return res.status(400).json({ error: 'File wajib diunggah.' });
 
     try {
-      const { rows, numericCells } = await parseFileDetailed(req.file.buffer, req.file.originalname);
       const isPreview = req.query.preview === 'true';
-      const confirmReplace = isTrue(req.body?.confirmReplace) || isTrue(req.query.confirmReplace);
+      const confirmReplace = confirmedAccounts(req.body?.confirmReplace, req.query.confirmReplace);
+      const reasonRaw = req.body?.throughLockReason;
+      const reason = typeof reasonRaw === 'string' ? reasonRaw.trim() : '';
+      if (reason && !isPreview) {
+        if (reason.length < THROUGH_LOCK_MIN) {
+          return res.status(400).json({ error: 'Alasan menembus kunci periode minimal 10 karakter.' });
+        }
+        if (req.user!.via === 'mcp') {
+          return res.status(403).json({ error: 'AIRA tidak dapat menembus kunci periode untuk saldo awal.', code: OPENING_LOCK_RIGHT });
+        }
+        if (!(await hasCap(req.user!.role, 'period.lock'))) {
+          return res.status(403).json({ error: 'Menembus kunci periode untuk saldo awal butuh hak Kunci Periode (period.lock).', code: OPENING_LOCK_RIGHT });
+        }
+      }
+      const throughLock = reason && !isPreview ? { reason } : undefined;
+
+      const { rows, numericCells } = await parseFileDetailed(req.file.buffer, req.file.originalname);
 
       const { parsed, errors } = parseCoaRows(rows, sanitizeCellValue, numericCells);
       const validated = await validateCoaRows(prisma, parsed);
@@ -100,7 +143,7 @@ router.post(
       if (isPreview) {
         const data = [];
         for (const r of validRows) {
-          const opening = r.openingBalance === null ? null : await previewAccountOpening(prisma, previewAccount(r, r.existingId), r.openingBalance);
+          const opening = r.openingBalance === null ? null : await previewAccountOpening(prisma, previewAccount(r, r.existingId), r.openingBalance, r.openingDate);
           data.push({
             accountNumber: r.accountNumber,
             name: r.name,
@@ -154,7 +197,7 @@ router.post(
         }
 
         try {
-          const outcome = await importOpening(row, account.id, req.user!.userId, confirmReplace);
+          const outcome = await importOpening(row, account.id, req.user!.userId, confirmReplace.has(row.accountNumber), throughLock);
           if (outcome) {
             openings.push({
               row: row.rowNum,
