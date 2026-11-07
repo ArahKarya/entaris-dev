@@ -21,8 +21,11 @@ const db = vi.hoisted(() => {
 });
 vi.mock('../../lib/prisma', () => ({ prisma: db }));
 vi.mock('../../middleware/auth', () => ({ requireCap: () => (_q: any, _r: any, n: any) => n() }));
+const run = vi.hoisted(() => ({ runRecurringTemplate: vi.fn(), runDueTemplates: vi.fn() }));
+vi.mock('../../services/recurringExecute', () => run);
 
 import router from '../recurring';
+import { BusinessError } from '../../utils/errors';
 
 let server: http.Server;
 let base: string;
@@ -179,5 +182,48 @@ describe('PUT /api/recurring/:id', () => {
     db._tx.recurringTemplate.findUnique.mockResolvedValue(null);
     const r = await call('PUT', '/api/recurring/nope', { name: 'x' });
     expect(r.status).toBe(404);
+  });
+});
+
+describe('POST /api/recurring/:id/execute', () => {
+  it('runs the template as the caller and returns the posted journal', async () => {
+    run.runRecurringTemplate.mockResolvedValue({ outcome: 'posted', journal: { id: 'je-1', entryNumber: 'JV-1' } });
+    const r = await call('POST', `/api/recurring/${TMPL}/execute`);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ success: true, result: { id: 'je-1', entryNumber: 'JV-1' } });
+    expect(run.runRecurringTemplate).toHaveBeenCalledWith(TMPL, { userId: 'u-1' });
+  });
+
+  it('refuses a run that did not post with its code', async () => {
+    const error = new BusinessError('Total debit (10) harus sama dengan total kredit (9).', 'JOURNAL_UNBALANCED');
+    run.runRecurringTemplate.mockResolvedValue({ outcome: 'failed', code: 'JOURNAL_UNBALANCED', message: error.message, error });
+    const r = await call('POST', `/api/recurring/${TMPL}/execute`);
+    expect(r.status).toBe(400);
+    expect(r.body).toMatchObject({ code: 'JOURNAL_UNBALANCED' });
+  });
+
+  it('returns 404 for an unknown template', async () => {
+    run.runRecurringTemplate.mockResolvedValue({ outcome: 'not_found' });
+    const r = await call('POST', '/api/recurring/nope/execute');
+    expect(r.status).toBe(404);
+  });
+});
+
+describe('POST /api/recurring/run-due', () => {
+  it('reports each due template with its outcome and code', async () => {
+    run.runDueTemplates.mockResolvedValue([
+      { templateId: 'a', name: 'Sewa', outcome: 'posted' },
+      { templateId: 'b', name: 'Rusak', outcome: 'failed', code: 'LINE_AMOUNT_PRECISION', error: 'tiga desimal' },
+    ]);
+    const r = await call('POST', '/api/recurring/run-due');
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({
+      message: '1/2 template dijalankan.',
+      results: [
+        { templateId: 'a', name: 'Sewa', success: true },
+        { templateId: 'b', name: 'Rusak', success: false, error: 'tiga desimal', code: 'LINE_AMOUNT_PRECISION' },
+      ],
+    });
+    expect(run.runDueTemplates).toHaveBeenCalledWith('u-1');
   });
 });

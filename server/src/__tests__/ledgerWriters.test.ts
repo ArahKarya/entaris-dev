@@ -20,7 +20,6 @@ type Counts = Record<string, number>;
 const ALLOWLIST: Record<string, Counts> = {
   'routes/coa.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/customerDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
-  'routes/fiscalYears.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/fixedAssets.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/health/fixes.ts': { 'accountingLedgerEntry.deleteMany': 1, 'accountingLedgerEntry.create': 1, 'sql:UPDATE accounting_ledger_entries': 1 },
   'routes/import/coa.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
@@ -28,7 +27,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'routes/inventory/movements.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2, 'accountingLedgerEntry.updateMany': 2, 'journalEntry.update': 2 },
   'routes/journals.ts': { 'accountingLedgerEntry.updateMany': 1 },
   'routes/projectGuarantees.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
-  'routes/recurring.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/settings/dummyData.ts': { 'accountingLedgerEntry.deleteMany': 1, 'journalItem.deleteMany': 1, 'journalEntry.deleteMany': 1 },
   'routes/stockOpname.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/vendorDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
@@ -47,7 +45,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/productionRunSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/purchaseInvoiceRevise.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
-  'services/recurringRunner.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/salesInvoiceSubmit.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'services/salesReturnSubmit.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'utils/journalCancel.ts': { 'accountingLedgerEntry.updateMany': 1 },

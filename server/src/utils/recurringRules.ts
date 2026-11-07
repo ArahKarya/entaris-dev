@@ -10,6 +10,8 @@ export const RECURRING_DATE_INVALID = 'RECURRING_DATE_INVALID';
 export const RECURRING_DATE_PAST = 'RECURRING_DATE_PAST';
 export const RECURRING_DATE_BEFORE_LAST_RUN = 'RECURRING_DATE_BEFORE_LAST_RUN';
 export const RECURRING_TYPE_MISMATCH = 'RECURRING_TYPE_MISMATCH';
+/** Run of a template whose type has no automatic execution (only 'journal' posts). */
+export const RECURRING_TYPE_UNSUPPORTED = 'RECURRING_TYPE_UNSUPPORTED';
 export const RECURRING_PARTY_NOT_ALLOWED = 'PARTY_NOT_ALLOWED';
 
 export interface NextRunDateInput {

@@ -89,8 +89,11 @@ describe('runCloseChecklist', () => {
   registerCloseCheck(warnCheck);
   registerCloseCheck(manyCheck);
 
-  function tx(baseline: Array<{ itemKey: string; amount: string }> = []) {
+  function tx(baseline: Array<{ itemKey: string; amount: string }> = [], closeAccount: { isActive: boolean; isGroup: boolean } = { isActive: true, isGroup: false }) {
     return makeAutoTx({
+      // The mapped close accounts, as system-accounts loads them.
+      'account.findUnique': (args: { where: { id: string } }) =>
+        ({ id: args.where.id, accountNumber: '3.x', name: 'x', rootType: 'EQUITY', ...closeAccount }),
       'closeCheckBaseline.findMany': (args: { where: { checkId: string; itemKey: { in: string[] } } }) =>
         args.where.checkId === blockCheck.id
           ? baseline.filter((b) => args.where.itemKey.in.includes(b.itemKey)).map((b) => ({ ...b, amount: new Prisma.Decimal(b.amount) }))
@@ -165,6 +168,17 @@ describe('runCloseChecklist', () => {
       status: 'fail',
       items: [{ key: 'RETAINED_EARNINGS', kind: 'SystemAccountRole', label: 'Laba Ditahan' }],
     });
+  });
+
+  it('a close account mapped to an inactive or group account fails system-accounts', async () => {
+    mapped();
+    for (const closeAccount of [{ isActive: false, isGroup: false }, { isActive: true, isGroup: true }]) {
+      const list = await runCloseChecklist(tx([], closeAccount).tx, YEAR);
+      expect(list.checks.find((c) => c.id === 'system-accounts')).toMatchObject({
+        status: 'fail',
+        items: [{ key: 'CURRENT_PROFIT' }, { key: 'RETAINED_EARNINGS' }],
+      });
+    }
   });
 
   describe('baseline capture of one check', () => {

@@ -56,7 +56,11 @@ export async function callRoute(
   router: Router,
   method: 'get' | 'post' | 'put' | 'patch' | 'delete',
   path: string,
-  opts: { query?: Record<string, string>; body?: unknown; userId?: string; role?: string; params?: Record<string, string> } = {},
+  opts: {
+    query?: Record<string, string>; body?: unknown; userId?: string; role?: string; params?: Record<string, string>;
+    /** Request headers (e.g. accept-language), read through req.get case-insensitively. */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<RouteResult> {
   type Layer = { route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: (...args: unknown[]) => unknown }> } };
   const layer = (router.stack as Layer[]).find((l) => l.route?.path === path && l.route.methods[method]);
@@ -69,14 +73,15 @@ export async function callRoute(
     send(body: unknown) { result.body = body; ended = true; return res; },
     setHeader() { return res; },
   };
+  const headers = Object.fromEntries(Object.entries(opts.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
   const req = {
     method: method.toUpperCase(),
     query: opts.query ?? {},
     body: opts.body ?? {},
     params: opts.params ?? {},
-    headers: {},
+    headers,
     user: opts.userId ? { userId: opts.userId, role: opts.role ?? 'Admin' } : undefined,
-    get: () => undefined,
+    get: (name: string) => headers[name.toLowerCase()],
   };
   for (const { handle } of layer.route.stack) {
     let advanced = false;

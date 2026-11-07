@@ -9,8 +9,7 @@ const SRC = join(__dirname, '../../..');
 
 /** file (relative to src) -> source type -> number of writers tagged with it. */
 const EXPECTED: Record<string, Record<string, number>> = {
-  'routes/recurring.ts': { RECURRING: 1 },
-  'services/recurringRunner.ts': { RECURRING: 1 },
+  'services/recurringExecute.ts': { RECURRING: 1 },
   'routes/fiscalYears.ts': { FY_CLOSE: 1 },
   'routes/fixedAssets.ts': { DEPRECIATION: 2 },
   'routes/customerDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
@@ -90,9 +89,24 @@ describe('journal writers tag their source type', () => {
     expect(args[0]).toContain('sourceKey');
   });
 
-  it('the year-close journal carries its fiscal-year key', () => {
-    const text = readFileSync(join(SRC, 'routes/fiscalYears.ts'), 'utf8');
-    expect(text).toMatch(/sourceKey: `FY_CLOSE:\$\{[^}]+\}`/);
+  it('the year-close journal posts through postJournal with its fiscal-year key', () => {
+    const args = callArgs(readFileSync(join(SRC, 'routes/fiscalYears.ts'), 'utf8'), 'postJournal');
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain("sourceType: 'FY_CLOSE'");
+    expect(args[0]).toContain('sourceKey: sourceKeys.close(year.id)');
+    expect(args[0]).toContain('periodOptions: { ignoreLock: true }');
+  });
+
+  it('recurring templates post RECURRING only through recurringExecute.ts', () => {
+    for (const file of ['routes/recurring.ts', 'services/recurringRunner.ts']) {
+      const text = readFileSync(join(SRC, file), 'utf8');
+      expect(text, file).not.toContain("sourceType: 'RECURRING'");
+      expect(callArgs(text, 'postJournal'), file).toHaveLength(0);
+    }
+    const args = callArgs(readFileSync(join(SRC, 'services/recurringExecute.ts'), 'utf8'), 'postJournal');
+    expect(args).toHaveLength(1);
+    expect(args[0]).toContain('sourceKey: sourceKeys.recurring(template.id, opts.runDate)');
+    expect(args[0]).toContain('accountRule: TEMPLATE_RULE');
   });
 
   it('postJournalInTx defaults to SYSTEM_DOC', () => {

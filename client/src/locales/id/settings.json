@@ -551,7 +551,7 @@
         },
         "system-accounts": {
           "title": "Akun sistem tutup buku",
-          "hint": "Petakan Laba Tahun Berjalan dan Laba Ditahan di Pengaturan > Akun Sistem."
+          "hint": "Petakan Laba Tahun Berjalan dan Laba Ditahan ke akun detail yang aktif di Pengaturan > Akun Sistem."
         },
         "do-uninvoiced": {
           "title": "Surat jalan belum ditagih",

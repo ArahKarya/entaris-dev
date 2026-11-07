@@ -87,6 +87,7 @@ const TYPE_META: Record<string, { key: TypeKey; tone: StatusTone; icon: LucideIc
   quotation_expiring: { key: 'quotation_expiring', tone: 'warning', icon: CalendarClock },
   guarantee_due: { key: 'guarantee_due', tone: 'warning', icon: ShieldCheck },
   po_overdue: { key: 'po_overdue', tone: 'danger', icon: Truck },
+  recurring_failed: { key: 'recurring_failed', tone: 'danger', icon: FileWarning },
   cash_book_draft: { key: 'cash_book_draft', tone: 'info', icon: NotebookPen },
   wo_overdue: { key: 'wo_overdue', tone: 'danger', icon: Wrench },
   wo_assigned: { key: 'wo_assigned', tone: 'info', icon: Wrench },
