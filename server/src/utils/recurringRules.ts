@@ -13,6 +13,8 @@ export const RECURRING_TYPE_MISMATCH = 'RECURRING_TYPE_MISMATCH';
 /** Run of a template whose type has no automatic execution (only 'journal' posts). */
 export const RECURRING_TYPE_UNSUPPORTED = 'RECURRING_TYPE_UNSUPPORTED';
 export const RECURRING_PARTY_NOT_ALLOWED = 'PARTY_NOT_ALLOWED';
+/** Manual run on a business day that already has an active journal of the template (200, nothing posted). */
+export const RECURRING_ALREADY_RAN = 'RECURRING_ALREADY_RAN';
 
 export interface NextRunDateInput {
   /** YYYY-MM-DD as sent by the client. */

@@ -37,6 +37,8 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/gaFinance.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'services/gaVehicleServiceJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/goodsReceiptSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
+  // One-off repair (plan step 5 PR-5.6): keys approved legacy opening journals. Remove with scripts/repair/e2-opening-balance-audit.ts.
+  'services/ledger/openingBalanceAudit.ts': { 'journalEntry.updateMany': 1 },
   'services/ledger/postJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/openingStockImport.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/paymentSubmit.ts': { 'journalEntry.create': 4, 'accountingLedgerEntry.createMany': 4 },

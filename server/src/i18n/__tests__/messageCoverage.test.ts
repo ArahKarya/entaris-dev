@@ -49,6 +49,10 @@ const IGNORED = new Set<string>([
   '--since needs a date as YYYY-MM-DD, got {0}',
   '--gate must be one of: {0}',
   'Unknown argument: {0}',
+  // Refusals of the opening-balance audit command line (scripts/repair/e2-opening-balance-audit.ts,
+  // services/ledger/openingBalanceAuditArgs.ts), CLI only.
+  'Use either --apply or --dry-run.',
+  '--check-duplicates takes no other argument',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */

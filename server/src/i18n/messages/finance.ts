@@ -461,6 +461,9 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // PAYMENT_REQUEST_RULE (payment request and settlement expense lines)
   "Akun biaya": "Expense account",
   " Pengajuan dana tidak boleh memakai akun kontrol atau pajak; gunakan modul Pembayaran atau Uang Muka.": " Payment requests cannot use control or tax accounts; use the Payments or Deposits module.",
+  // OPENING_ACCOUNT_RULE (opening balance of an account, plan step 5 §2.4)
+  "Akun saldo awal": "Opening balance account",
+  " Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.": " Receivable, payable and deposit openings are set through the party opening balance; inventory through the opening stock import.",
   // journal lines (E2-R3, utils/journalLineRules.ts); {0} = "debit" / "kredit".
   "Baris {0}: {1}": "Line {0}: {1}",
   "kredit": "credit",
@@ -481,6 +484,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   // recurring runs (E2-R3, services/recurringExecute.ts)
   "Transaksi Berulang Gagal": "Recurring transaction failed",
   "Template \"{0}\" tidak diposting: {1} Jadwalnya tidak maju sampai template diperbaiki.": "Template \"{0}\" was not posted: {1} Its schedule does not move until the template is fixed.",
+  "Template sudah dijalankan hari ini; batalkan jurnalnya dulu bila ingin menjalankan ulang.": "The template has already run today; cancel its journal first to run it again.",
   // postJournal (E2-R3, services/ledger/postJournal.ts)
   "Tanggal jurnal {0} masuk tahun buku {1}, bukan tahun buku yang diharapkan.": "The journal date {0} falls in fiscal year {1}, not the expected fiscal year.",
   // party rules (E2-R4, services/ledger/partyRules.ts); role names translate inside the patterns.
