@@ -38,6 +38,8 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/gaFinance.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'services/gaVehicleServiceJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/goodsReceiptSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
+  // One-off repair (scripts/repair/e2-orphan-ale-repair.ts): cancels orphan ledger groups whole. Remove with the script.
+  'services/ledger/orphanAleRepair.ts': { 'sql:UPDATE accounting_ledger_entries': 1 },
   'services/ledger/postJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/openingStockImport.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/paymentSubmit.ts': { 'journalEntry.create': 4, 'accountingLedgerEntry.createMany': 4 },
