@@ -184,8 +184,9 @@ router.patch('/:id/balance', async (req: AuthRequest, res) => {
       // Revenue/expense accounts are refused ahead of the opening-balance service (5.7a): their stored
       // balance spans every year, closed ones too (E2-R15), so `new - stored` would post the
       // difference against a total the COA column (current year only) does not show. Only the root
-      // type of OPENING_ACCOUNT_RULE is checked here; control accounts stay as they were until 5.7a.
-      const rootTypeProblem = postableAccountProblem(account, { ...OPENING_ACCOUNT_RULE, allowGroupOrInactive: true }, null);
+      // type of OPENING_ACCOUNT_RULE matters here (restricted kinds are not passed, so control accounts
+      // stay as they were until 5.7a); an inactive account is refused as well.
+      const rootTypeProblem = postableAccountProblem(account, OPENING_ACCOUNT_RULE, null);
       if (rootTypeProblem) throw new BusinessError(rootTypeProblem.message, rootTypeProblem.code);
 
       const currentBalance = Number(account.balance);
