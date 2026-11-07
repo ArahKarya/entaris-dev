@@ -5,6 +5,7 @@ import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBa
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
+import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
@@ -70,9 +71,7 @@ export async function submitSalesInvoiceInTx(
   const salesAccount = await systemAccounts.getAccount('SALES');
   const serviceRevenueAccount = await systemAccounts.getAccount('SERVICE_REVENUE');
   const inventoryAccount = await systemAccounts.getAccount('INVENTORY');
-  // Prefer HPP Beras (5.1) over the generic COGS parent (5).
-  const hppBerasAccount = await tx.account.findFirst({ where: { accountNumber: '5.1' } });
-  const cogsAccount = hppBerasAccount || await systemAccounts.getAccount('COGS');
+  const cogsAccount = await cogsAccountFor(tx);
 
   // Pre-fetch all referenced account/serviceItem rows in batch — avoids
   // 2N findUnique calls inside the transaction.
@@ -254,12 +253,13 @@ export async function submitSalesInvoiceInTx(
   const pphAmountNum = pphAmount.toNumber();
   if (pphAmountNum > 0) {
     const pphAccount = await tx.account.findFirst({ where: { accountNumber: '1.5.4' } });
-    if (pphAccount) {
-      debitJournalItems.push({
-        accountId: pphAccount.id, debit: pphAmountNum, credit: 0,
-        description: `PPh Penjualan: ${invoice.invoiceNumber}`,
-      });
+    if (!pphAccount) {
+      throw new BusinessError('Akun "1.5.4 PPh 23 Penjualan" tidak ditemukan di bagan akun; PPh penjualan tidak bisa dijurnal.');
     }
+    debitJournalItems.push({
+      accountId: pphAccount.id, debit: pphAmountNum, credit: 0,
+      description: `PPh Penjualan: ${invoice.invoiceNumber}`,
+    });
   }
 
   const jvNumber = `JV-${invoice.invoiceNumber}`;

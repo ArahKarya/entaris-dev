@@ -5,6 +5,7 @@ import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBa
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
+import { cogsAccountFor, salesReturnAccount } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 
@@ -128,12 +129,8 @@ export async function submitSalesReturnInTx(
   const arAccount = await systemAccounts.getAccount('AR');
   const customerDepositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
   const inventoryAccount = await systemAccounts.getAccount('INVENTORY');
-  const hppBerasAccount = await tx.account.findFirst({ where: { accountNumber: '5.1' } });
-  const cogsAccount = hppBerasAccount || (await systemAccounts.getAccount('COGS'));
-  const returAccount = await tx.account.findFirst({ where: { accountNumber: '4.3' } });
-  if (!returAccount) {
-    throw new BusinessError('Akun "4.3 Retur Penjualan" tidak ditemukan di bagan akun.');
-  }
+  const cogsAccount = await cogsAccountFor(tx);
+  const returAccount = await salesReturnAccount(tx);
 
   // Resolve & validate each return line
   const resolved: Array<{
