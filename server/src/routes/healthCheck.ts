@@ -8,13 +8,13 @@ import { logger } from '../lib/logger';
 import { handleRouteError } from '../utils/errors';
 import {
   type CheckResult,
-  checkAleSync,
   checkAccountBalanceDrift,
   checkUnbalancedJournals,
-  checkOrphanAle,
   checkStockMovementMismatch,
   checkWarehouseStockDrift,
 } from './health/checks';
+import { checkAleSync, checkNonJournalAle, checkOrphanAle } from './health/aleChecks';
+import { checkPartyOutstandingDrift } from './health/partyChecks';
 import { checkRequiredTriggers } from './health/schemaGuards';
 import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import { checkAleFiscalYear } from './health/fiscalYearChecks';
@@ -41,6 +41,8 @@ router.get('/', async (_req, res) => {
       checkCustomerDepositVsGl(),
       checkAleFiscalYear(),
       checkFormerRoleAccounts(),
+      checkNonJournalAle(),
+      checkPartyOutstandingDrift(),
     ]);
 
     const overallStatus = checks.some((c) => c.status === 'error')

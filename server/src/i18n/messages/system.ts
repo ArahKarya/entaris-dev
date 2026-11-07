@@ -104,8 +104,6 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Gagal mengambil data aging.": "Failed to load aging data.",
   "Gagal mengambil data posisi kas.": "Failed to load the cash position.",
   "Gagal mengambil data supplier teratas.": "Failed to load top suppliers.",
-  "{0} akun memiliki perbedaan antara ALE dan JournalItem": "{0} accounts differ between ALE and JournalItem",
-  "ALE dan JournalItem sinkron": "ALE and JournalItem are in sync",
   "{0} akun memiliki saldo yang tidak sesuai dengan jurnal": "{0} accounts have balances that do not match the journals",
   "Semua saldo akun sesuai": "All account balances match",
   "{0} jurnal tidak balance (debit ≠ kredit)": "{0} journals are not balanced (debit ≠ credit)",
@@ -134,6 +132,14 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   // health check (E2-R14)
   "Pemeriksaan ini hanya mendeteksi. Koreksi lewat jurnal di periode berjalan atau skrip perbaikan.": "This check only detects. Correct it with a journal in the current period or a repair script.",
   "Hitung ulang saldo ditutup sementara: tahun buku tertutup masih mengurangi saldo laba rugi. Tersedia lagi setelah aturan saldo tunggal.": "Balance recalculation is temporarily closed: closed fiscal years still reduce the profit and loss balances. It returns once the single balance rule is in place.",
+  // health checks: ledger rows per journal, non-journal ledger rows, party outstanding (E2-R14)
+  "Baris Buku Besar setiap jurnal sama dengan baris jurnalnya": "The General Ledger rows of every journal match its journal lines",
+  "{0} jurnal STT dibatalkan dengan cara lama (jurnal -CXL); menunggu skrip data STT lama": "{0} STT journals were cancelled the old way (a -CXL journal); waiting for the legacy STT data script",
+  "{0} jurnal: baris Buku Besar berbeda dengan baris jurnalnya": "{0} journals: the General Ledger rows differ from the journal lines",
+  "{0} dokumen punya baris Buku Besar di luar jurnal; {1} di antaranya juga tercatat lewat jurnal (ganda)": "{0} documents have General Ledger rows outside a journal; {1} of them are also booked through a journal (counted twice)",
+  "Semua baris Buku Besar tercatat lewat jurnal": "Every General Ledger row is booked through a journal",
+  "{0} mitra: sisa saldo tersimpan berbeda dengan hitungan saldo awal + invoice + jurnal manual": "{0} parties: the stored outstanding amount differs from opening balance + invoices + manual journals",
+  "Sisa saldo tersimpan semua mitra sama dengan hitungannya": "The stored outstanding amount of every party matches its calculation",
   // health checks: schema guards (E7-R11)
   "{0} trigger database hilang dan {1} nonaktif; jejak audit bisa diubah. Jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).": "{0} database triggers are missing and {1} are disabled; the audit trail can be changed. Re-run the trigger migration SQL as described in MIGRATION.md (Migrasi trigger jejak audit).",
   "{0} trigger database hilang; jejak audit bisa diubah. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).": "{0} database triggers are missing; the audit trail can be changed. After restoring an older backup, restart the app; if the check stays red, re-run the trigger migration SQL as described in MIGRATION.md (Migrasi trigger jejak audit).",

@@ -13,6 +13,8 @@ const fixes = vi.hoisted(() => ({
 }));
 vi.mock('../health/fixes', () => fixes);
 vi.mock('../health/checks', () => ({}));
+vi.mock('../health/aleChecks', () => ({}));
+vi.mock('../health/partyChecks', () => ({}));
 vi.mock('../health/fiscalYearChecks', () => ({}));
 vi.mock('../health/formerRoleAccountChecks', () => ({}));
 vi.mock('../../lib/prisma', () => ({ prisma: { auditLog: { create: vi.fn(async () => ({})) } } }));
