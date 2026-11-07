@@ -29,6 +29,7 @@ import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { submitSalesReturnInTx } from '../../services/salesReturnSubmit';
 import { submitProductionRunInTx } from '../../services/productionRunSubmit';
 import { ACCOUNT_MAPPING_MISSING } from '../../types/systemAccounts';
+import { ACCOUNT_GROUP, ACCOUNT_INACTIVE } from '../../services/ledger/accountGuard';
 import { BusinessError } from '../../utils/errors';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -153,6 +154,24 @@ async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
   return 'NO_ERROR';
 }
 
+/** 60 kg in at 10.000, 60 kg out at 20.000 with a 30.000 fixed conversion cost: a gain well over it. */
+async function gainRun(tx: Tx) {
+  const wh = await warehouse(tx);
+  const input = await stockedItem(tx, wh.id, 100, 10_000, 'IN');
+  const output = await stockedItem(tx, wh.id, 0, 0, 'OUT');
+  return submitProductionRunInTx(
+    tx,
+    {
+      date: `${Y}-03-05`,
+      warehouseId: wh.id,
+      inputs: [{ itemId: input.id, quantity: 60 }],
+      outputs: [{ itemId: output.id, quantity: 60, unitPrice: 20_000 }],
+      costs: [{ description: 'IT conversion', costSide: 'InputSide', basis: 'Fixed', rate: 30_000 }],
+    } as any,
+    userId,
+  );
+}
+
 d('COGS and sales return post to mapped accounts', () => {
   it('debits the account mapped to COGS and leaves HPP Beras (5.1) alone', async () => {
     await inRollback(async (tx) => {
@@ -180,6 +199,26 @@ d('COGS and sales return post to mapped accounts', () => {
         ),
       );
       expect(code).toBe(ACCOUNT_MAPPING_MISSING);
+    });
+  });
+
+  it.each([
+    ['a group account', { isGroup: true }, ACCOUNT_GROUP],
+    ['an inactive account', { isActive: false }, ACCOUNT_INACTIVE],
+  ])('rejects the invoice when COGS is mapped to %s', async (_label, patch, expected) => {
+    await inRollback(async (tx) => {
+      const cogs = await fixtureAccount(tx, 'COGS', 'EXPENSE');
+      await tx.account.update({ where: { id: cogs.id }, data: patch });
+      await mapRole(tx, 'COGS', cogs.id);
+      const customer = await tx.party.create({ data: { name: `IT-4.13a Customer ${tag()}`, partyType: 'Customer', isActive: true } });
+      const code = await codeOf(
+        submitSalesInvoiceInTx(
+          tx,
+          { date: `${Y}-03-01`, partyId: customer.id, items: [{ itemName: 'jasa', itemType: 'service', quantity: 1, rate: 1_000 }] } as any,
+          userId,
+        ),
+      );
+      expect(code).toBe(expected);
     });
   });
 
@@ -238,24 +277,6 @@ d('COGS and sales return post to mapped accounts', () => {
 });
 
 d('production conversion posts to the mapped account', () => {
-  /** 60 kg in at 10.000, 60 kg out at 20.000 with a 30.000 fixed conversion cost: a gain well over it. */
-  async function gainRun(tx: Tx) {
-    const wh = await warehouse(tx);
-    const input = await stockedItem(tx, wh.id, 100, 10_000, 'IN');
-    const output = await stockedItem(tx, wh.id, 0, 0, 'OUT');
-    return submitProductionRunInTx(
-      tx,
-      {
-        date: `${Y}-03-05`,
-        warehouseId: wh.id,
-        inputs: [{ itemId: input.id, quantity: 60 }],
-        outputs: [{ itemId: output.id, quantity: 60, unitPrice: 20_000 }],
-        costs: [{ description: 'IT conversion', costSide: 'InputSide', basis: 'Fixed', rate: 30_000 }],
-      } as any,
-      userId,
-    );
-  }
-
   it('fails with ACCOUNT_MAPPING_MISSING for a gain when PRODUCTION_CONVERSION is unmapped', async () => {
     await inRollback(async (tx) => {
       const cogs = await fixtureAccount(tx, 'COGS', 'EXPENSE');
@@ -302,6 +323,13 @@ d('production_conversion_mapping loose SQL', () => {
       expect(await mappedNumbers(tx)).toEqual(['5.12']);
       await tx.$executeRawUnsafe(MIGRATION_SQL);
       expect(await mappedNumbers(tx)).toEqual(['5.12']);
+
+      const cogs = await fixtureAccount(tx, 'COGS', 'EXPENSE');
+      await mapRole(tx, 'COGS', cogs.id);
+      const run = await gainRun(tx);
+      const line = await lineOn(tx, `JV-${run!.runNumber}`, target.id);
+      expect(line.credit).toBe(30_000);
+      expect(line.accountIds).not.toContain(legacy.id);
     });
   });
 

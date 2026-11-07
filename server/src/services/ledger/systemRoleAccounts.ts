@@ -1,6 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { mappedAccount, type MappedAccount } from '../systemAccounts';
+import { BusinessError } from '../../utils/errors';
+import { postableAccountProblem } from './accountGuard';
+import { SYSTEM_ACCOUNT_ROLES, type SystemAccountRole } from '../../types/systemAccounts';
 
 type Tx = Prisma.TransactionClient;
 
@@ -8,18 +11,31 @@ type Tx = Prisma.TransactionClient;
  * Posting accounts for COGS, sales returns and the production conversion credit. All three come
  * from the system account mapping (read through `tx`); no account number is hardcoded, so an
  * accountant who remaps a role sees the next posting follow it. An unmapped role throws
- * ACCOUNT_MAPPING_MISSING (400) instead of falling back to another account.
+ * ACCOUNT_MAPPING_MISSING (400) instead of falling back to another account. A mapped account that
+ * is a group or inactive fails with ACCOUNT_GROUP / ACCOUNT_INACTIVE (400): these journals are
+ * written without postJournal, so the check is made here rather than posting onto a group.
  */
+async function postableMappedAccount(tx: Tx, role: SystemAccountRole): Promise<MappedAccount> {
+  const mapped = await mappedAccount(tx, role);
+  const acc = await tx.account.findUnique({
+    where: { id: mapped.id },
+    select: { id: true, accountNumber: true, name: true, rootType: true, isGroup: true, isActive: true },
+  });
+  const problem = postableAccountProblem(acc, { label: SYSTEM_ACCOUNT_ROLES[role].label }, null);
+  if (problem) throw new BusinessError(problem.message, problem.code);
+  return mapped;
+}
+
 export function cogsAccountFor(tx: Tx): Promise<MappedAccount> {
-  return mappedAccount(tx, 'COGS');
+  return postableMappedAccount(tx, 'COGS');
 }
 
 export function salesReturnAccount(tx: Tx): Promise<MappedAccount> {
-  return mappedAccount(tx, 'SALES_RETURN');
+  return postableMappedAccount(tx, 'SALES_RETURN');
 }
 
 export function productionConversionAccount(tx: Tx): Promise<MappedAccount> {
-  return mappedAccount(tx, 'PRODUCTION_CONVERSION');
+  return postableMappedAccount(tx, 'PRODUCTION_CONVERSION');
 }
 
 export interface ProductionDiffSplit {

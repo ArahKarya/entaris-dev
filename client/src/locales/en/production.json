@@ -201,12 +201,12 @@
     "edit": "Edit",
     "glSummary": {
       "byProductIn": "By-products in (NRV)",
-      "conversionCharged": "Conversion costs charged (5.12)",
+      "conversionCharged": "Conversion costs charged",
       "conversionDiff": "Difference (conversion costs)",
       "mainIn": "Main output in",
       "materialOut": "Raw materials out",
-      "productionLoss": "Production loss (5.1)",
-      "remainderToCogs": "Remaining difference to rice COGS (5.1)",
+      "productionLoss": "Production loss",
+      "remainderToCogs": "Remaining difference to COGS",
       "title": "Cost summary (GL)",
       "totalInputCost": "Total input cost",
       "totalOutputValue": "Total output value"

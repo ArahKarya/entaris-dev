@@ -628,7 +628,9 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                       <span className="font-mono font-medium text-foreground">{formatRupiah(run.glSummary.byproductValue)}</span>
                     </div>
                     {(() => {
-                      const lines = (journal?.items ?? []).filter((it: any) => ['5.1', '5.12'].includes(it.account?.accountNumber));
+                      const cogsId = run.diffAccountIds?.cogs;
+                      const conversionId = run.diffAccountIds?.conversion;
+                      const lines = (journal?.items ?? []).filter((it: any) => it.account?.id && (it.account.id === cogsId || it.account.id === conversionId));
                       if (lines.length === 0) {
                         return (
                           <div className="border-t border-border pt-2 flex justify-between text-sm">
@@ -646,7 +648,7 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                             return (
                               <div key={it.id} className="flex justify-between text-sm">
                                 <span className="text-muted-foreground font-medium">
-                                  {it.account.accountNumber === '5.12' ? t('productionDetailDrawer.glSummary.conversionCharged') : cr ? t('productionDetailDrawer.glSummary.remainderToCogs') : t('productionDetailDrawer.glSummary.productionLoss')}
+                                  {it.account.id === conversionId ? t('productionDetailDrawer.glSummary.conversionCharged') : cr ? t('productionDetailDrawer.glSummary.remainderToCogs') : t('productionDetailDrawer.glSummary.productionLoss')}
                                 </span>
                                 <span className={cn('font-mono font-semibold', cr ? 'text-success-text' : 'text-danger-text')}>
                                   {formatRupiah(Number(cr ? it.credit : it.debit))}{cr ? ' (CR)' : ' (DR)'}
