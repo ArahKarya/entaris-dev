@@ -13,7 +13,7 @@ export interface WipeResult {
 /**
  * Delete demo data in exclusive mode: empty every data table, delete the masters the demo created,
  * drop the demo's audit and notification rows, then reset the balances that were derived from the
- * transactions. Settings, users, chart of accounts and pre-existing masters are kept.
+ * transactions and clear the cut-over date. Settings, users, chart of accounts and pre-existing masters are kept.
  */
 export async function wipeDemoData(): Promise<WipeResult> {
   return prisma.$transaction(
@@ -47,11 +47,18 @@ export async function wipeDemoData(): Promise<WipeResult> {
   );
 }
 
-/** With every transaction gone, derived balances return to their opening values. */
-async function resetDerivedBalances(tx: Prisma.TransactionClient): Promise<void> {
+/**
+ * With every transaction gone, derived balances return to their opening values and the cut-over
+ * date is cleared. Exported for the cut-over integration test (the TRUNCATE above needs a database
+ * without business data).
+ */
+export async function resetDerivedBalances(tx: Prisma.TransactionClient): Promise<void> {
   await recalculateAccountBalances(tx);
   await tx.$executeRawUnsafe(
     'UPDATE "parties" SET "outstanding_amount" = "opening_outstanding", "deposit_balance" = 0, "customer_deposit_balance" = 0',
   );
   await tx.$executeRawUnsafe('UPDATE "inventory_items" SET "current_stock" = 0');
+  // The demo's opening balances are gone with its journals, so the cut-over date they fixed goes too
+  // (E2-R11); company_settings itself is kept (KEEP_TABLES).
+  await tx.$executeRawUnsafe('UPDATE "company_settings" SET "cutover_date" = NULL');
 }

@@ -271,7 +271,7 @@ export interface AssertPostableOptions {
    * the same account would both hold a share lock and then deadlock on the balance UPDATE.
    */
   lockRows?: boolean;
-  /** Rule per account id, replacing `rule` for that account (only the remap reclass, plan §2.3). */
+  /** Rule per account id, replacing `rule` for that account (the remap reclass, plan §2.3, and the opening balance). */
   lineRules?: ReadonlyMap<string, PostableRule>;
 }
 

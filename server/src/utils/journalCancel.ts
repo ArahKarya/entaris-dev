@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { updateAccountBalance } from './accountBalance';
 import { journalFamilyWhere } from './journalFamily';
-import { assertPeriodOpen, type PeriodLabel } from './periodGuard';
+import { assertPeriodOpen, type PeriodGuardOptions, type PeriodLabel } from './periodGuard';
 import { cancelTrailData, tryClaimCancel, type CancelTrail } from './cancelClaim';
 
 type Tx = Prisma.TransactionClient;
@@ -20,14 +20,16 @@ type JournalWithItems = Prisma.JournalEntryGetPayload<{ include: { items: true }
  * The status flip is a conditional claim on the row, so of two concurrent voids only one
  * reverses the balances; `journal.status` read earlier by the caller may be stale. `trail` (the
  * user and reason of a user-initiated cancel) is stored on the journal; system voids omit it.
+ * `periodOptions` goes to the period guard (default: the lock date applies); see cancelJournalsInTx.
  */
 export async function voidJournalInTx(
   tx: Tx,
   journal: JournalWithItems,
   label: PeriodLabel = 'jurnal',
   trail?: CancelTrail,
+  periodOptions?: PeriodGuardOptions,
 ): Promise<boolean> {
-  await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId, date: journal.date }, label);
+  await assertPeriodOpen(tx, { fiscalYearId: journal.fiscalYearId, date: journal.date }, label, periodOptions);
   if (journal.status === 'Cancelled') return false;
 
   const claimed = await tryClaimCancel(tx.journalEntry, journal.id, {

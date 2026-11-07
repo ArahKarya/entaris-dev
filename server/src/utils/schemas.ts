@@ -446,9 +446,25 @@ export const UpdatePartySchema = CreatePartySchema.partial().extend({
   isActive: z.boolean().optional(),
 });
 
-// Opening Balance
+// opening balance (E2-R11): PATCH /coa/:id/balance -> services/ledger/openingBalance.ts
+/** Plain amount with at most 2 decimals, optional minus (a contra balance), below 10^13 (Decimal(15,2)). */
+const OPENING_AMOUNT = /^-?\d{1,13}(\.\d{1,2})?$/;
 export const SetBalanceSchema = z.object({
-  balance: z.coerce.number({ error: 'Saldo harus berupa angka.' }),
+  balance: z
+    .union([z.number(), z.string()], { error: 'Saldo harus berupa angka.' })
+    .transform((v) => (typeof v === 'number' ? (Number.isFinite(v) ? String(v) : '') : v.trim()))
+    .refine(
+      (v) => OPENING_AMOUNT.test(v),
+      'Saldo harus angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal dan paling banyak 2 angka desimal.',
+    ),
+  asOfDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal saldo awal harus berformat YYYY-MM-DD.')
+    .refine((d) => !Number.isNaN(Date.parse(`${d}T00:00:00.000Z`)) && new Date(`${d}T00:00:00.000Z`).toISOString().startsWith(d), 'Tanggal saldo awal harus berformat YYYY-MM-DD.')
+    .optional(),
+  throughLock: z
+    .object({ reason: z.string().trim().min(10, 'Alasan menembus kunci periode minimal 10 karakter.') })
+    .optional(),
 });
 
 // Company Settings

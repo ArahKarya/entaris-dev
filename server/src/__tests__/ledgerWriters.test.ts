@@ -18,7 +18,6 @@ const RAW_SQL = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+"?(accounting_ledger_e
 type Counts = Record<string, number>;
 
 const ALLOWLIST: Record<string, Counts> = {
-  'routes/coa.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/customerDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
   'routes/fixedAssets.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/import/coa.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },

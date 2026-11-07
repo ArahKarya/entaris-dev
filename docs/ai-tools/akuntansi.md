@@ -16,7 +16,7 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 
 1. **Bagan akun (COA)**: pohon akun bernomor bertitik (`1.1.1`, `2.1.1`, ...). Digit pertama menentukan golongan: 1 Aset, 2 Kewajiban, 3 Ekuitas, 4 dan 7 Pendapatan, 5, 6, dan 8 Beban. Tipe akun selalu diturunkan dari digit pertama; nilai `rootType`/`accountType` yang berbeda ditolak. Akun grup (`isGroup`) hanya pengelompok dan tidak boleh dijurnal; transaksi selalu ke akun detail aktif. Cari `accountId` lewat `coa_flat` sebelum membuat jurnal atau pengajuan.
 2. **Jurnal manual**: `je_create` memposting jurnal `JV-…` langsung berstatus Submitted (tidak ada draf). Dipakai untuk koreksi, transfer antar bank, dan penyesuaian. Aturannya sama dengan seluruh posting buku besar: minimal 2 baris bernilai, total debit tepat sama dengan total kredit (tanpa toleransi sen, `JOURNAL_UNBALANCED`), maksimal 2 desimal, akun detail yang aktif. Baris ke akun kontrol (Piutang Usaha, Hutang Usaha, Persediaan, PPN Masukan/Keluaran, Hutang Belum Tagih) butuh capability `journal.control` (default hanya Admin, `ACCOUNT_CONTROL`); akun Uang Muka Customer/Supplier selalu ditolak, koreksinya lewat modul Uang Muka. Pihak (`partyId`) wajib di baris Piutang Usaha (Customer) dan Hutang Usaha (Supplier) dan dilarang di baris lain (`PARTY_REQUIRED`, `PARTY_NOT_ALLOWED`, `PARTY_TYPE_MISMATCH`); untuk beban, tulis nama Supplier di keterangan. Saldo piutang/hutang pihak dihitung ulang dari dokumen ditambah penyesuaian manual, juga saat jurnal dibatalkan. `je_cancel` hanya membatalkan jurnal buatan manusia: sumber MANUAL (`je_create`), IMPORT, RECURRING, atau CASH_BOOK (Draft Buku Kas), dan butuh capability `doc.cancel`. Jurnal dari modul lain (pembayaran, faktur, STT, HPP, uang muka, tutup buku, penyusutan, saldo awal) dan jurnal lama yang sumbernya tidak tercatat ditolak dengan `JOURNAL_NOT_MANUAL`; batalkan dari dokumen asalnya, atau buat jurnal balik manual dengan `je_create`.
-3. **Saldo awal**: `coa_set_balance` menyetel saldo akun detail ke nilai tertentu. Selisihnya diposting sebagai jurnal `OB-…` melawan Ekuitas Saldo Awal (3.1).
+3. **Saldo awal**: `coa_set_balance` menetapkan saldo akun neraca (aset, kewajiban, ekuitas) **per tanggal cut-over** (awal tahun buku terbuka paling awal, tersimpan saat saldo awal pertama diposting; `asOfDate` lain ditolak `OPENING_DATE_MISMATCH`). Selisih terhadap buku besar sebelum tanggal itu diposting sebagai satu jurnal `JV-…` bersumber OPENING bertanggal cut-over melawan Ekuitas Saldo Awal (3.1); input ulang mengganti jurnal saldo awal berkunci akun itu, nilai yang sama tidak menulis apa pun. Pendapatan/beban, akun kontrol (piutang, hutang, uang muka, hutang belum ditagih), persediaan, 3.1 dan 3.4 ditolak. Akun yang masih punya jurnal saldo awal lama tanpa kunci ditolak `OPENING_LEGACY_REVIEW` sampai akuntan menjalankan audit saldo awal. Bulan cut-over yang terkunci hanya bisa ditembus pemegang `period.lock` dari layar COA, tidak lewat AIRA.
 4. **Tahun buku**: setiap posting wajib jatuh pada tahun buku yang terbuka (`getOpenFiscalYear`). `fy_create` membuat periode; `fy_close` menutup buku (jurnal `CLOSE-<nama>`); `fy_reopen` membukanya lagi. Periode yang ditutup menolak posting baru dengan kode `PERIOD_CLOSED`; tanggal yang tidak tercakup tahun buku mana pun ditolak dengan `FISCAL_YEAR_MISSING`. Di dalam tahun buku yang terbuka berlaku **kunci periode bulanan**: `period_lock_get` menampilkan tanggal kuncinya, dan posting, edit, atau pembatalan bertanggal pada atau sebelum tanggal itu ditolak dengan `PERIOD_LOCKED` (quotation, SO, PO, proforma, inquiry, dan surat jalan sementara dikecualikan karena tanpa efek GL/stok). `period_lock_set` memajukan, memundurkan, atau membuka kunci; butuh capability `period.lock` (default hanya Admin), dan memundurkan atau membuka kunci wajib alasan. Koreksi untuk bulan yang terkunci dibuat di periode terbuka, atau minta pemegang `period.lock` memundurkan kunci. Selama tutup atau buka buku tahun itu masih berjalan, posting ke tahun tersebut menunggu paling lama 3 detik lalu ditolak dengan `PERIOD_BUSY`; tidak ada yang tersimpan, jadi ulangi setelah proses itu selesai.
 5. **Akun sistem**: `sysacct_get`/`sysacct_update` memetakan peran akun (Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, dst.) ke akun COA konkret. Semua auto-posting membaca pemetaan ini.
 6. **Pajak**: `tax_get_config` dan tiga tool tulisnya mengelola tarif (PPN penjualan/pembelian, PPh potong). `tax_report` meringkas PPN keluaran, PPN masukan, dan PPh per bulan dari faktur berstatus Submitted/Paid/PartiallyPaid/Overdue.
@@ -29,8 +29,8 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 |------|-------|--------|---------|
 | `je_create` | sesuai baris | sesuai baris | Total debit tepat = total kredit; satu baris tidak boleh debit sekaligus kredit; akun kontrol butuh `journal.control`, akun uang muka ditolak |
 | `je_cancel` | (membalik) | (membalik) | Saldo akun dibalik, status Cancelled |
-| `coa_set_balance` aset/beban naik | akun | Ekuitas Saldo Awal 3.1 | Turun: kebalikannya |
-| `coa_set_balance` kewajiban/ekuitas/pendapatan naik | Ekuitas Saldo Awal 3.1 | akun | Turun: kebalikannya |
+| `coa_set_balance` aset naik (per cut-over) | akun | Ekuitas Saldo Awal 3.1 | Turun: kebalikannya |
+| `coa_set_balance` kewajiban/ekuitas naik (per cut-over) | Ekuitas Saldo Awal 3.1 | akun | Turun: kebalikannya |
 | `fy_close` (laba) | Laba Tahun Berjalan 3.4 | Laba Ditahan 3.2 | Rugi: kebalikannya; saldo berjalan akun pendapatan & beban tahun itu di-nol-kan |
 | `fy_reopen` | (tanpa jurnal baru) | (tanpa jurnal baru) | Jurnal penutup `CLOSE-<nama>` yang aktif dibatalkan, bukan dibalik dan bukan dihapus (status Cancelled beserta alasannya); efeknya pada 3.2 dan 3.4 hilang dan saldo pendapatan/beban kembali. Penutupan berikutnya bernomor `CLOSE-<nama>-R2`, `-R3`, ... |
 | `fa_depreciate` / bulk | Beban Penyusutan (akun aset) | Akumulasi Penyusutan | Jurnal `DEP-…`; nilai buku aset berkurang |
@@ -68,7 +68,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | Bagan akun, COA | `Account`, `accountNumber`, `rootType`, `isGroup` |
 | Jurnal umum / JV | `JournalEntry`, `entryNumber` `JV-…`, status `Submitted`/`Cancelled` |
 | Buku besar | `AccountingLedgerEntry` (ledger tak-terhapus) |
-| Saldo awal | Jurnal `OB-…`, akun sistem `OPENING_EQUITY` (3.1) |
+| Saldo awal | Jurnal `JV-…` bersumber OPENING bertanggal cut-over (jurnal lama `OB-…`), akun sistem `OPENING_EQUITY` (3.1) |
 | Tahun buku, periode | `FiscalYear`, `isClosed`, `getOpenFiscalYear` |
 | Tutup buku | Jurnal `CLOSE-<nama>`, `RETAINED_EARNINGS` (3.2), `CURRENT_PROFIT` (3.4) |
 | Akun sistem | `SystemAccountMapping`, peran akun (role) |
@@ -320,7 +320,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 ### coa_set_balance
 
-**Ringkasan:** Menetapkan saldo awal sebuah akun detail ke nilai balance. Selisih terhadap saldo sekarang diposting sebagai jurnal Saldo Awal (OB) berlawanan dengan akun Ekuitas Saldo Awal (3.1) pada tahun buku terbuka.
+**Ringkasan:** Menetapkan saldo awal akun neraca (aset, kewajiban, ekuitas) per tanggal cut-over. balance = saldo akun pada tanggal cut-over di sisi normalnya (negatif untuk akun kontra). Selisih terhadap buku besar sebelum tanggal cut-over (ditambah saldo awal yang sudah tercatat dengan cara lain pada hari itu, mis. setoran modal berlawanan 3.1) diposting sebagai satu jurnal saldo awal berlawanan dengan Ekuitas Saldo Awal (3.1). Saldo awal piutang, hutang, dan uang muka diisi per pihak; persediaan lewat impor stok awal.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -332,8 +332,9 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| `id` | path | `string` | ya | ID akun detail (bukan grup). |
-| `balance` | body | `number` | ya | Saldo akhir yang diinginkan (angka rupiah; bukan selisih). |
+| `id` | path | `string` | ya | ID akun detail neraca (bukan grup, bukan akun kontrol, bukan 3.1/3.4). |
+| `balance` | body | `number` | ya | Saldo akun pada tanggal cut-over (rupiah, paling banyak 2 desimal; bukan selisih). Negatif untuk saldo kontra. |
+| `asOfDate` | body | `date` | tidak | Opsional, YYYY-MM-DD. Harus sama dengan tanggal cut-over; kosongkan untuk memakai tanggal cut-over. |
 
 **Contoh pemanggilan**
 
@@ -355,26 +356,32 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Set saldo awal akun <id> menjadi 1? Selisih diposting ke Ekuitas Saldo Awal (3.1)."
+  "confirm": "Set saldo awal akun <id> per tanggal cut-over menjadi 1? Selisih terhadap buku besar sebelum cut-over diposting ke Ekuitas Saldo Awal (3.1); jurnal saldo awal berkunci yang lama diganti."
 }
 ```
 
-**Isi hasil:** Akun dengan saldo terbaru.
+**Isi hasil:** Akun terbaru + opening { asOfDate (tanggal cut-over), action posted|replaced|cancelled|unchanged, journalNumber, cancelled (nomor jurnal saldo awal lama yang dibatalkan) }.
 
-**Efek pembukuan/stok:** Jurnal OB-… status Submitted + ledger: akun ASET/BEBAN delta>0 → DR akun / CR 3.1 (delta<0 sebaliknya); akun KEWAJIBAN/EKUITAS/PENDAPATAN delta>0 → CR akun / DR 3.1. Saldo kedua akun diperbarui. Tanpa selisih (<0,01) tidak ada jurnal.
+**Efek pembukuan/stok:** Satu jurnal JV- bersumber OPENING (kunci per akun) bertanggal cut-over: selisih = balance − saldo buku besar sebelum cut-over. Akun ASET selisih>0 → DR akun / CR 3.1 (selisih<0 sebaliknya); KEWAJIBAN/EKUITAS selisih>0 → CR akun / DR 3.1. Bila sudah ada jurnal saldo awal berkunci untuk akun ini, jurnal itu dibatalkan (void) dulu lalu diganti; nilai yang sama tidak menulis apa pun (unchanged). Jurnal saldo awal lama tanpa kunci tidak pernah dibatalkan otomatis; tanggal cut-over tersimpan saat saldo awal pertama diposting.
 
-**Teks konfirmasi:** Set saldo awal akun {id} menjadi {balance}? Selisih diposting ke Ekuitas Saldo Awal (3.1).
+**Teks konfirmasi:** Set saldo awal akun {id} per tanggal cut-over menjadi {balance}? Selisih terhadap buku besar sebelum cut-over diposting ke Ekuitas Saldo Awal (3.1); jurnal saldo awal berkunci yang lama diganti.
 
 **Prasyarat**
 
-- Ada tahun buku terbuka untuk hari ini.
-- Akun bukan akun grup.
+- Ada tahun buku terbuka (tanggal cut-over = awal tahun buku terbuka paling awal bila belum tersimpan).
+- Akun detail aktif bertipe aset, kewajiban, atau ekuitas; bukan akun kontrol (piutang, hutang, uang muka, hutang belum ditagih, persediaan) dan bukan 3.1/3.4.
+- Akun tidak punya jurnal saldo awal lama tanpa kunci (jalankan audit saldo awal dulu).
 - Akun sistem OPENING_EQUITY terpetakan.
 
 **Error umum**
 
-- 400: akun grup tidak bisa diberi saldo
-- 400: tidak ada tahun buku terbuka
+- 400: akun grup, tidak aktif, pendapatan/beban, atau akun kontrol/persediaan (ACCOUNT_GROUP, ACCOUNT_INACTIVE, ACCOUNT_ROOT_TYPE, ACCOUNT_CONTROL)
+- 400: akun Ekuitas Saldo Awal atau Laba Tahun Berjalan (OPENING_ACCOUNT_KIND)
+- 400: asOfDate bukan tanggal cut-over (OPENING_DATE_MISMATCH)
+- 400: masih ada jurnal saldo awal lama tanpa kunci (OPENING_LEGACY_REVIEW)
+- 400: tahun buku tanggal cut-over tertutup (PERIOD_CLOSED) atau bulannya terkunci (PERIOD_LOCKED); AIRA tidak dapat menembus kunci periode
+- 400: tidak ada tahun buku terbuka (FISCAL_YEAR_MISSING)
+- 400: balance bukan angka dengan paling banyak 2 desimal
 
 **Tool terkait:** [`coa_flat`](#coa_flat), [`je_list`](#je_list)
 
