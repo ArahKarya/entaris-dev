@@ -12,6 +12,7 @@ import { calcWeightedAverage } from '../utils/weightedAverage';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
 import { systemAccounts } from './systemAccounts';
+import { productionDiffAccounts, splitProductionDiff } from './ledger/systemRoleAccounts';
 import { settleCogsBackfillForItem } from './cogsBackfillService';
 import type { SubmitProductionRunInput } from './productionRunSubmit';
 import { persistOeeInTx } from './oee';
@@ -435,16 +436,13 @@ export async function editProductionRunInTx(
     });
   }
 
-  // Selisih: lihat aturan di productionRunSubmit.ts (5.12 s.d. biaya konversi, sisa 5.1).
+  // Selisih: lihat aturan di productionRunSubmit.ts (konversi s.d. biaya konversi, sisa HPP).
   const diff = totalOutputCost.minus(totalInputCost).toDecimalPlaces(2).toNumber();
   if (Math.abs(diff) > 0) {
-    const hppBerasAccount = await tx.account.findFirst({ where: { accountNumber: '5.1' } });
-    const cogsAccount = hppBerasAccount || await systemAccounts.getAccount('COGS');
+    const { cogs: cogsAccount, conversion: conversionAccount } = await productionDiffAccounts(tx, diff);
     if (diff > 0) {
-      const conversionAccount = await tx.account.findFirst({ where: { accountNumber: '5.12', isActive: true } });
       const convCost = totalCostInputSide.plus(totalCostOutputSide).toDecimalPlaces(2).toNumber();
-      const to512 = conversionAccount ? Math.min(diff, Math.max(convCost, 0)) : 0;
-      const to51 = new Decimal(diff).minus(to512).toDecimalPlaces(2).toNumber();
+      const { toConversion: to512, toCogs: to51 } = splitProductionDiff(diff, convCost);
       if (to512 > 0) {
         journalItems.push({
           accountId: conversionAccount!.id,

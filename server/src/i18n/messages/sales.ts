@@ -182,7 +182,7 @@ export const SALES_MESSAGES: MessageDictionary = {
   "Status retur tidak dikenal.": "Unknown return status.",
   "Invoice sudah dibatalkan, tidak bisa diretur.": "Invoice is cancelled and cannot be returned.",
   "Invoice masih draft, belum bisa diretur.": "Invoice is still a draft and cannot be returned yet.",
-  "Akun \"4.3 Retur Penjualan\" tidak ditemukan di bagan akun.": "Account \"4.3 Retur Penjualan\" not found in the chart of accounts.",
+  "Akun \"1.5.4 PPh 23 Penjualan\" tidak ditemukan di bagan akun; PPh penjualan tidak bisa dijurnal.": "Account \"1.5.4 PPh 23 Penjualan\" not found in the chart of accounts; sales withholding tax cannot be journaled.",
   "Baris invoice tidak ditemukan (id={0}).": "Invoice line not found (id={0}).",
   "Qty retur \"{0}\" ({1}) melebihi sisa yang bisa diretur ({2}).": "Return qty \"{0}\" ({1}) exceeds the returnable remainder ({2}).",
   "Nilai retur tidak boleh negatif.": "Return value cannot be negative.",

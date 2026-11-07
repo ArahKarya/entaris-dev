@@ -438,7 +438,7 @@ export const DEFAULT_ACCOUNT_NUMBERS: Record<SystemAccountRole, string | string[
   OTHER_INCOME: '7.4',
   OTHER_EXPENSE: '8.7',
   // Biaya Konversi Produksi
-  PRODUCTION_CONVERSION: '6.39',
+  PRODUCTION_CONVERSION: '5.12',
   // Selisih Persediaan
   INVENTORY_VARIANCE: '6.38',
   // Pembulatan

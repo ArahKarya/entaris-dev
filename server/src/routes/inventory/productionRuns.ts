@@ -183,7 +183,18 @@ router.get('/:id', async (req, res) => {
       yieldPct: inputQty > 0 ? (mainQty / inputQty) * 100 : null,
     };
 
-    return res.json({ ...run, journal: journal || null, glSummary });
+    // Accounts the value difference was posted to, so the drawer picks its lines by account, not by number.
+    const diffMaps = await prisma.systemAccountMapping.findMany({
+      where: { role: { in: ['COGS', 'PRODUCTION_CONVERSION'] } },
+      orderBy: { sortOrder: 'asc' },
+      select: { role: true, accountId: true },
+    });
+    const diffAccountIds = {
+      cogs: diffMaps.find((m) => m.role === 'COGS')?.accountId ?? null,
+      conversion: diffMaps.find((m) => m.role === 'PRODUCTION_CONVERSION')?.accountId ?? null,
+    };
+
+    return res.json({ ...run, journal: journal || null, glSummary, diffAccountIds });
   } catch (error) {
     logger.error({ error }, 'GET /inventory/production-runs/:id error');
     return res.status(500).json({ error: 'Gagal mengambil detail proses produksi.' });

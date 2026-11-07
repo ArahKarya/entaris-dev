@@ -16,7 +16,7 @@ const ACCOUNTS: Record<string, string> = {
   ACCRUED_PAYABLE: 'acc-2.1.5',
   AR: 'acc-ar',
   CUSTOMER_DEPOSIT: 'acc-dep',
-  COGS: 'acc-5',
+  COGS: 'acc-cogs',
   TAX_OUTPUT: 'acc-ppn',
 };
 vi.mock('../systemAccounts', () => ({
@@ -24,6 +24,7 @@ vi.mock('../systemAccounts', () => ({
     getAccount: vi.fn(async (role: string) => ({ id: ACCOUNTS[role] })),
     getAccounts: vi.fn(async (role: string) => [{ id: ACCOUNTS[role] }]),
   },
+  mappedAccount: vi.fn(async (_tx: unknown, role: string) => ({ id: `acc-${role}`, accountNumber: role, name: role })),
 }));
 vi.mock('../temporaryDeliveryNote', () => ({ linkTemporaryNotesToDoInTx: vi.fn(async () => undefined) }));
 vi.mock('../salesOrderDelivery', () => ({
@@ -73,14 +74,13 @@ describe('goods receipt movements', () => {
 });
 
 describe('delivery order movements', () => {
-  const doHandlers = (hppBeras: boolean) => ({
+  const doHandlers = () => ({
     'party.findUnique': () => ({ id: 'cust', name: 'Cust', isActive: true, partyType: 'Customer' }),
     'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true }],
     'inventoryItem.findUnique': () => ({ id: 'i1', name: 'Beras', unit: 'Kg', averageCost: '9000' }),
     'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
     'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '100' }],
     'inventoryStock.findUnique': () => ({ currentStock: '100' }),
-    'account.findFirst': () => (hppBeras ? { id: 'acc-5.1' } : null),
     'deliveryOrder.findUniqueOrThrow': () => ({ id: 'do-1', items: [] }),
     'deliveryOrder.findUnique': () => ({
       id: 'do-1', doNumber: 'DO-1', status: 'Submitted', invoiceId: null, items: [],
@@ -96,32 +96,26 @@ describe('delivery order movements', () => {
     items: [{ inventoryItemId: 'i1', warehouseId: 'wh-1', itemName: 'Beras', quantity: 2, unit: 'Kg' }],
   };
 
-  it('submit stores the HPP account the invoice will debit (5.1 first)', async () => {
-    const { tx, fn } = makeAutoTx(doHandlers(true));
+  it('submit stores the COGS account the invoice will debit (the mapped one)', async () => {
+    const { tx, fn } = makeAutoTx(doHandlers());
     await submitDeliveryOrderInTx(tx, body, 'u1');
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'DeliveryOrder', movementType: 'Out', offsetAccountId: 'acc-5.1' });
-  });
-
-  it('submit falls back to the COGS system account', async () => {
-    const { tx, fn } = makeAutoTx(doHandlers(false));
-    await submitDeliveryOrderInTx(tx, body, 'u1');
-    expect(movementData(fn)[0]?.offsetAccountId).toBe('acc-5');
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'DeliveryOrder', movementType: 'Out', offsetAccountId: 'acc-cogs' });
   });
 
   it('edit stores it on the re-created movements', async () => {
-    const { tx, fn } = makeAutoTx(doHandlers(true));
+    const { tx, fn } = makeAutoTx(doHandlers());
     await editDeliveryOrderInTx(tx, 'do-1', body, 'u1');
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'DeliveryOrder', offsetAccountId: 'acc-5.1' });
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'DeliveryOrder', offsetAccountId: 'acc-cogs' });
   });
 
   it('edit moves the header fiscal year with the date', async () => {
-    const { tx, fn } = makeAutoTx(doHandlers(true));
+    const { tx, fn } = makeAutoTx(doHandlers());
     await editDeliveryOrderInTx(tx, 'do-1', body, 'u1');
     expect(fn('deliveryOrder.update').mock.calls[0]![0].data).toMatchObject({ date: new Date('2026-10-10'), fiscalYearId: 'fy-2026' });
   });
 
   it('edit rejects moving the note to another month, before touching stock', async () => {
-    const { tx, fn } = makeAutoTx(doHandlers(true));
+    const { tx, fn } = makeAutoTx(doHandlers());
     await expect(editDeliveryOrderInTx(tx, 'do-1', { ...body, date: '2026-11-02' }, 'u1')).rejects.toMatchObject({
       code: DELIVERY_ORDER_MONTH_CHANGE,
     });
@@ -130,13 +124,13 @@ describe('delivery order movements', () => {
   });
 
   it('edit rejects a note whose date is in a closed fiscal year', async () => {
-    const { tx, fn } = makeAutoTx({ ...doHandlers(true), $queryRaw: () => [{ is_closed: true }] });
+    const { tx, fn } = makeAutoTx({ ...doHandlers(), $queryRaw: () => [{ is_closed: true }] });
     await expect(editDeliveryOrderInTx(tx, 'do-1', body, 'u1')).rejects.toMatchObject({ code: 'PERIOD_CLOSED' });
     expect(fn('deliveryOrderItem.deleteMany')).not.toHaveBeenCalled();
   });
 
   it('no counter account for a zero-value line', async () => {
-    const h = doHandlers(true);
+    const h = doHandlers();
     const { tx, fn } = makeAutoTx({ ...h, 'inventoryItem.findUnique': () => ({ id: 'i1', name: 'Beras', unit: 'Kg', averageCost: '0' }) });
     await submitDeliveryOrderInTx(tx, body, 'u1');
     expect(movementData(fn)[0]?.offsetAccountId).toBeNull();
@@ -144,7 +138,7 @@ describe('delivery order movements', () => {
 });
 
 describe('sales return restock movements', () => {
-  it('stores the HPP account the COGS reversal journal credits', async () => {
+  it('stores the mapped COGS account the COGS reversal journal credits', async () => {
     const { tx, fn } = makeAutoTx({
       'salesInvoice.findUnique': () => ({
         id: 'si-1',
@@ -172,13 +166,13 @@ describe('sales return restock movements', () => {
           },
         ],
       }),
-      'account.findFirst': ({ where }) => ({ id: `acc-${where.accountNumber}` }),
+      'account.findUnique': ({ where }) => ({ id: where.id, accountNumber: where.id, name: where.id, rootType: 'EXPENSE', isGroup: false, isActive: true }),
       'journalEntry.create': ({ data }) => ({ id: `je-${data.entryNumber}` }),
     });
     await submitSalesReturnInTx(tx, { salesInvoiceId: 'si-1', date: '2026-10-10', items: [{ salesInvoiceItemId: 'sii-1', quantity: 2 }] }, 'u1');
 
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'SalesReturn', totalValue: 14000, offsetAccountId: 'acc-5.1' });
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'SalesReturn', totalValue: 14000, offsetAccountId: 'acc-COGS' });
     const cogsJe = fn('journalEntry.create').mock.calls.map((c) => c[0].data).find((d) => d.entryNumber.startsWith('JV-COGS-'));
-    expect(cogsJe.items.create.find((l: any) => l.credit > 0).accountId).toBe('acc-5.1');
+    expect(cogsJe.items.create.find((l: any) => l.credit > 0).accountId).toBe('acc-COGS');
   });
 });

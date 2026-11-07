@@ -1969,6 +1969,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 403: bypass stok minus butuh capability.
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
+- 400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 DO_MONTH_CHANGE: tanggal SJ tidak boleh pindah bulan; batalkan lalu buat SJ baru di bulan tujuan
 - 403: tanpa capability doc.cancel
@@ -3934,7 +3935,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** SalesInvoice yang dibuat (invoiceNumber, status, items, customer, grandTotal).
 
-**Efek pembukuan/stok:** GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR 5.1 HPP / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.
+**Efek pembukuan/stok:** GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.
 
 **Teks konfirmasi:** Terbitkan Invoice Penjualan untuk pelanggan {partyId} tanggal {date} (jurnal & stok langsung diposting)?
 
@@ -3950,6 +3951,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: stok tidak cukup.
 - 400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak
 
 **Tool terkait:** [`do_pending`](#do_pending), [`quot_convert_payload`](#quot_convert_payload), [`pay_record`](kas-bank.md#pay_record)
 
@@ -4735,7 +4737,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** 201: SalesReturn terposting. 202: { pendingApproval, request } bila perlu persetujuan.
 
-**Efek pembukuan/stok:** Cabang langsung (role bypass): JV-RN: DR 4.3 Retur Penjualan (+ DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR HPP. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).
+**Efek pembukuan/stok:** Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).
 
 **Teks konfirmasi:** Buat Retur Penjualan untuk invoice {salesInvoiceId} tanggal {date}?
 
@@ -4749,7 +4751,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 400: qty retur melebihi sisa yang bisa diretur.
 - 400: invoice sudah dibatalkan.
-- 400: akun 4.3 tidak ditemukan.
+- 400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 

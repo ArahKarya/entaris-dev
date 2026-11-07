@@ -402,7 +402,7 @@ async function main() {
     { role: 'OTHER_INCOME', accountNumber: '7.4', sortOrder: 0 },
     { role: 'OTHER_EXPENSE', accountNumber: '8.7', sortOrder: 0 },
     // Biaya Konversi Produksi
-    { role: 'PRODUCTION_CONVERSION', accountNumber: '6.39', sortOrder: 0 },
+    { role: 'PRODUCTION_CONVERSION', accountNumber: '5.12', sortOrder: 0 },
     // Selisih Persediaan
     { role: 'INVENTORY_VARIANCE', accountNumber: '6.38', sortOrder: 0 },
     // Pembulatan
@@ -414,6 +414,12 @@ async function main() {
     if (!accountId) {
       console.log(`- Skipped system mapping ${mapping.role}: account ${mapping.accountNumber} not found`);
       continue;
+    }
+    // The upsert key is (role, accountId): changing a seeded account would add a second mapping
+    // for a single-account role. PRODUCTION_CONVERSION used to be seeded to 6.39, which posting
+    // never read, so a leftover row there is dropped before the 5.12 mapping is written.
+    if (mapping.role === 'PRODUCTION_CONVERSION') {
+      await prisma.systemAccountMapping.deleteMany({ where: { role: mapping.role, accountId: { not: accountId } } });
     }
     await prisma.systemAccountMapping.upsert({
       where: {

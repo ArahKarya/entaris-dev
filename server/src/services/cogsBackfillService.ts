@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
+import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 
@@ -87,11 +88,7 @@ export async function settleCogsBackfillForItem(
       invAccountId = def.id;
     }
 
-    // COGS account: prefer 5.1, else parent 5
-    const cogsAccount =
-      (await tx.account.findFirst({ where: { accountNumber: '5.1' } })) ||
-      (await tx.account.findFirst({ where: { accountNumber: '5' } }));
-    if (!cogsAccount) throw new Error('Akun HPP (5 atau 5.1) tidak ditemukan untuk auto-settle COGS backfill.');
+    const cogsAccount = await cogsAccountFor(tx);
 
     const isPositive = diffNum > 0;
     const debitAccountId = isPositive ? cogsAccount.id : invAccountId;

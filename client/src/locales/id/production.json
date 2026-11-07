@@ -201,12 +201,12 @@
     "edit": "Edit",
     "glSummary": {
       "byProductIn": "Produk samping masuk (NRV)",
-      "conversionCharged": "Biaya konversi dibebankan (5.12)",
+      "conversionCharged": "Biaya konversi dibebankan",
       "conversionDiff": "Selisih (biaya konversi)",
       "mainIn": "Output utama masuk",
       "materialOut": "Bahan baku keluar",
-      "productionLoss": "Rugi produksi (5.1)",
-      "remainderToCogs": "Sisa selisih ke HPP Beras (5.1)",
+      "productionLoss": "Rugi produksi",
+      "remainderToCogs": "Sisa selisih ke HPP",
       "title": "Ringkasan Biaya (GL)",
       "totalInputCost": "Total Biaya Input",
       "totalOutputValue": "Total Nilai Output"

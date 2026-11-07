@@ -152,7 +152,6 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Gudang masih punya {0} item dengan saldo. Pindahkan stok ke gudang lain dulu.": "Warehouse still has {0} items with a balance. Move the stock to another warehouse first.",
   "Gudang punya riwayat transaksi. Nonaktifkan saja (jangan hapus) supaya riwayat tetap terbaca.": "Warehouse has transaction history. Deactivate it instead of deleting so the history stays readable.",
   "Gagal menghapus gudang.": "Failed to delete the warehouse.",
-  "Akun HPP (5 atau 5.1) tidak ditemukan untuk auto-settle COGS backfill.": "COGS account (5 or 5.1) not found for auto-settling the COGS backfill.",
   "Filter isActive harus true atau false.": "The isActive filter must be true or false.",
   "Status stok tidak dikenal.": "Unknown stock status.",
   "Gudang dengan kode \"{0}\" tidak ditemukan.": "Warehouse with code \"{0}\" not found.",
