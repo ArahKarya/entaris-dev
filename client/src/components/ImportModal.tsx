@@ -15,6 +15,17 @@ interface ImportError {
   message: string;
 }
 
+/** COA import: what a row does to the opening balance (server routes/import/coa.ts). */
+interface OpeningPreview {
+  allowed: boolean;
+  reason: string | null;
+  cutoverDate: string | null;
+  recorded: string | null;
+  action: 'unchanged' | 'post' | 'replace';
+  runningBalance: boolean;
+  needsConfirm: boolean;
+}
+
 interface PreviewResult {
   data: any[];
   errors: ImportError[];
@@ -81,6 +92,24 @@ const AlreadyImportedNote = ({ items }: { items: Array<{ narration: string; date
   );
 };
 
+const OpeningCell = ({ value, opening }: { value: unknown; opening?: OpeningPreview | null }) => {
+  const { t } = useTranslation('shell');
+  if (!opening) return <>{String(value ?? '')}</>;
+  const label = !opening.allowed && opening.action !== 'unchanged'
+    ? t('importModal.opening.refused')
+    : opening.action === 'replace'
+      ? t('importModal.opening.replace', { recorded: opening.recorded ?? '—' })
+      : t(`importModal.opening.${opening.action}`);
+  return (
+    <>
+      {String(value ?? '')}
+      <span className={cn('block text-[11px]', opening.needsConfirm ? 'text-warning-text' : 'text-muted-foreground')}>
+        {label}{opening.runningBalance ? ` · ${t('importModal.opening.runningBalance')}` : ''}
+      </span>
+    </>
+  );
+};
+
 const ImportModal = ({ isOpen, onClose, importType }: Props) => {
   const { t } = useTranslation(['shell', 'common']);
   const [step, setStep] = useState<'upload' | 'preview' | 'result'>('upload');
@@ -88,6 +117,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const config = typeConfig[importType];
@@ -102,6 +132,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
       return res.data as PreviewResult;
     },
     onSuccess: (data) => {
+      setConfirmReplace(false);
       setPreview(data);
       setStep('preview');
     },
@@ -114,6 +145,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append('file', file);
+      if (confirmReplace) formData.append('confirmReplace', 'true');
       const res = await api.post(config.endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -175,9 +207,12 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
     setSelectedFile(null);
     setPreview(null);
     setResult(null);
+    setConfirmReplace(false);
     onClose();
   };
 
+  const openingRows: Array<{ opening?: OpeningPreview | null }> = importType === 'coa' ? preview?.data ?? [] : [];
+  const replaceCount = openingRows.filter((row) => row.opening?.needsConfirm).length;
   const STEPS = ['upload', 'preview', 'result'] as const;
   const busy = previewMutation.isPending || importMutation.isPending;
   const stepLabel = t(`importModal.steps.${step}`);
@@ -282,6 +317,18 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                 <AlreadyImportedNote items={preview.alreadyImported!} />
               )}
 
+              {replaceCount > 0 && (
+                <label className="flex items-start gap-2 rounded-lg bg-warning-subtle p-3 text-xs text-warning-text">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmReplace}
+                    onChange={(e) => setConfirmReplace(e.target.checked)}
+                  />
+                  <span>{t('importModal.confirmReplace', { count: replaceCount })}</span>
+                </label>
+              )}
+
               {preview.data.length > 0 && (
                 <ScrollRegion label={t('importModal.previewLabel')} className="max-h-72 overflow-y-auto border border-border">
                   <table className="w-full text-xs">
@@ -298,7 +345,11 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                         <tr key={i} className="border-b border-border/60">
                           <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
                           {config.columns.map((col) => (
-                            <td key={col} className="px-3 py-1.5 text-foreground">{String(row[col] ?? '')}</td>
+                            <td key={col} className="px-3 py-1.5 text-foreground">
+                              {col === 'openingBalance' && importType === 'coa'
+                                ? <OpeningCell value={row[col]} opening={row.opening} />
+                                : String(row[col] ?? '')}
+                            </td>
                           ))}
                         </tr>
                       ))}

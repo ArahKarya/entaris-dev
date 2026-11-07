@@ -396,7 +396,16 @@
     "changeFile": "Change file",
     "importing": "Importing…",
     "importCount_one": "Import {{count}} row",
-    "importCount_other": "Import {{count}} rows"
+    "importCount_other": "Import {{count}} rows",
+    "confirmReplace_one": "I confirm replacing the recorded opening balance of {{count}} account (balance at the cut-over date, not the running balance).",
+    "confirmReplace_other": "I confirm replacing the recorded opening balance of {{count}} accounts (balance at the cut-over date, not the running balance).",
+    "opening": {
+      "unchanged": "Opening balance unchanged",
+      "post": "New opening balance posted",
+      "replace": "Replaces the recorded opening balance {{recorded}}",
+      "refused": "This account takes no opening balance here",
+      "runningBalance": "equals the running balance"
+    }
   },
   "userForm": {
     "saved": "User saved.",

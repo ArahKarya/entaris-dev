@@ -396,7 +396,16 @@
     "changeFile": "Ganti File",
     "importing": "Mengimport…",
     "importCount_one": "Import {{count}} Data",
-    "importCount_other": "Import {{count}} Data"
+    "importCount_other": "Import {{count}} Data",
+    "confirmReplace_one": "Saya mengonfirmasi penggantian saldo awal tercatat pada {{count}} akun (saldo awal per tanggal cut-over, bukan saldo berjalan).",
+    "confirmReplace_other": "Saya mengonfirmasi penggantian saldo awal tercatat pada {{count}} akun (saldo awal per tanggal cut-over, bukan saldo berjalan).",
+    "opening": {
+      "unchanged": "Saldo awal tidak berubah",
+      "post": "Saldo awal baru diposting",
+      "replace": "Mengganti saldo awal tercatat {{recorded}}",
+      "refused": "Saldo awal ditolak untuk akun ini",
+      "runningBalance": "sama dengan saldo berjalan"
+    }
   },
   "userForm": {
     "saved": "Data pengguna disimpan.",
