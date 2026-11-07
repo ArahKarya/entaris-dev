@@ -1,10 +1,11 @@
-// Diagnostic dashboard endpoints (mounted behind the audit permission). Check SQL and
-// preview/fix transactions live in routes/health/{checks,arChecks,fixes}.ts; this file only
-// dispatches and writes the audit log.
+// Diagnostic dashboard endpoints (mounted behind the audit permission). Checks only detect;
+// the one fix left (stored-balance recalculation) needs doc.cancel. Check SQL and the
+// preview/fix transaction live in routes/health/*.ts; this file only dispatches and writes the audit log.
 import { Router } from 'express';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, requireCap } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
+import { handleRouteError } from '../utils/errors';
 import {
   type CheckResult,
   checkAleSync,
@@ -18,19 +19,12 @@ import { checkRequiredTriggers } from './health/schemaGuards';
 import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import { checkAleFiscalYear } from './health/fiscalYearChecks';
 import { checkFormerRoleAccounts } from './health/formerRoleAccountChecks';
-import {
-  previewAleSync,
-  previewAccountBalanceDrift,
-  previewOrphanAle,
-  fixAleSync,
-  fixAccountBalanceDrift,
-  fixOrphanAle,
-} from './health/fixes';
+import { previewAccountBalanceDrift, fixAccountBalanceDrift } from './health/fixes';
 
 const router = Router();
 
-/** Fixes that rewrite or cancel ledger entries across all years, closed ones included (audit G-26). */
-export const DISABLED_FIXES: ReadonlySet<string> = new Set(['ale-sync', 'orphan-ale']);
+const DETECT_ONLY_MESSAGE = 'Pemeriksaan ini hanya mendeteksi. Koreksi lewat jurnal di periode berjalan atau skrip perbaikan.';
+const FIX_ACTION = 'FIX_ACCOUNT_BALANCE_DRIFT';
 
 // GET /api/health-check: Run all diagnostic checks in parallel
 router.get('/', async (_req, res) => {
@@ -67,77 +61,38 @@ router.get('/preview/:check', async (req, res) => {
   const check = String(req.params.check ?? '');
 
   try {
-    let preview: { description: string; count: number; details: unknown[]; warning?: string };
-
-    switch (check) {
-      case 'ale-sync':
-        preview = await previewAleSync();
-        break;
-      case 'account-balance-drift':
-        preview = await previewAccountBalanceDrift();
-        break;
-      case 'orphan-ale':
-        preview = await previewOrphanAle();
-        break;
-      default:
-        return res.status(400).json({ success: false, error: 'Check tidak dapat di-preview' });
+    if (check !== 'account-balance-drift') {
+      return res.status(400).json({ success: false, error: DETECT_ONLY_MESSAGE });
     }
+    const preview = await previewAccountBalanceDrift();
 
     res.json({ success: true, data: { check, ...preview } });
   } catch (error) {
-    logger.error(error, `Health check preview failed: ${check}`);
-    res.status(500).json({ success: false, error: 'Gagal membuat preview' });
+    handleRouteError(res, error, `Health check preview failed: ${check}`, 'Gagal membuat preview');
   }
 });
 
 // POST /api/health-check/fix/:check: Auto-fix a specific check
-router.post('/fix/:check', async (req: AuthRequest, res) => {
+router.post('/fix/:check', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const check = String(req.params.check ?? '');
   const userId = req.user?.userId;
   const userAgent = Array.isArray(req.headers['user-agent'])
     ? req.headers['user-agent'][0]
     : req.headers['user-agent'];
 
-  const actionMap: Record<string, string> = {
-    'ale-sync': 'FIX_ALE_SYNC',
-    'account-balance-drift': 'FIX_ACCOUNT_BALANCE_DRIFT',
-    'orphan-ale': 'FIX_ORPHAN_ALE',
-  };
-
-  if (DISABLED_FIXES.has(check)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Perbaikan otomatis ini dinonaktifkan karena bisa mengubah buku besar tahun yang sudah ditutup. Koreksi selisih lewat jurnal di periode berjalan.',
-    });
-  }
-
-  if (!actionMap[check]) {
-    return res.status(400).json({ success: false, error: 'Check tidak dapat diperbaiki otomatis' });
+  if (check !== 'account-balance-drift') {
+    return res.status(400).json({ success: false, error: DETECT_ONLY_MESSAGE });
   }
 
   const startedAt = new Date();
   try {
-    let result: { fixed: number; message: string; snapshot?: unknown };
-
-    switch (check) {
-      case 'ale-sync':
-        result = await fixAleSync();
-        break;
-      case 'account-balance-drift':
-        result = await fixAccountBalanceDrift();
-        break;
-      case 'orphan-ale':
-        result = await fixOrphanAle();
-        break;
-      default:
-        return res.status(400).json({ success: false, error: 'Check tidak dapat diperbaiki otomatis' });
-    }
+    const result = await fixAccountBalanceDrift();
 
     if (userId) {
       await prisma.auditLog.create({
         data: {
           userId,
-          action: actionMap[check],
+          action: FIX_ACTION,
           entityType: 'health-check',
           entityId: check,
           newValues: {
@@ -157,12 +112,11 @@ router.post('/fix/:check', async (req: AuthRequest, res) => {
     logger.info({ check, userId, fixed: result.fixed }, 'Health check fix applied');
     res.json({ success: true, data: { fixed: result.fixed, message: result.message } });
   } catch (error) {
-    logger.error(error, `Health check fix failed: ${check}`);
     if (userId) {
       await prisma.auditLog.create({
         data: {
           userId,
-          action: `${actionMap[check]}_FAILED`,
+          action: `${FIX_ACTION}_FAILED`,
           entityType: 'health-check',
           entityId: check,
           newValues: {
@@ -176,7 +130,7 @@ router.post('/fix/:check', async (req: AuthRequest, res) => {
         },
       }).catch((err) => logger.error({ err }, 'Audit log write failed for health fix error'));
     }
-    res.status(500).json({ success: false, error: 'Gagal memperbaiki masalah' });
+    handleRouteError(res, error, `Health check fix failed: ${check}`, 'Gagal memperbaiki masalah');
   }
 });
 

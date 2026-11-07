@@ -1,38 +1,39 @@
-// Preview + fix functions for /api/health-check/preview/:check and /fix/:check.
-// Three "auto-fixable" issues: ALE sync, account balance drift, orphan ALE.
+// Preview + fix for /api/health-check/preview/:check and /fix/:check. Only the stored-balance
+// recalculation is left; every other check is detect-only (E2-R14), corrected by a journal in the
+// current period or a repair script.
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { recalculateAccountBalances } from '../../utils/accountBalance';
+import { BusinessError } from '../../utils/errors';
 
-export async function previewAleSync(): Promise<{ description: string; count: number; details: unknown[]; warning?: string }> {
-  const [aleCount, jiCount, jeCount] = await Promise.all([
-    prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*)::bigint AS count FROM accounting_ledger_entries WHERE reference_type = 'JournalEntry'
-    `,
-    prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*)::bigint AS count FROM journal_entry_accounts
-    `,
-    prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*)::bigint AS count FROM journal_entries
-    `,
-  ]);
+export const FIX_DRIFT_CLOSED_YEARS = 'FIX_DRIFT_CLOSED_YEARS';
 
-  const deleteCount = Number(aleCount[0]?.count ?? 0);
-  const createCount = Number(jiCount[0]?.count ?? 0);
-  const jeTotal = Number(jeCount[0]?.count ?? 0);
-
-  return {
-    description: `Akan MENGHAPUS ${deleteCount.toLocaleString('id-ID')} baris ALE referensi JournalEntry, lalu membuat ulang ${createCount.toLocaleString('id-ID')} baris dari ${jeTotal.toLocaleString('id-ID')} jurnal.`,
-    warning: 'Operasi ini intensif (mungkin 1-2 menit) dan akan menulis ulang seluruh buku besar dari jurnal. Pastikan tidak ada transaksi berjalan.',
-    count: deleteCount,
-    details: [
-      { action: 'Hapus ALE JournalEntry', jumlah: deleteCount },
-      { action: 'Buat ulang dari JournalItem', jumlah: createCount },
-      { action: 'Journal entries diproses', jumlah: jeTotal },
-    ],
-  };
+/**
+ * Interim guard until the single stored-balance rule (PR-5.5): the recalculation sums every year,
+ * while closing a year subtracts its revenue/expense from accounts.balance, so one click would put
+ * closed years back and a later reopen would add them again.
+ */
+async function assertNoClosedPnlYears(db: Prisma.TransactionClient | typeof prisma): Promise<void> {
+  const rows = await db.$queryRaw<Array<{ one: number }>>`
+    SELECT 1 AS one
+      FROM accounting_ledger_entries ale
+      JOIN fiscal_years fy ON fy.id = ale.fiscal_year_id
+      JOIN accounts a ON a.id = ale.account_id
+     WHERE fy.is_closed = true
+       AND ale.is_cancelled = false
+       AND a."rootType" IN ('REVENUE','EXPENSE')
+     LIMIT 1
+  `;
+  if (rows.length > 0) {
+    throw new BusinessError(
+      'Hitung ulang saldo ditutup sementara: tahun buku tertutup masih mengurangi saldo laba rugi. Tersedia lagi setelah aturan saldo tunggal.',
+      FIX_DRIFT_CLOSED_YEARS,
+    );
+  }
 }
 
 export async function previewAccountBalanceDrift(): Promise<{ description: string; count: number; details: unknown[] }> {
+  await assertNoClosedPnlYears(prisma);
   const drifts = await prisma.$queryRaw<Array<{
     account_code: string;
     account_name: string;
@@ -77,106 +78,13 @@ export async function previewAccountBalanceDrift(): Promise<{ description: strin
   };
 }
 
-export async function previewOrphanAle(): Promise<{ description: string; count: number; details: unknown[] }> {
-  const orphans = await prisma.$queryRaw<Array<{
-    ale_id: string;
-    reference_type: string;
-    reference_id: string;
-    account_code: string;
-    account_name: string;
-    debit: string;
-    credit: string;
-  }>>`
-    SELECT ale.id AS ale_id,
-           ale.reference_type,
-           ale.reference_id,
-           a."accountNumber" AS account_code,
-           a.name AS account_name,
-           ale.debit::text,
-           ale.credit::text
-      FROM accounting_ledger_entries ale
-      JOIN accounts a ON a.id = ale.account_id
-     WHERE ale.is_cancelled = false
-       AND (
-         (ale.reference_type = 'JournalEntry'
-           AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.id = ale.reference_id))
-         OR
-         (ale.reference_type = 'StockMovement'
-           AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.id = ale.reference_id))
-         OR
-         (ale.reference_type = 'StockOpname'
-           AND NOT EXISTS (SELECT 1 FROM stock_opnames so WHERE so.id = ale.reference_id))
-       )
-     ORDER BY ale.reference_type
-     LIMIT 100
-  `;
-
-  return {
-    description: orphans.length === 0
-      ? 'Tidak ada ALE orphan. Tidak ada yang akan berubah.'
-      : `Akan MENANDAI ${orphans.length} entri ALE berikut sebagai cancelled (tidak dihapus):`,
-    count: orphans.length,
-    details: orphans,
-  };
-}
-
-// Fix functions
-
-/**
- * Fix ALE sync: delete all JournalEntry ALEs and recreate from JournalItems.
- */
-export async function fixAleSync(): Promise<{ fixed: number; message: string; snapshot: unknown }> {
-  return await prisma.$transaction(async (tx) => {
-    // Delete all JournalEntry ALE entries
-    const deleted = await tx.accountingLedgerEntry.deleteMany({
-      where: { referenceType: 'JournalEntry' },
-    });
-
-    // Recreate from JournalItems for all journal entries (Posted + Cancelled)
-    const journalEntries = await tx.journalEntry.findMany({
-      include: { items: true },
-    });
-
-    let created = 0;
-    for (const je of journalEntries) {
-      const isCancelled = je.status === 'Cancelled';
-      for (const item of je.items) {
-        await tx.accountingLedgerEntry.create({
-          data: {
-            date: je.date,
-            accountId: item.accountId,
-            partyId: item.partyId,
-            debit: item.debit,
-            credit: item.credit,
-            referenceType: 'JournalEntry',
-            referenceId: je.id,
-            description: item.description || je.narration || '',
-            fiscalYearId: je.fiscalYearId,
-            isCancelled,
-          },
-        });
-        created++;
-      }
-    }
-
-    return {
-      fixed: created,
-      message: `Dihapus ${deleted.count} ALE lama, dibuat ${created} ALE baru dari JournalItem`,
-      snapshot: {
-        deletedCount: deleted.count,
-        createdCount: created,
-        journalEntriesProcessed: journalEntries.length,
-      },
-    };
-  }, { timeout: 120000 });
-}
-
 /**
  * Fix account balance drift: recalculate all account balances from JournalItems.
  * Captures before/after snapshot of drifted accounts for audit.
  */
 export async function fixAccountBalanceDrift(): Promise<{ fixed: number; message: string; snapshot: unknown }> {
   return await prisma.$transaction(async (tx) => {
+    await assertNoClosedPnlYears(tx);
     // Capture drifted accounts BEFORE recalculation (rootType-aware formula)
     const beforeDrift = await tx.$queryRaw<Array<{
       account_code: string;
@@ -222,67 +130,6 @@ export async function fixAccountBalanceDrift(): Promise<{ fixed: number; message
         totalDrifted: beforeDrift.length,
         totalAccountsRecalc: count,
       },
-    };
-  }, { timeout: 60000 });
-}
-
-/**
- * Fix orphan ALE: mark orphan entries as cancelled.
- * Captures snapshot of affected entries for audit.
- */
-export async function fixOrphanAle(): Promise<{ fixed: number; message: string; snapshot: unknown }> {
-  return await prisma.$transaction(async (tx) => {
-    // Capture orphan entries BEFORE marking cancelled
-    const orphansBefore = await tx.$queryRaw<Array<{
-      ale_id: string;
-      reference_type: string;
-      reference_id: string;
-      account_code: string;
-      debit: string;
-      credit: string;
-    }>>`
-      SELECT ale.id AS ale_id,
-             ale.reference_type,
-             ale.reference_id,
-             a."accountNumber" AS account_code,
-             ale.debit::text,
-             ale.credit::text
-        FROM accounting_ledger_entries ale
-        JOIN accounts a ON a.id = ale.account_id
-       WHERE ale.is_cancelled = false
-         AND (
-           (ale.reference_type = 'JournalEntry'
-             AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.id = ale.reference_id))
-           OR
-           (ale.reference_type = 'StockMovement'
-             AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.id = ale.reference_id))
-           OR
-           (ale.reference_type = 'StockOpname'
-             AND NOT EXISTS (SELECT 1 FROM stock_opnames so WHERE so.id = ale.reference_id))
-         )
-       LIMIT 100
-    `;
-
-    const result = await tx.$executeRaw`
-      UPDATE accounting_ledger_entries ale
-         SET is_cancelled = true
-       WHERE ale.is_cancelled = false
-         AND (
-           (ale.reference_type = 'JournalEntry'
-             AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.id = ale.reference_id))
-           OR
-           (ale.reference_type = 'StockMovement'
-             AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.id = ale.reference_id))
-           OR
-           (ale.reference_type = 'StockOpname'
-             AND NOT EXISTS (SELECT 1 FROM stock_opnames so WHERE so.id = ale.reference_id))
-         )
-    `;
-
-    return {
-      fixed: result,
-      message: `${result} entri ALE orphan ditandai sebagai cancelled`,
-      snapshot: { orphansAffected: orphansBefore, totalAffected: result },
     };
   }, { timeout: 60000 });
 }

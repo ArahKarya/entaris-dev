@@ -127,14 +127,13 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   // health check: former system account role accounts (E2-R8)
   "{0} akun bekas peran akun sistem masih bersaldo; pindahkan sisanya lewat Pengaturan > Akun Sistem": "{0} former system account role accounts still have a balance; move the rest from Settings > System Accounts",
   "Akun bekas peran akun sistem tidak bersaldo": "No former system account role account has a balance",
-  "Dihapus {0} ALE lama, dibuat {1} ALE baru dari JournalItem": "Deleted {0} old ALE entries and created {1} new ALE entries from JournalItem",
   "Dihitung ulang saldo {0} akun dari jurnal": "Recalculated the balances of {0} accounts from journals",
-  "{0} entri ALE orphan ditandai sebagai cancelled": "{0} orphan ALE entries marked as cancelled",
   "Gagal menjalankan health check": "Failed to run the health check",
-  "Check tidak dapat di-preview": "This check cannot be previewed",
   "Gagal membuat preview": "Failed to create the preview",
-  "Check tidak dapat diperbaiki otomatis": "This check cannot be fixed automatically",
   "Gagal memperbaiki masalah": "Failed to fix the issue",
+  // health check (E2-R14)
+  "Pemeriksaan ini hanya mendeteksi. Koreksi lewat jurnal di periode berjalan atau skrip perbaikan.": "This check only detects. Correct it with a journal in the current period or a repair script.",
+  "Hitung ulang saldo ditutup sementara: tahun buku tertutup masih mengurangi saldo laba rugi. Tersedia lagi setelah aturan saldo tunggal.": "Balance recalculation is temporarily closed: closed fiscal years still reduce the profit and loss balances. It returns once the single balance rule is in place.",
   // health checks: schema guards (E7-R11)
   "{0} trigger database hilang dan {1} nonaktif; jejak audit bisa diubah. Jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).": "{0} database triggers are missing and {1} are disabled; the audit trail can be changed. Re-run the trigger migration SQL as described in MIGRATION.md (Migrasi trigger jejak audit).",
   "{0} trigger database hilang; jejak audit bisa diubah. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (Migrasi trigger jejak audit).": "{0} database triggers are missing; the audit trail can be changed. After restoring an older backup, restart the app; if the check stays red, re-run the trigger migration SQL as described in MIGRATION.md (Migrasi trigger jejak audit).",

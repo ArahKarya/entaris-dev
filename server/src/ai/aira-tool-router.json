@@ -6595,7 +6595,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Pratinjau (tanpa mengubah data) perubahan yang akan dilakukan perbaikan otomatis. Hanya untuk check: ale-sync, account-balance-drift, orphan-ale. Perbaikan itu sendiri (fix) tidak tersedia sebagai tool; perbaikan ale-sync dan orphan-ale juga dinonaktifkan di aplikasi karena bisa mengubah tahun buku tertutup, jadi pratinjaunya hanya informasi.",
+      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia butuh capability doc.cancel dan ditolak sementara bila ada tahun buku tertutup ber-ALE laba rugi (FIX_DRIFT_CLOSED_YEARS).",
       "risk": "read",
       "roles": [
         "Admin"
@@ -6610,11 +6610,9 @@
           "type": "enum",
           "required": true,
           "enum": [
-            "ale-sync",
-            "account-balance-drift",
-            "orphan-ale"
+            "account-balance-drift"
           ],
-          "description": "Kode check: ale-sync | account-balance-drift | orphan-ale"
+          "description": "Kode check: account-balance-drift"
         }
       ],
       "output": {},
@@ -6625,7 +6623,8 @@
       "level": 1,
       "phase": 6,
       "errors": [
-        "400: check tidak dapat di-preview"
+        "400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)",
+        "400 FIX_DRIFT_CLOSED_YEARS: hitung ulang saldo ditutup sementara karena ada tahun buku tertutup ber-ALE laba rugi"
       ],
       "related": [
         "hc_run"

@@ -61,10 +61,10 @@ type CheckKey =
 
 /** Server check name → `auth:healthCheck.checks.<key>` and the fix endpoint key. */
 const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
-  'ALE vs JournalItem Sync': { key: 'aleSync', fixKey: 'ale-sync' },
+  'ALE vs JournalItem Sync': { key: 'aleSync' },
   'Account Balance Drift': { key: 'balanceDrift', fixKey: 'account-balance-drift' },
   'Unbalanced Journal Entries': { key: 'unbalancedJournals' },
-  'Orphan ALE Entries': { key: 'orphanAle', fixKey: 'orphan-ale' },
+  'Orphan ALE Entries': { key: 'orphanAle' },
   'Stock vs Movement Mismatch': { key: 'stockMismatch' },
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
   'AR vs Subledger': { key: 'arSubledger' },
@@ -83,7 +83,7 @@ function checkInfo(name: string): CheckInfo {
   return {
     title,
     fixKey: known.fixKey,
-    fixEffect: i18n.t(`healthCheck.fixEffects.${known.key as 'aleSync' | 'balanceDrift' | 'orphanAle'}`, { ns: 'auth' }),
+    fixEffect: i18n.t(`healthCheck.fixEffects.${known.key as 'balanceDrift'}`, { ns: 'auth' }),
   };
 }
 
