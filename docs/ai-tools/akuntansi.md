@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis dari `server/src/ai/aira-tool-router.json` — jangan edit manual. Panduan alur: `docs/ai-tools/_guides/`.
 
-Endpoint MCP target: `/mcp/akuntansi` · 38 tool (read 16, write 8, critical 14)
+Endpoint MCP target: `/mcp/akuntansi` · 39 tool (read 17, write 8, critical 14)
 
 ## Tujuan
 
@@ -86,6 +86,7 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 | [`coa_create`](#coa_create) | write | tidak | `POST /api/coa` |
 | [`coa_delete`](#coa_delete) | critical | tidak | `DELETE /api/coa/:id` |
 | [`coa_flat`](#coa_flat) | read | - | `GET /api/coa/flat` |
+| [`coa_get_opening`](#coa_get_opening) | read | - | `GET /api/coa/:id/opening` |
 | [`coa_list`](#coa_list) | read | - | `GET /api/coa` |
 | [`coa_set_balance`](#coa_set_balance) | critical | tidak | `PATCH /api/coa/:id/balance` |
 | [`coa_update`](#coa_update) | write | tidak | `PUT /api/coa/:id` |
@@ -282,6 +283,52 @@ Pada AIRA, semua tool tulis di toolset ini tier critical: wajib persetujuan manu
 **Isi hasil:** Array akun aktif tanpa hierarki; tiap akun: id, accountNumber, name, accountType, rootType, isGroup, isActive, balance, partyRole (AR/AP/CUSTOMER_DEPOSIT/VENDOR_DEPOSIT atau null: baris jurnal manual di akun ber-partyRole wajib partyId, akun lain menolak partyId).
 
 **Tool terkait:** [`coa_list`](#coa_list), [`je_create`](#je_create)
+
+### coa_get_opening
+
+**Ringkasan:** Membaca saldo awal akun neraca: saldo awal tercatat (jurnal saldo awal berkunci + buku besar sebelum cut-over), tanggal cut-over, daftar jurnal saldo awal, jurnal saldo awal lama tanpa kunci, dan apakah akun bisa diubah lewat coa_set_balance. Gunakan sebelum coa_set_balance; tidak menulis apa pun.
+
+- **Risk / tier:** `read` / Auto
+- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `coa` / `view`)
+- **Catatan akses:** GET data referensi terbuka bagi semua user login (requireWrite).
+- **Handler:** `GET /api/coa/:id/opening` (src/routes/coa.ts)
+- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)
+
+**Parameter**
+
+| Nama | Lokasi | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `id` | path | `string` | ya | ID akun. |
+
+**Contoh pemanggilan**
+
+```json
+{
+  "tool": "coa_get_opening",
+  "args": {
+    "id": "<id>"
+  }
+}
+```
+
+**Contoh hasil (dipersingkat)**
+
+```json
+{
+  "ok": true,
+  "kind": "read",
+  "data": "<cutoverDate (YYYY-MM-DD) dan cutoverStored (false = turunan dari awal tahun buku terbuka p>"
+}
+```
+
+**Isi hasil:** cutoverDate (YYYY-MM-DD) dan cutoverStored (false = turunan dari awal tahun buku terbuka paling awal, belum tersimpan); amount = saldo awal tercatat di sisi normal akun (null bila belum ada jurnal saldo awal berkunci); journals = jurnal saldo awal berkunci aktif {id, entryNumber, date, amount}; legacyJournals = jurnal saldo awal lama tanpa kunci (akuntan menentukannya lewat audit saldo awal sebelum saldo awal diubah); sameDayOpeningEquity = nomor jurnal lain pada hari cut-over yang melawan Ekuitas Saldo Awal dan sudah dihitung sebagai dasar; editable false bila reason berisi ACCOUNT_GROUP, ACCOUNT_INACTIVE, ACCOUNT_ROOT_TYPE, ACCOUNT_CONTROL, OPENING_ACCOUNT_KIND atau OPENING_LEGACY_REVIEW. Periode tertutup/terkunci baru ditolak saat coa_set_balance.
+
+**Error umum**
+
+- 404: akun tidak ditemukan
+- 400: tidak ada tahun buku terbuka dan tanggal cut-over belum tersimpan (FISCAL_YEAR_MISSING)
+
+**Tool terkait:** [`coa_set_balance`](#coa_set_balance), [`coa_flat`](#coa_flat)
 
 ### coa_list
 

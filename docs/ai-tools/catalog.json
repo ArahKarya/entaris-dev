@@ -2,10 +2,10 @@
   "app": "simple-erp",
   "version": 3,
   "counts": {
-    "tools": 513,
+    "tools": 514,
     "byRisk": {
       "critical": 112,
-      "read": 236,
+      "read": 237,
       "write": 165
     },
     "byToolset": {
@@ -13,7 +13,7 @@
       "sistem": 19,
       "penjualan": 94,
       "obrolan": 2,
-      "akuntansi": 38,
+      "akuntansi": 39,
       "pengajuan-pembayaran": 32,
       "aset-umum": 141,
       "dashboard": 17,
@@ -24,7 +24,7 @@
       "produksi": 28,
       "master-data": 12
     },
-    "routes": 603
+    "routes": 604
   },
   "toolsets": [
     {
@@ -254,6 +254,7 @@
         "coa_create",
         "coa_delete",
         "coa_flat",
+        "coa_get_opening",
         "coa_list",
         "coa_set_balance",
         "coa_update",
@@ -3057,6 +3058,64 @@
       "example": {
         "tool": "coa_flat",
         "args": {}
+      }
+    },
+    {
+      "name": "coa_get_opening",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "coa",
+      "desc": "Membaca saldo awal akun neraca: saldo awal tercatat (jurnal saldo awal berkunci + buku besar sebelum cut-over), tanggal cut-over, daftar jurnal saldo awal, jurnal saldo awal lama tanpa kunci, dan apakah akun bisa diubah lewat coa_set_balance. Gunakan sebelum coa_set_balance; tidak menulis apa pun.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "id": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID akun."
+        }
+      ],
+      "output": {
+        "cutoverDate": "string",
+        "cutoverStored": "boolean",
+        "amount": "string",
+        "journals": "array",
+        "legacyJournals": "array",
+        "sameDayOpeningEquity": "array",
+        "editable": "boolean",
+        "reason": "string"
+      },
+      "outputSummary": "cutoverDate (YYYY-MM-DD) dan cutoverStored (false = turunan dari awal tahun buku terbuka paling awal, belum tersimpan); amount = saldo awal tercatat di sisi normal akun (null bila belum ada jurnal saldo awal berkunci); journals = jurnal saldo awal berkunci aktif {id, entryNumber, date, amount}; legacyJournals = jurnal saldo awal lama tanpa kunci (akuntan menentukannya lewat audit saldo awal sebelum saldo awal diubah); sameDayOpeningEquity = nomor jurnal lain pada hari cut-over yang melawan Ekuitas Saldo Awal dan sudah dihitung sebagai dasar; editable false bila reason berisi ACCOUNT_GROUP, ACCOUNT_INACTIVE, ACCOUNT_ROOT_TYPE, ACCOUNT_CONTROL, OPENING_ACCOUNT_KIND atau OPENING_LEGACY_REVIEW. Periode tertutup/terkunci baru ditolak saat coa_set_balance.",
+      "handler": "GET /api/coa/:id/opening",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "accessNote": "GET data referensi terbuka bagi semua user login (requireWrite).",
+      "errors": [
+        "404: akun tidak ditemukan",
+        "400: tidak ada tahun buku terbuka dan tanggal cut-over belum tersimpan (FISCAL_YEAR_MISSING)"
+      ],
+      "related": [
+        "coa_set_balance",
+        "coa_flat"
+      ],
+      "doc": "### coa_get_opening\n\n**Ringkasan:** Membaca saldo awal akun neraca: saldo awal tercatat (jurnal saldo awal berkunci + buku besar sebelum cut-over), tanggal cut-over, daftar jurnal saldo awal, jurnal saldo awal lama tanpa kunci, dan apakah akun bisa diubah lewat coa_set_balance. Gunakan sebelum coa_set_balance; tidak menulis apa pun.\n\n- **Risk / tier:** `read` / Auto\n- **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `coa` / `view`)\n- **Catatan akses:** GET data referensi terbuka bagi semua user login (requireWrite).\n- **Handler:** `GET /api/coa/:id/opening` (src/routes/coa.ts)\n- **Status default:** aktif (dapat dinonaktifkan per tool di Settings → AIRA)\n\n**Parameter**\n\n| Nama | Lokasi | Tipe | Wajib | Keterangan |\n|---|---|---|---|---|\n| `id` | path | `string` | ya | ID akun. |\n\n**Contoh pemanggilan**\n\n```json\n{\n  \"tool\": \"coa_get_opening\",\n  \"args\": {\n    \"id\": \"<id>\"\n  }\n}\n```\n\n**Contoh hasil (dipersingkat)**\n\n```json\n{\n  \"ok\": true,\n  \"kind\": \"read\",\n  \"data\": \"<cutoverDate (YYYY-MM-DD) dan cutoverStored (false = turunan dari awal tahun buku terbuka p>\"\n}\n```\n\n**Isi hasil:** cutoverDate (YYYY-MM-DD) dan cutoverStored (false = turunan dari awal tahun buku terbuka paling awal, belum tersimpan); amount = saldo awal tercatat di sisi normal akun (null bila belum ada jurnal saldo awal berkunci); journals = jurnal saldo awal berkunci aktif {id, entryNumber, date, amount}; legacyJournals = jurnal saldo awal lama tanpa kunci (akuntan menentukannya lewat audit saldo awal sebelum saldo awal diubah); sameDayOpeningEquity = nomor jurnal lain pada hari cut-over yang melawan Ekuitas Saldo Awal dan sudah dihitung sebagai dasar; editable false bila reason berisi ACCOUNT_GROUP, ACCOUNT_INACTIVE, ACCOUNT_ROOT_TYPE, ACCOUNT_CONTROL, OPENING_ACCOUNT_KIND atau OPENING_LEGACY_REVIEW. Periode tertutup/terkunci baru ditolak saat coa_set_balance.\n\n**Error umum**\n\n- 404: akun tidak ditemukan\n- 400: tidak ada tahun buku terbuka dan tanggal cut-over belum tersimpan (FISCAL_YEAR_MISSING)\n\n**Tool terkait:** [`coa_set_balance`](#coa_set_balance), [`coa_flat`](#coa_flat)\n",
+      "example": {
+        "tool": "coa_get_opening",
+        "args": {
+          "id": "<id>"
+        }
       }
     },
     {

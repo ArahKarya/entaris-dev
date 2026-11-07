@@ -15,6 +15,7 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Gagal mengupdate akun.": "Failed to update the account.",
   "Tidak bisa set saldo untuk akun grup.": "Cannot set a balance on a group account.",
   "Gagal mengatur saldo awal.": "Failed to set the opening balance.",
+  "Gagal mengambil saldo awal akun.": "Failed to load the account opening balance.",
   "Tidak dapat menghapus akun yang masih memiliki sub-akun. Hapus sub-akun terlebih dahulu.": "Cannot delete an account that still has sub-accounts. Delete the sub-accounts first.",
   "Tidak dapat menghapus akun ini karena dipakai sebagai Akun Sistem ({0}). Lepaskan dulu pemetaannya di Pengaturan → Akun Sistem.": "Cannot delete this account because it is used as a System Account ({0}). Remove the mapping first in Settings → System Accounts.",
   "Tidak dapat menghapus akun ini karena masih ditautkan ke {0}. Ubah akun pada item tersebut terlebih dahulu.": "Cannot delete this account because it is still linked to {0}. Change the account on those records first.",

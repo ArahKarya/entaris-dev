@@ -2463,6 +2463,57 @@
       ]
     },
     {
+      "name": "coa_get_opening",
+      "group": "Akuntansi",
+      "toolset": "akuntansi",
+      "module": "coa",
+      "desc": "Membaca saldo awal akun neraca: saldo awal tercatat (jurnal saldo awal berkunci + buku besar sebelum cut-over), tanggal cut-over, daftar jurnal saldo awal, jurnal saldo awal lama tanpa kunci, dan apakah akun bisa diubah lewat coa_set_balance. Gunakan sebelum coa_set_balance; tidak menulis apa pun.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant",
+        "StaffProduksi",
+        "Viewer"
+      ],
+      "input": {
+        "id": "string"
+      },
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "ID akun."
+        }
+      ],
+      "output": {
+        "cutoverDate": "string",
+        "cutoverStored": "boolean",
+        "amount": "string",
+        "journals": "array",
+        "legacyJournals": "array",
+        "sameDayOpeningEquity": "array",
+        "editable": "boolean",
+        "reason": "string"
+      },
+      "outputSummary": "cutoverDate (YYYY-MM-DD) dan cutoverStored (false = turunan dari awal tahun buku terbuka paling awal, belum tersimpan); amount = saldo awal tercatat di sisi normal akun (null bila belum ada jurnal saldo awal berkunci); journals = jurnal saldo awal berkunci aktif {id, entryNumber, date, amount}; legacyJournals = jurnal saldo awal lama tanpa kunci (akuntan menentukannya lewat audit saldo awal sebelum saldo awal diubah); sameDayOpeningEquity = nomor jurnal lain pada hari cut-over yang melawan Ekuitas Saldo Awal dan sudah dihitung sebagai dasar; editable false bila reason berisi ACCOUNT_GROUP, ACCOUNT_INACTIVE, ACCOUNT_ROOT_TYPE, ACCOUNT_CONTROL, OPENING_ACCOUNT_KIND atau OPENING_LEGACY_REVIEW. Periode tertutup/terkunci baru ditolak saat coa_set_balance.",
+      "handler": "GET /api/coa/:id/opening",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "accessNote": "GET data referensi terbuka bagi semua user login (requireWrite).",
+      "errors": [
+        "404: akun tidak ditemukan",
+        "400: tidak ada tahun buku terbuka dan tanggal cut-over belum tersimpan (FISCAL_YEAR_MISSING)"
+      ],
+      "related": [
+        "coa_set_balance",
+        "coa_flat"
+      ]
+    },
+    {
       "name": "cogs_backfill_list",
       "group": "Akuntansi",
       "toolset": "akuntansi",
