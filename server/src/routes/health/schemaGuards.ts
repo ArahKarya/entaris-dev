@@ -63,7 +63,7 @@ export async function checkRequiredTriggers(): Promise<CheckResult> {
           ? `${missing} trigger database hilang; ${purposes}. Setelah restore cadangan lama, mulai ulang aplikasi; bila tetap merah, jalankan ulang SQL migrasi trigger sesuai MIGRATION.md (bagian Migrasi trigger).`
           : `${problems.length} trigger database nonaktif; ${purposes}. Aktifkan lagi dengan ALTER TABLE <tabel> ENABLE TRIGGER <nama> untuk: ${disabled}.`,
     count: problems.length,
-    details: problems,
+    details: problems.map(({ table, name, problem }) => ({ table, name, problem })),
     fixable: false,
   };
 }
