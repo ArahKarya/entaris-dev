@@ -84,6 +84,12 @@ model Party {
   taxId                  String?                 @map("tax_id")
   outstandingAmount      Decimal                 @default(0) @map("outstanding_amount") @db.Decimal(15, 2)
   openingOutstanding     Decimal                 @default(0) @map("opening_outstanding") @db.Decimal(15, 2)
+  // Per side (E2-R13, services/ledger/partySides.ts): outstandingAmount = receivable + payable, and
+  // openingOutstanding = openingReceivable + openingPayable + the opening not yet directed to a side.
+  receivableOutstanding  Decimal                 @default(0) @map("receivable_outstanding") @db.Decimal(15, 2)
+  payableOutstanding     Decimal                 @default(0) @map("payable_outstanding") @db.Decimal(15, 2)
+  openingReceivable      Decimal                 @default(0) @map("opening_receivable") @db.Decimal(15, 2)
+  openingPayable         Decimal                 @default(0) @map("opening_payable") @db.Decimal(15, 2)
   depositBalance         Decimal                 @default(0) @map("deposit_balance") @db.Decimal(15, 2)
   customerDepositBalance Decimal                 @default(0) @map("customer_deposit_balance") @db.Decimal(15, 2)
   isActive               Boolean                 @default(true) @map("is_active")
