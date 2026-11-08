@@ -1,7 +1,8 @@
 // Re-importing COA or parties must never delete posted opening-balance journals (audit G-25).
 // COA (E2-R12): the opening balance goes through the opening balance service; the same amount is
 // 'unchanged', a replacement needs confirmReplace, a refusal is reported and the account stays saved.
-// Parties: a party that already has an opening balance keeps it and the row is reported.
+// Parties (PR-5.12): the route hands each row to services/partyImport.ts (covered by importPartiesOpening.integration.test.ts);
+// here: the confirmation per sheet row, what is reported, and that nothing is deleted.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -45,7 +46,10 @@ const opening = vi.hoisted(() => ({
   setOpeningBalanceInTx: vi.fn(),
   OPENING_DATE_MISMATCH: 'OPENING_DATE_MISMATCH',
   OPENING_LOCK_RIGHT: 'OPENING_LOCK_RIGHT',
+  OPENING_NEGATIVE: 'OPENING_NEGATIVE',
 }));
+const partyImport = vi.hoisted(() => ({ importPartyRow: vi.fn(), previewPartyOpening: vi.fn() }));
+vi.mock('../../services/partyImport', () => partyImport);
 vi.mock('../../services/ledger/openingBalance', () => opening);
 const perms = vi.hoisted(() => ({ hasCap: vi.fn(async () => false) }));
 vi.mock('../../services/permissionService', () => perms);
@@ -307,100 +311,86 @@ describe('POST /api/import/coa re-import', () => {
 });
 
 describe('POST /api/import/parties re-import', () => {
+  const result = (over: Record<string, unknown> = {}) => ({ created: false, openings: [], issues: [], ...over });
+
   beforeEach(() => {
     db.rows = [{ name: 'Budi', partyType: 'Customer', openingBalance: '5000000' }];
+    partyImport.importPartyRow.mockResolvedValue(result());
+    partyImport.previewPartyOpening.mockResolvedValue(null);
   });
 
-  it('existing party: profile updated, balances and journals untouched, row reported', async () => {
-    db.party.findFirst.mockResolvedValue({ id: 'p-budi' });
-    db.party.update.mockResolvedValue({ id: 'p-budi' });
-
+  it('hands the row to the party import with the parsed openings, no direct writes or deletes', async () => {
     const res = await post('/api/import/parties');
 
     expect(res.status).toBe(200);
-    const data = db.party.update.mock.calls[0][0].data;
-    expect(data).not.toHaveProperty('outstandingAmount');
-    expect(data).not.toHaveProperty('depositBalance');
-    expect(data).not.toHaveProperty('customerDepositBalance');
-    expect(res.body.errors[0].message).toContain('saldo awal tidak diubah');
+    expect(res.body).toMatchObject({ success: 1, failed: 0, errors: [] });
+    const [, row, ctx] = partyImport.importPartyRow.mock.calls[0];
+    expect(row).toMatchObject({ rowNum: 2, name: 'Budi', partyType: 'Customer', openings: { AR: '5000000' } });
+    expect(ctx).toEqual({ userId: 'u-1', confirmed: false, throughLock: undefined });
+    // No balance column and no journal is written by the route itself any more.
+    expect(db.party.create).not.toHaveBeenCalled();
+    expect(db.party.update).not.toHaveBeenCalled();
     expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
-    expect(db.journalEntry.findMany).not.toHaveBeenCalled();
     noDeletes();
   });
 
-  it('new party: opening balance journal is posted and nothing is deleted', async () => {
-    db.party.findFirst.mockResolvedValue(null);
-    db._tx.party.create.mockResolvedValue({ id: 'p-new' });
+  it('a replacement is confirmed by its sheet row number only', async () => {
+    db.rows = [
+      { name: 'A', partyType: 'Customer', openingBalance: '1' },
+      { name: 'B', partyType: 'Customer', openingBalance: '2' },
+    ];
+
+    await post('/api/import/parties', { confirmReplace: ['3'] });
+
+    expect(partyImport.importPartyRow.mock.calls.map((c) => [c[1].rowNum, c[2].confirmed])).toEqual([[2, false], [3, true]]);
+  });
+
+  it('a party with transactions: the issue is reported on its row and the row still counts as saved', async () => {
+    partyImport.importPartyRow.mockResolvedValue(result({ issues: [{ message: 'Mitra "Budi" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.', code: 'PARTY_OPENING_KEPT' }] }));
 
     const res = await post('/api/import/parties');
 
     expect(res.body.success).toBe(1);
-    // The undirected opening of a Customer is its receivable, as recalcPartyOutstanding computes it.
-    const created = db._tx.party.create.mock.calls[0][0].data;
-    expect([created.outstandingAmount, created.receivableOutstanding, created.payableOutstanding].map(String))
-      .toEqual(['5000000', '5000000', '0']);
-    expect(db._tx.journalEntry.create).toHaveBeenCalledTimes(1);
-    noDeletes();
+    expect(res.body.errors).toEqual([{ row: 2, message: expect.stringContaining('saldo awal tidak diubah'), code: 'PARTY_OPENING_KEPT' }]);
   });
 
-  it('new party: the period guard runs in the transaction that writes the party and its journals', async () => {
-    db.rows = [{ name: 'Sari', partyType: 'Both', openingBalance: '5000000', depositBalance: '100000', customerDepositBalance: '200000' }];
-    db.party.findFirst.mockResolvedValue(null);
-    db._tx.party.create.mockResolvedValue({ id: 'p-sari' });
-    const { getOpenFiscalYear } = await import('../../utils/fiscalYear');
+  it('a refused new party fails its row with the code, the other rows go on', async () => {
+    db.rows = [
+      { name: 'Budi', partyType: 'Customer', openingBalance: '5' },
+      { name: 'Sari', partyType: 'Customer' },
+    ];
+    partyImport.importPartyRow.mockRejectedValueOnce(new BusinessError('Tahun buku 2026 sudah ditutup', 'PERIOD_CLOSED'));
 
     const res = await post('/api/import/parties');
 
     expect(res.body.success).toBe(1);
-    // One transaction per row: the year lookup is share-locked until the three journals commit.
-    expect(db.$transaction).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(getOpenFiscalYear)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(getOpenFiscalYear).mock.calls[0][0]).toBe(db._tx);
-    expect(db._tx.journalEntry.create).toHaveBeenCalledTimes(3);
-    expect(db._tx.payment.create).toHaveBeenCalledTimes(2);
-    expect(db.party.create).not.toHaveBeenCalled();
+    expect(res.body.failed).toBe(1);
+    expect(res.body.errors).toEqual([{ row: 2, message: 'Gagal insert "Budi": Tahun buku 2026 sudah ditutup', code: 'PERIOD_CLOSED' }]);
   });
 
-  it('new party: a year closed before the row is posted fails the row, and party and journals roll back together', async () => {
-    db.party.findFirst.mockResolvedValue(null);
-    const { getOpenFiscalYear } = await import('../../utils/fiscalYear');
-    const { BusinessError } = await import('../../utils/errors');
-    vi.mocked(getOpenFiscalYear).mockRejectedValueOnce(
-      new BusinessError('Tahun buku 2026 sudah ditutup; dokumen di periode ini tidak bisa diposting, diubah, atau dibatalkan. Buat koreksi di periode berjalan.', 'PERIOD_CLOSED'),
-    );
+  it('a row with a negative amount never reaches the party import', async () => {
+    db.rows = [{ name: 'Budi', partyType: 'Customer', openingBalance: '-5' }];
 
     const res = await post('/api/import/parties');
 
-    expect(res.body.success).toBe(0);
-    expect(res.body.errors[0].message).toMatch(/Gagal insert "Budi": Tahun buku 2026 sudah ditutup/);
-    expect(vi.mocked(getOpenFiscalYear).mock.calls[0][0]).toBe(db._tx);
-    expect(db._tx.party.create).not.toHaveBeenCalled();
-    expect(db.party.create).not.toHaveBeenCalled();
-    expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
+    expect(res.body.errors[0]).toMatchObject({ row: 2, code: 'OPENING_NEGATIVE' });
+    expect(partyImport.importPartyRow).not.toHaveBeenCalled();
   });
 
-  it('new party without opening balances is created outside any transaction', async () => {
-    db.rows = [{ name: 'Tono', partyType: 'Supplier' }];
-    db.party.findFirst.mockResolvedValue(null);
-    db.party.create.mockResolvedValue({ id: 'p-tono' });
+  it('the preview writes nothing and shows the opening of each row', async () => {
+    partyImport.previewPartyOpening.mockResolvedValue({ allowed: true, action: 'replace', recorded: '4000000.00', needsConfirm: true });
 
-    const res = await post('/api/import/parties');
+    const res = await post('/api/import/parties?preview=true');
 
-    expect(res.body.success).toBe(1);
-    expect(db.party.create).toHaveBeenCalledTimes(1);
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(res.body.data[0]).toMatchObject({ rowNum: 2, name: 'Budi', openingBalance: '5000000', arahSaldo: 'Piutang', opening: { action: 'replace', needsConfirm: true } });
+    expect(partyImport.importPartyRow).not.toHaveBeenCalled();
   });
 
-  it('new party: a missing system account fails the row before the party is created', async () => {
-    db.party.findFirst.mockResolvedValue(null);
-    const { systemAccounts } = await import('../../services/systemAccounts');
-    vi.mocked(systemAccounts.getAccount).mockRejectedValueOnce(new Error('Akun sistem AR belum dikonfigurasi'));
-
-    const res = await post('/api/import/parties');
-
-    expect(res.body.success).toBe(0);
-    expect(db.party.create).not.toHaveBeenCalled();
-    expect(db._tx.party.create).not.toHaveBeenCalled();
-    expect(db._tx.journalEntry.create).not.toHaveBeenCalled();
+  it('throughLockReason needs the period.lock right and is passed to the row', async () => {
+    const reason = 'koreksi saldo awal bulan terkunci';
+    expect((await post('/api/import/parties', { throughLockReason: reason })).status).toBe(403);
+    perms.hasCap.mockResolvedValue(true);
+    await post('/api/import/parties', { throughLockReason: reason });
+    expect(partyImport.importPartyRow.mock.calls[0][2].throughLock).toEqual({ reason });
   });
 });
