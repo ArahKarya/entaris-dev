@@ -572,6 +572,10 @@
         "customer-deposit-subledger": {
           "title": "Uang Muka Customer sesuai",
           "hint": "Saldo Uang Muka Customer ini di Buku Besar berbeda dengan sisa uang mukanya (saldo hari ini). Koreksi lewat dokumen atau jurnal; selisih lama sudah tercatat di baseline."
+        },
+        "ap-subledger": {
+          "title": "Hutang sesuai invoice",
+          "hint": "Saldo Hutang Supplier ini di Buku Besar berbeda dengan sisa tagihan invoice dan saldo awal hutangnya (saldo hari ini). Koreksi lewat dokumen atau jurnal; selisih lama sudah tercatat di baseline."
         }
       },
       "roles": {

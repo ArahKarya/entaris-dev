@@ -1,7 +1,8 @@
-// Receivable and customer deposit balances per Customer: the general ledger (active ledger rows on
-// the AR / CUSTOMER_DEPOSIT accounts, by party_id) against the subledger the documents keep
-// (invoice outstanding plus opening receivable plus the manual party adjustment of
-// services/ledger/partyAdjustments.ts; deposit amount less applications and refunds). The ledger
+// Receivable and customer deposit balances per Customer, and payable per Supplier: the general
+// ledger (active ledger rows on the AR / CUSTOMER_DEPOSIT / AP accounts, by party_id) against the
+// subledger the documents keep (invoice outstanding plus the opening of that side plus the manual
+// party adjustment of services/ledger/partyAdjustments.ts; deposit amount less applications and
+// refunds). The ledger
 // side reads the role's accounts through the caller's transaction, including the accounts the role
 // held before a remap (roleAccountIds includeFormer), so a document voided after a remap still
 // lands on the party.
@@ -162,6 +163,43 @@ export async function findArSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): 
   const active = scope.fiscalYear
     ? activeCte(accountIds, scope.fiscalYear, Prisma.sql`
         SELECT party_id FROM sales_invoices
+         WHERE status NOT IN ('Draft', 'Cancelled') AND date >= ${scope.fiscalYear.gte} AND date < ${scope.fiscalYear.lt}`)
+    : null;
+  return diffs(tx, gl, sub, scope, active);
+}
+
+/**
+ * Payable per party, the mirror of findArSubledgerDiffs (PR-5.10, owner decision #9): ledger credit -
+ * debit on the AP accounts (current and former) against the outstanding of its purchase invoices
+ * (not Draft or Cancelled), plus its manual party adjustment on those accounts, plus its opening
+ * payable: opening_payable for a Supplier or Both, and for a Supplier also what the migration left
+ * undirected (legacyUnassigned counts on the payable side of a Supplier only, as computePartySides
+ * does). The inclusion test uses the same expression as the amount. In a year-scoped run a party
+ * with such an invoice dated in the year is active. [] while AP is not mapped. Largest difference
+ * first.
+ */
+export async function findApSubledgerDiffs(tx: Tx, scope: SubledgerScope = {}): Promise<PartySubledgerDiff[]> {
+  const accountIds = await roleAccountIds(tx, 'AP', { includeFormer: true });
+  if (accountIds.length === 0 || scope.partyIds?.length === 0) return [];
+  const gl = glCte(accountIds, Prisma.sql`ale.credit - ale.debit`, scope);
+  const opening = Prisma.sql`CASE WHEN p."partyType" = 'Supplier' THEN p.opening_outstanding - p.opening_receivable
+                                  WHEN p."partyType" = 'Both' THEN p.opening_payable
+                                  ELSE 0 END`;
+  const sub = Prisma.sql`
+    SELECT p.id AS party_id,
+           COALESCE(inv.outstanding, 0) + COALESCE(adj.amount, 0) + ${opening} AS amount
+      FROM parties p
+      LEFT JOIN (
+        SELECT party_id, SUM(outstanding) AS outstanding
+          FROM purchase_invoices
+         WHERE status NOT IN ('Draft', 'Cancelled')
+         GROUP BY party_id
+      ) inv ON inv.party_id = p.id
+      LEFT JOIN (${manualPartyAdjustmentSql(accountIds, ADJUSTMENT_SIGN.AP)}) adj ON adj.party_id = p.id
+     WHERE inv.party_id IS NOT NULL OR adj.party_id IS NOT NULL OR ${opening} <> 0`;
+  const active = scope.fiscalYear
+    ? activeCte(accountIds, scope.fiscalYear, Prisma.sql`
+        SELECT party_id FROM purchase_invoices
          WHERE status NOT IN ('Draft', 'Cancelled') AND date >= ${scope.fiscalYear.gte} AND date < ${scope.fiscalYear.lt}`)
     : null;
   return diffs(tx, gl, sub, scope, active);

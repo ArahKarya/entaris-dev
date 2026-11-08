@@ -26,7 +26,7 @@ import {
   captureCloseBaseline,
   type BaselineCapture,
 } from '../../services/fiscalYearClose';
-// The checks other modules register (ar-subledger, customer-deposit-subledger), so --check knows them.
+// The checks other modules register (ar-subledger, customer-deposit-subledger, ap-subledger), so --check knows them.
 import '../../services/closeCheckPlugins';
 
 interface Options {
