@@ -10,6 +10,7 @@ import { RupiahField } from './purchase-cash/RupiahField';
 import AttachmentPreview from './AttachmentPreview';
 import { ComboboxField } from './overlays/ComboboxField';
 import { usePartyPicker } from '@/hooks/usePartyPicker';
+import { useOpeningCutover } from '@/hooks/useOpeningCutover';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -39,6 +40,9 @@ const CustomerDepositModal: React.FC<CustomerDepositModalProps> = ({ isOpen, onC
   const [proformaId, setProformaId] = useState('none');
 
   const queryClient = useQueryClient();
+  // An opening deposit is dated on the cut-over date; the date field follows it while ticked.
+  const cutover = useOpeningCutover(isOpen && isOpeningBalance);
+  const entryDate = isOpeningBalance && cutover ? cutover : date;
 
   useEffect(() => {
     if (isOpen) {
@@ -102,7 +106,7 @@ const CustomerDepositModal: React.FC<CustomerDepositModalProps> = ({ isOpen, onC
 
   const handleSubmit = () => {
     mutation.mutate({
-      date,
+      date: entryDate,
       partyId,
       amount: numAmount,
       paymentType: 'CustomerDeposit',
@@ -133,7 +137,7 @@ const CustomerDepositModal: React.FC<CustomerDepositModalProps> = ({ isOpen, onC
           <OverlayBody>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t('customerDepositModal.fields.date')}>
-                <DateInput value={date} onChange={setDate} disabled={!!savedId} />
+                <DateInput value={entryDate} onChange={setDate} disabled={!!savedId || (isOpeningBalance && !!cutover)} />
               </Field>
               <ComboboxField
                   label={t('customerDepositModal.fields.customer')}
@@ -186,6 +190,7 @@ const CustomerDepositModal: React.FC<CustomerDepositModalProps> = ({ isOpen, onC
                   />
                 </p>
                 <p className="mt-0.5 text-xs">{t('customerDepositModal.opening.note')}</p>
+                {cutover && <p className="mt-0.5 text-xs">{t('customerDepositModal.opening.cutover', { date: cutover })}</p>}
               </div>
             )}
 

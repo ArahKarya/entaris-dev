@@ -509,7 +509,6 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Nilai \"{0}\" bukan angka yang valid. Tulis angka tanpa pemisah ribuan, dengan titik sebagai tanda desimal.": "The value \"{0}\" is not a valid number. Write the number without thousands separators, with a dot as the decimal mark.",
   // opening balance (E2-R11): services/ledger/openingBalance.ts, OPENING_ACCOUNT_RULE, routes/coa.ts, utils/schemas.ts
   "Belum ada tahun buku terbuka; tanggal cut-over saldo awal diambil dari awal tahun buku terbuka paling awal. Buat tahun buku terlebih dahulu.": "There is no open fiscal year; the opening balance cut-over date is the start of the earliest open fiscal year. Create a fiscal year first.",
-  "Saldo awal pihak belum didukung oleh layanan saldo awal.": "Party opening balances are not supported by the opening balance service yet.",
   "Saldo awal dicatat per tanggal cut-over {0}; tanggal {1} tidak bisa dipakai. Isi saldo per tanggal cut-over.": "Opening balances are recorded as of the cut-over date {0}; the date {1} cannot be used. Enter the balance as of the cut-over date.",
   "Tahun buku untuk tanggal cut-over {0} tidak ditemukan. Buat tahun buku untuk tanggal ini terlebih dahulu.": "No fiscal year covers the cut-over date {0}. Create a fiscal year for this date first.",
   "Akun {0} masih memiliki jurnal saldo awal lama tanpa kunci ({1}). Jalankan audit saldo awal; akuntan menentukan jurnal ini sebelum saldo awal diubah.": "Account {0} still has old opening balance journals without a key ({1}). Run the opening balance audit; the accountant decides on these journals before the opening balance can change.",
@@ -528,4 +527,18 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "saldo awal tercatat {0} akan diganti {1}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance {0} would be replaced by {1}. Tick this account's confirmation on the import screen to replace it.",
   "saldo awal tercatat akan diganti {0}. Centang konfirmasi akun ini di layar impor untuk menggantinya.": "the recorded opening balance would be replaced by {0}. Tick this account's confirmation on the import screen to replace it.",
   "nilai {0} sama dengan saldo berjalan akun, bukan saldo per tanggal cut-over {1}. Isi saldo per tanggal cut-over, atau centang konfirmasi akun ini bila nilai ini memang saldo awalnya.": "the value {0} equals the account's running balance, not the balance at the cut-over date {1}. Enter the balance at the cut-over date, or tick this account's confirmation if this value really is the opening balance.",
+  // opening balance (E2-R11, E2-R13): party targets, services/ledger/openingBalanceParty.ts, services/paymentSubmit.ts
+  "Saldo awal pihak tidak boleh negatif.": "A party opening balance cannot be negative.",
+  "Saldo awal {0} tidak berlaku untuk mitra bertipe {1}.": "A {0} opening balance does not apply to a partner of type {1}.",
+  "Mitra {0} sudah punya mutasi {1} sebelum tanggal cut-over {2}. Saldo awal pihak hanya untuk {3} di luar Invoice aplikasi per tanggal cut-over; koreksi lewat jurnal manual.": "Partner {0} already has {1} entries before the cut-over date {2}. A party opening balance only covers {3} outside the Invoices in the app at the cut-over date; correct it with a manual journal.",
+  "Saldo awal {0} mitra {1} masih memiliki {2}. Jalankan audit saldo awal; akuntan menentukannya sebelum saldo awal diubah.": "The {0} opening balance of partner {1} still has {2}. Run the opening balance audit; the accountant decides on it before the opening balance can change.",
+  "jurnal saldo awal lama tanpa kunci ({0})": "old opening balance journals without a key ({0})",
+  "saldo awal tercatat {0} tanpa jurnal saldo awal berkunci yang sama": "a recorded opening balance of {0} without a matching keyed opening journal",
+  "saldo awal {0} yang belum diarahkan ke piutang atau hutang": "an opening balance of {0} not yet directed to receivable or payable",
+  "Saldo awal {0} mitra {1} sudah terpakai pembayaran atau penggunaan uang muka, jadi tidak bisa diganti. Koreksi lewat jurnal manual.": "The {0} opening balance of partner {1} is already used by a payment or a deposit application, so it cannot be replaced. Correct it with a manual journal.",
+  "Saldo awal uang muka tidak tercatat.": "The opening deposit was not recorded.",
+  "piutang": "receivable",
+  "hutang": "payable",
+  "uang muka Supplier": "Supplier deposit",
+  "uang muka Customer": "Customer deposit",
 };

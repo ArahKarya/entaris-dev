@@ -7,6 +7,8 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
 import { logger } from '../lib/logger';
 import { OUTSTANDING_TOLERANCE, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
+import { businessDayOf } from '../utils/businessDate';
+import { setOpeningBalanceInTx } from './ledger/openingBalance';
 
 type Tx = Prisma.TransactionClient;
 
@@ -41,8 +43,11 @@ export interface SubmitPaymentInput {
 
 /**
  * Submit a payment. Journal by paymentType:
- *   - VendorDeposit:   DR Uang Muka Vendor / CR Kas (or Ekuitas if opening)
- *   - CustomerDeposit: DR Kas / CR Uang Muka Pelanggan (or Ekuitas if opening)
+ *   - VendorDeposit:   DR Uang Muka Vendor / CR Kas
+ *   - CustomerDeposit: DR Kas / CR Uang Muka Pelanggan
+ *   - an opening deposit (isOpeningBalance) goes to the opening balance service instead: dated on
+ *     the cut-over date (another date is OPENING_DATE_MISMATCH), keyed per party, and it replaces
+ *     the party's earlier opening deposit of that kind instead of adding to it
  *   - VendorRefund:    DR Bank / CR Hutang Usaha — supplier returns money;
  *                      optionally reduces a source Pay payment's allocations
  *   - CustomerRefund:  DR Piutang Usaha / CR Bank — we return money to customer
@@ -59,40 +64,28 @@ export async function submitPaymentInTx(
 ): Promise<{ payment: Awaited<ReturnType<Tx['payment']['create']>>; party: Awaited<ReturnType<Tx['party']['findUnique']>>; unallocatedAmount: number }> {
   const parsedDate = new Date(body.date);
   if (isNaN(parsedDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
-  const fiscalYear = await getOpenFiscalYear(tx, parsedDate);
 
-  // Skip cash-account validation for opening-balance deposits (they DR/CR
-  // Ekuitas Saldo Awal instead).
   const isOpeningDeposit =
     body.isOpeningBalance === true &&
     (body.paymentType === 'VendorDeposit' || body.paymentType === 'CustomerDeposit');
-  if (!isOpeningDeposit) {
-    const bankAccount = await tx.account.findUnique({ where: { id: body.accountId } });
-    if (!bankAccount) throw new BusinessError('Akun kas/bank tidak ditemukan.');
-    const isCashAccount = await systemAccounts.isCashAccount(bankAccount.accountNumber);
-    if (!isCashAccount) throw new BusinessError('Akun yang dipilih bukan akun kas/bank.');
-  }
+  if (isOpeningDeposit) return submitOpeningDepositInTx(tx, body, parsedDate, userId);
+
+  const fiscalYear = await getOpenFiscalYear(tx, parsedDate);
+  const bankAccount = await tx.account.findUnique({ where: { id: body.accountId } });
+  if (!bankAccount) throw new BusinessError('Akun kas/bank tidak ditemukan.');
+  const isCashAccount = await systemAccounts.isCashAccount(bankAccount.accountNumber);
+  if (!isCashAccount) throw new BusinessError('Akun yang dipilih bukan akun kas/bank.');
 
   const party = await tx.party.findUnique({ where: { id: body.partyId } });
   if (!party) throw new BusinessError('Data mitra tidak ditemukan.');
   if (!party.isActive) throw new BusinessError('Mitra sudah tidak aktif.');
 
-  // Tag Proforma hanya untuk CustomerDeposit; proforma harus aktif dan milik customer yang sama.
-  let proformaInvoiceId: string | null = null;
-  if (body.paymentType === 'CustomerDeposit' && body.proformaInvoiceId) {
-    const pf = await tx.proformaInvoice.findUnique({ where: { id: body.proformaInvoiceId } });
-    if (!pf) throw new BusinessError('Proforma Invoice tidak ditemukan.');
-    if (pf.status === 'Cancelled') throw new BusinessError('Proforma Invoice sudah dibatalkan.');
-    if (pf.partyId !== body.partyId) throw new BusinessError('Customer pada uang muka tidak sama dengan Proforma Invoice.');
-    proformaInvoiceId = pf.id;
-  }
+  const proformaInvoiceId = await proformaTagOf(tx, body);
 
   const paymentNumber = await generateDocumentNumber(tx, 'PAY', parsedDate, fiscalYear.id);
   const numAmount = body.amount;
 
-  const resolvedAccountId = isOpeningDeposit
-    ? (await systemAccounts.getAccount('OPENING_EQUITY')).id
-    : body.accountId;
+  const resolvedAccountId = body.accountId;
 
   const payment = await tx.payment.create({
     data: {
@@ -120,11 +113,8 @@ export async function submitPaymentInTx(
       throw new BusinessError('Uang muka hanya dapat dibuat untuk Supplier.');
     }
     const depositAccount = await systemAccounts.getAccount('VENDOR_DEPOSIT');
-    const isOpening = body.isOpeningBalance === true;
-    const creditAccountId = isOpening
-      ? (await systemAccounts.getAccount('OPENING_EQUITY')).id
-      : body.accountId;
-    const narrationPrefix = isOpening ? 'Saldo Awal Uang Muka Vendor' : 'Uang Muka Vendor';
+    const creditAccountId = body.accountId;
+    const narrationPrefix = 'Uang Muka Vendor';
 
     const jvNumber = `JV-${paymentNumber}`;
     const existingJV = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber } });
@@ -173,11 +163,8 @@ export async function submitPaymentInTx(
       throw new BusinessError('Uang muka customer hanya dapat dibuat untuk Customer.');
     }
     const depositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
-    const isOpening = body.isOpeningBalance === true;
-    const debitAccountId = isOpening
-      ? (await systemAccounts.getAccount('OPENING_EQUITY')).id
-      : body.accountId;
-    const narrationPrefix = isOpening ? 'Saldo Awal Uang Muka Pelanggan' : 'Uang Muka Pelanggan';
+    const debitAccountId = body.accountId;
+    const narrationPrefix = 'Uang Muka Pelanggan';
 
     const jvNumber = `JV-${paymentNumber}`;
     const existingJV = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber } });
@@ -486,6 +473,46 @@ export async function submitPaymentInTx(
 
   await recalcPartyOutstanding(tx, body.partyId);
   return { payment, party, unallocatedAmount };
+}
+
+type SubmittedPayment = Awaited<ReturnType<typeof submitPaymentInTx>>;
+
+/** Tag Proforma hanya untuk CustomerDeposit; proforma harus aktif dan milik customer yang sama. */
+async function proformaTagOf(tx: Tx, body: SubmitPaymentInput): Promise<string | null> {
+  if (body.paymentType !== 'CustomerDeposit' || !body.proformaInvoiceId) return null;
+  const pf = await tx.proformaInvoice.findUnique({ where: { id: body.proformaInvoiceId } });
+  if (!pf) throw new BusinessError('Proforma Invoice tidak ditemukan.');
+  if (pf.status === 'Cancelled') throw new BusinessError('Proforma Invoice sudah dibatalkan.');
+  if (pf.partyId !== body.partyId) throw new BusinessError('Customer pada uang muka tidak sama dengan Proforma Invoice.');
+  return pf.id;
+}
+
+/**
+ * An opening deposit from the deposit screen (or AIRA): the opening balance service posts it on the
+ * cut-over date as the party's VDEP/CDEP opening, replacing the earlier one. `body.date` must be the
+ * cut-over day; `body.accountId` is ignored (the counter account is the opening equity). The
+ * reference, notes and (customer) Sales Order / Proforma tags go on the new deposit payment.
+ */
+async function submitOpeningDepositInTx(tx: Tx, body: SubmitPaymentInput, parsedDate: Date, userId: string): Promise<SubmittedPayment> {
+  const party = await tx.party.findUnique({ where: { id: body.partyId } });
+  if (!party) throw new BusinessError('Data mitra tidak ditemukan.');
+  if (!party.isActive) throw new BusinessError('Mitra sudah tidak aktif.');
+  const asOfDate = /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : businessDayOf(parsedDate);
+  const isCustomer = body.paymentType === 'CustomerDeposit';
+  const outcome = await setOpeningBalanceInTx(tx, {
+    target: { kind: 'PARTY', partyId: body.partyId, subledger: isCustomer ? 'CDEP' : 'VDEP' },
+    amount: String(body.amount),
+    asOfDate,
+    userId,
+    deposit: {
+      referenceNo: body.referenceNo || null,
+      notes: body.notes || null,
+      salesOrderId: isCustomer ? (body.salesOrderId ?? null) : null,
+      proformaInvoiceId: await proformaTagOf(tx, body),
+    },
+  });
+  if (!outcome.payment) throw new BusinessError('Saldo awal uang muka tidak tercatat.');
+  return { payment: outcome.payment, party, unallocatedAmount: 0 };
 }
 
 /**
