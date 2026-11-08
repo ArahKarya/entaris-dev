@@ -1481,7 +1481,7 @@
     "currentBalance": "Saldo uang muka saat ini: <amount>{{amount}}</amount>",
     "activeDeposits": "{{total}} deposit aktif",
     "opening": {
-      "label": "Saldo Awal / Koreksi",
+      "label": "Saldo Awal",
       "hint": "Catat deposit tanpa mempengaruhi kas (offset ke Ekuitas Saldo Awal)",
       "journal": "Jurnal: <mono>DR Ekuitas Saldo Awal / CR Uang Muka Customer</mono>",
       "note": "Kas/Bank tidak terpengaruh. Gunakan untuk deposit yang uangnya sudah masuk sebelum sistem digunakan. Nilai ini mengganti saldo awal uang muka Customer ini sebelumnya, bukan menambahnya.",

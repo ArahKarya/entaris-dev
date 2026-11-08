@@ -134,7 +134,7 @@
     "currentBalance": "Saldo uang muka saat ini: <amount>{{amount}}</amount>",
     "activeDeposits_one": "{{count}} deposit aktif",
     "activeDeposits_other": "{{count}} deposit aktif",
-    "openingBalance": "Saldo Awal / Koreksi",
+    "openingBalance": "Saldo Awal",
     "openingBalanceHint": "Catat deposit tanpa mempengaruhi kas (offset ke Ekuitas Saldo Awal)",
     "journalLabel": "Jurnal:",
     "journalEntry": "DR Uang Muka Pembelian / CR Ekuitas Saldo Awal",

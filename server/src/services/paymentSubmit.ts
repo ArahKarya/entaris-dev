@@ -80,15 +80,7 @@ export async function submitPaymentInTx(
   if (!party) throw new BusinessError('Data mitra tidak ditemukan.');
   if (!party.isActive) throw new BusinessError('Mitra sudah tidak aktif.');
 
-  // Tag Proforma hanya untuk CustomerDeposit; proforma harus aktif dan milik customer yang sama.
-  let proformaInvoiceId: string | null = null;
-  if (body.paymentType === 'CustomerDeposit' && body.proformaInvoiceId) {
-    const pf = await tx.proformaInvoice.findUnique({ where: { id: body.proformaInvoiceId } });
-    if (!pf) throw new BusinessError('Proforma Invoice tidak ditemukan.');
-    if (pf.status === 'Cancelled') throw new BusinessError('Proforma Invoice sudah dibatalkan.');
-    if (pf.partyId !== body.partyId) throw new BusinessError('Customer pada uang muka tidak sama dengan Proforma Invoice.');
-    proformaInvoiceId = pf.id;
-  }
+  const proformaInvoiceId = await proformaTagOf(tx, body);
 
   const paymentNumber = await generateDocumentNumber(tx, 'PAY', parsedDate, fiscalYear.id);
   const numAmount = body.amount;
@@ -485,21 +477,39 @@ export async function submitPaymentInTx(
 
 type SubmittedPayment = Awaited<ReturnType<typeof submitPaymentInTx>>;
 
+/** Tag Proforma hanya untuk CustomerDeposit; proforma harus aktif dan milik customer yang sama. */
+async function proformaTagOf(tx: Tx, body: SubmitPaymentInput): Promise<string | null> {
+  if (body.paymentType !== 'CustomerDeposit' || !body.proformaInvoiceId) return null;
+  const pf = await tx.proformaInvoice.findUnique({ where: { id: body.proformaInvoiceId } });
+  if (!pf) throw new BusinessError('Proforma Invoice tidak ditemukan.');
+  if (pf.status === 'Cancelled') throw new BusinessError('Proforma Invoice sudah dibatalkan.');
+  if (pf.partyId !== body.partyId) throw new BusinessError('Customer pada uang muka tidak sama dengan Proforma Invoice.');
+  return pf.id;
+}
+
 /**
  * An opening deposit from the deposit screen (or AIRA): the opening balance service posts it on the
  * cut-over date as the party's VDEP/CDEP opening, replacing the earlier one. `body.date` must be the
- * cut-over day; `body.accountId` is ignored (the counter account is the opening equity).
+ * cut-over day; `body.accountId` is ignored (the counter account is the opening equity). The
+ * reference, notes and (customer) Sales Order / Proforma tags go on the new deposit payment.
  */
 async function submitOpeningDepositInTx(tx: Tx, body: SubmitPaymentInput, parsedDate: Date, userId: string): Promise<SubmittedPayment> {
   const party = await tx.party.findUnique({ where: { id: body.partyId } });
   if (!party) throw new BusinessError('Data mitra tidak ditemukan.');
   if (!party.isActive) throw new BusinessError('Mitra sudah tidak aktif.');
   const asOfDate = /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : businessDayOf(parsedDate);
+  const isCustomer = body.paymentType === 'CustomerDeposit';
   const outcome = await setOpeningBalanceInTx(tx, {
-    target: { kind: 'PARTY', partyId: body.partyId, subledger: body.paymentType === 'VendorDeposit' ? 'VDEP' : 'CDEP' },
+    target: { kind: 'PARTY', partyId: body.partyId, subledger: isCustomer ? 'CDEP' : 'VDEP' },
     amount: String(body.amount),
     asOfDate,
     userId,
+    deposit: {
+      referenceNo: body.referenceNo || null,
+      notes: body.notes || null,
+      salesOrderId: isCustomer ? (body.salesOrderId ?? null) : null,
+      proformaInvoiceId: await proformaTagOf(tx, body),
+    },
   });
   if (!outcome.payment) throw new BusinessError('Saldo awal uang muka tidak tercatat.');
   return { payment: outcome.payment, party, unallocatedAmount: 0 };

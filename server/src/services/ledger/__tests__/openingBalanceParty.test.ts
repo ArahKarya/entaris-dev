@@ -94,10 +94,18 @@ function makeTx(over: Partial<FakeState> = {}) {
       update: vi.fn(async ({ data }: any) => { calls.push(`party:${Object.keys(data)[0]}`); return {}; }),
     },
     accountingLedgerEntry: { findFirst: vi.fn(async (_args: any) => (s.history ? { id: 'ale' } : null)) },
-    journalEntry: { findMany: vi.fn(async () => s.journals) },
+    journalEntry: {
+      findMany: vi.fn(async () => s.journals),
+      findUnique: vi.fn(async ({ where }: any) => s.journals.find((j) => (where.id ? j.id === where.id : j.entryNumber === where.entryNumber)) ?? null),
+    },
     payment: {
-      findMany: vi.fn(async () => s.payments),
-      findUnique: vi.fn(async () => ({
+      // Linked owners, unlinked owners (by payment number), and the old deposit screen's opening deposits.
+      findMany: vi.fn(async ({ where }: any) => s.payments.filter((p) => {
+        if (where.journalEntryId?.in) return where.journalEntryId.in.includes(p.journalEntryId);
+        if (where.journalEntryId === null) return !p.journalEntryId && where.paymentNumber.in.includes(p.paymentNumber);
+        return p.accountId === where.accountId && !where.id.notIn.includes(p.id);
+      })),
+      findUnique: vi.fn(async ({ where }: any) => (where.journalEntryId ? null : {
         refundedAmount: D(s.used.refundedAmount),
         customerDepositApplications: Array.from({ length: s.used.applications }, (_, i) => ({ id: `a${i}` })),
         depositApplications: [],
@@ -205,6 +213,8 @@ describe('party opening balance', () => {
     ['an unkeyed opening journal', { journals: [journal('AR', 500, { sourceKey: null })], openingReceivable: 500, openingOutstanding: 500 }],
     ['an opening column without a keyed journal', { openingReceivable: 300, openingOutstanding: 300 }],
     ['an undirected opening', { openingOutstanding: 700 }],
+    // keyed by the 5.6 audit over a column still undirected: not a payment taking it
+    ['a keyed journal over an undirected opening', { journals: [journal('AR', 500)], openingOutstanding: 500 }],
   ])('refuses OPENING_LEGACY_REVIEW for %s', async (_name, state) => {
     const tx = makeTx(state);
     await expect(setOpeningBalanceInTx(tx as any, input('AR', '600'))).rejects.toMatchObject({ code: OPENING_LEGACY_REVIEW });
@@ -225,13 +235,46 @@ describe('party opening balance', () => {
       { accountId: 'cdep', partyId: 'p1', credit: '400.00' },
     ]);
     expect(tx.calls).toEqual(['lock-payments', 'lock-accounts', 'lock-party', 'payment:create', 'party:customerDepositBalance']);
+    // The payment rows before the PAY/JV numbers, like the deposit apply and refund routes.
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(mocks.generateDocumentNumber.mock.invocationCallOrder[0]);
     expect(out.payment).toMatchObject({ journalEntryId: 'je-new' });
     expect(mocks.adjustPartyOpening).not.toHaveBeenCalled();
   });
 
+  it('replaces a journal-less opening deposit of the old deposit screen instead of adding to it', async () => {
+    const tx = makeTx({ partyType: 'Supplier', payments: [{ id: 'pay-old', paymentNumber: 'PAY-1', journalEntryId: null, accountId: 'eq', amount: D(10) }] });
+    const out = await setOpeningBalanceInTx(tx as any, input('VDEP', '10'));
+    expect(out.action).toBe('replaced');
+    expect(mocks.cancelDepositPaymentInTx).toHaveBeenCalledWith(tx, 'pay-old', 'VENDOR', expect.anything(), expect.anything());
+  });
+
+  it('pairs an unkeyed opening deposit journal with its payment posted before the payment-to-journal link', async () => {
+    const legacy = journal('VDEP', 300, { id: 'je-old', entryNumber: 'JV-PAY-1', sourceKey: null, sourceType: null, narration: 'Saldo Awal Uang Muka Vendor: PAY-1 - Mitra' });
+    const tx = makeTx({ partyType: 'Supplier', journals: [legacy], payments: [{ id: 'pay-old', paymentNumber: 'PAY-1', journalEntryId: null, accountId: 'cash', amount: D(300) }] });
+    const out = await setOpeningBalanceInTx(tx as any, input('VDEP', '400'));
+    expect(out.action).toBe('replaced');
+    expect(mocks.cancelDepositPaymentInTx).toHaveBeenCalledWith(tx, 'pay-old', 'VENDOR', expect.anything(), expect.anything());
+    expect(mocks.cancelJournalsInTx).toHaveBeenCalledWith(tx, [], expect.anything());
+  });
+
+  it('keeps the reference, notes and tags typed on an opening deposit; other ones replace it', async () => {
+    const details = { referenceNo: 'KW-123', notes: 'sisa DP 2025', salesOrderId: 'so-1', proformaInvoiceId: 'pf-1' };
+    const tx = makeTx();
+    await setOpeningBalanceInTx(tx as any, input('CDEP', '400', { deposit: details }));
+    expect(tx.payment.create.mock.calls[0][0].data).toMatchObject(details);
+    expect(mocks.postJournal.mock.calls[0][1].narration).toBe('Saldo awal uang muka Customer: Mitra');
+
+    const keyed = journal('CDEP', 400, { id: 'je-dep' });
+    const stored = { id: 'pay-1', journalEntryId: 'je-dep', amount: D(400), ...details };
+    await expect(setOpeningBalanceInTx(makeTx({ journals: [keyed], payments: [stored] }) as any, input('CDEP', '400', { deposit: details })))
+      .resolves.toMatchObject({ action: 'unchanged' });
+    await expect(setOpeningBalanceInTx(makeTx({ journals: [keyed], payments: [stored] }) as any, input('CDEP', '400', { deposit: { ...details, notes: 'lain' } })))
+      .resolves.toMatchObject({ action: 'replaced' });
+  });
+
   it('is unchanged for the same keyed opening deposit', async () => {
     const keyed = journal('VDEP', 250, { id: 'je-dep' });
-    const tx = makeTx({ partyType: 'Supplier', journals: [keyed], payments: [{ id: 'pay-1', journalEntryId: 'je-dep', amount: D(250) }] });
+    const tx = makeTx({ partyType: 'Supplier', journals: [keyed], payments: [{ id: 'pay-1', journalEntryId: 'je-dep', amount: D(250), notes: 'Saldo awal uang muka Supplier: Mitra' }] });
     const out = await setOpeningBalanceInTx(tx as any, input('VDEP', '250'));
     expect(out).toMatchObject({ action: 'unchanged', payment: { id: 'pay-1' } });
     expect(mocks.cancelDepositPaymentInTx).not.toHaveBeenCalled();

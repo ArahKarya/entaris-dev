@@ -134,7 +134,7 @@
     "currentBalance": "Current deposit balance: <amount>{{amount}}</amount>",
     "activeDeposits_one": "{{count}} active deposit",
     "activeDeposits_other": "{{count}} active deposits",
-    "openingBalance": "Opening balance / correction",
+    "openingBalance": "Opening balance",
     "openingBalanceHint": "Record the deposit without affecting cash (offset to opening balance equity)",
     "journalLabel": "Journal:",
     "journalEntry": "DR Purchase Advances / CR Opening Balance Equity",

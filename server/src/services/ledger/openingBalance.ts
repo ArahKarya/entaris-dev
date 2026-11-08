@@ -69,6 +69,16 @@ export interface SetOpeningInput {
   trail?: CancelTrail;
   /** Post or replace through the monthly period lock (owner decision #10); the caller checks period.lock. */
   throughLock?: { reason: string };
+  /** Deposit targets (VDEP/CDEP) only: stored on the new opening deposit payment; the journal narration stays generated. */
+  deposit?: OpeningDepositDetails;
+}
+
+/** What the user typed on an opening deposit (deposit screen, POST /payments); the caller validates the tags. */
+export interface OpeningDepositDetails {
+  referenceNo?: string | null;
+  notes?: string | null;
+  salesOrderId?: string | null;
+  proformaInvoiceId?: string | null;
 }
 
 export interface OpeningOutcome {

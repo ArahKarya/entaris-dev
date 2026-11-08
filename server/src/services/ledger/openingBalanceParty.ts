@@ -15,7 +15,10 @@
 // by voiding its journal alone. That includes the unkeyed opening deposits of the deposit screen and
 // of the old party import: their amount is the deposit itself (not a delta against a running
 // balance, the reason unkeyed account openings are refused), so cancelling the payment and posting
-// one on the cut-over date loses nothing. Every other unkeyed opening journal of the party side
+// one on the cut-over date loses nothing. An opening deposit is found by its journal (linked, or
+// unlinked by the deposit cancel's own rule for deposits posted before the payment-to-journal link)
+// and, for the old deposit screen, by its counter account (opening equity) when it has no journal on
+// the party line at all. Every other unkeyed opening journal of the party side
 // refuses (OPENING_LEGACY_REVIEW), as do opening columns this service did not write (undirected or
 // without a keyed journal), until the party opening audit (PR-5.13) settles them.
 import { Prisma, type Payment, type PartyType, type PrismaClient } from '@prisma/client';
@@ -28,6 +31,7 @@ import { recalcPartyOutstanding } from '../../utils/accountBalance';
 import { mappedAccount } from '../systemAccounts';
 import { lockAccounts } from '../coa/accountStructure';
 import { cancelDepositPaymentInTx, type DepositSide } from '../depositCancel';
+import { findUnlinkedDepositJournal } from '../depositCancelGuard';
 import { DOCUMENT_RULE } from './accountGuard';
 import { cancelJournalsInTx, type JournalWithItems } from './cancelJournals';
 import { sourceKeys, type OpeningPartyKind } from './journalSource';
@@ -37,7 +41,7 @@ import { postJournal } from './postJournal';
 import {
   OPENING_DATE_MISMATCH, OPENING_IN_USE, OPENING_LEGACY_REVIEW, OPENING_NEGATIVE, OPENING_PARTY_HAS_HISTORY,
   OPENING_REPLACED_REASON, OPENING_THROUGH_LOCK_ACTION, isLegacyOpening, openingJournalInstant, peekCutoverDate, resolveCutoverDate,
-  type OpeningOutcome, type SetOpeningInput,
+  type OpeningDepositDetails, type OpeningOutcome, type SetOpeningInput,
 } from './openingBalance';
 
 type Tx = Prisma.TransactionClient;
@@ -72,7 +76,8 @@ const partyAmount = (cfg: KindConfig, debit: Prisma.Decimal.Value, credit: Prism
 /** An opening deposit: the payment and the journal it owns; `keyed` when the journal carries this service's key. */
 export interface OpeningDepositPayment {
   payment: Payment;
-  journal: JournalWithItems;
+  /** Null for a legacy deposit of the old deposit screen that never had a journal. */
+  journal: JournalWithItems | null;
   keyed: boolean;
 }
 
@@ -86,7 +91,9 @@ export interface PartyOpeningJournals {
 /**
  * Active opening journals on the party's lines of the side's role accounts (former role accounts
  * included). A journal owned by an active deposit payment of the kind is an opening deposit
- * (`deposits`), keyed or not; the rest is `keyed` (this service's key) or `legacy`.
+ * (`deposits`), keyed or not; the rest is `keyed` (this service's key) or `legacy`. Deposit kinds
+ * also list the party's active deposits of the old deposit screen (counter account opening equity)
+ * whose journal is not among these, journal-less ones included.
  */
 export async function findActivePartyOpeningJournals(db: Db, partyId: string, kind: OpeningPartyKind): Promise<PartyOpeningJournals> {
   const cfg = KINDS[kind];
@@ -112,21 +119,67 @@ export async function findActivePartyOpeningJournals(db: Db, partyId: string, ki
     orderBy: [{ date: 'asc' }, { entryNumber: 'asc' }],
   });
   const openings = rows.filter((j) => j.sourceKey === key || isLegacyOpening(j));
-  const owners = cfg.deposit && openings.length > 0
-    ? await db.payment.findMany({
-        where: { journalEntryId: { in: openings.map((j) => j.id) }, paymentType: cfg.deposit.paymentType, status: { not: 'Cancelled' } },
-      })
-    : [];
-  const ownerOf = new Map(owners.map((p) => [p.journalEntryId, p]));
+  if (!cfg.deposit) {
+    return { keyed: openings.filter((j) => j.sourceKey === key), legacy: openings.filter((j) => j.sourceKey !== key), deposits: [] };
+  }
+  const ownerOf = await openingDepositOwners(db, partyId, cfg.deposit.paymentType, openings);
   const free = openings.filter((j) => !ownerOf.has(j.id));
-  return {
-    keyed: free.filter((j) => j.sourceKey === key),
-    legacy: free.filter((j) => j.sourceKey !== key),
-    deposits: openings.flatMap((j) => {
-      const payment = ownerOf.get(j.id);
-      return payment ? [{ payment, journal: j, keyed: j.sourceKey === key }] : [];
-    }),
-  };
+  const deposits: OpeningDepositPayment[] = openings.flatMap((j) => {
+    const payment = ownerOf.get(j.id);
+    return payment ? [{ payment, journal: j, keyed: j.sourceKey === key }] : [];
+  });
+  deposits.push(...(await screenOpeningDeposits(db, partyId, cfg.deposit.paymentType, [...ownerOf.values()])));
+  return { keyed: free.filter((j) => j.sourceKey === key), legacy: free.filter((j) => j.sourceKey !== key), deposits };
+}
+
+type DepositPaymentType = NonNullable<KindConfig['deposit']>['paymentType'];
+
+/**
+ * Journal id -> the active deposit payment of the type that owns it: linked by journalEntryId, or,
+ * for deposits posted before that link, the payment whose own journal the deposit cancel finds
+ * (findUnlinkedDepositJournal: `JV-<paymentNumber>` or the ledger description), so replacing goes
+ * through the payment like any other opening deposit.
+ */
+async function openingDepositOwners(db: Db, partyId: string, paymentType: DepositPaymentType, openings: readonly JournalWithItems[]): Promise<Map<string, Payment>> {
+  const ownerOf = new Map<string, Payment>();
+  if (openings.length === 0) return ownerOf;
+  const active = { paymentType, status: { not: 'Cancelled' as const } };
+  const linked = await db.payment.findMany({ where: { ...active, journalEntryId: { in: openings.map((j) => j.id) } } });
+  for (const p of linked) ownerOf.set(p.journalEntryId!, p);
+  const unowned = openings.filter((j) => !ownerOf.has(j.id));
+  const numberOf = (text: string | null | undefined) => text?.match(/: (\S+)$/)?.[1];
+  const candidates = [...new Set(unowned.flatMap((j) => [
+    j.entryNumber.startsWith('JV-') ? j.entryNumber.slice(3) : undefined,
+    ...j.items.map((i) => numberOf(i.description)),
+  ]).filter((n): n is string => !!n))];
+  if (candidates.length === 0) return ownerOf;
+  const unlinked = await db.payment.findMany({ where: { ...active, partyId, journalEntryId: null, paymentNumber: { in: candidates } } });
+  for (const p of unlinked) {
+    const own = await findUnlinkedDepositJournal(db as Tx, { id: p.id, paymentNumber: p.paymentNumber, partyId, paymentType });
+    if (own && unowned.some((j) => j.id === own.id) && !ownerOf.has(own.id)) ownerOf.set(own.id, p);
+  }
+  return ownerOf;
+}
+
+/**
+ * Active deposits of the old deposit screen's opening branch (counter account opening equity, the
+ * mark it left on the payment) not among `owned`: without a journal, or with one that has no opening
+ * line on the party. They are the party's opening deposit as well (owner decision #3: replaced, never
+ * added to). A cash deposit never has opening equity as its account.
+ */
+async function screenOpeningDeposits(db: Db, partyId: string, paymentType: DepositPaymentType, owned: readonly Payment[]): Promise<OpeningDepositPayment[]> {
+  const equity = await mappedAccount(db as Tx, 'OPENING_EQUITY');
+  const rows = await db.payment.findMany({
+    where: { partyId, paymentType, status: { not: 'Cancelled' }, accountId: equity.id, id: { notIn: owned.map((p) => p.id) } },
+    include: { journalEntry: { include: { items: true } } },
+    orderBy: { paymentNumber: 'asc' },
+  });
+  const out: OpeningDepositPayment[] = [];
+  for (const { journalEntry, ...payment } of rows) {
+    const journal = journalEntry ?? (await findUnlinkedDepositJournal(db as Tx, { id: payment.id, paymentNumber: payment.paymentNumber, partyId, paymentType }));
+    out.push({ payment, journal: journal && journal.status !== 'Cancelled' ? journal : null, keyed: false });
+  }
+  return out;
 }
 
 /** Sum of the party lines of `journals` on the side's role accounts, normal side. */
@@ -140,10 +193,10 @@ function journalSum(cfg: KindConfig, journals: readonly JournalWithItems[], part
 export async function recordedPartyOpening(db: Db, partyId: string, kind: OpeningPartyKind): Promise<Decimal | null> {
   const cfg = KINDS[kind];
   const found = await findActivePartyOpeningJournals(db, partyId, kind);
-  const keyedDeposits = found.deposits.filter((d) => d.keyed);
-  if (found.keyed.length === 0 && keyedDeposits.length === 0) return null;
+  const keyedJournals = found.deposits.flatMap((d) => (d.keyed && d.journal ? [d.journal] : []));
+  if (found.keyed.length === 0 && keyedJournals.length === 0) return null;
   const accountIds = new Set(await roleAccountIds(db as Tx, cfg.role, { includeFormer: true }));
-  return journalSum(cfg, [...found.keyed, ...keyedDeposits.map((d) => d.journal)], partyId, accountIds);
+  return journalSum(cfg, [...found.keyed, ...keyedJournals], partyId, accountIds);
 }
 
 /** The one keyed journal already holds exactly the wanted lines: on the day, party line + opening equity. */
@@ -176,12 +229,29 @@ function legacyReview(partyName: string, kind: OpeningPartyKind, detail: string)
   );
 }
 
+const undirectedReview = (partyName: string, kind: OpeningPartyKind, undirected: Decimal): BusinessError =>
+  legacyReview(partyName, kind, `saldo awal ${undirected.toFixed(2)} yang belum diarahkan ke piutang atau hutang`);
+
 function inUse(partyName: string, kind: OpeningPartyKind): BusinessError {
   return new BusinessError(
     `Saldo awal ${kindLabel(kind)} mitra ${partyName} sudah terpakai pembayaran atau penggunaan uang muka, jadi tidak bisa diganti. Koreksi lewat jurnal manual.`,
     OPENING_IN_USE,
   );
 }
+
+/** The payment fields of an opening deposit: what the user typed, the generated description as default notes. */
+function depositFields(details: OpeningDepositDetails | undefined, description: string) {
+  return {
+    referenceNo: details?.referenceNo || null,
+    notes: details?.notes || description,
+    salesOrderId: details?.salesOrderId ?? null,
+    proformaInvoiceId: details?.proformaInvoiceId ?? null,
+  };
+}
+
+const sameDetails = (p: Payment, want: ReturnType<typeof depositFields>): boolean =>
+  (p.referenceNo ?? null) === want.referenceNo && (p.notes ?? null) === want.notes
+  && (p.salesOrderId ?? null) === want.salesOrderId && (p.proformaInvoiceId ?? null) === want.proformaInvoiceId;
 
 /** Party opening balance, in the caller's transaction (see the header). */
 export async function setPartyOpeningInTx(tx: Tx, input: SetOpeningInput, partyId: string, kind: OpeningPartyKind): Promise<OpeningOutcome> {
@@ -219,15 +289,16 @@ export async function setPartyOpeningInTx(tx: Tx, input: SetOpeningInput, partyI
       FISCAL_YEAR_MISSING,
     );
   }
-  // Numbers (advisory locks) first, then the opening deposit payments, the account rows and the
-  // party row: the order of the deposit routes (payment, then balances) and of every JV writer.
-  const paymentNumber = cfg.deposit ? await generateDocumentNumber(tx, 'PAY', instant, fy.id) : null;
-  const entryNumber = await generateDocumentNumber(tx, 'JV', instant, fy.id);
+  // The opening deposit payments first, then the numbers (advisory locks), the account rows and the
+  // party row: the order of the deposit apply/refund routes (payment row, then the JV number) and
+  // of every JV writer (number, then accounts).
   if (cfg.deposit) {
     const before = await findActivePartyOpeningJournals(tx, partyId, kind);
     const ids = before.deposits.map((d) => d.payment.id);
     if (ids.length > 0) await tx.$queryRaw`SELECT id FROM payments WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
   }
+  const paymentNumber = cfg.deposit ? await generateDocumentNumber(tx, 'PAY', instant, fy.id) : null;
+  const entryNumber = await generateDocumentNumber(tx, 'JV', instant, fy.id);
   await lockAccounts(tx, [target.id, equity.id]);
   await tx.$queryRaw`SELECT id FROM parties WHERE id = ${partyId} FOR UPDATE`;
 
@@ -249,10 +320,13 @@ export async function setPartyOpeningInTx(tx: Tx, input: SetOpeningInput, partyI
     current = new Prisma.Decimal(cfg.side === 'RECEIVABLE' ? columns.openingReceivable : columns.openingPayable);
     const keyedSum = journalSum(cfg, found.keyed, partyId, accountSet);
     const undirected = legacyUnassignedOf(columns);
+    // An undirected opening comes first: a keyed journal over it (keyed by the 5.6 audit) is not a
+    // payment taking the opening, the party opening audit (PR-5.13) directs it.
+    if (undirected.gt(0)) throw undirectedReview(party.name, kind, undirected);
     // A payment remainder took part of the opening (the side column, or opening_outstanding alone before PR-5.13).
     if (found.keyed.length > 0 && (current.lt(keyedSum) || undirected.isNegative())) throw inUse(party.name, kind);
     if (!current.eq(keyedSum)) throw legacyReview(party.name, kind, `saldo awal tercatat ${current.toFixed(2)} tanpa jurnal saldo awal berkunci yang sama`);
-    if (!undirected.isZero()) throw legacyReview(party.name, kind, `saldo awal ${undirected.toFixed(2)} yang belum diarahkan ke piutang atau hutang`);
+    if (!undirected.isZero()) throw undirectedReview(party.name, kind, undirected);
     if (found.keyed.length === 1 && isSameJournal(found.keyed[0], day, cfg, partyId, target.id, equity.id, amount)) unchanged = found.keyed[0];
     if (found.keyed.length === 0 && amount.isZero()) return { action: 'unchanged', asOfDate: day, amount, journal: null, cancelled: [], payment: null };
   } else {
@@ -271,7 +345,11 @@ export async function setPartyOpeningInTx(tx: Tx, input: SetOpeningInput, partyI
       }
     }
     const only = found.deposits.length === 1 && found.keyed.length === 0 ? found.deposits[0] : null;
-    if (only?.keyed && new Prisma.Decimal(only.payment.amount).eq(amount) && isSameJournal(only.journal, day, cfg, partyId, target.id, equity.id, amount)) {
+    if (
+      only?.keyed && only.journal && new Prisma.Decimal(only.payment.amount).eq(amount)
+      && isSameJournal(only.journal, day, cfg, partyId, target.id, equity.id, amount)
+      && sameDetails(only.payment, depositFields(input.deposit, `Saldo awal ${cfg.label}: ${party.name}`))
+    ) {
       return { action: 'unchanged', asOfDate: day, amount, journal: only.journal, cancelled: [], payment: only.payment };
     }
     if (found.deposits.length === 0 && found.keyed.length === 0 && amount.isZero()) {
@@ -308,7 +386,7 @@ export async function setPartyOpeningInTx(tx: Tx, input: SetOpeningInput, partyI
           accountId: equity.id,
           amount: abs,
           status: 'Submitted',
-          notes: description,
+          ...depositFields(input.deposit, description),
           fiscalYearId: fy.id,
           createdBy: input.userId,
           submittedAt: new Date(),
