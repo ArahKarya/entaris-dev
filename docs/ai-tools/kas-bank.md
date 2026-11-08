@@ -780,7 +780,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 ### pay_cancel
 
-**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan), jurnal pembayaran dibatalkan (void) dan saldo akun dibalik persis per baris jurnalnya. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).
+**Ringkasan:** Membatalkan pembayaran Receive/Pay: alokasi dibalik (outstanding invoice dipulihkan, saldo awal pihak yang diambil sisa pembayaran dikembalikan ke sisinya), jurnal pembayaran dibatalkan (void) dan saldo akun dibalik persis per baris jurnalnya. Uang muka dan refund tidak bisa dibatalkan di sini (pakai endpoint uang muka; refund lewat jurnal koreksi manual).
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -821,7 +821,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Pembayaran dengan status Cancelled.
 
-**Efek pembukuan/stok:** Jurnal pembayaran dibatalkan (void, tanpa jurnal balik): ledger-nya ditandai batal dan saldo akun dibalik per baris jurnal, jadi akun Piutang/Hutang yang dipulihkan adalah akun saat posting walaupun pemetaan Akun Sistem sudah berubah. Pembayaran lama tanpa jurnal dibalik dari nominal dan pemetaan Piutang/Hutang saat ini. Outstanding invoice terkait naik kembali, status invoice dipulihkan.
+**Efek pembukuan/stok:** Jurnal pembayaran dibatalkan (void, tanpa jurnal balik): ledger-nya ditandai batal dan saldo akun dibalik per baris jurnal, jadi akun Piutang/Hutang yang dipulihkan adalah akun saat posting walaupun pemetaan Akun Sistem sudah berubah. Pembayaran lama tanpa jurnal dibalik dari nominal dan pemetaan Piutang/Hutang saat ini. Outstanding invoice terkait naik kembali, status invoice dipulihkan; alokasi saldo awal (OpeningReceivable/OpeningPayable/OpeningUnassigned) dikembalikan ke saldo awal pihak, sehingga piutang/hutang pihak kembali sama dengan Buku Besar.
 
 **Teks konfirmasi:** Batalkan pembayaran {id}? Alokasi dan jurnal akan dibalik.
 
@@ -908,11 +908,11 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 {
   "ok": true,
   "kind": "read",
-  "data": "<Payment lengkap + party, account, splits, allocations, journalEntry.items.>"
+  "data": "<Payment lengkap + party, account, splits, allocations (invoiceType SalesInvoice/PurchaseIn>"
 }
 ```
 
-**Isi hasil:** Payment lengkap + party, account, splits, allocations, journalEntry.items.
+**Isi hasil:** Payment lengkap + party, account, splits, allocations (invoiceType SalesInvoice/PurchaseInvoice dengan invoiceNumber, atau OpeningReceivable/OpeningPayable/OpeningUnassigned = bagian yang mengurangi saldo awal pihak, invoiceId = id pihak, invoiceNumber null), journalEntry.items.
 
 **Error umum**
 
@@ -1127,7 +1127,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Payment yang dibuat + party + unallocatedAmount. HTTP 201.
 
-**Efek pembukuan/stok:** Receive: DR Kas/Bank (per split) / CR Piutang Usaha (1.2.1), outstanding SI turun. Pay: DR Hutang Usaha (2.1.1) / CR Kas/Bank (per split), outstanding PI turun. VendorDeposit: DR Uang Muka Supplier (1.3) / CR Kas-Bank. CustomerDeposit: DR Kas-Bank / CR Uang Muka Customer (2.1.2). isOpeningBalance (uang muka saldo awal): satu jurnal JV- bersumber OPENING berkunci per pihak (OPENING:PARTY:<id>:VDEP|CDEP) bertanggal cut-over, VendorDeposit DR Uang Muka Supplier / CR Ekuitas Saldo Awal 3.1, CustomerDeposit DR 3.1 / CR Uang Muka Customer, dengan Payment uang muka baru; uang muka saldo awal pihak itu yang lama (berkunci, atau dari layar uang muka/impor lama) dibatalkan dulu (Payment Cancelled + jurnal void, bukan dihapus). VendorRefund: DR Bank / CR Hutang Usaha. CustomerRefund: DR Piutang Usaha / CR Bank. Sisa tak teralokasi mengurangi saldo awal pihak.
+**Efek pembukuan/stok:** Receive: DR Kas/Bank (per split) / CR Piutang Usaha (1.2.1), outstanding SI turun. Pay: DR Hutang Usaha (2.1.1) / CR Kas/Bank (per split), outstanding PI turun. VendorDeposit: DR Uang Muka Supplier (1.3) / CR Kas-Bank. CustomerDeposit: DR Kas-Bank / CR Uang Muka Customer (2.1.2). isOpeningBalance (uang muka saldo awal): satu jurnal JV- bersumber OPENING berkunci per pihak (OPENING:PARTY:<id>:VDEP|CDEP) bertanggal cut-over, VendorDeposit DR Uang Muka Supplier / CR Ekuitas Saldo Awal 3.1, CustomerDeposit DR 3.1 / CR Uang Muka Customer, dengan Payment uang muka baru; uang muka saldo awal pihak itu yang lama (berkunci, atau dari layar uang muka/impor lama) dibatalkan dulu (Payment Cancelled + jurnal void, bukan dihapus). VendorRefund: DR Bank / CR Hutang Usaha. CustomerRefund: DR Piutang Usaha / CR Bank; dengan refundSourcePaymentId alokasi pembayaran asal dikurangi (Invoice dulu, lalu saldo awal yang diambilnya, dipulihkan). Sisa Receive/Pay yang tidak teralokasi ke Invoice mengurangi saldo awal pihak di sisi pembayaran saja (Receive: saldo awal piutang, Pay: saldo awal hutang; mitra Both tidak pernah memotong sisi lain), dicatat sebagai alokasi OpeningReceivable/OpeningPayable/OpeningUnassigned (invoiceId = id pihak); sisanya dicatat sebagai kelebihan bayar.
 
 **Teks konfirmasi:** Catat {paymentType} Rp {amount} untuk pihak {partyId} tanggal {date} lewat akun {accountId}. Jurnal akan diposting. Setujui?
 

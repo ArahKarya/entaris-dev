@@ -29,6 +29,17 @@ const typeConfig: Record<string, { type: PaymentTypeKey; icon: React.ReactNode; 
   Transfer: { type: 'Transfer', icon: <ArrowRightLeft className="size-4" aria-hidden />, color: 'text-info-text' },
 };
 
+/** Label key per allocation type; the Opening* types are what a remainder took from the party opening (no number). */
+const ALLOCATION_LABEL_KEY = {
+  SalesInvoice: 'paymentDetailDrawer.allocations.salesInvoice',
+  PurchaseInvoice: 'paymentDetailDrawer.allocations.purchaseInvoice',
+  OpeningReceivable: 'paymentDetailDrawer.allocations.openingReceivable',
+  OpeningPayable: 'paymentDetailDrawer.allocations.openingPayable',
+  OpeningUnassigned: 'paymentDetailDrawer.allocations.openingUnassigned',
+} as const;
+type AllocationType = keyof typeof ALLOCATION_LABEL_KEY;
+const OPENING_ALLOCATION_TYPES = new Set(['OpeningReceivable', 'OpeningPayable', 'OpeningUnassigned']);
+
 const PaymentDetailDrawer: React.FC<Props> = ({ paymentId, onClose }) => {
   const { t } = useTranslation('finance');
   const queryClient = useQueryClient();
@@ -177,9 +188,11 @@ const PaymentDetailDrawer: React.FC<Props> = ({ paymentId, onClose }) => {
                     <li key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-muted p-3">
                       <div>
                         <p className="text-xs font-medium text-foreground">
-                          {a.invoiceType === 'SalesInvoice' ? t('paymentDetailDrawer.allocations.salesInvoice') : t('paymentDetailDrawer.allocations.purchaseInvoice')}
+                          {t(ALLOCATION_LABEL_KEY[a.invoiceType as AllocationType] ?? 'paymentDetailDrawer.allocations.purchaseInvoice')}
                         </p>
-                        <p className="font-mono text-xs text-muted-foreground">{a.invoiceNumber ?? `${a.invoiceId.slice(0, 8)}...`}</p>
+                        {!OPENING_ALLOCATION_TYPES.has(a.invoiceType) && (
+                          <p className="font-mono text-xs text-muted-foreground">{a.invoiceNumber ?? `${a.invoiceId.slice(0, 8)}...`}</p>
+                        )}
                       </div>
                       <span className="num text-xs font-bold text-foreground">{formatRupiah(Number(a.allocatedAmount))}</span>
                     </li>

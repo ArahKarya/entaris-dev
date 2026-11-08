@@ -1142,7 +1142,10 @@
     "allocations": {
       "title": "Alokasi ke Invoice",
       "salesInvoice": "Invoice Penjualan",
-      "purchaseInvoice": "Invoice Pembelian"
+      "purchaseInvoice": "Invoice Pembelian",
+      "openingReceivable": "Saldo awal piutang",
+      "openingPayable": "Saldo awal hutang",
+      "openingUnassigned": "Saldo awal (belum diarahkan)"
     },
     "journal": {
       "title": "Jurnal ({{number}})",
