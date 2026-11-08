@@ -226,9 +226,6 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
               data: { outstanding: newOutstandingNum, status: newOutstanding.gte(new Decimal(inv.grandTotal.toString())) ? 'Submitted' : 'PartiallyPaid' },
             });
           }
-        } else if (isOpeningAllocation(alloc.invoiceType)) {
-          // What the payment took from the party's opening goes back into the same bucket (PR-5.13).
-          await restorePartyOpening(tx, payment.partyId, alloc.invoiceType, allocAmt.toFixed(2));
         }
       }
 
@@ -254,6 +251,14 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
         // AR/AP mapping, as before. Rejecting it would leave the payment impossible to cancel.
         logger.warn({ paymentId: payment.id, paymentNumber: payment.paymentNumber }, 'Payment cancel: no journal, nominal reversal');
         await reverseNominalPaymentBalances(tx, payment);
+      }
+
+      // What the payment took from the party's opening goes back into the same bucket (PR-5.13).
+      // After the journal void: the AR/AP account rows are locked before the party row, the order
+      // payment submit and the opening balance save use, so a concurrent one cannot deadlock (40P01).
+      for (const alloc of allocations) {
+        if (!isOpeningAllocation(alloc.invoiceType)) continue;
+        await restorePartyOpening(tx, payment.partyId, alloc.invoiceType, new Decimal(alloc.allocatedAmount.toString()).toFixed(2));
       }
 
       // Recalc party outstanding from invoice data (source of truth)

@@ -18,7 +18,8 @@
 //                                  the remainder back) and at most the side's opening journals: the
 //                                  column takes the ledger opening
 //   undirected-matches-gl          Customer or Supplier: the columns already add up to the ledger but
-//                                  part of it is undirected; the only side the type has takes it
+//                                  part of it is undirected (report: the subledger already follows the
+//                                  ledger, and plan PR-5.13 limits --apply to the two classes above)
 //   both-direction-from-gl         Both: the opening total matches the ledger, the ledger shows the
 //                                  split per side (report; the accountant corrects with one manual
 //                                  journal, never by moving columns)
@@ -28,7 +29,7 @@
 //   gl-without-opening             the ledger holds an opening the party has no column or opening
 //                                  journal for (report)
 //   unexplained                    anything else (report)
-// --apply (with --approved-by) changes only the first three apply classes: the side column moves
+// --apply (with --approved-by) changes only the two apply classes: the side column moves
 // through adjustPartyOpening, the explained undirected rest goes to zero, the party is recalculated
 // (recalcPartyOutstanding) and must classify as match afterwards, else the batch rolls back. The
 // ledger never changes. One audit row per party (via 'repair').
@@ -62,7 +63,7 @@ export type PartyOpeningClass =
 
 /** The classes --apply changes. */
 export const PARTY_OPENING_APPLY_CLASSES: ReadonlySet<PartyOpeningClass> = new Set([
-  'opening-from-single-journal', 'consumed-opening-not-restored', 'undirected-matches-gl',
+  'opening-from-single-journal', 'consumed-opening-not-restored',
 ]);
 
 export interface PartyOpeningSide {
@@ -130,12 +131,15 @@ export function classifyPartyOpening(f: PartyOpeningFigures): PartyOpeningVerdic
 
   // Moving side s with the undirected rest set to zero: every other side must already match on its column.
   const othersMatch = (s: PartySide) => owned.filter((o) => o !== s).every((o) => near(col(o), fig(o).glOpening));
+  // --apply zeroes the undirected rest, so it must be explained whatever side it counts on: a Both
+  // rest counted on the receivable side is not a payable journal unless it is that amount.
+  const restExplainedBy = (amount: Dec) => rest.isZero() || near(rest, amount);
   for (const s of owned) {
     const g = fig(s);
     if (col(s).isZero() && g.journals?.entryNumbers.length === 1 && g.payments === 0
       && g.journals.amount.gt(0) && near(g.journals.amount, g.glOpening) && othersMatch(s)
       // Nothing recorded yet, or the undirected rest is that journal: an undirected rest beyond it is not explained.
-      && (effective(s).isZero() || near(effective(s), g.journals.amount))) {
+      && restExplainedBy(g.journals.amount)) {
       return moved('opening-from-single-journal', s, g.journals.amount);
     }
   }
@@ -143,11 +147,13 @@ export function classifyPartyOpening(f: PartyOpeningFigures): PartyOpeningVerdic
     const g = fig(s);
     const missing = g.glOpening.minus(effective(s));
     if (missing.gt(PARTY_OPENING_TOLERANCE) && g.cancelledPayments.plus(PARTY_OPENING_TOLERANCE).gte(missing)
-      && (g.journals?.entryNumbers.length ?? 0) > 0 && g.glOpening.lte(g.journals!.amount.plus(PARTY_OPENING_TOLERANCE)) && othersMatch(s)) {
+      && (g.journals?.entryNumbers.length ?? 0) > 0 && g.glOpening.lte(g.journals!.amount.plus(PARTY_OPENING_TOLERANCE)) && othersMatch(s)
+      // The rest is part of `missing` only on the side it counts on; elsewhere it would be dropped unexplained.
+      && (rest.isZero() || unassignedCountsOn(f.partyType, s))) {
       return moved('consumed-opening-not-restored', s, g.glOpening);
     }
   }
-  if (f.partyType !== 'Both' && matches) return moved('undirected-matches-gl', owned[0], fig(owned[0]).glOpening);
+  if (f.partyType !== 'Both' && matches) return report('undirected-matches-gl');
   if (f.partyType === 'Both' && !rest.isZero()
     && near(f.openingOutstanding, f.receivable.glOpening.plus(f.payable.glOpening))
     && SIDES.every((s) => fig(s).glOpening.gte(PARTY_OPENING_TOLERANCE.neg()))) {

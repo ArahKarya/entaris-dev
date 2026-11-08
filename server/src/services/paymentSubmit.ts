@@ -221,6 +221,13 @@ export async function submitPaymentInTx(
       throw new BusinessError('Refund customer hanya berlaku untuk Customer.');
     }
 
+    // Lock the source payment before any account row: a cancel of it claims the same row first, so
+    // the two serialize (a cancelled payment cannot also be refunded, nor its opening restored twice)
+    // and keep the payment-then-accounts order of the cancel route.
+    if (body.refundSourcePaymentId) {
+      await tx.$queryRaw`SELECT id FROM payments WHERE id = ${body.refundSourcePaymentId} FOR UPDATE`;
+    }
+
     const liabAssetAccount = isVendorRefund
       ? await systemAccounts.getAccount('AP')
       : await systemAccounts.getAccount('AR');
@@ -279,6 +286,7 @@ export async function submitPaymentInTx(
     // available allocations.
     if (body.refundSourcePaymentId) {
       const expectedType = isVendorRefund ? 'Pay' : 'Receive';
+      // Read under the lock taken above: status and allocations as the last cancel or refund left them.
       const source = await tx.payment.findUnique({
         where: { id: body.refundSourcePaymentId },
         include: { allocations: true },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma, type PartyType } from '@prisma/client';
-import { classifyPartyOpening, type PartyOpeningFigures, type PartyOpeningSide } from '../partyOpeningAudit';
+import { classifyPartyOpening, PARTY_OPENING_APPLY_CLASSES, type PartyOpeningFigures, type PartyOpeningSide } from '../partyOpeningAudit';
 
 const D = (v: number) => new Prisma.Decimal(v);
 interface SideIn { gl?: number; docs?: number; adj?: number; payments?: number; cancelled?: number; journals?: number[] | null }
@@ -48,9 +48,21 @@ describe('classifyPartyOpening', () => {
     expect(verdict(party('Customer', { or: 50, oo: 50 }, { gl: 60, journals: [50], payments: 1, cancelled: 20 })).cls).toBe('unexplained');
   });
 
-  it('undirected-matches-gl: a Customer whose remainder cut opening_outstanding alone', () => {
+  it('undirected-matches-gl: a Customer whose remainder cut opening_outstanding alone (report)', () => {
     expect(verdict(party('Customer', { or: 50, oo: 40 }, { gl: 40, journals: [50], payments: 1 })))
-      .toEqual({ cls: 'undirected-matches-gl', side: 'RECEIVABLE', target: ['40.00', '0.00'] });
+      .toEqual({ cls: 'undirected-matches-gl', side: null, target: null });
+    expect(PARTY_OPENING_APPLY_CLASSES.has('undirected-matches-gl')).toBe(false);
+  });
+
+  it('a Both rest counted on the receivable side blocks moving the payable side unless it is that journal', () => {
+    // Undirected 30, no AR journal, payable journal 50: the 30 is not explained, --apply must not drop it.
+    expect(verdict(party('Both', { oo: 30 }, { gl: 0 }, { gl: 50, journals: [50] })).cls).toBe('both-needs-accountant');
+    // The undirected rest is that payable journal: the journal directs it.
+    expect(verdict(party('Both', { oo: 50 }, { gl: 0 }, { gl: 50, journals: [50] })))
+      .toEqual({ cls: 'opening-from-single-journal', side: 'PAYABLE', target: ['0.00', '50.00'] });
+    // consumed-opening-not-restored on the payable side with a rest counted on the receivable side.
+    expect(verdict(party('Both', { op: 40, oo: 70 }, { gl: 0 }, { gl: 50, journals: [50], payments: 1, cancelled: 10 })).cls)
+      .not.toBe('consumed-opening-not-restored');
   });
 
   it('Both: the ledger shows the split (report), or the accountant decides', () => {

@@ -5,8 +5,8 @@
 //   match, opening-from-single-journal, consumed-opening-not-restored, undirected-matches-gl,
 //   both-direction-from-gl, both-needs-accountant, negative-opening, opening-off-side,
 //   gl-without-opening, unexplained
-// --apply --approved-by "<accountant name>" changes only opening-from-single-journal,
-// consumed-opening-not-restored and undirected-matches-gl: the side's opening column takes the
+// --apply --approved-by "<accountant name>" changes only opening-from-single-journal and
+// consumed-opening-not-restored: the side's opening column takes the
 // opening the ledger shows, the explained undirected rest goes to zero and the party is
 // recalculated. The ledger does not change; a Both direction is corrected by the accountant with one
 // manual journal. One audit row per party (via 'repair'). The CSV is written before the first batch
