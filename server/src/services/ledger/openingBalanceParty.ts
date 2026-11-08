@@ -199,6 +199,18 @@ export async function recordedPartyOpening(db: Db, partyId: string, kind: Openin
   return journalSum(cfg, [...found.keyed, ...keyedJournals], partyId, accountIds);
 }
 
+/**
+ * Every active opening journal of a party side, keyed or not (deposit openings included), and the
+ * party lines' total on the side's role accounts: what the party opening audit (PR-5.13) compares.
+ */
+export async function partyOpeningJournalTotal(db: Db, partyId: string, kind: OpeningPartyKind): Promise<{ entryNumbers: string[]; amount: Decimal }> {
+  const cfg = KINDS[kind];
+  const found = await findActivePartyOpeningJournals(db, partyId, kind);
+  const journals = [...found.keyed, ...found.legacy, ...found.deposits.flatMap((d) => (d.journal ? [d.journal] : []))];
+  const accountIds = new Set(await roleAccountIds(db as Tx, cfg.role, { includeFormer: true }));
+  return { entryNumbers: journals.map((j) => j.entryNumber), amount: journalSum(cfg, journals, partyId, accountIds) };
+}
+
 /** The one keyed journal already holds exactly the wanted lines: on the day, party line + opening equity. */
 function isSameJournal(j: JournalWithItems, day: string, cfg: KindConfig, partyId: string, accountId: string, equityId: string, amount: Decimal): boolean {
   if (businessDayOf(j.date) !== day || j.items.length !== 2) return false;
