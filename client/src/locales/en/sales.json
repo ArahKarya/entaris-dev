@@ -1572,8 +1572,7 @@
     "outstanding": {
       "overpaid": "Overpaid",
       "receivable": "Receivable",
-      "payable": "Payable",
-      "owed": "Outstanding"
+      "payable": "Payable"
     },
     "toast": {
       "deactivated": "Partner deactivated because it has related transactions.",

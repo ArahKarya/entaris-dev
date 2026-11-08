@@ -110,18 +110,31 @@ export interface PartySummarySource {
   partyType: PartyType | string;
   isActive: boolean;
   outstandingAmount: DecimalLike;
+  /** Receivable side (services/ledger/partySides.ts). */
+  receivableOutstanding: DecimalLike;
+  /** Payable side (services/ledger/partySides.ts). */
+  payableOutstanding: DecimalLike;
   depositBalance: DecimalLike;
   customerDepositBalance: DecimalLike;
 }
+
+/** The columns summarizeParties and summarizePartyDashboard read. */
+export const PARTY_SUMMARY_SELECT = {
+  partyType: true, isActive: true, outstandingAmount: true, receivableOutstanding: true, payableOutstanding: true,
+  depositBalance: true, customerDepositBalance: true,
+} as const;
+
+const isCustomerSide = (t: PartyType | string) => t === PartyType.Customer || t === PartyType.Both;
+const isSupplierSide = (t: PartyType | string) => t === PartyType.Supplier || t === PartyType.Both;
 
 export interface PartySummary {
   total: number;
   activeCount: number;
   inactiveCount: number;
   byType: { Customer: number; Supplier: number; Both: number };
-  /** Positive outstanding of Customer + Both parties (same rule as /dashboard). */
+  /** Positive receivable side of Customer + Both parties (same rule as /dashboard). */
   totalReceivable: number;
-  /** Positive outstanding of Supplier + Both parties (same rule as /dashboard). */
+  /** Positive payable side of Supplier + Both parties (same rule as /dashboard). */
   totalPayable: number;
   /** Uang muka pelanggan (customerDepositBalance) of Customer + Both. */
   totalCustomerDeposit: number;
@@ -143,17 +156,13 @@ export function summarizeParties(rows: readonly PartySummarySource[]): PartySumm
   for (const r of rows) {
     if (r.partyType in byType) byType[r.partyType as keyof typeof byType] += 1;
     if (r.isActive) activeCount += 1;
-    const outstanding = toDecimal(r.outstandingAmount);
-    const positive = Decimal.max(outstanding, 0);
-    if (outstanding.gt(0)) withOutstandingCount += 1;
-    const isCustomer = r.partyType === PartyType.Customer || r.partyType === PartyType.Both;
-    const isSupplier = r.partyType === PartyType.Supplier || r.partyType === PartyType.Both;
-    if (isCustomer) {
-      receivable = receivable.plus(positive);
+    if (toDecimal(r.outstandingAmount).gt(0)) withOutstandingCount += 1;
+    if (isCustomerSide(r.partyType)) {
+      receivable = receivable.plus(Decimal.max(toDecimal(r.receivableOutstanding), 0));
       customerDeposit = customerDeposit.plus(toDecimal(r.customerDepositBalance));
     }
-    if (isSupplier) {
-      payable = payable.plus(positive);
+    if (isSupplierSide(r.partyType)) {
+      payable = payable.plus(Decimal.max(toDecimal(r.payableOutstanding), 0));
       vendorDeposit = vendorDeposit.plus(toDecimal(r.depositBalance));
     }
   }
@@ -168,5 +177,66 @@ export function summarizeParties(rows: readonly PartySummarySource[]): PartySumm
     totalCustomerDeposit: money(customerDeposit),
     totalVendorDeposit: money(vendorDeposit),
     withOutstandingCount,
+  };
+}
+
+export interface PartyDashboardSource extends PartySummarySource {
+  id: string;
+  name: string;
+}
+
+export interface PartyDashboardTop {
+  id: string;
+  name: string;
+  outstanding: number;
+}
+
+export interface PartyDashboardSummary {
+  totalCustomers: number;
+  totalSuppliers: number;
+  /** Positive receivable side of Customer + Both (a Both party counts once per side, E5-R3). */
+  totalPiutang: number;
+  /** Positive payable side of Supplier + Both. */
+  totalHutang: number;
+  totalCustomerDeposit: number;
+  totalVendorDeposit: number;
+}
+
+const TOP_LIMIT = 10;
+
+/** Largest positive amounts of one side, at most ten, ties by name. */
+function topBySide(rows: readonly PartyDashboardSource[], amount: (r: PartyDashboardSource) => Decimal): PartyDashboardTop[] {
+  return rows
+    .map((r) => ({ r, value: amount(r) }))
+    .filter((x) => x.value.gt(0))
+    .sort((a, b) => b.value.comparedTo(a.value) || a.r.name.localeCompare(b.r.name))
+    .slice(0, TOP_LIMIT)
+    .map(({ r, value }) => ({ id: r.id, name: r.name, outstanding: money(value) }));
+}
+
+/**
+ * GET /parties/dashboard figures (active, non-dummy parties): totals and top lists per side, from
+ * receivableOutstanding / payableOutstanding, so a Both party with a 30 jt payable and a 20 jt
+ * receivable adds 30 jt to totalHutang and 20 jt to totalPiutang instead of 50 jt to each.
+ */
+export function summarizePartyDashboard(rows: readonly PartyDashboardSource[]): {
+  summary: PartyDashboardSummary;
+  topCustomers: PartyDashboardTop[];
+  topVendors: PartyDashboardTop[];
+} {
+  const s = summarizeParties(rows);
+  const customers = rows.filter((r) => isCustomerSide(r.partyType));
+  const suppliers = rows.filter((r) => isSupplierSide(r.partyType));
+  return {
+    summary: {
+      totalCustomers: customers.length,
+      totalSuppliers: suppliers.length,
+      totalPiutang: s.totalReceivable,
+      totalHutang: s.totalPayable,
+      totalCustomerDeposit: s.totalCustomerDeposit,
+      totalVendorDeposit: s.totalVendorDeposit,
+    },
+    topCustomers: topBySide(customers, (r) => toDecimal(r.receivableOutstanding)),
+    topVendors: topBySide(suppliers, (r) => toDecimal(r.payableOutstanding)),
   };
 }

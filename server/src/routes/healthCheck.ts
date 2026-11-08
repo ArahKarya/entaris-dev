@@ -17,7 +17,7 @@ import {
 import { checkAleSync, checkNonJournalAle, checkOrphanAle } from './health/aleChecks';
 import { checkPartyOutstandingDrift } from './health/partyChecks';
 import { checkRequiredTriggers } from './health/schemaGuards';
-import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
+import { checkApSubledgerVsGl, checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import { checkAleFiscalYear } from './health/fiscalYearChecks';
 import { checkFormerRoleAccounts } from './health/formerRoleAccountChecks';
 import { FIX_ACTION, previewAccountBalanceDrift, fixAccountBalanceDrift } from './health/fixes';
@@ -39,6 +39,7 @@ router.get('/', async (_req, res) => {
       checkRequiredTriggers(),
       checkArSubledgerVsGl(),
       checkCustomerDepositVsGl(),
+      checkApSubledgerVsGl(),
       checkAleFiscalYear(),
       checkFormerRoleAccounts(),
       checkNonJournalAle(),

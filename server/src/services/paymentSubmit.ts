@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
+import { assertPartySideLocked } from './ledger/partySides';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
@@ -152,6 +153,7 @@ export async function submitPaymentInTx(
     await updateAccountBalance(tx, depositAccount.id, numAmount, 0);
     await updateAccountBalance(tx, creditAccountId, 0, numAmount);
 
+    await assertPartySideLocked(tx, body.partyId, 'PAYABLE');
     await tx.party.update({
       where: { id: body.partyId },
       data: { depositBalance: { increment: numAmount } },
@@ -202,6 +204,7 @@ export async function submitPaymentInTx(
     await updateAccountBalance(tx, debitAccountId, numAmount, 0);
     await updateAccountBalance(tx, depositAccount.id, 0, numAmount);
 
+    await assertPartySideLocked(tx, body.partyId, 'RECEIVABLE');
     await tx.party.update({
       where: { id: body.partyId },
       data: { customerDepositBalance: { increment: numAmount } },
@@ -363,6 +366,7 @@ export async function submitPaymentInTx(
     }
 
     await tx.payment.update({ where: { id: payment.id }, data: { journalEntryId: journalEntry.id } });
+    await assertPartySideLocked(tx, body.partyId, isVendorRefund ? 'PAYABLE' : 'RECEIVABLE');
     await recalcPartyOutstanding(tx, body.partyId);
     return { payment, party, unallocatedAmount: 0 };
   }
@@ -490,6 +494,8 @@ export async function submitPaymentInTx(
     }
   }
 
+  // Receive posts to the receivable side, Pay to the payable side; re-read under the party row lock.
+  await assertPartySideLocked(tx, body.partyId, body.paymentType === 'Receive' ? 'RECEIVABLE' : 'PAYABLE');
   await recalcPartyOutstanding(tx, body.partyId);
   return { payment, party, unallocatedAmount };
 }

@@ -153,7 +153,7 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 
 ### party_dashboard
 
-**Ringkasan:** Dashboard mitra aktif non-dummy: total piutang (pelanggan), total hutang (pemasok), total uang muka, dan daftar teratas berdasar saldo. Tanpa parameter.
+**Ringkasan:** Dashboard mitra aktif non-dummy: total piutang (sisi piutang Customer dan Customer & Supplier, kolom receivableOutstanding), total hutang (sisi hutang Supplier dan Customer & Supplier, kolom payableOutstanding), total uang muka, dan daftar teratas per sisi. Mitra Customer & Supplier dihitung sekali per sisi (hutang 30 jt dan piutang 20 jt menambah totalHutang 30 jt dan totalPiutang 20 jt). Tanpa parameter.
 
 - **Risk / tier:** `read` / Auto
 - **Roles & izin:** Admin, Accountant, StaffProduksi, Viewer (modul `parties` / `view`)
@@ -178,11 +178,11 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 {
   "ok": true,
   "kind": "read",
-  "data": "<Ringkasan {totalPiutang, totalHutang, deposit, top lists...}.>"
+  "data": "<Ringkasan {summary: {totalCustomers, totalSuppliers, totalPiutang, totalHutang, totalCusto>"
 }
 ```
 
-**Isi hasil:** Ringkasan {totalPiutang, totalHutang, deposit, top lists...}.
+**Isi hasil:** Ringkasan {summary: {totalCustomers, totalSuppliers, totalPiutang, totalHutang, totalCustomerDeposit, totalVendorDeposit}, topCustomers (sisi piutang), topVendors (sisi hutang), aging piutang/hutang, pembayaran terakhir}.
 
 ### party_delete
 
@@ -409,11 +409,11 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 {
   "ok": true,
   "kind": "read",
-  "data": "<Agregat KPI mitra (jumlah, total outstanding, total uang muka).>"
+  "data": "<Agregat KPI mitra (jumlah per tipe, totalReceivable dari sisi piutang, totalPayable dari s>"
 }
 ```
 
-**Isi hasil:** Agregat KPI mitra (jumlah, total outstanding, total uang muka).
+**Isi hasil:** Agregat KPI mitra (jumlah per tipe, totalReceivable dari sisi piutang, totalPayable dari sisi hutang, total uang muka, jumlah mitra bersaldo).
 
 **Error umum**
 
@@ -421,7 +421,7 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 
 ### party_update
 
-**Ringkasan:** Ubah data mitra (nama, tipe, kontak, NPWP, isWapu, isActive). Parsial: hanya field yang dikirim berubah; null atau string kosong menghapus phone/email/address/taxId. Perhatian: isWapu/taxId memengaruhi perlakuan pajak faktur berikutnya; isActive=false menyembunyikan dari pilihan transaksi baru.
+**Ringkasan:** Ubah data mitra (nama, tipe, kontak, NPWP, isWapu, isActive). Parsial: hanya field yang dikirim berubah; null atau string kosong menghapus phone/email/address/taxId. Perhatian: isWapu/taxId memengaruhi perlakuan pajak faktur berikutnya; isActive=false menyembunyikan dari pilihan transaksi baru. Ganti partyType yang melepas sisi piutang atau hutang ditolak selama sisi itu masih dipakai (menambah sisi, mis. Customer ke Customer & Supplier, selalu boleh).
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -468,13 +468,14 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 
 **Isi hasil:** Record mitra terbaru.
 
-**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; memengaruhi faktur BARU (pajak WAPU, status aktif). Faktur lama tidak diubah.
+**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; memengaruhi faktur BARU (pajak WAPU, status aktif). Faktur lama tidak diubah. Ganti tipe yang menambah sisi menghitung ulang saldo piutang/hutang pihak (receivableOutstanding, payableOutstanding) dari dokumen sisi itu.
 
 **Teks konfirmasi:** Ubah mitra {id}. Setujui?
 
 **Error umum**
 
 - 404: data pihak tidak ditemukan
+- 400 PARTY_TYPE_HAS_BALANCE: ganti tipe melepas sisi (piutang atau hutang) yang masih punya saldo, saldo awal, uang muka, invoice yang belum dibatalkan, atau baris Buku Besar; atau memindahkan saldo awal yang belum diarahkan
 
 **Tool terkait:** [`party_get`](#party_get)
 

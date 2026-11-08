@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { updateBalancesForItems, recalcPartyOutstanding } from '../utils/accountBalance';
+import { assertPartySideLocked } from './ledger/partySides';
 import { BusinessError } from '../utils/errors';
 import { mappedAccount } from './systemAccounts';
 import { voidJournalInTx } from '../utils/journalCancel';
@@ -255,6 +256,7 @@ async function createExpensePurchaseInvoice(
     tx,
     jeItems.map((i) => ({ accountId: i.accountId, debit: i.debit, credit: i.credit })),
   );
+  await assertPartySideLocked(tx, opts.partyId, 'PAYABLE');
   await recalcPartyOutstanding(tx, opts.partyId);
 
   return { invoice, journalEntry };

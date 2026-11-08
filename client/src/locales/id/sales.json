@@ -1572,8 +1572,7 @@
     "outstanding": {
       "overpaid": "Lebih bayar",
       "receivable": "Piutang",
-      "payable": "Hutang",
-      "owed": "Terutang"
+      "payable": "Hutang"
     },
     "toast": {
       "deactivated": "Mitra dinonaktifkan karena memiliki transaksi terkait.",

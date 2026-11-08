@@ -17,8 +17,12 @@
 // report (services/partyOutstandingDrift.ts) and e2-party-side-recalc use it. adjustPartyOpening is
 // the one writer of the opening columns: the party opening service (PR-5.11), the payment
 // consumption and its restore (partyOpeningConsumption.ts) and e2-party-opening-audit (PR-5.13).
+// assertPartyTypeChangeAllowed (PR-5.10) keeps a type change from dropping a side that still holds
+// something, since computePartySides would then stop counting it.
 import { Prisma, type PartyType } from '@prisma/client';
+import { BusinessError } from '../../utils/errors';
 import { manualPartyAdjustments } from './partyAdjustments';
+import { PARTY_NOT_FOUND, PARTY_TYPE_MISMATCH, loadPartyTypes, roleAccountIds, type PartyRole } from './partyRules';
 
 type Tx = Prisma.TransactionClient;
 type Dec = Prisma.Decimal;
@@ -224,6 +228,126 @@ export const PARTY_SIDE_RECALC_AUDIT_ACTION = 'E2_PARTY_SIDE_RECALC';
  * legacy-unassigned: opening not directed to a side yet, left to e2-party-opening-audit (PR-5.13).
  */
 export type PartySideIssue = 'negative-opening-side' | 'opening-off-side' | 'legacy-unassigned';
+
+// Party type change guard (PR-5.10; plan §7 technical default "ganti tipe pihak ditolak bila sisi
+// yang dilepas masih bersaldo").
+
+export const PARTY_TYPE_HAS_BALANCE = 'PARTY_TYPE_HAS_BALANCE';
+
+/** Why a side cannot be released, most telling first; each phrase has its own English entry. */
+export type PartySideHold =
+  | 'saldo terutang'
+  | 'saldo awal'
+  | 'saldo awal yang belum diarahkan'
+  | 'pembayaran yang memakai saldo awal yang belum diarahkan'
+  | 'saldo uang muka'
+  | 'invoice yang belum dibatalkan'
+  | 'baris Buku Besar';
+
+const SIDE_LABEL: Readonly<Record<PartySide, string>> = { RECEIVABLE: 'Piutang', PAYABLE: 'Hutang' };
+const TYPE_LABEL: Readonly<Record<PartyType, string>> = { Customer: 'Customer', Supplier: 'Supplier', Both: 'Customer & Supplier' };
+const SIDE_ROLES: Readonly<Record<PartySide, readonly PartyRole[]>> = {
+  RECEIVABLE: ['AR', 'CUSTOMER_DEPOSIT'],
+  PAYABLE: ['AP', 'VENDOR_DEPOSIT'],
+};
+
+export interface PartyTypeChangeProblem {
+  side: PartySide;
+  holds: PartySideHold[];
+}
+
+/**
+ * What blocks changing `partyId` from its type to `newType`, per side. A side is released when the
+ * new type no longer has it (Customer or Both to Supplier drops the receivable side; Supplier or
+ * Both to Customer drops the payable side); it blocks while it still has an outstanding amount, an
+ * opening, a deposit balance, an invoice that is not Cancelled (Draft included) or an active ledger
+ * row on the side's role accounts (current and former). The undirected opening (legacyUnassigned)
+ * sits on the payable side of a Supplier and on the receivable side otherwise, so a change into or
+ * out of Supplier would move it: that blocks too, on the side it sits on now, and so does an active
+ * payment holding an OpeningUnassigned allocation (partyOpeningConsumption.ts), since its cancel or
+ * refund would put that amount back into the rest after the change. [] when allowed or
+ * when the type does not change. Throws BusinessError (404 text) when the party does not exist.
+ */
+export async function partyTypeChangeProblems(tx: Tx, partyId: string, newType: PartyType): Promise<PartyTypeChangeProblem[]> {
+  const party = await tx.party.findUnique({
+    where: { id: partyId },
+    select: {
+      partyType: true, receivableOutstanding: true, payableOutstanding: true, openingOutstanding: true,
+      openingReceivable: true, openingPayable: true, depositBalance: true, customerDepositBalance: true,
+    },
+  });
+  if (!party) throw new BusinessError('Data pihak tidak ditemukan.', PARTY_NOT_FOUND);
+  const old = party.partyType;
+  if (old === newType) return [];
+  const released: PartySide[] = [];
+  if (hasReceivable(old) && !hasReceivable(newType)) released.push('RECEIVABLE');
+  if (hasPayable(old) && !hasPayable(newType)) released.push('PAYABLE');
+  const legacy = legacyUnassignedOf(party);
+  const legacySide: PartySide = old === 'Supplier' ? 'PAYABLE' : 'RECEIVABLE';
+  const restMoves = (old === 'Supplier') !== (newType === 'Supplier');
+  const legacyMoves = restMoves && !legacy.isZero();
+  // OPENING_ALLOCATION_TYPE.UNASSIGNED; the literal avoids a cycle with partyOpeningConsumption.ts.
+  const restInPayments = restMoves && (await tx.paymentAllocation.count({
+    where: { invoiceType: 'OpeningUnassigned', invoiceId: partyId, allocatedAmount: { gt: 0 }, payment: { status: { not: 'Cancelled' } } },
+  })) > 0;
+
+  const problems: PartyTypeChangeProblem[] = [];
+  for (const side of (['RECEIVABLE', 'PAYABLE'] as const)) {
+    const holds: PartySideHold[] = [];
+    if (released.includes(side)) {
+      const receivable = side === 'RECEIVABLE';
+      if (!D(receivable ? party.receivableOutstanding : party.payableOutstanding).isZero()) holds.push('saldo terutang');
+      if (!D(receivable ? party.openingReceivable : party.openingPayable).isZero()) holds.push('saldo awal');
+      if (!D(receivable ? party.customerDepositBalance : party.depositBalance).isZero()) holds.push('saldo uang muka');
+      const invoiceWhere = { partyId, status: { not: 'Cancelled' as const } };
+      const invoices = receivable
+        ? await tx.salesInvoice.count({ where: invoiceWhere })
+        : await tx.purchaseInvoice.count({ where: invoiceWhere });
+      if (invoices > 0) holds.push('invoice yang belum dibatalkan');
+      const accountIds = (await Promise.all(SIDE_ROLES[side].map((r) => roleAccountIds(tx, r, { includeFormer: true })))).flat();
+      if (accountIds.length > 0) {
+        const row = await tx.accountingLedgerEntry.findFirst({
+          where: { partyId, isCancelled: false, accountId: { in: accountIds } },
+          select: { id: true },
+        });
+        if (row) holds.push('baris Buku Besar');
+      }
+    }
+    if (legacyMoves && side === legacySide) holds.push('saldo awal yang belum diarahkan');
+    if (restInPayments && side === legacySide) holds.push('pembayaran yang memakai saldo awal yang belum diarahkan');
+    if (holds.length > 0) problems.push({ side, holds });
+  }
+  return problems;
+}
+
+/** Throws PARTY_TYPE_HAS_BALANCE (400) naming the first blocked side and its first hold. */
+export async function assertPartyTypeChangeAllowed(tx: Tx, partyId: string, newType: PartyType): Promise<void> {
+  const [first] = await partyTypeChangeProblems(tx, partyId, newType);
+  if (!first) return;
+  throw new BusinessError(
+    `Tipe mitra tidak bisa diubah menjadi ${TYPE_LABEL[newType]}: sisi ${SIDE_LABEL[first.side]} masih punya ${first.holds[0]}. Selesaikan atau pindahkan lewat dokumen atau jurnal dulu.`,
+    PARTY_TYPE_HAS_BALANCE,
+  );
+}
+
+/**
+ * For a document posting to `side` of a party (sales and purchase invoice submit, the GA expense
+ * bill, payments, refunds and deposits): re-reads the party type under the party row lock and
+ * refuses PARTY_TYPE_MISMATCH when the type has no such side, since computePartySides would not
+ * count it. Called right before the writer's recalcPartyOutstanding (or deposit balance update),
+ * which takes the same row lock, so the lock order does not change. PUT /parties/:id locks the row
+ * FOR UPDATE before assertPartyTypeChangeAllowed: whichever of the two locks second sees the
+ * other committed (a posting sees the new type, the type change sees the posting's rows).
+ */
+export async function assertPartySideLocked(tx: Tx, partyId: string, side: PartySide): Promise<void> {
+  const type = (await loadPartyTypes(tx, [partyId], { lock: true })).get(partyId);
+  if (!type) throw new BusinessError('Data pihak tidak ditemukan.', PARTY_NOT_FOUND);
+  if (side === 'RECEIVABLE' ? hasReceivable(type) : hasPayable(type)) return;
+  throw new BusinessError(
+    `Mitra bertipe ${TYPE_LABEL[type]} tidak punya sisi ${SIDE_LABEL[side]}; dokumen ini hanya bisa dicatat untuk mitra yang punya sisi itu.`,
+    PARTY_TYPE_MISMATCH,
+  );
+}
 
 export interface PartySideRecalcRow {
   partyId: string;

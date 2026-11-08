@@ -572,6 +572,10 @@
         "customer-deposit-subledger": {
           "title": "Customer deposits match",
           "hint": "The Customer Deposit balance of this Customer in the General Ledger differs from its remaining deposits (today's balances). Correct it with a document or a journal; old differences are in the baseline."
+        },
+        "ap-subledger": {
+          "title": "Payables match invoices",
+          "hint": "The Payable balance of this Supplier in the General Ledger differs from its invoices' outstanding amount and opening payable (today's balances). Correct it with a document or a journal; old differences are in the baseline."
         }
       },
       "roles": {

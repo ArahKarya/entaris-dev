@@ -13,6 +13,7 @@ import api from '@/lib/api';
 import { exportToExcel } from '@/lib/exportExcel';
 import i18n from '@/i18n';
 import { formatNumber, formatRupiah, toNumber } from '@/lib/format';
+import { outstandingLines, type PartySide } from '@/lib/partySides';
 import type { StatusTone } from '@/lib/status';
 import { can, cap } from '@/lib/permissions';
 import { LIST_PARAM, useListState } from '@/hooks/useListState';
@@ -48,6 +49,8 @@ interface PartyRow {
   address: string | null;
   taxId: string | null;
   outstandingAmount: Money;
+  receivableOutstanding: Money;
+  payableOutstanding: Money;
   depositBalance: Money;
   customerDepositBalance: Money;
   isActive: boolean;
@@ -104,14 +107,11 @@ const withUnit = (label: string) => (
   </>
 );
 
-/** What a positive / negative outstanding means for this party. */
-function outstandingCaption(p: PartyRow): string {
-  const value = num(p.outstandingAmount);
+/** What a positive / negative outstanding on one side means. */
+function sideCaption(side: PartySide, value: number): string {
   if (value < 0) return i18n.t('sales:partiesPage.outstanding.overpaid');
   if (value === 0) return '';
-  if (p.partyType === 'Customer') return i18n.t('sales:partiesPage.outstanding.receivable');
-  if (p.partyType === 'Supplier') return i18n.t('sales:partiesPage.outstanding.payable');
-  return i18n.t('sales:partiesPage.outstanding.owed');
+  return i18n.t(`sales:partiesPage.outstanding.${side}`);
 }
 
 function toExportRows(rows: PartyRow[]): Record<string, unknown>[] {
@@ -287,19 +287,25 @@ export const PartiesPage = () => {
         sortDescFirst: true,
         meta: { align: 'right' },
         cell: ({ row }) => {
-          const p = row.original;
-          const value = num(p.outstandingAmount);
-          const caption = outstandingCaption(p);
+          // A Both party shows its receivable and payable on separate lines.
+          const lines = outstandingLines(row.original);
           return (
             <div className="flex flex-col items-end">
-              <span
-                className={
-                  value > 0 ? 'font-semibold text-foreground' : value < 0 ? 'text-success-text' : 'text-muted-foreground'
-                }
-              >
-                {money(Math.abs(value))}
-              </span>
-              {caption && <span className="text-xs text-muted-foreground">{caption}</span>}
+              {lines.map(({ side, value }) => {
+                const caption = lines.length > 1 && value === 0 ? i18n.t(`sales:partiesPage.outstanding.${side}`) : sideCaption(side, value);
+                return (
+                  <span key={side} className="flex flex-col items-end">
+                    <span
+                      className={
+                        value > 0 ? 'font-semibold text-foreground' : value < 0 ? 'text-success-text' : 'text-muted-foreground'
+                      }
+                    >
+                      {money(Math.abs(value))}
+                    </span>
+                    {caption && <span className="text-xs text-muted-foreground">{caption}</span>}
+                  </span>
+                );
+              })}
             </div>
           );
         },

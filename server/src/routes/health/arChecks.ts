@@ -1,19 +1,20 @@
-// Receivable and customer deposit checks for /api/health-check (E4-R3): the ledger balance per
-// Customer against the subledger the invoices and deposits keep (services/ledger/arSubledgerCheck.ts).
+// Receivable and customer deposit checks for /api/health-check (E4-R3), and the payable check per
+// Supplier (PR-5.10): the ledger balance per party against the subledger the invoices and deposits
+// keep (services/ledger/arSubledgerCheck.ts).
 // Detection only, no fix: a difference is corrected by the accountant with a document or a journal.
 import { prisma } from '../../lib/prisma';
-import { findArSubledgerDiffs, findCustomerDepositDiffs, type PartySubledgerDiff } from '../../services/ledger/arSubledgerCheck';
+import { findApSubledgerDiffs, findArSubledgerDiffs, findCustomerDepositDiffs, type PartySubledgerDiff } from '../../services/ledger/arSubledgerCheck';
 import { PARTY_ROLE_AMBIGUOUS } from '../../services/ledger/partyRules';
 import { BusinessError } from '../../utils/errors';
 import type { CheckResult } from './checks';
 
 const DETAIL_LIMIT = 20;
 
-/** Detail rows for the client table; the bucket without a party is labelled "(tanpa Customer)". */
-export function detailRows(rows: readonly PartySubledgerDiff[]) {
+/** Detail rows for the client table; the bucket without a party is labelled `noParty`. */
+export function detailRows(rows: readonly PartySubledgerDiff[], noParty = '(tanpa Customer)') {
   const listed = rows.slice(0, DETAIL_LIMIT);
   return listed.map((r) => ({
-    party_name: r.partyName ?? '(tanpa Customer)',
+    party_name: r.partyName ?? noParty,
     party_type: r.partyType,
     gl: r.gl.toNumber(),
     subledger: r.subledger.toNumber(),
@@ -61,6 +62,21 @@ export async function checkCustomerDepositVsGl(): Promise<CheckResult> {
       : 'Saldo Uang Muka Customer di Buku Besar sama dengan sisa uang muka per Customer',
     count: rows.length,
     details: detailRows(rows),
+    fixable: false,
+  };
+}
+
+export async function checkApSubledgerVsGl(): Promise<CheckResult> {
+  const rows = await rowsOrAmbiguous('AP vs Subledger', () => findApSubledgerDiffs(prisma));
+  if (!Array.isArray(rows)) return rows;
+  return {
+    name: 'AP vs Subledger',
+    status: rows.length > 0 ? 'warning' : 'ok',
+    message: rows.length > 0
+      ? `${rows.length} Supplier: saldo Hutang di Buku Besar berbeda dengan sisa tagihan invoice`
+      : 'Saldo Hutang di Buku Besar sama dengan sisa tagihan invoice per Supplier',
+    count: rows.length,
+    details: detailRows(rows, '(tanpa Supplier)'),
     fixable: false,
   };
 }

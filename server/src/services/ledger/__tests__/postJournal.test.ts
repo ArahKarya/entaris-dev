@@ -161,7 +161,12 @@ describe('postJournal', () => {
     const now = new Date('2178-03-10T03:00:00Z');
     const { journal, fiscalYear } = await postJournal(tx as any, base({ sourceKey: 'X:1', now }));
     expect(fiscalYear).toBe(FY);
-    expect(tx.calls).toEqual(['lock', 'accounts', 'create', 'ale']);
+    // Account rows first, then the party rows (the order recalcPartyOutstanding keeps later).
+    expect(tx.calls).toEqual(['lock', 'accounts', 'lock', 'create', 'ale']);
+    const [strings, ...args] = tx.$queryRaw.mock.calls[1] as unknown as [TemplateStringsArray, ...unknown[]];
+    const partyLock = Prisma.sql(strings, ...args);
+    expect(partyLock.sql).toMatch(/FROM parties .*FOR NO KEY UPDATE/);
+    expect(partyLock.values).toEqual(['cust']);
     const data = tx.journalEntry.create.mock.calls[0][0].data;
     expect(data).toMatchObject({
       entryNumber: 'JV-217803-0001', status: 'Submitted', fiscalYearId: 'fy-1', sourceType: 'MANUAL', sourceKey: 'X:1',

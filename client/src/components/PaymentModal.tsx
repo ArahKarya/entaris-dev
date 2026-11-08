@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { FormDialog } from './purchase-cash/FormDialog';
 import { OptionPicker } from './purchase-cash/OptionPicker';
 import { usePartyPicker } from '@/hooks/usePartyPicker';
+import { sideOutstanding } from '@/lib/partySides';
 import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
 import AttachmentUpload from './AttachmentUpload';
 import AttachmentPreview from './AttachmentPreview';
@@ -158,9 +159,10 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, defaultTyp
   });
 
   const totalInvoiceOutstanding = openInvoices?.reduce((s: number, inv: any) => s + Number(inv.outstanding), 0) ?? 0;
-  // Party-level outstanding (includes opening balances without invoices)
+  // Party-level outstanding on the side this payment settles (includes opening balances without
+  // invoices); a Both party's receivable and payable stay apart.
   const selectedParty = partyPicker.selectedParty;
-  const partyOutstanding = Number(selectedParty?.outstandingAmount ?? 0);
+  const partyOutstanding = sideOutstanding(selectedParty, isReceiveFlow ? 'receivable' : 'payable');
   const nonInvoiceOutstanding = Math.max(0, partyOutstanding - totalInvoiceOutstanding);
 
   const mutation = useMutation({

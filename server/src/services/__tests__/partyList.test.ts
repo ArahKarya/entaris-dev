@@ -77,24 +77,44 @@ describe('sorting', () => {
 
 describe('summarizeParties', () => {
   const d = (v: string) => new Prisma.Decimal(v);
-  it('sums positive outstanding per side and deposits (dashboard rules)', () => {
+  const row = (partyType: string, isActive: boolean, receivable: string, payable: string, vendorDeposit: string, customerDeposit: string) => ({
+    partyType, isActive,
+    outstandingAmount: d(receivable).plus(d(payable)),
+    receivableOutstanding: d(receivable),
+    payableOutstanding: d(payable),
+    depositBalance: d(vendorDeposit),
+    customerDepositBalance: d(customerDeposit),
+  });
+
+  it('sums the positive side columns and deposits (dashboard rules)', () => {
     const s = summarizeParties([
-      { partyType: 'Customer', isActive: true, outstandingAmount: d('1000.10'), depositBalance: d('0'), customerDepositBalance: d('50') },
-      { partyType: 'Customer', isActive: false, outstandingAmount: d('-200'), depositBalance: d('0'), customerDepositBalance: d('0') },
-      { partyType: 'Supplier', isActive: true, outstandingAmount: d('300'), depositBalance: d('75'), customerDepositBalance: d('0') },
-      { partyType: 'Both', isActive: true, outstandingAmount: d('10'), depositBalance: d('5'), customerDepositBalance: d('7') },
+      row('Customer', true, '1000.10', '0', '0', '50'),
+      row('Customer', false, '-200', '0', '0', '0'),
+      row('Supplier', true, '0', '300', '75', '0'),
+      row('Both', true, '4', '6', '5', '7'),
     ]);
     expect(s).toEqual({
       total: 4,
       activeCount: 3,
       inactiveCount: 1,
       byType: { Customer: 2, Supplier: 1, Both: 1 },
-      totalReceivable: 1010.1,
-      totalPayable: 310,
+      totalReceivable: 1004.1,
+      totalPayable: 306,
       totalCustomerDeposit: 57,
       totalVendorDeposit: 80,
       withOutstandingCount: 3,
     });
+  });
+
+  it('counts each side of a Both party once (payable 30 jt, receivable 20 jt)', () => {
+    const s = summarizeParties([row('Both', true, '20000000', '30000000', '0', '0')]);
+    expect(s.totalReceivable).toBe(20_000_000);
+    expect(s.totalPayable).toBe(30_000_000);
+  });
+
+  it('leaves a negative side out without cancelling the other side', () => {
+    const s = summarizeParties([row('Both', true, '-500', '800', '0', '0')]);
+    expect(s).toMatchObject({ totalReceivable: 0, totalPayable: 800, withOutstandingCount: 1 });
   });
 
   it('handles an empty list', () => {

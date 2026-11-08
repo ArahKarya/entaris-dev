@@ -55,6 +55,7 @@ type CheckKey =
   | 'warehouseDrift'
   | 'arSubledger'
   | 'customerDepositSubledger'
+  | 'apSubledger'
   | 'aleFiscalYear'
   | 'formerRoleAccounts'
   | 'nonJournalAle'
@@ -71,6 +72,7 @@ const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
   'AR vs Subledger': { key: 'arSubledger' },
   'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
+  'AP vs Subledger': { key: 'apSubledger' },
   'ALE vs Fiscal Year': { key: 'aleFiscalYear' },
   'Former Role Accounts': { key: 'formerRoleAccounts' },
   'Non-Journal Ledger Entries': { key: 'nonJournalAle' },

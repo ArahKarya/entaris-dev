@@ -117,6 +117,9 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Saldo Piutang di Buku Besar sama dengan sisa tagihan invoice per Customer": "The Receivable balance in the General Ledger matches the invoices' outstanding amount for every Customer",
   "{0} Customer: saldo Uang Muka Customer di Buku Besar berbeda dengan sisa uang muka": "{0} Customers: the Customer Deposit balance in the General Ledger differs from the remaining deposits",
   "Saldo Uang Muka Customer di Buku Besar sama dengan sisa uang muka per Customer": "The Customer Deposit balance in the General Ledger matches the remaining deposits for every Customer",
+  // health check: AP vs subledger (party sides, E2-R13 / PR-5.10)
+  "{0} Supplier: saldo Hutang di Buku Besar berbeda dengan sisa tagihan invoice": "{0} Suppliers: the Payable balance in the General Ledger differs from the invoices' outstanding amount",
+  "Saldo Hutang di Buku Besar sama dengan sisa tagihan invoice per Supplier": "The Payable balance in the General Ledger matches the invoices' outstanding amount for every Supplier",
   // health check: ledger rows vs fiscal year (E2-R5)
   "{0} jurnal: entri Buku Besar tercatat di Tahun Buku yang berbeda dengan tanggal jurnalnya": "{0} journals: General Ledger entries are booked to a Fiscal Year other than the one holding the journal date",
   "Entri Buku Besar semua jurnal tercatat di Tahun Buku sesuai tanggalnya": "General Ledger entries of every journal are booked to the Fiscal Year holding their date",
@@ -173,6 +176,19 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Pihak tidak ditemukan.": "Party not found.",
   "Data pihak tidak ditemukan.": "Party data not found.",
   "Gagal mengupdate data pihak.": "Failed to update the party.",
+  // party sides (E2-R13): party type change guard (services/ledger/partySides.ts, PR-5.10); side and hold names translate inside the pattern.
+  "Tipe mitra tidak bisa diubah menjadi {0}: sisi {1} masih punya {2}. Selesaikan atau pindahkan lewat dokumen atau jurnal dulu.": "The partner type cannot be changed to {0}: the {1} side still has {2}. Settle it or move it with a document or a journal first.",
+  "Piutang": "Receivable",
+  "Hutang": "Payable",
+  "saldo terutang": "an outstanding balance",
+  "saldo awal": "an opening balance",
+  "saldo awal yang belum diarahkan": "an opening balance not yet directed to a side",
+  "pembayaran yang memakai saldo awal yang belum diarahkan": "a payment that used the opening balance not yet directed to a side",
+  "saldo uang muka": "a deposit balance",
+  "invoice yang belum dibatalkan": "invoices that are not cancelled",
+  "baris Buku Besar": "General Ledger rows",
+  // party sides (E2-R13): a posting to a side the party type does not have (assertPartySideLocked, PR-5.10)
+  "Mitra bertipe {0} tidak punya sisi {1}; dokumen ini hanya bisa dicatat untuk mitra yang punya sisi itu.": "A partner of type {0} has no {1} side; this document can only be recorded for a partner that has that side.",
   "Mitra dinonaktifkan karena memiliki {0} transaksi terkait.": "Partner deactivated because it has {0} related transactions.",
   "Mitra dihapus.": "Partner deleted.",
   "Data mitra tidak ditemukan.": "Partner data not found.",

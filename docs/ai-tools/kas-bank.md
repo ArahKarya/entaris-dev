@@ -1149,6 +1149,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400 PERIOD_CLOSED: uang muka saldo awal yang lama ada di tahun buku tertutup
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
+- 400 PARTY_TYPE_MISMATCH: mitra tidak punya sisi pembayaran ini (Receive, CustomerDeposit, CustomerRefund = sisi Piutang: Customer/Both; Pay, VendorDeposit, VendorRefund = sisi Hutang: Supplier/Both)
 
 **Tool terkait:** [`pi_list`](pembelian.md#pi_list), [`vdep_apply`](pembelian.md#vdep_apply), [`pay_cancel`](#pay_cancel), [`pay_ledger`](#pay_ledger)
 
