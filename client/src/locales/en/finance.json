@@ -1142,7 +1142,10 @@
     "allocations": {
       "title": "Invoice allocations",
       "salesInvoice": "Sales Invoice",
-      "purchaseInvoice": "Purchase Invoice"
+      "purchaseInvoice": "Purchase Invoice",
+      "openingReceivable": "Opening receivable",
+      "openingPayable": "Opening payable",
+      "openingUnassigned": "Opening balance (no side yet)"
     },
     "journal": {
       "title": "Journal ({{number}})",

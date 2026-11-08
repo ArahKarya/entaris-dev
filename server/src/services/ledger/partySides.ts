@@ -10,12 +10,13 @@
 // services/paymentSubmit.ts) stay undirected: legacyUnassigned = opening_outstanding −
 // opening_receivable − opening_payable. It counts on the receivable side of a Customer or Both and on
 // the payable side of a Supplier, as the one-column formula did, so no outstanding changes before
-// the accountant reviews it (e2-party-opening-audit, PR-5.13). It can be negative: a payment remainder
-// still lowers opening_outstanding alone until PR-5.13.
+// the accountant reviews it (e2-party-opening-audit, PR-5.13). It can be negative: before PR-5.13 a
+// payment remainder lowered opening_outstanding alone.
 //
 // computePartySides is the one formula: recalcPartyOutstanding (utils/accountBalance.ts), the drift
 // report (services/partyOutstandingDrift.ts) and e2-party-side-recalc use it. adjustPartyOpening is
-// the one writer of the opening columns once its callers land (PR-5.11, PR-5.13).
+// the one writer of the opening columns: the party opening service (PR-5.11), the payment
+// consumption and its restore (partyOpeningConsumption.ts) and e2-party-opening-audit (PR-5.13).
 import { Prisma, type PartyType } from '@prisma/client';
 import { manualPartyAdjustments } from './partyAdjustments';
 
@@ -159,30 +160,37 @@ export async function writePartySides(tx: Tx, f: PartySideFigures): Promise<bool
   return true;
 }
 
-const OPENING_COLUMN: Readonly<Record<PartySide, Prisma.Sql>> = {
-  RECEIVABLE: Prisma.raw('opening_receivable'),
-  PAYABLE: Prisma.raw('opening_payable'),
+/** Where an opening amount sits: a side's column, or the undirected rest (legacyUnassigned). */
+export type OpeningBucket = PartySide | 'UNASSIGNED';
+
+/** The bucket's current amount, and the column the bucket owns (none for the undirected rest). */
+const OPENING_BUCKET: Readonly<Record<OpeningBucket, { value: Prisma.Sql; column: Prisma.Sql | null }>> = {
+  RECEIVABLE: { value: Prisma.raw('opening_receivable'), column: Prisma.raw('opening_receivable') },
+  PAYABLE: { value: Prisma.raw('opening_payable'), column: Prisma.raw('opening_payable') },
+  UNASSIGNED: { value: Prisma.raw('opening_outstanding - opening_receivable - opening_payable'), column: null },
 };
 
 /**
- * Moves a side's opening amount and opening_outstanding together in one statement under the party
- * row lock: a negative delta takes off at most what the side still holds (never below zero), a
- * positive one adds it back. Returns the change actually made (negative for a reduction, zero when
- * nothing was left or the party does not exist). Two callers at once queue on the row lock, so their
- * reductions never add up to more than the opening.
+ * Moves a bucket's opening amount and opening_outstanding together in one statement under the party
+ * row lock: a negative delta takes off at most what the bucket still holds (never below zero), a
+ * positive one adds it back. UNASSIGNED moves opening_outstanding alone (the undirected rest).
+ * Returns the change actually made (negative for a reduction, zero when nothing was left or the
+ * party does not exist). Two callers at once queue on the row lock, so their reductions never add
+ * up to more than the opening.
  */
-export async function adjustPartyOpening(tx: Tx, partyId: string, side: PartySide, delta: Prisma.Decimal.Value): Promise<Dec> {
+export async function adjustPartyOpening(tx: Tx, partyId: string, side: OpeningBucket, delta: Prisma.Decimal.Value): Promise<Dec> {
   const amount = D(delta);
   if (amount.isZero()) return amount;
-  const col = OPENING_COLUMN[side];
+  const bucket = OPENING_BUCKET[side];
   const change = amount.isNegative()
     ? Prisma.sql`-LEAST(GREATEST(cur.v, 0), ${amount.abs().toFixed(2)}::numeric)`
     : Prisma.sql`${amount.toFixed(2)}::numeric`;
+  const setColumn = bucket.column ? Prisma.sql`${bucket.column} = p.${bucket.column} + ${change},` : Prisma.empty;
   const rows = await tx.$queryRaw<{ change: string }[]>`
-    WITH cur AS (SELECT id, ${col} AS v FROM parties WHERE id = ${partyId} FOR UPDATE),
+    WITH cur AS (SELECT id, ${bucket.value} AS v FROM parties WHERE id = ${partyId} FOR UPDATE),
          upd AS (
            UPDATE parties p
-              SET ${col} = cur.v + ${change},
+              SET ${setColumn}
                   opening_outstanding = p.opening_outstanding + ${change},
                   updated_at = NOW()
              FROM cur

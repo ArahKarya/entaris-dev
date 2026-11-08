@@ -15,6 +15,7 @@ import { systemAccounts } from '../services/systemAccounts';
 import { submitPaymentInTx } from '../services/paymentSubmit';
 import { setSalesInvoiceOutstandingInTx } from '../services/salesInvoiceStatus';
 import { withAllocationInvoiceNumbers } from '../services/paymentAllocationDetail';
+import { isOpeningAllocation, restorePartyOpening } from '../services/ledger/partyOpeningConsumption';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
   buildCashLedgerFilter,
@@ -173,7 +174,7 @@ router.post('/', async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/payments/:id/cancel — cancel payment and reverse allocations
+// POST /api/payments/:id/cancel — cancel payment and reverse allocations (invoices and the party opening)
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
   if (!body) return;
@@ -250,6 +251,14 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
         // AR/AP mapping, as before. Rejecting it would leave the payment impossible to cancel.
         logger.warn({ paymentId: payment.id, paymentNumber: payment.paymentNumber }, 'Payment cancel: no journal, nominal reversal');
         await reverseNominalPaymentBalances(tx, payment);
+      }
+
+      // What the payment took from the party's opening goes back into the same bucket (PR-5.13).
+      // After the journal void: the AR/AP account rows are locked before the party row, the order
+      // payment submit and the opening balance save use, so a concurrent one cannot deadlock (40P01).
+      for (const alloc of allocations) {
+        if (!isOpeningAllocation(alloc.invoiceType)) continue;
+        await restorePartyOpening(tx, payment.partyId, alloc.invoiceType, new Decimal(alloc.allocatedAmount.toString()).toFixed(2));
       }
 
       // Recalc party outstanding from invoice data (source of truth)

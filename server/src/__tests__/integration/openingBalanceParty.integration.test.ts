@@ -10,7 +10,7 @@
  *   60 jt again is 'unchanged'.
  * - Both payable 20 jt: AP +20 jt, AR unchanged, payable_outstanding 20 jt.
  * - Ledger rows before the cut-over: OPENING_PARTY_HAS_HISTORY. A consumed opening: OPENING_IN_USE, also
- *   after a real Receive payment of 10 jt with no Invoice (it lowers opening_outstanding alone), and for
+ *   after a real Receive payment of 10 jt with no Invoice (it takes the receivable opening), and for
  *   an opening Customer deposit applied to an Invoice through POST /customer-deposits/apply.
  * - POST /payments isOpeningBalance: another date OPENING_DATE_MISMATCH; the cut-over date posts a keyed
  *   deposit payment; a second one replaces it (old payment Cancelled), the deposit balance is the new
@@ -240,11 +240,11 @@ d('party opening balance (2156)', () => {
     await inRollback(async (tx) => {
       const c = await party(tx, 'Customer');
       await setParty(tx, c.id, 'AR', 50 * JT);
-      // No Invoice: the whole payment is a remainder, which lowers opening_outstanding alone.
+      // No Invoice: the whole payment is a remainder, which takes the receivable opening (PR-5.13).
       const paid = await submitPaymentInTx(tx, { date: `${Y}-02-01`, partyId: c.id, paymentType: 'Receive', accountId: cashAccountId, amount: 10 * JT }, actor.userId);
       expect(paid.unallocatedAmount).toBe(10 * JT);
       const cols = await columns(tx, c.id);
-      expect([cols.openingReceivable.toFixed(2), cols.openingOutstanding.toFixed(2)]).toEqual(['50000000.00', '40000000.00']);
+      expect([cols.openingReceivable.toFixed(2), cols.openingOutstanding.toFixed(2)]).toEqual(['40000000.00', '40000000.00']);
       await expect(setParty(tx, c.id, 'AR', 60 * JT)).rejects.toMatchObject({ code: OPENING_IN_USE });
     });
   });
