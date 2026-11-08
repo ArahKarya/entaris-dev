@@ -15,6 +15,7 @@ import { systemAccounts } from '../services/systemAccounts';
 import { submitPaymentInTx } from '../services/paymentSubmit';
 import { setSalesInvoiceOutstandingInTx } from '../services/salesInvoiceStatus';
 import { withAllocationInvoiceNumbers } from '../services/paymentAllocationDetail';
+import { isOpeningAllocation, restorePartyOpening } from '../services/ledger/partyOpeningConsumption';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
   buildCashLedgerFilter,
@@ -173,7 +174,7 @@ router.post('/', async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/payments/:id/cancel — cancel payment and reverse allocations
+// POST /api/payments/:id/cancel — cancel payment and reverse allocations (invoices and the party opening)
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
   if (!body) return;
@@ -225,6 +226,9 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
               data: { outstanding: newOutstandingNum, status: newOutstanding.gte(new Decimal(inv.grandTotal.toString())) ? 'Submitted' : 'PartiallyPaid' },
             });
           }
+        } else if (isOpeningAllocation(alloc.invoiceType)) {
+          // What the payment took from the party's opening goes back into the same bucket (PR-5.13).
+          await restorePartyOpening(tx, payment.partyId, alloc.invoiceType, allocAmt.toFixed(2));
         }
       }
 

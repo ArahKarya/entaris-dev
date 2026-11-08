@@ -93,6 +93,16 @@ describe('adjustPartyOpening', () => {
     expect(sql.sql).not.toContain('LEAST');
   });
 
+  it('UNASSIGNED moves opening_outstanding alone, capped at the undirected rest', async () => {
+    const t = tx('-300.00');
+    expect((await adjustPartyOpening(t as any, 'p1', 'UNASSIGNED', -500)).toFixed(2)).toBe('-300.00');
+    const [strings, ...values] = t.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    const sql = Prisma.sql(strings, ...values);
+    expect(sql.sql).toContain('opening_outstanding - opening_receivable - opening_payable AS v');
+    expect(sql.sql).not.toMatch(/SET\s+opening_(receivable|payable) =/);
+    expect(sql.sql).toContain('opening_outstanding = p.opening_outstanding');
+  });
+
   it('an unknown party changes nothing', async () => {
     expect((await adjustPartyOpening(tx(null) as any, 'missing', 'PAYABLE', -5)).toFixed(2)).toBe('0.00');
   });
