@@ -14,9 +14,10 @@
 //   6. otherwise the keyed journals are voided and the difference between the amount and the
 //      ledger before the cut-over day (openingBase) is posted on the cut-over day.
 // The amount is the account's balance AT the cut-over date, read from the ledger, never from
-// accounts.balance (E2-R15). Party targets (AR, AP, deposits) are declared here and arrive in PR-5.11.
+// accounts.balance (E2-R15). Party targets (receivable, payable, supplier and customer deposits)
+// go to openingBalanceParty.ts (PR-5.11), which shares the cut-over date and the legacy rules here.
 
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type Payment, type PrismaClient } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { businessDayOf, startOfBusinessDay, addDays } from '../../utils/businessDate';
@@ -28,6 +29,7 @@ import { assertPostableAccount, DOCUMENT_RULE, loadControlAccountMap, OPENING_AC
 import { cancelJournalsInTx, type JournalWithItems } from './cancelJournals';
 import { classifyLegacyJournal, sourceKeys, type OpeningPartyKind } from './journalSource';
 import { postJournal } from './postJournal';
+import { findActivePartyOpeningJournals, recordedPartyOpening, setPartyOpeningInTx } from './openingBalanceParty';
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | PrismaClient;
@@ -77,6 +79,8 @@ export interface OpeningOutcome {
   journal: JournalWithItems | null;
   /** Entry numbers of the journals this call voided. */
   cancelled: string[];
+  /** Deposit targets (VDEP/CDEP): the opening deposit payment now active (new or unchanged), else null. */
+  payment?: Payment | null;
 }
 
 export interface CutoverPeek {
@@ -87,7 +91,8 @@ export interface CutoverPeek {
 
 const ZERO = new Prisma.Decimal(0);
 const SETTINGS_SLUG = 'default';
-const REPLACED_REASON = 'Diganti saldo awal baru';
+/** Cancel reason stored on the journals and payments an opening balance replaces. */
+export const OPENING_REPLACED_REASON = 'Diganti saldo awal baru';
 const DEPOSIT_OPENING_NARRATION = /^Saldo Awal Uang Muka (Vendor|Pelanggan)\b/;
 
 const dateDay = (d: Date): string => d.toISOString().slice(0, 10);
@@ -146,15 +151,8 @@ export function openingJournalInstant(day: string): Date {
   return startOfBusinessDay(day);
 }
 
-function accountIdOf(target: OpeningTarget): string {
-  if (target.kind !== 'ACCOUNT') {
-    throw new BusinessError('Saldo awal pihak belum didukung oleh layanan saldo awal.');
-  }
-  return target.accountId;
-}
-
-/** True for a legacy (unkeyed, source NULL) journal the old rules classify as an opening balance. */
-function isLegacyOpening(j: JournalWithItems): boolean {
+/** True for a legacy (unkeyed) journal that is an opening balance by source type, by the old rules (source NULL) or as an opening deposit. */
+export function isLegacyOpening(j: JournalWithItems): boolean {
   if (j.sourceType === 'OPENING') return true;
   if (DEPOSIT_OPENING_NARRATION.test(j.narration ?? '')) return true;
   if (j.sourceType !== null) return false;
@@ -175,7 +173,8 @@ export async function findActiveOpeningJournals(
   tx: Db,
   target: OpeningTarget,
 ): Promise<{ keyed: JournalWithItems[]; legacy: JournalWithItems[] }> {
-  const accountId = accountIdOf(target);
+  if (target.kind === 'PARTY') return findActivePartyOpeningJournals(tx, target.partyId, target.subledger);
+  const accountId = target.accountId;
   const key = sourceKeys.openingAccount(accountId);
   const rows = await tx.journalEntry.findMany({
     where: {
@@ -255,7 +254,8 @@ export async function openingBase(tx: Db, accountId: string, day: string, exclud
  * preview show this, never accounts.balance; entering it again is 'unchanged'.
  */
 export async function recordedOpening(db: Db, target: OpeningTarget): Promise<Decimal | null> {
-  const accountId = accountIdOf(target);
+  if (target.kind === 'PARTY') return recordedPartyOpening(db, target.partyId, target.subledger);
+  const accountId = target.accountId;
   const { keyed } = await findActiveOpeningJournals(db, target);
   if (keyed.length === 0) return null;
   const account = await db.account.findUnique({ where: { id: accountId }, select: { rootType: true } });
@@ -462,7 +462,8 @@ async function assertOpeningAccount(tx: Tx, accountId: string) {
  * locked month (PERIOD_LOCKED) unless `throughLock`, which is recorded in the audit trail.
  */
 export async function setOpeningBalanceInTx(tx: Tx, input: SetOpeningInput): Promise<OpeningOutcome> {
-  const accountId = accountIdOf(input.target);
+  if (input.target.kind === 'PARTY') return setPartyOpeningInTx(tx, input, input.target.partyId, input.target.subledger);
+  const accountId = input.target.accountId;
   const amount = new Prisma.Decimal(input.amount);
   const { day } = await peekCutoverDate(tx);
   if (input.asOfDate !== undefined && input.asOfDate !== day) {
@@ -513,7 +514,7 @@ export async function setOpeningBalanceInTx(tx: Tx, input: SetOpeningInput): Pro
   const periodOptions: PeriodGuardOptions = { ignoreLock: !!input.throughLock };
   const cancelled = await cancelJournalsInTx(tx, keyed, {
     label: 'jurnal',
-    trail: input.trail ?? cancelTrail(input.userId, REPLACED_REASON),
+    trail: input.trail ?? cancelTrail(input.userId, OPENING_REPLACED_REASON),
     periodOptions,
   });
 
