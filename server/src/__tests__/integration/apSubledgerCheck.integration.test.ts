@@ -290,7 +290,13 @@ d('party type change guard (PR-5.10)', () => {
       const legacy = await party(tx, 'Supplier', { openingOutstanding: 3 * JT, payableOutstanding: 3 * JT, outstandingAmount: 3 * JT });
       expectRefused(await putType(legacy, 'Both'), 'Hutang', 'saldo awal yang belum diarahkan');
 
-      for (const id of [withInvoice, withOpening, both, legacy]) {
+      // A Pay that took that rest (PR-5.13) would put it back into it on cancel, so it still blocks.
+      const consumed = await party(tx, 'Supplier', { openingOutstanding: 3 * JT, payableOutstanding: 3 * JT, outstandingAmount: 3 * JT });
+      await submitPaymentInTx(tx, { date: `${Y}-03-05`, partyId: consumed, paymentType: 'Pay', accountId: cashAccountId, amount: 3 * JT }, actor.userId);
+      expect((await tx.party.findUniqueOrThrow({ where: { id: consumed } })).openingOutstanding.toFixed(2)).toBe('0.00');
+      expectRefused(await putType(consumed, 'Both'), 'Hutang', 'pembayaran yang memakai saldo awal yang belum diarahkan');
+
+      for (const id of [withInvoice, withOpening, both, legacy, consumed]) {
         const p = await tx.party.findUniqueOrThrow({ where: { id } });
         expect(p.partyType).toBe(id === withOpening ? 'Customer' : id === both ? 'Both' : 'Supplier');
       }

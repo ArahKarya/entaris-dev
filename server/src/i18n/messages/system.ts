@@ -183,6 +183,7 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "saldo terutang": "an outstanding balance",
   "saldo awal": "an opening balance",
   "saldo awal yang belum diarahkan": "an opening balance not yet directed to a side",
+  "pembayaran yang memakai saldo awal yang belum diarahkan": "a payment that used the opening balance not yet directed to a side",
   "saldo uang muka": "a deposit balance",
   "invoice yang belum dibatalkan": "invoices that are not cancelled",
   "baris Buku Besar": "General Ledger rows",

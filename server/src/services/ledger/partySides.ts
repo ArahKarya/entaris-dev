@@ -239,6 +239,7 @@ export type PartySideHold =
   | 'saldo terutang'
   | 'saldo awal'
   | 'saldo awal yang belum diarahkan'
+  | 'pembayaran yang memakai saldo awal yang belum diarahkan'
   | 'saldo uang muka'
   | 'invoice yang belum dibatalkan'
   | 'baris Buku Besar';
@@ -262,7 +263,9 @@ export interface PartyTypeChangeProblem {
  * opening, a deposit balance, an invoice that is not Cancelled (Draft included) or an active ledger
  * row on the side's role accounts (current and former). The undirected opening (legacyUnassigned)
  * sits on the payable side of a Supplier and on the receivable side otherwise, so a change into or
- * out of Supplier would move it: that blocks too, on the side it sits on now. [] when allowed or
+ * out of Supplier would move it: that blocks too, on the side it sits on now, and so does an active
+ * payment holding an OpeningUnassigned allocation (partyOpeningConsumption.ts), since its cancel or
+ * refund would put that amount back into the rest after the change. [] when allowed or
  * when the type does not change. Throws BusinessError (404 text) when the party does not exist.
  */
 export async function partyTypeChangeProblems(tx: Tx, partyId: string, newType: PartyType): Promise<PartyTypeChangeProblem[]> {
@@ -281,7 +284,12 @@ export async function partyTypeChangeProblems(tx: Tx, partyId: string, newType: 
   if (hasPayable(old) && !hasPayable(newType)) released.push('PAYABLE');
   const legacy = legacyUnassignedOf(party);
   const legacySide: PartySide = old === 'Supplier' ? 'PAYABLE' : 'RECEIVABLE';
-  const legacyMoves = !legacy.isZero() && (old === 'Supplier') !== (newType === 'Supplier');
+  const restMoves = (old === 'Supplier') !== (newType === 'Supplier');
+  const legacyMoves = restMoves && !legacy.isZero();
+  // OPENING_ALLOCATION_TYPE.UNASSIGNED; the literal avoids a cycle with partyOpeningConsumption.ts.
+  const restInPayments = restMoves && (await tx.paymentAllocation.count({
+    where: { invoiceType: 'OpeningUnassigned', invoiceId: partyId, allocatedAmount: { gt: 0 }, payment: { status: { not: 'Cancelled' } } },
+  })) > 0;
 
   const problems: PartyTypeChangeProblem[] = [];
   for (const side of (['RECEIVABLE', 'PAYABLE'] as const)) {
@@ -306,6 +314,7 @@ export async function partyTypeChangeProblems(tx: Tx, partyId: string, newType: 
       }
     }
     if (legacyMoves && side === legacySide) holds.push('saldo awal yang belum diarahkan');
+    if (restInPayments && side === legacySide) holds.push('pembayaran yang memakai saldo awal yang belum diarahkan');
     if (holds.length > 0) problems.push({ side, holds });
   }
   return problems;
