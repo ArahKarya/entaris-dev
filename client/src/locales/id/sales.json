@@ -1484,7 +1484,8 @@
       "label": "Saldo Awal / Koreksi",
       "hint": "Catat deposit tanpa mempengaruhi kas (offset ke Ekuitas Saldo Awal)",
       "journal": "Jurnal: <mono>DR Ekuitas Saldo Awal / CR Uang Muka Customer</mono>",
-      "note": "Kas/Bank tidak terpengaruh. Gunakan untuk deposit yang uangnya sudah masuk sebelum sistem digunakan."
+      "note": "Kas/Bank tidak terpengaruh. Gunakan untuk deposit yang uangnya sudah masuk sebelum sistem digunakan. Nilai ini mengganti saldo awal uang muka Customer ini sebelumnya, bukan menambahnya.",
+      "cutover": "Tanggal mengikuti tanggal cut-over saldo awal: {{date}}."
     },
     "summary": "Deposit <amount>{{amount}}</amount> dari customer",
     "saved": "Tersimpan",

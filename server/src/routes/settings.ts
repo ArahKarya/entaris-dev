@@ -7,6 +7,9 @@ import { requirePerm } from '../middleware/auth';
 import { validateBody } from '../utils/validate';
 import { RUPIAH, UpdateCompanySettingsSchema } from '../utils/schemas';
 import { logger } from '../lib/logger';
+import { BusinessError } from '../utils/errors';
+import { FISCAL_YEAR_MISSING } from '../utils/periodGuard';
+import { peekCutoverDate } from '../services/ledger/openingBalance';
 import dummyDataRouter from './settings/dummyData';
 import demoDataRouter from './settings/demoData';
 import fs from 'fs';
@@ -71,15 +74,20 @@ router.get('/runtime', requirePerm('settings'), async (req, res) => {
 // GET /api/settings/company
 router.get('/company', async (req, res) => {
   try {
-    const [settings, dummyParty, demoBatch] = await Promise.all([
+    const [settings, dummyParty, demoBatch, openingCutover] = await Promise.all([
       prisma.companySettings.findFirst({ where: { slug: 'default' } }),
       prisma.party.findFirst({ where: { isDummy: true }, select: { id: true } }),
       prisma.demoDataBatch.findFirst({ select: { id: true } }),
+      // The opening balance cut-over date, peeked (never stored here); null without an open fiscal year.
+      peekCutoverDate(prisma).catch((e: unknown) => {
+        if (e instanceof BusinessError && e.code === FISCAL_YEAR_MISSING) return null;
+        throw e;
+      }),
     ]);
     // Bookkeeping is rupiah only: an old non-IDR code (until the next save or the e2 repair) is a
     // stale label, so it is never handed back for a client or AIRA to resend.
     return res.json(
-      settings ? { ...settings, defaultCurrency: RUPIAH, hasDummyData: Boolean(dummyParty || demoBatch) } : settings,
+      settings ? { ...settings, defaultCurrency: RUPIAH, hasDummyData: Boolean(dummyParty || demoBatch), openingCutover } : settings,
     );
   } catch (error) {
     logger.error({ error }, 'GET /settings/company error');

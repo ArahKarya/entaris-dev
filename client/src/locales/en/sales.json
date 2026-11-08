@@ -1484,7 +1484,8 @@
       "label": "Opening balance / correction",
       "hint": "Record the deposit without affecting cash (offset to Opening Balance Equity)",
       "journal": "Journal: <mono>DR Opening Balance Equity / CR Customer Deposits</mono>",
-      "note": "Cash and bank are not affected. Use this for deposits received before the system was in use."
+      "note": "Cash and bank are not affected. Use this for deposits received before the system was in use. The amount replaces this Customer's earlier opening deposit instead of adding to it.",
+      "cutover": "The date follows the opening balance cut-over date: {{date}}."
     },
     "summary": "Deposit of <amount>{{amount}}</amount> from the customer",
     "saved": "Saved",

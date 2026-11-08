@@ -887,11 +887,11 @@ Autentikasi (`/api/auth/*`), administrasi user dan role (`/api/users`, `/api/rol
 {
   "ok": true,
   "kind": "read",
-  "data": "<Record CompanySettings (slug default) atau null bila belum diisi.>"
+  "data": "<Record CompanySettings (slug default) atau null bila belum diisi. openingCutover = { day (>"
 }
 ```
 
-**Isi hasil:** Record CompanySettings (slug default) atau null bila belum diisi.
+**Isi hasil:** Record CompanySettings (slug default) atau null bila belum diisi. openingCutover = { day (YYYY-MM-DD), stored } tanggal cut-over saldo awal (stored false = turunan dari awal tahun buku terbuka paling awal), null bila tidak ada tahun buku terbuka.
 
 ### set_company_update
 
