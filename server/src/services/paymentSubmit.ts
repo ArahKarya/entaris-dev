@@ -10,6 +10,7 @@ import { logger } from '../lib/logger';
 import { OUTSTANDING_TOLERANCE, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 import { businessDayOf } from '../utils/businessDate';
 import { setOpeningBalanceInTx } from './ledger/openingBalance';
+import { consumePartyOpening, isOpeningAllocation, paymentOpeningSide, restorePartyOpening } from './ledger/partyOpeningConsumption';
 
 type Tx = Prisma.TransactionClient;
 
@@ -50,13 +51,16 @@ export interface SubmitPaymentInput {
  *     the cut-over date (another date is OPENING_DATE_MISMATCH), keyed per party, and it replaces
  *     the party's earlier opening deposit of that kind instead of adding to it
  *   - VendorRefund:    DR Bank / CR Hutang Usaha — supplier returns money;
- *                      optionally reduces a source Pay payment's allocations
+ *                      optionally reduces a source Pay payment's allocations (invoices
+ *                      first, then what it took from the opening)
  *   - CustomerRefund:  DR Piutang Usaha / CR Bank — we return money to customer
  *   - Receive:         DR Kas (multi-split) / CR Piutang Usaha — auto-allocate
  *                      to oldest open sales invoices
  *   - Pay:             DR Hutang Usaha / CR Kas (multi-split) — auto-allocate
  *                      to oldest open purchase invoices
- * Receive/Pay return the unallocated remainder (overpayment is logged and reduces opening balance).
+ * Receive/Pay return the unallocated remainder: it takes the party's opening on the payment's side
+ * (an Opening* allocation, services/ledger/partyOpeningConsumption.ts); what is left is logged as
+ * an overpayment.
  */
 export async function submitPaymentInTx(
   tx: Tx,
@@ -220,6 +224,13 @@ export async function submitPaymentInTx(
       throw new BusinessError('Refund customer hanya berlaku untuk Customer.');
     }
 
+    // Lock the source payment before any account row: a cancel of it claims the same row first, so
+    // the two serialize (a cancelled payment cannot also be refunded, nor its opening restored twice)
+    // and keep the payment-then-accounts order of the cancel route.
+    if (body.refundSourcePaymentId) {
+      await tx.$queryRaw`SELECT id FROM payments WHERE id = ${body.refundSourcePaymentId} FOR UPDATE`;
+    }
+
     const liabAssetAccount = isVendorRefund
       ? await systemAccounts.getAccount('AP')
       : await systemAccounts.getAccount('AR');
@@ -278,6 +289,7 @@ export async function submitPaymentInTx(
     // available allocations.
     if (body.refundSourcePaymentId) {
       const expectedType = isVendorRefund ? 'Pay' : 'Receive';
+      // Read under the lock taken above: status and allocations as the last cancel or refund left them.
       const source = await tx.payment.findUnique({
         where: { id: body.refundSourcePaymentId },
         include: { allocations: true },
@@ -326,6 +338,24 @@ export async function submitPaymentInTx(
         } else {
           await setSalesInvoiceOutstandingInTx(tx, alloc.invoiceId, { delta: reverseAmt });
         }
+      }
+
+      // Then what the source payment took from the party's opening, back into the same bucket.
+      const openingAllocs = source.allocations
+        .filter((a) => isOpeningAllocation(a.invoiceType))
+        .sort((a, b) => Number(b.allocatedAmount) - Number(a.allocatedAmount));
+      for (const alloc of openingAllocs) {
+        if (remaining.lte(0)) break;
+        const allocAmount = new Decimal(alloc.allocatedAmount.toString());
+        const reverseAmt = Decimal.min(remaining, allocAmount);
+        remaining = remaining.minus(reverseAmt);
+        const newAlloc = allocAmount.minus(reverseAmt);
+        if (newAlloc.lte(new Decimal('0.01'))) {
+          await tx.paymentAllocation.delete({ where: { id: alloc.id } });
+        } else {
+          await tx.paymentAllocation.update({ where: { id: alloc.id }, data: { allocatedAmount: newAlloc.toFixed(2) } });
+        }
+        await restorePartyOpening(tx, body.partyId, alloc.invoiceType, reverseAmt.toFixed(2));
       }
 
       if (remaining.gt(new Decimal('0.01'))) {
@@ -452,26 +482,15 @@ export async function submitPaymentInTx(
     numAmount,
   );
 
-  // Apply unallocated remainder to opening balance (covers pre-app
-  // receivables/payables that aren't in the invoice table).
+  // The unallocated remainder takes the party's opening on the payment's side (receivable for a
+  // Receive, payable for a Pay), recorded as Opening* allocations so a cancel or a refund puts it
+  // back (plan step 5 PR-5.13).
   if (unallocatedAmount > 0.01) {
-    const currentParty = await tx.party.findUnique({
-      where: { id: body.partyId },
-      select: { openingOutstanding: true },
-    });
-    const openingBal = new Decimal(currentParty?.openingOutstanding?.toString() ?? '0');
-    if (openingBal.gt(0)) {
-      const reduction = Decimal.min(new Decimal(unallocatedAmount), openingBal).toNumber();
-      await tx.party.update({
-        where: { id: body.partyId },
-        data: { openingOutstanding: { decrement: reduction } },
-      });
-      const finalUnallocated = new Decimal(unallocatedAmount).minus(new Decimal(reduction)).toNumber();
-      if (finalUnallocated > 0.01) {
-        logger.warn({ paymentId: payment.id, unallocatedAmount: finalUnallocated }, 'Overpayment: sisa pembayaran tidak teralokasi');
-      }
-    } else {
-      logger.warn({ paymentId: payment.id, unallocatedAmount }, 'Overpayment: sisa pembayaran tidak teralokasi');
+    const side = paymentOpeningSide(body.paymentType === 'Receive' ? 'Receive' : 'Pay');
+    const taken = await consumePartyOpening(tx, payment.id, body.partyId, side, unallocatedAmount.toFixed(2));
+    const finalUnallocated = new Decimal(unallocatedAmount).minus(taken.toString());
+    if (finalUnallocated.gt(new Decimal('0.01'))) {
+      logger.warn({ paymentId: payment.id, unallocatedAmount: finalUnallocated.toNumber() }, 'Overpayment: sisa pembayaran tidak teralokasi');
     }
   }
 

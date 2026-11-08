@@ -56,6 +56,9 @@ const IGNORED = new Set<string>([
   '--check-duplicates takes no other argument',
   // Refusal of the legacy STT cancel command line (services/ledger/sttCancelLegacyArgs.ts), CLI only.
   '--include-ale-fix only goes with --apply',
+  // Party opening audit (scripts/repair/e2-party-opening-audit.ts, services/ledger/partyOpeningAudit.ts),
+  // CLI only: its other refusals are the shared ones above; this one rolls an --apply batch back.
+  'Party {0} is {1} after the {2} repair; nothing was applied.',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */

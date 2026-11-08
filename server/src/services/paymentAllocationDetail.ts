@@ -4,7 +4,9 @@
  *    (account, splits, notes, status), identical for sales and purchase invoices so the
  *    "Rincian Pembayaran" block and the invoice PDF can split cash vs. deductions.
  *  - withAllocationInvoiceNumbers: resolves the polymorphic (invoiceType, invoiceId) pair of each
- *    allocation to its invoice number for the payment detail.
+ *    allocation to its invoice number for the payment detail. A Receive/Pay remainder that took the
+ *    party's opening (OpeningReceivable / OpeningPayable / OpeningUnassigned, invoiceId = the party,
+ *    services/ledger/partyOpeningConsumption.ts) has no number; the client labels it by type.
  */
 import type { Prisma, PrismaClient } from '@prisma/client';
 
