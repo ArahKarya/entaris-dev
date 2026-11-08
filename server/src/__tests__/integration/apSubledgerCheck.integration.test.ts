@@ -13,7 +13,9 @@
  * - Close checklist: ap-subledger blocks; a captured baseline holds the old difference, a larger
  *   one blocks again; the bucket without a party is labelled "(tanpa Supplier)".
  * - PUT /parties/:id refuses a type change that drops a side still in use (PARTY_TYPE_HAS_BALANCE)
- *   and allows one that only adds a side or drops an unused one.
+ *   and allows one that only adds a side or drops an unused one; a gained side is recalculated.
+ * - Writers posting to a side the party type does not have are refused (PARTY_TYPE_MISMATCH,
+ *   assertPartySideLocked): purchase invoice and Pay for a Customer, Receive for a Supplier.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient, type FiscalYear } from '@prisma/client';
@@ -319,6 +321,54 @@ d('party type change guard (PR-5.10)', () => {
       expectRefused(await putType(supplier, 'Customer'), 'Hutang', 'saldo terutang');
 
       expect((await callRoute(partiesRouter, 'put', '/:id', { params: { id: '00000000-0000-0000-0000-000000000000' }, body: { partyType: 'Customer' }, ...actor })).status).toBe(404);
+    });
+  });
+
+  it('recalculates the side columns when a type change gains a side', async () => {
+    await inRollback(async (tx) => {
+      await books(tx);
+      // Older data: a Customer holding a purchase invoice its type does not count.
+      const p = await party(tx, 'Supplier');
+      await invoice(tx, p, 5 * JT);
+      await tx.party.update({ where: { id: p }, data: { partyType: 'Customer' } });
+      await recalcPartyOutstanding(tx, p);
+      expect((await tx.party.findUniqueOrThrow({ where: { id: p } })).payableOutstanding.toFixed(2)).toBe('0.00');
+
+      const r = await putType(p, 'Both');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(Number(r.body.payableOutstanding)).toBe(5 * JT);
+      const stored = await tx.party.findUniqueOrThrow({ where: { id: p } });
+      expect([stored.payableOutstanding.toFixed(2), stored.outstandingAmount.toFixed(2)]).toEqual(['5000000.00', '5000000.00']);
+    });
+  });
+});
+
+d('posting to a side the party type does not have (PR-5.10)', () => {
+  async function expectMismatch(run: Promise<unknown>, side: 'Piutang' | 'Hutang') {
+    const err = await run.then(() => null, (e: unknown) => e as { code?: string; message?: string });
+    expect(err, 'expected the posting to be refused').not.toBeNull();
+    expect(err!.code).toBe('PARTY_TYPE_MISMATCH');
+    expect(err!.message).toContain(`tidak punya sisi ${side}`);
+  }
+
+  it('refuses a purchase invoice and a Pay for a Customer and a Receive for a Supplier', async () => {
+    await inRollback(async (tx) => {
+      await books(tx);
+      const customer = await party(tx, 'Customer');
+      const supplier = await party(tx, 'Supplier');
+      await expectMismatch(invoice(tx, customer, JT), 'Hutang');
+      await expectMismatch(
+        submitPaymentInTx(tx, { date: `${Y}-03-05`, partyId: customer, paymentType: 'Pay', accountId: cashAccountId, amount: JT }, actor.userId),
+        'Hutang',
+      );
+      await expectMismatch(
+        submitPaymentInTx(tx, { date: `${Y}-03-05`, partyId: supplier, paymentType: 'Receive', accountId: cashAccountId, amount: JT }, actor.userId),
+        'Piutang',
+      );
+      // A Both party has both sides.
+      const both = await party(tx, 'Both');
+      await invoice(tx, both, JT);
+      expect((await tx.party.findUniqueOrThrow({ where: { id: both } })).payableOutstanding.toFixed(2)).toBe('1000000.00');
     });
   });
 });

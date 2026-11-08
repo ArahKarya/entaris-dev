@@ -5,7 +5,7 @@
 // move history and the sourceKey of the remap reclass journals that are not cancelled), so a
 // document voided after a remap still lands on the party's subledger.
 
-import type { PartyType, Prisma } from '@prisma/client';
+import { Prisma, type PartyType } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
 import { REMAP_KEY_PREFIX, parseRemapSourceKey } from './journalSource';
 
@@ -213,10 +213,20 @@ export async function roleAccountIds(
   return [...roles].filter(([, r]) => r === role).map(([id]) => id);
 }
 
-/** Party id -> party type for the given ids (missing ids are absent). */
-export async function loadPartyTypes(tx: Tx, partyIds: readonly (string | null | undefined)[]): Promise<Map<string, PartyType>> {
+/**
+ * Party id -> party type for the given ids (missing ids are absent). `lock` first takes the party row
+ * locks (FOR NO KEY UPDATE, in id order, the lock recalcPartyOutstanding's write takes later in the
+ * same transaction), so a concurrent PUT /parties/:id type change, which locks the row FOR UPDATE,
+ * either waits for this posting or is seen committed here (services/ledger/partySides.ts).
+ */
+export async function loadPartyTypes(
+  tx: Tx,
+  partyIds: readonly (string | null | undefined)[],
+  opts: { lock?: boolean } = {},
+): Promise<Map<string, PartyType>> {
   const ids = [...new Set(partyIds.filter((id): id is string => !!id))];
   if (ids.length === 0) return new Map();
+  if (opts.lock) await tx.$queryRaw`SELECT id FROM parties WHERE id IN (${Prisma.join([...ids].sort())}) ORDER BY id FOR NO KEY UPDATE`;
   const parties = await tx.party.findMany({ where: { id: { in: ids } }, select: { id: true, partyType: true } });
   return new Map(parties.map((p) => [p.id, p.partyType]));
 }

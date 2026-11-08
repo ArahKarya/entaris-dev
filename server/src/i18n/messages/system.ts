@@ -185,6 +185,8 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "saldo uang muka": "a deposit balance",
   "invoice yang belum dibatalkan": "invoices that are not cancelled",
   "baris Buku Besar": "General Ledger rows",
+  // party sides (E2-R13): a posting to a side the party type does not have (assertPartySideLocked, PR-5.10)
+  "Mitra bertipe {0} tidak punya sisi {1}; dokumen ini hanya bisa dicatat untuk mitra yang punya sisi itu.": "A partner of type {0} has no {1} side; this document can only be recorded for a partner that has that side.",
   "Mitra dinonaktifkan karena memiliki {0} transaksi terkait.": "Partner deactivated because it has {0} related transactions.",
   "Mitra dihapus.": "Partner deleted.",
   "Data mitra tidak ditemukan.": "Partner data not found.",

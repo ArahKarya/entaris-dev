@@ -21,7 +21,7 @@
 import { Prisma, type PartyType } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
 import { manualPartyAdjustments } from './partyAdjustments';
-import { PARTY_NOT_FOUND, roleAccountIds, type PartyRole } from './partyRules';
+import { PARTY_NOT_FOUND, PARTY_TYPE_MISMATCH, loadPartyTypes, roleAccountIds, type PartyRole } from './partyRules';
 
 type Tx = Prisma.TransactionClient;
 type Dec = Prisma.Decimal;
@@ -310,6 +310,25 @@ export async function assertPartyTypeChangeAllowed(tx: Tx, partyId: string, newT
   throw new BusinessError(
     `Tipe mitra tidak bisa diubah menjadi ${TYPE_LABEL[newType]}: sisi ${SIDE_LABEL[first.side]} masih punya ${first.holds[0]}. Selesaikan atau pindahkan lewat dokumen atau jurnal dulu.`,
     PARTY_TYPE_HAS_BALANCE,
+  );
+}
+
+/**
+ * For a document posting to `side` of a party (sales and purchase invoice submit, the GA expense
+ * bill, payments, refunds and deposits): re-reads the party type under the party row lock and
+ * refuses PARTY_TYPE_MISMATCH when the type has no such side, since computePartySides would not
+ * count it. Called right before the writer's recalcPartyOutstanding (or deposit balance update),
+ * which takes the same row lock, so the lock order does not change. PUT /parties/:id locks the row
+ * FOR UPDATE before assertPartyTypeChangeAllowed: whichever of the two locks second sees the
+ * other committed (a posting sees the new type, the type change sees the posting's rows).
+ */
+export async function assertPartySideLocked(tx: Tx, partyId: string, side: PartySide): Promise<void> {
+  const type = (await loadPartyTypes(tx, [partyId], { lock: true })).get(partyId);
+  if (!type) throw new BusinessError('Data pihak tidak ditemukan.', PARTY_NOT_FOUND);
+  if (side === 'RECEIVABLE' ? hasReceivable(type) : hasPayable(type)) return;
+  throw new BusinessError(
+    `Mitra bertipe ${TYPE_LABEL[type]} tidak punya sisi ${SIDE_LABEL[side]}; dokumen ini hanya bisa dicatat untuk mitra yang punya sisi itu.`,
+    PARTY_TYPE_MISMATCH,
   );
 }
 

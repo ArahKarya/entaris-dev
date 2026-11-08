@@ -7,6 +7,7 @@ import { clearable } from '../utils/clearable';
 import { logger } from '../lib/logger';
 import { handleRouteError } from '../utils/errors';
 import { assertPartyTypeChangeAllowed } from '../services/ledger/partySides';
+import { recalcPartyOutstanding } from '../utils/accountBalance';
 import { parseListPaging } from '../utils/listQuery';
 import {
   buildPartyWhere,
@@ -322,13 +323,18 @@ router.put('/:id', async (req, res) => {
   try {
     const party = await prisma.$transaction(async (tx) => {
       // A type change must not drop a side that still holds a balance (PARTY_TYPE_HAS_BALANCE).
-      // The row lock keeps a document posted meanwhile from slipping past the check.
+      // Every writer posting to a party side re-reads the type under this row lock
+      // (assertPartySideLocked, loadPartyTypes { lock }), so a posting either commits before the
+      // check below sees it or sees the new type and is refused.
+      let typeChanged = false;
       if (body.partyType) {
         const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM parties WHERE id = ${id} FOR UPDATE`;
         if (locked.length === 0) return null;
         await assertPartyTypeChangeAllowed(tx, id, body.partyType);
+        const current = await tx.party.findUnique({ where: { id }, select: { partyType: true } });
+        typeChanged = current?.partyType !== body.partyType;
       }
-      return tx.party.update({
+      const updated = await tx.party.update({
         where: { id },
         data: {
           name: body.name,
@@ -341,6 +347,10 @@ router.put('/:id', async (req, res) => {
           isWapu: body.isWapu,
         },
       });
+      // A gained side starts counting what the party already holds there; refresh the side columns.
+      if (!typeChanged) return updated;
+      await recalcPartyOutstanding(tx, id);
+      return tx.party.findUniqueOrThrow({ where: { id } });
     });
     if (!party) return res.status(404).json({ error: 'Data pihak tidak ditemukan.' });
     return res.json(party);

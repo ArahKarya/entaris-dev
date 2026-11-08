@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
+import { assertPartySideLocked } from './ledger/partySides';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
@@ -390,6 +391,8 @@ export async function submitPurchaseInvoiceInTx(
   for (const it of allJeItems) {
     await updateAccountBalance(tx, it.accountId, it.debit, it.credit);
   }
+  // The type is re-read under the party row lock: a type change committed meanwhile is seen here.
+  await assertPartySideLocked(tx, body.partyId, 'PAYABLE');
   await recalcPartyOutstanding(tx, body.partyId);
 
   // Mark linked STTs as Invoiced (header-level shortcut).

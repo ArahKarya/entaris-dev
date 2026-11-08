@@ -23972,7 +23972,8 @@
         "400: vendor wajib untuk PURCHASE_INVOICE",
         "400: sudah diposting",
         "400 ACCOUNT_MAPPING_MISSING: peran AP (PURCHASE_INVOICE) atau CASH (JOURNAL tanpa akun sumber) belum dipetakan di Akun Sistem",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 PARTY_TYPE_MISMATCH: vendor PURCHASE_INVOICE bertipe Customer tidak punya sisi Hutang; pilih Supplier atau Both"
       ],
       "related": [
         "eambill_list",
@@ -24167,7 +24168,8 @@
         "400: Uang muka hanya dapat dibuat untuk Supplier",
         "400: Nilai refund melebihi alokasi pembayaran asal",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
+        "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
+        "400 PARTY_TYPE_MISMATCH: mitra tidak punya sisi pembayaran ini (Receive, CustomerDeposit, CustomerRefund = sisi Piutang: Customer/Both; Pay, VendorDeposit, VendorRefund = sisi Hutang: Supplier/Both)"
       ],
       "related": [
         "pi_list",
@@ -25106,7 +25108,8 @@
         "400: STT sudah dibatalkan / sudah ditagih / pemasok berbeda",
         "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
         "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both"
       ],
       "related": [
         "gr_pending",
@@ -26812,7 +26815,8 @@
         "400: stok tidak cukup.",
         "400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak"
+        "400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak",
+        "400 PARTY_TYPE_MISMATCH: mitra bertipe Supplier tidak punya sisi Piutang; Invoice penjualan hanya untuk Customer atau Both"
       ],
       "related": [
         "do_pending",
@@ -31528,7 +31532,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Tidak ada efek GL/stok langsung; memengaruhi faktur BARU (pajak WAPU, status aktif). Faktur lama tidak diubah.",
+      "postingEffect": "Tidak ada efek GL/stok langsung; memengaruhi faktur BARU (pajak WAPU, status aktif). Faktur lama tidak diubah. Ganti tipe yang menambah sisi menghitung ulang saldo piutang/hutang pihak (receivableOutstanding, payableOutstanding) dari dokumen sisi itu.",
       "confirm_template": "Ubah mitra {id}. Setujui?",
       "errors": [
         "404: data pihak tidak ditemukan",

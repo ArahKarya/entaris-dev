@@ -63,10 +63,13 @@ export interface PostedJournal {
   fiscalYear: FiscalYear;
 }
 
-/** Throws the first party problem as BusinessError, naming the 1-based line. No-op under 'off'. */
+/**
+ * Throws the first party problem as BusinessError, naming the 1-based line. No-op under 'off'. The
+ * party types are read under the party row locks, so a type change cannot slip in before commit.
+ */
 async function assertPartyLines(tx: Tx, lines: readonly NormalizedJournalLine[], rule: PartyRule): Promise<void> {
   if (rule === 'off') return;
-  const [roles, types] = await Promise.all([loadPartyRoleMap(tx, lines.map((l) => l.accountId)), loadPartyTypes(tx, lines.map((l) => l.partyId))]);
+  const [roles, types] = await Promise.all([loadPartyRoleMap(tx, lines.map((l) => l.accountId)), loadPartyTypes(tx, lines.map((l) => l.partyId), { lock: true })]);
   lines.forEach((line, index) => {
     const partyType = line.partyId ? types.get(line.partyId) ?? null : null;
     const problem = partyLineProblem({ partyId: line.partyId, partyType }, roles.get(line.accountId), rule);

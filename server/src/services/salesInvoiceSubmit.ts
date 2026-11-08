@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
+import { assertPartySideLocked } from './ledger/partySides';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
@@ -296,6 +297,8 @@ export async function submitSalesInvoiceInTx(
   for (const ci of creditJournalItems) {
     await updateAccountBalance(tx, ci.accountId, 0, ci.credit);
   }
+  // The type is re-read under the party row lock: a type change committed meanwhile is seen here.
+  await assertPartySideLocked(tx, body.partyId, 'RECEIVABLE');
   await recalcPartyOutstanding(tx, body.partyId);
 
   // COGS: stock-out already happened at DO submit, so COGS uses the unitCost locked on the
