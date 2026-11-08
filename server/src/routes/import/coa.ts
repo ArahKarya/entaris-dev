@@ -8,10 +8,10 @@ import { upload, parseFileDetailed, sanitizeCellValue } from './shared';
 import { ACCOUNT_PARENT_NOT_FOUND } from '../../services/coa/accountRules';
 import { loadImportFacts, lockAccounts } from '../../services/coa/accountStructure';
 import { parseCoaRows, replanImportRow, validateCoaRows, type CoaImportRow } from '../../services/coa/coaImport';
-import { hasCap } from '../../services/permissionService';
+import { OPENING_REPLACE_UNCONFIRMED, OPENING_RUNNING_BALANCE } from '../../services/ledger/openingImportCodes';
+import { confirmedKeys, resolveThroughLock } from './throughLock';
 import {
   OPENING_DATE_MISMATCH,
-  OPENING_LOCK_RIGHT,
   previewAccountOpening,
   setOpeningBalanceInTx,
   type OpeningChangePreview,
@@ -20,30 +20,11 @@ import {
 
 const router = Router();
 
-/** A row would replace a recorded opening balance, and the request did not confirm that row. */
-export const OPENING_REPLACE_UNCONFIRMED = 'OPENING_REPLACE_UNCONFIRMED';
-/** A row's amount equals the account's running balance (old template), and the request did not confirm that row. */
-export const OPENING_RUNNING_BALANCE = 'OPENING_RUNNING_BALANCE';
+export { OPENING_REPLACE_UNCONFIRMED, OPENING_RUNNING_BALANCE };
 
 /** Rows that change an opening balance already in the ledger need their account number in `confirmReplace`. */
 const needsConfirm = (p: OpeningChangePreview): boolean =>
   p.allowed && (p.action === 'replace' || (p.action === 'post' && p.runningBalance));
-
-/**
- * The account numbers the user confirmed one by one: repeated form fields, or one comma-separated
- * value (body or query). Each row is confirmed on its own, so ticking one replacement never lets
- * another row (a running balance further down the file) through.
- */
-function confirmedAccounts(...values: unknown[]): Set<string> {
-  const out = new Set<string>();
-  for (const v of values.flat()) {
-    if (typeof v !== 'string') continue;
-    for (const n of v.split(',')) if (n.trim()) out.add(n.trim());
-  }
-  return out;
-}
-
-const THROUGH_LOCK_MIN = 10;
 
 function previewAccount(row: CoaImportRow, id: string | null) {
   return { id, accountNumber: row.accountNumber, name: row.name, rootType: row.rootType, isGroup: row.isGroup };
@@ -117,21 +98,10 @@ router.post(
 
     try {
       const isPreview = req.query.preview === 'true';
-      const confirmReplace = confirmedAccounts(req.body?.confirmReplace, req.query.confirmReplace);
-      const reasonRaw = req.body?.throughLockReason;
-      const reason = typeof reasonRaw === 'string' ? reasonRaw.trim() : '';
-      if (reason && !isPreview) {
-        if (reason.length < THROUGH_LOCK_MIN) {
-          return res.status(400).json({ error: 'Alasan menembus kunci periode minimal 10 karakter.' });
-        }
-        if (req.user!.via === 'mcp') {
-          return res.status(403).json({ error: 'AIRA tidak dapat menembus kunci periode untuk saldo awal.', code: OPENING_LOCK_RIGHT });
-        }
-        if (!(await hasCap(req.user!.role, 'period.lock'))) {
-          return res.status(403).json({ error: 'Menembus kunci periode untuk saldo awal butuh hak Kunci Periode (period.lock).', code: OPENING_LOCK_RIGHT });
-        }
-      }
-      const throughLock = reason && !isPreview ? { reason } : undefined;
+      const confirmReplace = confirmedKeys(req.body?.confirmReplace, req.query.confirmReplace);
+      const lock = await resolveThroughLock(req, isPreview);
+      if (!lock.ok) return res.status(lock.status).json(lock.body);
+      const throughLock = lock.throughLock;
 
       const { rows, numericCells } = await parseFileDetailed(req.file.buffer, req.file.originalname);
 

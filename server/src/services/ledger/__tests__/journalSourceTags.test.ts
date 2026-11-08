@@ -14,7 +14,6 @@ const EXPECTED: Record<string, Record<string, number>> = {
   'routes/fixedAssets.ts': { DEPRECIATION: 2 },
   'routes/customerDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
   'routes/vendorDeposits.ts': { DEPOSIT_OFFSET: 1, DEPOSIT_REFUND: 1 },
-  'routes/import/parties.ts': { OPENING: 3 },
   'services/openingStockImport.ts': { OPENING: 1 },
   'services/cashBookDraftPost.ts': { CASH_BOOK: 1 },
   'services/systemAccountRemap.ts': { SYSTEM_DOC: 1 },
