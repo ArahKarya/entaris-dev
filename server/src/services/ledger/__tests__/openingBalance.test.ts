@@ -8,6 +8,12 @@ const mocks = vi.hoisted(() => ({
   assertPostableAccount: vi.fn(),
   mappedAccount: vi.fn(),
   fiscalYearOn: vi.fn(),
+  setPartyOpeningInTx: vi.fn(),
+}));
+vi.mock('../openingBalanceParty', () => ({
+  setPartyOpeningInTx: mocks.setPartyOpeningInTx,
+  findActivePartyOpeningJournals: vi.fn(),
+  recordedPartyOpening: vi.fn(),
 }));
 vi.mock('../postJournal', () => ({ postJournal: mocks.postJournal }));
 vi.mock('../cancelJournals', () => ({ cancelJournalsInTx: mocks.cancelJournalsInTx }));
@@ -271,8 +277,12 @@ describe('setOpeningBalanceInTx', () => {
     expect(audit.newValues).toMatchObject({ reason: 'Saldo awal dari auditor', journalNumber: 'JV-215001-0002', cancelled: ['JV-215001-0001'] });
   });
 
-  it('refuses a party target until the party service exists', async () => {
+  it('hands a party target to the party service', async () => {
     const tx = makeTx();
-    await expect(setOpeningBalanceInTx(tx as any, input({ target: { kind: 'PARTY', partyId: 'p', subledger: 'AR' } }))).rejects.toThrow(/belum didukung/);
+    mocks.setPartyOpeningInTx.mockResolvedValue({ action: 'posted' });
+    const target = { kind: 'PARTY' as const, partyId: 'p', subledger: 'AR' as const };
+    await expect(setOpeningBalanceInTx(tx as any, input({ target }))).resolves.toEqual({ action: 'posted' });
+    expect(mocks.setPartyOpeningInTx).toHaveBeenCalledWith(tx, expect.objectContaining({ target }), 'p', 'AR');
+    expect(mocks.postJournal).not.toHaveBeenCalled();
   });
 });

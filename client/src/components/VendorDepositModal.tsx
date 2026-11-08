@@ -11,6 +11,7 @@ import { Field, DateInput } from '@/components/shared';
 import { FormDialog } from './purchase-cash/FormDialog';
 import { OptionPicker } from './purchase-cash/OptionPicker';
 import { usePartyPicker } from '@/hooks/usePartyPicker';
+import { useOpeningCutover } from '@/hooks/useOpeningCutover';
 import { RupiahField } from './purchase-cash/RupiahField';
 import { ErrorAlert, Callout } from './purchase-cash/ErrorAlert';
 import AttachmentUpload from './AttachmentUpload';
@@ -37,6 +38,9 @@ const VendorDepositModal: React.FC<VendorDepositModalProps> = ({ isOpen, onClose
   const [isOpeningBalance, setIsOpeningBalance] = useState(false);
 
   const queryClient = useQueryClient();
+  // An opening deposit is dated on the cut-over date; the date field follows it while ticked.
+  const cutover = useOpeningCutover(isOpen && isOpeningBalance);
+  const entryDate = isOpeningBalance && cutover ? cutover : date;
 
   useEffect(() => {
     if (isOpen) {
@@ -93,7 +97,7 @@ const VendorDepositModal: React.FC<VendorDepositModalProps> = ({ isOpen, onClose
 
   const handleSubmit = () => {
     mutation.mutate({
-      date,
+      date: entryDate,
       partyId,
       amount: numAmount,
       paymentType: 'VendorDeposit',
@@ -126,7 +130,7 @@ const VendorDepositModal: React.FC<VendorDepositModalProps> = ({ isOpen, onClose
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label={t('depositForm.date')}>
-          <DateInput value={date} onChange={setDate} />
+          <DateInput value={entryDate} onChange={setDate} disabled={isOpeningBalance && !!cutover} />
         </Field>
         <Field label={t('depositForm.supplier')}>
           <OptionPicker
@@ -176,6 +180,7 @@ const VendorDepositModal: React.FC<VendorDepositModalProps> = ({ isOpen, onClose
           <p className="mt-0.5 text-xs">
             {t('depositForm.openingBalanceNote')}
           </p>
+          {cutover && <p className="mt-0.5 text-xs">{t('depositForm.openingCutover', { date: cutover })}</p>}
         </Callout>
       )}
 

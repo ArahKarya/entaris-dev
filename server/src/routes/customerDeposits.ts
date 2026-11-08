@@ -9,17 +9,12 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { validateBody } from '../utils/validate';
 import { ApplyCustomerDepositSchema, CancelReasonSchema, RefundCustomerDepositSchema } from '../utils/schemas';
 import { BusinessError, handleRouteError } from '../utils/errors';
-import { voidJournalInTx } from '../utils/journalCancel';
 import { voidDepositApplicationJournalInTx } from '../services/depositApplicationCancel';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { systemAccounts } from '../services/systemAccounts';
 import { setSalesInvoiceOutstandingInTx } from '../services/salesInvoiceStatus';
-import {
-  assertDepositNotRefunded,
-  assertDepositNotFromSalesReturn,
-  findUnlinkedDepositJournal,
-} from '../services/depositCancelGuard';
+import { cancelDepositPaymentInTx } from '../services/depositCancel';
 import { cancelDepositRefundInTx, depositRefundSourceKey, listDepositRefunds } from '../services/depositRefundCancel';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
@@ -193,61 +188,7 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
   const trail = cancelTrail(req.user!.userId, body.reason);
 
   try {
-    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
-      await tx.$queryRaw`SELECT id FROM payments WHERE id = ${id} FOR UPDATE`;
-      const deposit = await tx.payment.findUnique({
-        where: { id },
-        include: {
-          customerDepositApplications: { where: { isCancelled: false } },
-          journalEntry: { include: { items: true } },
-        },
-      });
-      if (!deposit) throw new BusinessError('Deposit tidak ditemukan.');
-      if (deposit.paymentType !== 'CustomerDeposit') throw new BusinessError('Bukan tipe uang muka customer.');
-      if (deposit.status === 'Cancelled') throw new BusinessError('Deposit sudah dibatalkan.');
-      // First write, like every cancel: nothing below runs for a deposit another request cancelled.
-      await claimCancel(tx.payment, id, { status: 'Cancelled', cancelledAt: new Date(), ...trail });
-
-      // Check if any applications exist
-      if (deposit.customerDepositApplications.length > 0) {
-        throw new BusinessError('Deposit sudah digunakan untuk invoice. Batalkan penggunaan terlebih dahulu.');
-      }
-      assertDepositNotRefunded(deposit);
-      await assertDepositNotFromSalesReturn(tx, deposit.id);
-
-      // The journal's year when there is one; legacy deposits without a journal use their own.
-      await assertPeriodOpen(
-        tx,
-        deposit.journalEntry
-          ? { fiscalYearId: deposit.journalEntry.fiscalYearId, date: deposit.journalEntry.date }
-          : { fiscalYearId: deposit.fiscalYearId, date: deposit.date },
-        'uang muka',
-      );
-
-      const depositAmount = Number(deposit.amount);
-
-      // Void the journal in place (JE Cancelled, ALE isCancelled, balances reversed per item).
-      // Deposits posted before the payment→journal link still have their journal, found unlinked.
-      const journal = deposit.journalEntry ?? (await findUnlinkedDepositJournal(tx, { ...deposit, paymentType: 'CustomerDeposit' }));
-      if (journal) {
-        await voidJournalInTx(tx, journal, 'uang muka', trail);
-      } else {
-        // No journal and no ledger rows at all — reverse account balances directly.
-        // Never add a [BATAL] reversal JV: there is no original to pair it with.
-        const customerDepositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
-        const openingEquityAccount = await systemAccounts.getAccount('OPENING_EQUITY');
-        // Reverse: DR Customer Deposit / CR Ekuitas Saldo Awal
-        await updateAccountBalance(tx, customerDepositAccount.id, depositAmount, 0);
-        await updateAccountBalance(tx, openingEquityAccount.id, 0, depositAmount);
-      }
-
-      // Restore party deposit balance
-      await tx.party.update({
-        where: { id: deposit.partyId },
-        data: { customerDepositBalance: { decrement: depositAmount } },
-      });
-    }, { timeout: 15000 });
+    await prisma.$transaction((tx: Prisma.TransactionClient) => cancelDepositPaymentInTx(tx, id, 'CUSTOMER', trail), { timeout: 15000 });
 
     return res.json({ message: 'Uang muka customer dibatalkan.' });
   } catch (error: any) {

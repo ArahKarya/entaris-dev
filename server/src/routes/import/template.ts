@@ -6,6 +6,7 @@ import { AuthRequest } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
 import { peekCutoverDate, recordedOpening } from '../../services/ledger/openingBalance';
 import { sourceKeys } from '../../services/ledger/journalSource';
+import { recordedPartyOpenings } from '../../services/partyImport';
 
 type Db = typeof prisma;
 
@@ -86,6 +87,7 @@ router.get(
           { header: 'address', key: 'address', width: 40 },
           { header: 'taxId', key: 'taxId', width: 20 },
           { header: 'openingBalance', key: 'openingBalance', width: 18 },
+          { header: 'arahSaldo', key: 'arahSaldo', width: 12 },
           { header: 'depositBalance', key: 'depositBalance', width: 18 },
           { header: 'customerDepositBalance', key: 'customerDepositBalance', width: 22 },
         ];
@@ -95,18 +97,39 @@ router.get(
           orderBy: { name: 'asc' },
         });
 
+        const openings = await recordedPartyOpenings(prisma);
+        const cutover = await peekCutoverDate(prisma).catch(() => null);
+        sheet.getCell('G1').note = cutover
+          ? `Saldo awal pihak per tanggal cut-over ${cutover.day}, bukan saldo berjalan. Isi arahSaldo (Piutang atau Hutang); pihak Both dengan dua sisi memakai dua baris. Kosong = saldo awal tidak diubah.`
+          : 'Saldo awal pihak per tanggal cut-over, bukan saldo berjalan. Isi arahSaldo (Piutang atau Hutang). Kosong = saldo awal tidak diubah.';
+
+        const amount = (v: Prisma.Decimal | undefined) => (v ? Number(v.toFixed(2)) : '');
         for (const p of parties) {
-          sheet.addRow({
+          // The recorded opening per side, never outstandingAmount (it holds invoices too): the same
+          // file imported again changes nothing. A Both party with a receivable and a payable gets a
+          // second row for the payable; blank cells state nothing.
+          const recorded = openings.get(p.id) ?? {};
+          const sides: Array<{ direction: string; value: Prisma.Decimal }> = [];
+          if (p.partyType !== 'Supplier' && recorded.AR) sides.push({ direction: 'Piutang', value: recorded.AR });
+          if (p.partyType !== 'Customer' && recorded.AP) sides.push({ direction: 'Hutang', value: recorded.AP });
+          const profile = {
             name: p.name,
             partyType: p.partyType,
             phone: p.phone ?? '',
             email: p.email ?? '',
             address: p.address ?? '',
             taxId: p.taxId ?? '',
-            openingBalance: Number(p.outstandingAmount),
-            depositBalance: Number(p.depositBalance),
-            customerDepositBalance: Number(p.customerDepositBalance),
+          };
+          sheet.addRow({
+            ...profile,
+            openingBalance: amount(sides[0]?.value),
+            arahSaldo: sides[0]?.direction ?? '',
+            depositBalance: p.partyType === 'Customer' ? '' : amount(recorded.VDEP),
+            customerDepositBalance: p.partyType === 'Supplier' ? '' : amount(recorded.CDEP),
           });
+          for (const extra of sides.slice(1)) {
+            sheet.addRow({ ...profile, openingBalance: amount(extra.value), arahSaldo: extra.direction, depositBalance: '', customerDepositBalance: '' });
+          }
         }
       } else if (type === 'inventory') {
         sheet.columns = [

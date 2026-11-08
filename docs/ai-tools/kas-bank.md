@@ -1094,7 +1094,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 | `splits[].notes` | body | `string` | tidak |  |
 | `referenceNo` | body | `string` | tidak |  |
 | `notes` | body | `string` | tidak | Catatan bebas. |
-| `isOpeningBalance` | body | `boolean` | tidak | true = uang muka saldo awal (lawan akun Ekuitas Saldo Awal). |
+| `isOpeningBalance` | body | `boolean` | tidak | VendorDeposit/CustomerDeposit saja: true = saldo awal uang muka pihak per tanggal cut-over (lawan Ekuitas Saldo Awal 3.1, accountId diabaikan). date wajib sama dengan tanggal cut-over (cutoverDate di coa_get_opening). Nilai ini MENGGANTI saldo awal uang muka pihak itu yang sudah ada, bukan menambah; nilai yang sama tidak menulis apa pun. |
 | `refundSourcePaymentId` | body | `uuid` | tidak | Refund: ID pembayaran asal yang dikoreksi sebagian. |
 | `salesOrderId` | body | `uuid` | tidak | CustomerDeposit: tautkan uang muka ke Sales Order. |
 
@@ -1127,7 +1127,7 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 
 **Isi hasil:** Payment yang dibuat + party + unallocatedAmount. HTTP 201.
 
-**Efek pembukuan/stok:** Receive: DR Kas/Bank (per split) / CR Piutang Usaha (1.2.1), outstanding SI turun. Pay: DR Hutang Usaha (2.1.1) / CR Kas/Bank (per split), outstanding PI turun. VendorDeposit: DR Uang Muka Vendor (1.3) / CR Kas-Bank (atau CR Ekuitas Saldo Awal 3.1 bila isOpeningBalance). CustomerDeposit: DR Kas-Bank / CR Uang Muka Pelanggan (2.1.2). VendorRefund: DR Bank / CR Hutang Usaha. CustomerRefund: DR Piutang Usaha / CR Bank. Sisa tak teralokasi mengurangi saldo awal pihak.
+**Efek pembukuan/stok:** Receive: DR Kas/Bank (per split) / CR Piutang Usaha (1.2.1), outstanding SI turun. Pay: DR Hutang Usaha (2.1.1) / CR Kas/Bank (per split), outstanding PI turun. VendorDeposit: DR Uang Muka Supplier (1.3) / CR Kas-Bank. CustomerDeposit: DR Kas-Bank / CR Uang Muka Customer (2.1.2). isOpeningBalance (uang muka saldo awal): satu jurnal JV- bersumber OPENING berkunci per pihak (OPENING:PARTY:<id>:VDEP|CDEP) bertanggal cut-over, VendorDeposit DR Uang Muka Supplier / CR Ekuitas Saldo Awal 3.1, CustomerDeposit DR 3.1 / CR Uang Muka Customer, dengan Payment uang muka baru; uang muka saldo awal pihak itu yang lama (berkunci, atau dari layar uang muka/impor lama) dibatalkan dulu (Payment Cancelled + jurnal void, bukan dihapus). VendorRefund: DR Bank / CR Hutang Usaha. CustomerRefund: DR Piutang Usaha / CR Bank. Sisa tak teralokasi mengurangi saldo awal pihak.
 
 **Teks konfirmasi:** Catat {paymentType} Rp {amount} untuk pihak {partyId} tanggal {date} lewat akun {accountId}. Jurnal akan diposting. Setujui?
 
@@ -1143,6 +1143,10 @@ Akun kas/bank yang valid = akun detail (non-grup) bernomor 1.1.x (Kas Kecil, BRI
 - 400: Akun yang dipilih bukan akun kas/bank
 - 400: Uang muka hanya dapat dibuat untuk Supplier
 - 400: Nilai refund melebihi alokasi pembayaran asal
+- 400 OPENING_DATE_MISMATCH: isOpeningBalance dengan date selain tanggal cut-over saldo awal
+- 400 OPENING_IN_USE: uang muka saldo awal yang lama sudah dipakai di Invoice, di-refund, atau berasal dari retur; tidak bisa diganti
+- 400 OPENING_LEGACY_REVIEW: pihak masih punya jurnal saldo awal uang muka lama tanpa kunci yang bukan milik Payment; akuntan menjalankan audit saldo awal dulu
+- 400 PERIOD_CLOSED: uang muka saldo awal yang lama ada di tahun buku tertutup
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 - 400 PARTY_TYPE_MISMATCH: mitra tidak punya sisi pembayaran ini (Receive, CustomerDeposit, CustomerRefund = sisi Piutang: Customer/Both; Pay, VendorDeposit, VendorRefund = sisi Hutang: Supplier/Both)
