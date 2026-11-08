@@ -468,7 +468,7 @@ Toolset **master-data** mengelola data induk mitra bisnis: **Pelanggan & Vendor*
 
 **Isi hasil:** Record mitra terbaru.
 
-**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; memengaruhi faktur BARU (pajak WAPU, status aktif). Faktur lama tidak diubah.
+**Efek pembukuan/stok:** Tidak ada efek GL/stok langsung; memengaruhi faktur BARU (pajak WAPU, status aktif). Faktur lama tidak diubah. Ganti tipe yang menambah sisi menghitung ulang saldo piutang/hutang pihak (receivableOutstanding, payableOutstanding) dari dokumen sisi itu.
 
 **Teks konfirmasi:** Ubah mitra {id}. Setujui?
 

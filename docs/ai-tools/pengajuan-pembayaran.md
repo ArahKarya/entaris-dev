@@ -325,6 +325,7 @@ Aturan penting: seluruh jurnal satu transaksi seimbang dan diposting satu jurnal
 - 400: sudah diposting
 - 400 ACCOUNT_MAPPING_MISSING: peran AP (PURCHASE_INVOICE) atau CASH (JOURNAL tanpa akun sumber) belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 PARTY_TYPE_MISMATCH: vendor PURCHASE_INVOICE bertipe Customer tidak punya sisi Hutang; pilih Supplier atau Both
 
 **Tool terkait:** [`eambill_list`](#eambill_list), [`eambill_cancel`](#eambill_cancel)
 

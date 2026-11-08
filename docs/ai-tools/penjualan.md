@@ -3952,6 +3952,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak
+- 400 PARTY_TYPE_MISMATCH: mitra bertipe Supplier tidak punya sisi Piutang; Invoice penjualan hanya untuk Customer atau Both
 
 **Tool terkait:** [`do_pending`](#do_pending), [`quot_convert_payload`](#quot_convert_payload), [`pay_record`](kas-bank.md#pay_record)
 

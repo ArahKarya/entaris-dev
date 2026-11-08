@@ -606,6 +606,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)
 - 202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both
 
 **Tool terkait:** [`gr_pending`](#gr_pending), [`pi_match_preview`](#pi_match_preview), [`pay_record`](kas-bank.md#pay_record), [`pi_cancel`](#pi_cancel)
 
