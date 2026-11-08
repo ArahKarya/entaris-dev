@@ -34,6 +34,7 @@ vi.mock('../../routes/import/shared', async (orig) => ({
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { mappedAccount } from '../../services/systemAccounts';
 import { setOpeningBalanceInTx } from '../../services/ledger/openingBalance';
+import { updateAccountBalance } from '../../utils/accountBalance';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 import partiesImportRouter from '../../routes/import/parties';
 import templateRouter from '../../routes/import/template';
@@ -99,7 +100,7 @@ interface ImportBody {
   failed: number;
   errors: Array<{ row: number; message: string; code?: string }>;
   openings: Array<{ row: number; name: string; kind: string; action: string }>;
-  data?: Array<{ rowNum: number; name: string; opening: { action: string; needsConfirm: boolean; recorded: string | null } | null }>;
+  data?: Array<{ rowNum: number; name: string; opening: { action: string; needsConfirm: boolean; recorded: string | null; kinds?: Array<{ kind: string; action: string; recorded: string | null; amount: string }> } | null }>;
 }
 
 async function importRows(rows: SheetRow[], query: Record<string, string> = {}, body: Record<string, unknown> = {}): Promise<ImportBody> {
@@ -262,6 +263,36 @@ d('party import opening balances (2157)', () => {
       const after = await rowCounts(tx);
       expect(after.je).toBeGreaterThan(counts.je);
       expect(after.ale).toBeGreaterThan(counts.ale);
+    });
+  });
+
+  it('an old unkeyed opening deposit is previewed as a replacement and replaced once the row is confirmed', async () => {
+    await inRollback(async (tx, fy) => {
+      const name = uniq('Uang muka lama');
+      const s = await makeParty(tx, name, 'Supplier');
+      const dep = await mappedAccount(tx, 'VENDOR_DEPOSIT');
+      const eq = await mappedAccount(tx, 'OPENING_EQUITY');
+      // The old deposit screen: a payment against opening equity with stored balances only.
+      await updateAccountBalance(tx, dep.id, 3 * JT, 0);
+      await updateAccountBalance(tx, eq.id, 0, 3 * JT);
+      const legacy = await tx.payment.create({
+        data: { paymentNumber: `PAY-IT2157-${tag()}`, date: new Date(`${Y}-01-15T05:00:00.000Z`), partyId: s.id, paymentType: 'VendorDeposit', accountId: eq.id, amount: 3 * JT, status: 'Submitted', fiscalYearId: fy.id, createdBy: actor.userId },
+      });
+      await tx.party.update({ where: { id: s.id }, data: { depositBalance: 3 * JT } });
+      const row: SheetRow = { name, partyType: 'Supplier', openingBalance: '2000000', depositBalance: '3000000' };
+
+      const preview = await importRows([row], { preview: 'true' });
+      expect(preview.data?.[0]).toMatchObject({ opening: { action: 'replace', needsConfirm: true, kinds: [{ kind: 'AP', action: 'post' }, { kind: 'VDEP', action: 'replace', recorded: '3000000.00', amount: '3000000.00' }] } });
+
+      const refused = await importRows([row]);
+      expect(refused.errors).toMatchObject([{ row: 2, code: 'OPENING_REPLACE_UNCONFIRMED' }]);
+      expect((await tx.payment.findUniqueOrThrow({ where: { id: legacy.id } })).status).toBe('Submitted');
+
+      const done = await importRows([row], {}, { confirmReplace: ['2'] });
+      expect(done.errors).toEqual([]);
+      expect((await tx.payment.findUniqueOrThrow({ where: { id: legacy.id } })).status).toBe('Cancelled');
+      const cols = await columns(tx, s.id);
+      expect([money(cols.depositBalance), money(cols.openingPayable)]).toEqual(['3000000.00', '2000000.00']);
     });
   });
 

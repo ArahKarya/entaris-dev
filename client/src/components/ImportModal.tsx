@@ -26,6 +26,8 @@ interface OpeningPreview {
   action: 'unchanged' | 'post' | 'replace' | 'kept';
   runningBalance: boolean;
   needsConfirm: boolean;
+  /** Parties only: the opening per kind (AR, AP, Supplier or Customer deposit). */
+  kinds?: Array<{ kind: 'AR' | 'AP' | 'VDEP' | 'CDEP'; action: 'unchanged' | 'post' | 'replace'; recorded: string | null; amount: string }>;
 }
 
 interface PreviewResult {
@@ -94,6 +96,13 @@ const AlreadyImportedNote = ({ items }: { items: Array<{ narration: string; date
   );
 };
 
+/** "Receivable 2000000.00 → 3000000" for every kind the row replaces (the kind's own recorded and new amount). */
+const replacedKinds = (opening: OpeningPreview, t: (key: string) => string): string =>
+  (opening.kinds ?? [])
+    .filter((k) => k.action === 'replace')
+    .map((k) => `${t(`importModal.opening.kind.${k.kind}`)} ${k.recorded ?? '—'} → ${k.amount}`)
+    .join('; ');
+
 const OpeningCell = ({ value, opening }: { value: unknown; opening?: OpeningPreview | null }) => {
   const { t } = useTranslation('shell');
   if (!opening) return <>{String(value ?? '')}</>;
@@ -101,7 +110,9 @@ const OpeningCell = ({ value, opening }: { value: unknown; opening?: OpeningPrev
     ? t('importModal.opening.dateMismatch', { date: opening.cutoverDate ?? '—' })
     : !opening.allowed && opening.action !== 'unchanged'
     ? t('importModal.opening.refused')
-    : opening.action === 'replace'
+    : opening.action === 'replace' && opening.kinds
+      ? t('importModal.opening.replaceKinds', { changes: replacedKinds(opening, t) })
+      : opening.action === 'replace'
       ? t('importModal.opening.replace', { recorded: opening.recorded ?? '—' })
       : t(`importModal.opening.${opening.action}`);
   return (
@@ -149,7 +160,7 @@ const OpeningConfirmList = ({ rows, confirmed, onToggle }: { rows: OpeningRow[];
             <span>
               {row.opening?.action === 'replace'
                 ? row.accountNumber === undefined
-                  ? t('importModal.confirmReplacePartyRow', { row: row.rowNum, name: row.name, recorded: row.opening.recorded ?? '—', amount: String(row.openingBalance) })
+                  ? t('importModal.confirmReplacePartyRow', { row: row.rowNum, name: row.name, changes: replacedKinds(row.opening, t) })
                   : t('importModal.confirmReplaceRow', { account: row.accountNumber, name: row.name, recorded: row.opening.recorded ?? '—', amount: String(row.openingBalance) })
                 : t('importModal.confirmRunningRow', { account: row.accountNumber, name: row.name, amount: String(row.openingBalance) })}
             </span>

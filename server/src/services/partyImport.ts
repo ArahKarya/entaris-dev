@@ -12,6 +12,7 @@ import { BusinessError } from '../utils/errors';
 import { mappedAccount } from './systemAccounts';
 import { sourceKeys, type OpeningPartyKind } from './ledger/journalSource';
 import { peekCutoverDate, recordedOpening, setOpeningBalanceInTx, type OpeningOutcome } from './ledger/openingBalance';
+import { findActivePartyOpeningJournals } from './ledger/openingBalanceParty';
 import { OPENING_REPLACE_UNCONFIRMED } from './ledger/openingImportCodes';
 import type { PartyImportRow } from './partyImportRows';
 
@@ -73,6 +74,26 @@ export async function hasPartyTransactions(db: Db, partyId: string): Promise<boo
 const recordedOf = async (db: Db, partyId: string, kind: OpeningPartyKind): Promise<Dec | null> =>
   recordedOpening(db, { kind: 'PARTY', partyId, subledger: kind });
 
+/**
+ * Active opening deposit payments the service did not key (the old party import, the old deposit
+ * screen): the service replaces them by cancelling the payment, so the row is a replacement that
+ * needs the user's confirmation even though `recordedOf` sees no keyed opening. Null when none.
+ */
+async function legacyDepositOf(db: Db, partyId: string, kind: OpeningPartyKind): Promise<Dec | null> {
+  if (kind !== 'VDEP' && kind !== 'CDEP') return null;
+  const legacy = (await findActivePartyOpeningJournals(db, partyId, kind)).deposits.filter((d) => !d.keyed);
+  if (legacy.length === 0) return null;
+  return legacy.reduce((sum, d) => sum.add(new Prisma.Decimal(d.payment.amount)), new Prisma.Decimal(0));
+}
+
+/** What is recorded for the kind and whether the row replaces it (a legacy deposit always does). */
+async function kindState(db: Db, partyId: string, kind: OpeningPartyKind, amount: Dec): Promise<{ recorded: Dec | null; action: KindAction }> {
+  const keyed = await recordedOf(db, partyId, kind);
+  const legacy = await legacyDepositOf(db, partyId, kind);
+  if (legacy !== null) return { recorded: keyed ?? legacy, action: 'replace' };
+  return { recorded: keyed, action: kindAction(keyed, amount) };
+}
+
 function kindAction(recorded: Dec | null, amount: Dec): KindAction {
   if (recorded === null) return amount.isZero() ? 'unchanged' : 'post';
   return recorded.eq(amount) ? 'unchanged' : 'replace';
@@ -82,8 +103,8 @@ function kindAction(recorded: Dec | null, amount: Dec): KindAction {
 async function existingKinds(db: Db, partyId: string, row: PartyImportRow): Promise<KindPreview[]> {
   const out: KindPreview[] = [];
   for (const [kind, amount] of statedKinds(row)) {
-    const recorded = await recordedOf(db, partyId, kind);
-    out.push({ kind, action: kindAction(recorded, amount), recorded: recorded?.toFixed(2) ?? null, amount: amount.toFixed(2) });
+    const { recorded, action } = await kindState(db, partyId, kind, amount);
+    out.push({ kind, action, recorded: recorded?.toFixed(2) ?? null, amount: amount.toFixed(2) });
   }
   return out;
 }
@@ -136,12 +157,13 @@ export interface PartyImportResult {
   issues: PartyImportIssue[];
 }
 
-async function applyOpenings(tx: Tx, partyId: string, row: PartyImportRow, ctx: PartyImportContext, skipZero: boolean): Promise<PartyImportResult['openings']> {
+const keptMessage = (name: string) => `Mitra "${name}" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.`;
+
+async function applyOpenings(tx: Tx, partyId: string, row: PartyImportRow, ctx: PartyImportContext, skipZero: boolean, existingParty = false): Promise<PartyImportResult['openings']> {
   const done: PartyImportResult['openings'] = [];
   for (const [kind, amount] of statedKinds(row)) {
     if (skipZero && amount.isZero()) continue;
-    const recorded = await recordedOf(tx, partyId, kind);
-    const action = kindAction(recorded, amount);
+    const { recorded, action } = await kindState(tx, partyId, kind, amount);
     // The same amount is not posted again: a keyed journal dated after the cut-over day must not be voided for it.
     if (action === 'unchanged') continue;
     if (action === 'replace' && !ctx.confirmed) {
@@ -164,6 +186,11 @@ async function applyOpenings(tx: Tx, partyId: string, row: PartyImportRow, ctx: 
       );
     }
     done.push({ kind, action: outcome.action, journalNumber: outcome.journal?.entryNumber ?? null });
+  }
+  // Owner decision #3, checked again with the service's party lock held: a document submitted since
+  // the outer check must not let the opening change (the throw rolls the replacement back).
+  if (existingParty && done.length > 0 && (await hasPartyTransactions(tx, partyId))) {
+    throw new BusinessError(keptMessage(row.name), PARTY_OPENING_KEPT);
   }
   return done;
 }
@@ -198,15 +225,16 @@ export async function importPartyRow(prisma: PrismaClient, row: PartyImportRow, 
       created: false,
       openings: [],
       issues: differs
-        ? [{ message: `Mitra "${row.name}" sudah ada: data profil diperbarui, saldo awal tidak diubah. Koreksi saldo lewat jurnal manual.`, code: PARTY_OPENING_KEPT }]
+        ? [{ message: keptMessage(row.name), code: PARTY_OPENING_KEPT }]
         : [],
     };
   }
   try {
-    const openings = await prisma.$transaction((tx: Prisma.TransactionClient) => applyOpenings(tx, existing.id, row, ctx, false), { timeout: 15000 });
+    const openings = await prisma.$transaction((tx: Prisma.TransactionClient) => applyOpenings(tx, existing.id, row, ctx, false, true), { timeout: 15000 });
     return { created: false, openings, issues: [] };
   } catch (err) {
     if (!(err instanceof BusinessError)) throw err;
+    if (err.code === PARTY_OPENING_KEPT) return { created: false, openings: [], issues: [{ message: err.message, code: PARTY_OPENING_KEPT }] };
     return { created: false, openings: [], issues: [{ message: `Mitra "${row.name}" disimpan, tetapi ${err.message}`, ...(err.code ? { code: err.code } : {}) }] };
   }
 }
