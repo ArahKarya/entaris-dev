@@ -16,13 +16,14 @@ interface ImportError {
   message: string;
 }
 
-/** COA import: what a row does to the opening balance (server routes/import/coa.ts). */
+/** COA and party import: what a row does to the opening balance (server routes/import/coa.ts, parties.ts). */
 interface OpeningPreview {
   allowed: boolean;
   reason: string | null;
   cutoverDate: string | null;
   recorded: string | null;
-  action: 'unchanged' | 'post' | 'replace';
+  /** 'kept' (parties only): the party has transactions, its opening balance stays. */
+  action: 'unchanged' | 'post' | 'replace' | 'kept';
   runningBalance: boolean;
   needsConfirm: boolean;
 }
@@ -52,9 +53,9 @@ interface Props {
 const typeConfig = {
   parties: {
     endpoint: '/import/parties',
-    columns: ['name', 'partyType', 'phone', 'email', 'address', 'taxId', 'openingBalance', 'depositBalance', 'customerDepositBalance'],
-    templateHeaders: 'name,partyType,phone,email,address,taxId,openingBalance,depositBalance,customerDepositBalance',
-    templateSample: 'PT ABC,Customer,081234567890,abc@example.com,Jl. Contoh No.1,1234567890,5000000,0,0',
+    columns: ['name', 'partyType', 'phone', 'email', 'address', 'taxId', 'openingBalance', 'arahSaldo', 'depositBalance', 'customerDepositBalance'],
+    templateHeaders: 'name,partyType,phone,email,address,taxId,openingBalance,arahSaldo,depositBalance,customerDepositBalance',
+    templateSample: 'PT ABC,Customer,081234567890,abc@example.com,Jl. Contoh No.1,1234567890,5000000,Piutang,0,0',
     queryKeys: ['parties', 'coa', 'coa-all', 'balance-sheet', 'trial-balance', 'profit-loss', 'journals', 'dashboard-metrics'],
   },
   coa: {
@@ -113,35 +114,43 @@ const OpeningCell = ({ value, opening }: { value: unknown; opening?: OpeningPrev
   );
 };
 
+/** A COA row (confirmed by its account number) or a party row (confirmed by its sheet row number). */
 interface OpeningRow {
-  accountNumber: string;
+  accountNumber?: string;
+  rowNum?: number;
   name: string;
   openingBalance: unknown;
   opening?: OpeningPreview | null;
 }
 
+const confirmKey = (row: OpeningRow): string => row.accountNumber ?? String(row.rowNum);
+
 /**
- * Every COA row that needs a confirmation, each with its own checkbox (also rows beyond the 20 shown
+ * Every row that needs a confirmation, each with its own checkbox (also rows beyond the 20 shown
  * in the table): ticking one replacement never confirms a running balance on another account.
  */
-const OpeningConfirmList = ({ rows, confirmed, onToggle }: { rows: OpeningRow[]; confirmed: string[]; onToggle: (accountNumber: string, on: boolean) => void }) => {
+const OpeningConfirmList = ({ rows, confirmed, onToggle }: { rows: OpeningRow[]; confirmed: string[]; onToggle: (key: string, on: boolean) => void }) => {
   const { t } = useTranslation('shell');
+  const forParties = rows.every((row) => row.accountNumber === undefined);
+  const title = t(forParties ? 'importModal.confirmPartyTitle' : 'importModal.confirmTitle');
   return (
     <fieldset className="grid gap-1.5 rounded-lg bg-warning-subtle p-3 text-xs text-warning-text">
-      <legend className="sr-only">{t('importModal.confirmTitle')}</legend>
-      <p className="font-semibold">{t('importModal.confirmTitle')}</p>
+      <legend className="sr-only">{title}</legend>
+      <p className="font-semibold">{title}</p>
       <div className="grid max-h-32 gap-1 overflow-y-auto">
         {rows.map((row) => (
-          <label key={row.accountNumber} className="flex items-start gap-2">
+          <label key={confirmKey(row)} className="flex items-start gap-2">
             <input
               type="checkbox"
               className="mt-0.5"
-              checked={confirmed.includes(row.accountNumber)}
-              onChange={(e) => onToggle(row.accountNumber, e.target.checked)}
+              checked={confirmed.includes(confirmKey(row))}
+              onChange={(e) => onToggle(confirmKey(row), e.target.checked)}
             />
             <span>
               {row.opening?.action === 'replace'
-                ? t('importModal.confirmReplaceRow', { account: row.accountNumber, name: row.name, recorded: row.opening.recorded ?? '—', amount: String(row.openingBalance) })
+                ? row.accountNumber === undefined
+                  ? t('importModal.confirmReplacePartyRow', { row: row.rowNum, name: row.name, recorded: row.opening.recorded ?? '—', amount: String(row.openingBalance) })
+                  : t('importModal.confirmReplaceRow', { account: row.accountNumber, name: row.name, recorded: row.opening.recorded ?? '—', amount: String(row.openingBalance) })
                 : t('importModal.confirmRunningRow', { account: row.accountNumber, name: row.name, amount: String(row.openingBalance) })}
             </span>
           </label>
@@ -188,7 +197,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append('file', file);
-      confirmed.forEach((accountNumber) => formData.append('confirmReplace', accountNumber));
+      confirmed.forEach((key) => formData.append('confirmReplace', key));
       if (throughLock) formData.append('throughLockReason', lockReason.trim());
       const res = await api.post(config.endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -257,12 +266,12 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
     onClose();
   };
 
-  const openingRows: OpeningRow[] = importType === 'coa' ? preview?.data ?? [] : [];
+  const openingRows: OpeningRow[] = importType === 'coa' || importType === 'parties' ? preview?.data ?? [] : [];
   const confirmRows = openingRows.filter((row) => row.opening?.needsConfirm);
-  const toggleConfirm = (accountNumber: string, on: boolean) =>
-    setConfirmed((list) => (on ? [...list, accountNumber] : list.filter((n) => n !== accountNumber)));
+  const toggleConfirm = (key: string, on: boolean) =>
+    setConfirmed((list) => (on ? [...list, key] : list.filter((n) => n !== key)));
   // Posting through the period lock (owner decision #10): period.lock holders only, with a reason.
-  const canThroughLock = cap('period.lock') && openingRows.some((row) => row.opening?.allowed && row.opening.action !== 'unchanged');
+  const canThroughLock = cap('period.lock') && openingRows.some((row) => row.opening?.allowed && row.opening.action !== 'unchanged' && row.opening.action !== 'kept');
   const lockReasonOk = !throughLock || lockReason.trim().length >= 10;
   const STEPS = ['upload', 'preview', 'result'] as const;
   const busy = previewMutation.isPending || importMutation.isPending;
@@ -410,7 +419,7 @@ const ImportModal = ({ isOpen, onClose, importType }: Props) => {
                           <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
                           {config.columns.map((col) => (
                             <td key={col} className="px-3 py-1.5 text-foreground">
-                              {col === 'openingBalance' && importType === 'coa'
+                              {col === 'openingBalance' && (importType === 'coa' || importType === 'parties')
                                 ? <OpeningCell value={row[col]} opening={row.opening} />
                                 : String(row[col] ?? '')}
                             </td>

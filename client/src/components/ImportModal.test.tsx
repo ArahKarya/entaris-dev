@@ -15,9 +15,9 @@ const row = (opening: Record<string, unknown>, accountNumber = '1.1.1') => ({
   openingBalance: '700000', opening: { allowed: true, reason: null, cutoverDate: '2026-01-01', runningBalance: false, ...opening },
 });
 
-function renderModal() {
+function renderModal(importType: 'coa' | 'parties' = 'coa') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  render(<QueryClientProvider client={client}><ImportModal isOpen onClose={() => undefined} importType="coa" /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><ImportModal isOpen onClose={() => undefined} importType={importType} /></QueryClientProvider>);
 }
 
 async function choose() {
@@ -74,5 +74,38 @@ describe('ImportModal COA opening balance preview', () => {
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Data/ }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
     expect(sentConfirm()).toEqual([]);
+  });
+});
+
+describe('ImportModal party opening balance preview', () => {
+  const partyRow = (rowNum: number, name: string, opening: Record<string, unknown> | null) => ({
+    rowNum, name, partyType: 'Customer', openingBalance: '700000', arahSaldo: 'Piutang', depositBalance: '', customerDepositBalance: '',
+    opening: opening && { allowed: true, reason: null, cutoverDate: '2026-01-01', runningBalance: false, ...opening },
+  });
+
+  it('confirms a replacement by sheet row and sends the row number only for the ticked row', async () => {
+    post.mockResolvedValueOnce({ data: { data: [
+      partyRow(2, 'Budi', { action: 'replace', recorded: '500000.00', needsConfirm: true }),
+      partyRow(3, 'Sari', { action: 'replace', recorded: '100000.00', needsConfirm: true }),
+    ], errors: [], total: 2 } });
+    post.mockResolvedValueOnce({ data: { success: 2, failed: 0, errors: [] } });
+    renderModal('parties');
+    await choose();
+
+    const second = await screen.findByRole('checkbox', { name: /Baris 3 Sari: ganti saldo awal tercatat 100000\.00 menjadi 700000/ });
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    fireEvent.click(second);
+    fireEvent.click(screen.getByRole('button', { name: /Import 2 Data/ }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(sentConfirm()).toEqual(['3']);
+  });
+
+  it('a party with transactions shows its balance stays, with no confirmation', async () => {
+    post.mockResolvedValueOnce({ data: { data: [partyRow(2, 'Budi', { action: 'kept', recorded: '500000.00', needsConfirm: false })], errors: [], total: 1 } });
+    renderModal('parties');
+    await choose();
+
+    expect(await screen.findByText('Sudah bertransaksi: saldo awal tidak diubah')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 });

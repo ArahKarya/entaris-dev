@@ -400,6 +400,8 @@
     "confirmTitle": "Konfirmasi per akun: centang hanya akun yang saldo awalnya memang diganti atau diposting dengan nilai di berkas (saldo per tanggal cut-over, bukan saldo berjalan).",
     "confirmReplaceRow": "{{account}} {{name}}: ganti saldo awal tercatat {{recorded}} menjadi {{amount}}",
     "confirmRunningRow": "{{account}} {{name}}: {{amount}} sama dengan saldo berjalan; tetap posting sebagai saldo awal",
+    "confirmPartyTitle": "Konfirmasi per baris: centang hanya baris yang saldo awalnya memang diganti dengan nilai di berkas (saldo per tanggal cut-over).",
+    "confirmReplacePartyRow": "Baris {{row}} {{name}}: ganti saldo awal tercatat {{recorded}} menjadi {{amount}}",
     "throughLock": "Tembus kunci periode",
     "lockReason": "Alasan",
     "lockReasonHint": "Wajib, minimal 10 karakter; dicatat di audit trail.",
@@ -407,6 +409,7 @@
       "unchanged": "Saldo awal tidak berubah",
       "post": "Saldo awal baru diposting",
       "replace": "Mengganti saldo awal tercatat {{recorded}}",
+      "kept": "Sudah bertransaksi: saldo awal tidak diubah",
       "refused": "Saldo awal ditolak untuk akun ini",
       "runningBalance": "sama dengan saldo berjalan",
       "dateMismatch": "Tanggal bukan tanggal cut-over {{date}}"
