@@ -60,6 +60,8 @@ const lastData = (fn: { mock: { calls: unknown[][] } }) => (fn.mock.calls.at(-1)
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // PUT /parties/:id writes inside a transaction (the type change guard reads in it).
+  prismaMock.$transaction.mockImplementation(async (fn: (tx: typeof prismaMock) => unknown) => fn(prismaMock));
   prismaMock.party.update.mockImplementation(async ({ data }: { data: object }) => ({ id: 'p1', ...data }));
   prismaMock.inventoryItem.update.mockImplementation(async ({ data }: { data: object }) => ({ id: 'i1', ...data }));
   for (const m of [prismaMock.salesInvoice, prismaMock.purchaseInvoice]) {

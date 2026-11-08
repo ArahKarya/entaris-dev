@@ -5,13 +5,17 @@ import { validateBody } from '../utils/validate';
 import { CreatePartySchema, UpdatePartySchema } from '../utils/schemas';
 import { clearable } from '../utils/clearable';
 import { logger } from '../lib/logger';
+import { handleRouteError } from '../utils/errors';
+import { assertPartyTypeChangeAllowed } from '../services/ledger/partySides';
 import { parseListPaging } from '../utils/listQuery';
 import {
   buildPartyWhere,
   isPartyListQuery,
   partyOrderBy,
   parsePartySort,
+  PARTY_SUMMARY_SELECT,
   summarizeParties,
+  summarizePartyDashboard,
 } from '../services/partyList';
 
 const router = Router();
@@ -102,13 +106,7 @@ router.get('/summary', async (req, res) => {
   try {
     const built = buildPartyWhere(req.query as Record<string, unknown>);
     if (!built.ok) return res.status(400).json({ error: built.error });
-    const rows = await prisma.party.findMany({
-      where: built.where,
-      select: {
-        partyType: true, isActive: true,
-        outstandingAmount: true, depositBalance: true, customerDepositBalance: true,
-      },
-    });
+    const rows = await prisma.party.findMany({ where: built.where, select: PARTY_SUMMARY_SELECT });
     return res.json(summarizeParties(rows));
   } catch (error) {
     logger.error({ error }, 'GET /parties/summary error');
@@ -172,33 +170,12 @@ router.get('/dashboard', async (_req, res) => {
   try {
     const now = new Date();
 
+    // Totals and top lists per side (receivableOutstanding / payableOutstanding, E5-R3).
     const parties = await prisma.party.findMany({
       where: { isActive: true, isDummy: false },
-      select: {
-        id: true, name: true, partyType: true,
-        outstandingAmount: true, depositBalance: true, customerDepositBalance: true,
-      },
+      select: { id: true, name: true, ...PARTY_SUMMARY_SELECT },
     });
-
-    const customers = parties.filter(p => p.partyType === 'Customer' || p.partyType === 'Both');
-    const suppliers = parties.filter(p => p.partyType === 'Supplier' || p.partyType === 'Both');
-
-    const totalPiutang = customers.reduce((s, p) => s + Math.max(0, Number(p.outstandingAmount)), 0);
-    const totalHutang = suppliers.reduce((s, p) => s + Math.max(0, Number(p.outstandingAmount)), 0);
-    const totalCustomerDeposit = customers.reduce((s, p) => s + Number(p.customerDepositBalance), 0);
-    const totalVendorDeposit = suppliers.reduce((s, p) => s + Number(p.depositBalance), 0);
-
-    const topCustomers = customers
-      .filter(p => Number(p.outstandingAmount) > 0)
-      .sort((a, b) => Number(b.outstandingAmount) - Number(a.outstandingAmount))
-      .slice(0, 10)
-      .map(p => ({ id: p.id, name: p.name, outstanding: Number(p.outstandingAmount) }));
-
-    const topVendors = suppliers
-      .filter(p => Number(p.outstandingAmount) > 0)
-      .sort((a, b) => Number(b.outstandingAmount) - Number(a.outstandingAmount))
-      .slice(0, 10)
-      .map(p => ({ id: p.id, name: p.name, outstanding: Number(p.outstandingAmount) }));
+    const { summary, topCustomers, topVendors } = summarizePartyDashboard(parties);
 
     // Aging piutang
     const salesInvoices = await prisma.salesInvoice.findMany({
@@ -276,14 +253,7 @@ router.get('/dashboard', async (_req, res) => {
     });
 
     return res.json({
-      summary: {
-        totalCustomers: customers.length,
-        totalSuppliers: suppliers.length,
-        totalPiutang,
-        totalHutang,
-        totalCustomerDeposit,
-        totalVendorDeposit,
-      },
+      summary,
       topCustomers,
       topVendors,
       agingPiutang: aging,
@@ -350,24 +320,33 @@ router.put('/:id', async (req, res) => {
   if (!body) return;
 
   try {
-    const party = await prisma.party.update({
-      where: { id },
-      data: {
-        name: body.name,
-        partyType: body.partyType,
-        phone: clearable(body.phone),
-        email: clearable(body.email),
-        address: clearable(body.address),
-        taxId: clearable(body.taxId),
-        isActive: body.isActive,
-        isWapu: body.isWapu,
-      },
+    const party = await prisma.$transaction(async (tx) => {
+      // A type change must not drop a side that still holds a balance (PARTY_TYPE_HAS_BALANCE).
+      // The row lock keeps a document posted meanwhile from slipping past the check.
+      if (body.partyType) {
+        const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM parties WHERE id = ${id} FOR UPDATE`;
+        if (locked.length === 0) return null;
+        await assertPartyTypeChangeAllowed(tx, id, body.partyType);
+      }
+      return tx.party.update({
+        where: { id },
+        data: {
+          name: body.name,
+          partyType: body.partyType,
+          phone: clearable(body.phone),
+          email: clearable(body.email),
+          address: clearable(body.address),
+          taxId: clearable(body.taxId),
+          isActive: body.isActive,
+          isWapu: body.isWapu,
+        },
+      });
     });
+    if (!party) return res.status(404).json({ error: 'Data pihak tidak ditemukan.' });
     return res.json(party);
   } catch (error: any) {
-    logger.error({ error }, 'PUT /parties/:id error');
-    if (error.code === 'P2025') return res.status(404).json({ error: 'Data pihak tidak ditemukan.' });
-    return res.status(500).json({ error: 'Gagal mengupdate data pihak.' });
+    if (error?.code === 'P2025') return res.status(404).json({ error: 'Data pihak tidak ditemukan.' });
+    return handleRouteError(res, error, 'PUT /parties/:id error', 'Gagal mengupdate data pihak.');
   }
 });
 

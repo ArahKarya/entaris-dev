@@ -34,6 +34,9 @@ export interface PartyRecord extends KnownParty {
   isWapu?: boolean;
   isActive?: boolean;
   outstandingAmount?: number | string | null;
+  /** Receivable and payable sides of outstandingAmount (lib/partySides.ts). */
+  receivableOutstanding?: number | string | null;
+  payableOutstanding?: number | string | null;
   depositBalance?: number | string | null;
   customerDepositBalance?: number | string | null;
 }
