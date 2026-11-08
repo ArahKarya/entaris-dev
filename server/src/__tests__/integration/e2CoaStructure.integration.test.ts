@@ -9,7 +9,8 @@
  * - A 6.x expense with a balance: a move to 1.x is 400 ACCOUNT_STRUCTURE_LOCKED, also to a number
  *   that collides (400 comes before 409); a move inside the 6 prefix is 200; isGroup is locked too.
  * - Deactivating: a balance blocks; an expense whose only ledger rows sit in the closed year is
- *   allowed; one with a row in the open year is not.
+ *   allowed, also with its stored balance (the all-time ledger sum); one with a row in the open year
+ *   is not.
  * - Creating: a detail parent is 400, a parent of another type is 400, a type that contradicts
  *   the prefix is 400, and a good child inherits its type from the number.
  * - GET /coa/flat flags only accounts with ledger rows as locked.
@@ -241,9 +242,10 @@ d('chart of accounts structure rules (E2-R6)', () => {
       expect(blocked.status).toBe(400);
       expect(blocked.body.code).toBe('ACCOUNT_DEACTIVATE_BLOCKED');
 
-      // Rows only in the closed year and a zero balance: the year was closed, nothing is open.
+      // Rows only in the closed year: the stored balance keeps them (4 jt), nothing is open.
       const closedOnly = await account(tx, 'EXPENSE', numberUnder('6'));
-      await post(tx, closed, `${Y}-03-10`, closedOnly.id, cash.id, 4 * JT, false);
+      await post(tx, closed, `${Y}-03-10`, closedOnly.id, cash.id, 4 * JT);
+      expect((await tx.account.findUniqueOrThrow({ where: { id: closedOnly.id } })).balance.toNumber()).toBe(4 * JT);
       const ok = await put(closedOnly.id, { isActive: false });
       expect(ok.status, JSON.stringify(ok.body)).toBe(200);
       expect(ok.body.isActive).toBe(false);

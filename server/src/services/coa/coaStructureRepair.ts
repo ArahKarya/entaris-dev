@@ -5,13 +5,13 @@
 // The repair changes presentation only. Profit per fiscal year is revenue minus expense
 // (routes/fiscalYears.ts), so moving a 7.x account from the expense side to the revenue side
 // leaves it unchanged. accounts.balance flips sign with the type, so it is recalculated from the
-// ledger rows of OPEN years (closing a year already subtracted its contribution). Ledger rows of
-// closed years stay as they are; they only warn, and need --include-closed-years to go ahead.
+// ledger (every year, the one stored-balance rule). Ledger rows of closed years stay as they are;
+// they only warn, and need --include-closed-years to go ahead.
 // Everything else is reported for the accountant, never written.
 
 import type { Prisma, RootType } from '@prisma/client';
 import type { prisma } from '../../lib/prisma';
-import { recalculatePnlAccountBalances } from '../../utils/accountBalance';
+import { recalculateAccountBalances } from '../../utils/accountBalance';
 import { deriveRootType, isValidAccountNumber, numberPrefix } from './accountRules';
 import { lockAccounts } from './accountStructure';
 
@@ -150,7 +150,7 @@ export interface CoaRepairResult {
 
 /**
  * Sets the planned `revenueAsExpense` accounts to REVENUE and recalculates their balance from the
- * open fiscal years, in the caller's transaction. Refuses (writes nothing) without an approver
+ * ledger, in the caller's transaction. Refuses (writes nothing) without an approver
  * name, or when an account has ledger rows in a closed year and `includeClosedYears` is off.
  * One audit row per account, naming the accountant and whether closed years were acknowledged.
  */
@@ -206,6 +206,6 @@ export async function applyCoaStructureRepair(
     });
     applied.push(row.accountNumber);
   }
-  await recalculatePnlAccountBalances(tx, changed);
+  if (changed.length > 0) await recalculateAccountBalances(tx, changed);
   return { approvedBy, applied, skipped };
 }

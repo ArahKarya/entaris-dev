@@ -245,7 +245,10 @@ export function planUpdate(
 }
 
 function deactivationProblem(label: string, current: CurrentAccount, facts: StructureFacts): PlanProblem | null {
-  if (!current.balance.isZero()) {
+  // The stored balance of a revenue/expense account spans every year, closed ones too; for those
+  // only the open years' ledger net (deactivationNet below) blocks.
+  const pnl = current.rootType === 'REVENUE' || current.rootType === 'EXPENSE';
+  if (!pnl && !current.balance.isZero()) {
     return problem(ACCOUNT_DEACTIVATE_BLOCKED, `Akun ${label} masih bersaldo; kosongkan saldonya sebelum dinonaktifkan.`);
   }
   if (facts.mappedRoles.length > 0) {

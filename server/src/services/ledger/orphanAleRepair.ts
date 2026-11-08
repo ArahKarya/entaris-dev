@@ -7,10 +7,9 @@
 // years, locked months and stock references are reported for a correction by journal.
 //
 // Balances: a balance-sheet account is recalculated from the ledger. A revenue/expense account
-// is only moved by the cancelled rows while any fiscal year is closed: until PR-5.5 its stored
-// balance leaves out the closed years' contributions, which a recalculation would put back (and a
-// later reopen would then add a second time). The one-time recalculation of those accounts is
-// e2-stored-balance-recalc's job.
+// is only moved by the cancelled rows while any fiscal year is closed: a close before PR-5.5 took
+// the closed years' contributions off its stored balance, and putting them back is the one-time,
+// accountant-approved e2-stored-balance-recalc --apply, not this repair's job.
 import { Prisma, type RootType } from '@prisma/client';
 import { applyAccountImpacts } from '../../utils/accountBalance';
 import { BusinessError } from '../../utils/errors';

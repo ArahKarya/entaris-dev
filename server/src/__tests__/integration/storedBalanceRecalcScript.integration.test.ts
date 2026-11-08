@@ -1,11 +1,11 @@
 /**
  * Integration test: the one stored-balance rule (services/ledger/storedBalances) and the cores of
- * scripts/repair/e2-stored-balance-recalc.ts (dry run) and scripts/repair/e2-orphan-ale-repair.ts
+ * scripts/repair/e2-stored-balance-recalc.ts (dry run and --apply) and scripts/repair/e2-orphan-ale-repair.ts
  * (services/ledger/orphanAleRepair).
  *
  * Fixture: fiscal year 2146 (this file's only year, plan §6.3) as four quarters, closed or open per
- * case. The year close is replayed the way routes/fiscalYears.ts still does it until PR-5.5
- * (subtract the year's revenue/expense contribution, add it back on reopen). Everything runs in a
+ * case. The year close is replayed the way routes/fiscalYears.ts did it before PR-5.5 (subtract
+ * the year's revenue/expense contribution, add it back on reopen): the state --apply repairs. Everything runs in a
  * rollback transaction and assertions only look at this file's accounts and references, except the
  * lock-order races, which need committed rows on two connections and delete them after.
  * - The dry run writes nothing; a difference equal to minus one closed year, to two closed years,
@@ -13,6 +13,9 @@
  *   year got postings after the reopen or was closed again; any other is `unexplained`; an account
  *   that agrees but has closed-year rows is listed as `ok`.
  * - recalculateAccountBalances writes only the accounts that differ, to the all-time ledger sum.
+ * - --apply: no approver, no run; only closed-year rows are written (unexplained ones only with
+ *   includeUnexplained), one audit row per account names the accountant; a row whose difference
+ *   moved after the plan is skipped; a second run finds nothing to write.
  * - Orphan groups: an open-year journal group is cancelled whole and its accounts rebalanced; a
  *   closed year, a locked month and a stock reference are left as they are; one audit row names the
  *   accountant; a stale plan is skipped; no approver, no run. Rows dated in a closed year or in no
@@ -27,9 +30,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import type { Tx } from '../helpers/routeHarness';
 import {
+  applyStoredBalanceRecalc,
   findAccountBalanceDrift,
   planStoredBalanceRecalc,
   recalculateAccountBalances,
+  STORED_BALANCE_AUDIT_ACTION,
   type StoredBalancePlanRow,
 } from '../../services/ledger/storedBalances';
 import {
@@ -312,6 +317,100 @@ d('stored balance rule and recalculation plan', () => {
 
       expect((await recalculateAccountBalances(tx, [cash.id, revenue.id, expense.id])).changed).toEqual([]);
       expect((await findAccountBalanceDrift(tx, { accountIds: [cash.id, revenue.id, expense.id] })).total).toBe(0);
+    });
+  });
+});
+
+d('stored balance recalculation --apply', () => {
+  /** The plan rows of `accounts` only: the shared database may hold other drifting accounts. */
+  const planOf = async (tx: Tx, accounts: Account[]) => {
+    const ids = new Set(accounts.map((a) => a.id));
+    return (await planStoredBalanceRecalc(tx)).rows.filter((r) => ids.has(r.accountId));
+  };
+
+  it('refuses without an approver and writes nothing', async () => {
+    await inRollback(async (tx) => {
+      const userId = await ensureAdmin(tx);
+      const q1 = await quarter(tx, 1);
+      const cash = await account(tx, 'ASSET');
+      const revenue = await account(tx, 'REVENUE');
+      await post(tx, q1, `${Y}-02-10`, cash.id, revenue.id, 10 * JT);
+      await closeLikeRoute(tx, q1, userId);
+      const plan = await planOf(tx, [cash, revenue]);
+      const before = await snapshot(tx, [cash.id, revenue.id]);
+      await expect(applyStoredBalanceRecalc(tx, plan, { approvedBy: '  ' })).rejects.toThrow('--approved-by');
+      expect(await snapshot(tx, [cash.id, revenue.id])).toEqual(before);
+    });
+  });
+
+  it('writes only closed-year rows with one audit row each; unexplained only when asked; a second run writes nothing', async () => {
+    await inRollback(async (tx) => {
+      const userId = await ensureAdmin(tx);
+      const q1 = await quarter(tx, 1);
+      const q2 = await quarter(tx, 2);
+      const cash = await account(tx, 'ASSET');
+      const closedYear = await account(tx, 'REVENUE');
+      const odd = await account(tx, 'EXPENSE');
+      await post(tx, q1, `${Y}-02-10`, cash.id, closedYear.id, 1000 * JT);
+      await post(tx, q2, `${Y}-05-10`, cash.id, closedYear.id, 200 * JT);
+      await post(tx, q2, `${Y}-05-11`, odd.id, cash.id, 3 * JT);
+      await closeLikeRoute(tx, q1, userId);
+      await tx.account.update({ where: { id: odd.id }, data: { balance: { increment: '12.34' } } });
+
+      const plan = await planOf(tx, [cash, closedYear, odd]);
+      expect(plan.map((r) => [r.accountId, r.class]).sort()).toEqual([[closedYear.id, 'closed-year'], [odd.id, 'unexplained']].sort());
+
+      const first = await applyStoredBalanceRecalc(tx, plan, { approvedBy: ' Bu Akuntan ' });
+      expect(first.approvedBy).toBe('Bu Akuntan');
+      expect(first.applied.map((c) => c.accountId)).toEqual([closedYear.id]);
+      expect(first.skipped).toEqual([{ accountNumber: odd.accountNumber, reason: 'unexplained' }]);
+      expect((await balanceOf(tx, closedYear)).toString()).toBe(String(1200 * JT));
+      expect((await balanceOf(tx, odd)).toString()).toBe(dec(3 * JT).plus('12.34').toString());
+
+      const audits = await tx.auditLog.findMany({ where: { action: STORED_BALANCE_AUDIT_ACTION, entityId: { in: [closedYear.id, odd.id] } } });
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        entityType: 'Account', entityId: closedYear.id, via: 'repair',
+        viaMeta: { script: STORED_BALANCE_AUDIT_ACTION, approvedBy: 'Bu Akuntan' },
+        oldValues: { balance: String((200 * JT).toFixed(2)) },
+      });
+      expect(audits[0].newValues).toMatchObject({
+        balance: (1200 * JT).toFixed(2), class: 'closed-year', explanation: `-${q1.name}`, approvedBy: 'Bu Akuntan',
+      });
+
+      const withOdd = await applyStoredBalanceRecalc(tx, await planOf(tx, [cash, closedYear, odd]), { approvedBy: 'Bu Akuntan', includeUnexplained: true });
+      expect(withOdd.applied.map((c) => c.accountId)).toEqual([odd.id]);
+      expect((await balanceOf(tx, odd)).toString()).toBe(String(3 * JT));
+
+      // Nothing drifts any more: the closed-year account is listed as ok and nothing is written.
+      const again = await planOf(tx, [cash, closedYear, odd]);
+      expect(again.map((r) => r.class)).toEqual(['ok']);
+      const before = await snapshot(tx, [cash.id, closedYear.id, odd.id]);
+      expect(await applyStoredBalanceRecalc(tx, again, { approvedBy: 'Bu Akuntan', includeUnexplained: true })).toEqual({ approvedBy: 'Bu Akuntan', applied: [], skipped: [] });
+      expect(await snapshot(tx, [cash.id, closedYear.id, odd.id])).toEqual(before);
+    });
+  });
+
+  it('skips a row whose difference moved after the plan', async () => {
+    await inRollback(async (tx) => {
+      const userId = await ensureAdmin(tx);
+      const q1 = await quarter(tx, 1);
+      const q2 = await quarter(tx, 2);
+      const cash = await account(tx, 'ASSET');
+      const revenue = await account(tx, 'REVENUE');
+      await post(tx, q1, `${Y}-02-10`, cash.id, revenue.id, 10 * JT);
+      await closeLikeRoute(tx, q1, userId);
+      const plan = await planOf(tx, [cash, revenue]);
+      expect(plan.map((r) => r.class)).toEqual(['closed-year']);
+      // A posting moves stored balance and ledger together: still the planned difference.
+      await post(tx, q2, `${Y}-05-10`, cash.id, revenue.id, JT);
+      // A hand edit does not.
+      await tx.account.update({ where: { id: revenue.id }, data: { balance: { increment: 5 } } });
+
+      const result = await applyStoredBalanceRecalc(tx, plan, { approvedBy: 'Bu Akuntan' });
+      expect(result.applied).toEqual([]);
+      expect(result.skipped).toEqual([{ accountNumber: revenue.accountNumber, reason: 'changed-since-plan' }]);
+      expect((await balanceOf(tx, revenue)).toString()).toBe(String(JT + 5));
     });
   });
 });
