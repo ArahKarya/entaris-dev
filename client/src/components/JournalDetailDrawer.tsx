@@ -50,6 +50,11 @@ const JournalDetailDrawer: React.FC<Props> = ({ journalEntryId, onClose }) => {
             )}
           </div>
           <SheetDescription>{t('journalDetailDrawer.description')}</SheetDescription>
+          {journal?.reversedBy && (
+            <p className="text-sm text-muted-foreground">
+              {t('journalDetailDrawer.reversedBy', { number: journal.reversedBy.entryNumber })}
+            </p>
+          )}
         </SheetHeader>
 
         <SheetBody className="space-y-5" role="region" aria-label={t('journalDetailDrawer.bodyLabel')} tabIndex={0}>

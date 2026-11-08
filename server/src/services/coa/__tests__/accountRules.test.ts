@@ -137,10 +137,18 @@ describe('planUpdate', () => {
       expect(planUpdate(account(), { isActive: false }, facts(), null)).toEqual({ ok: true, data: { isActive: false } });
     });
 
-    it('blocks a balance of 0.01 but not 0.00', () => {
-      expect(planUpdate(account({ balance: D('0.00') }), { isActive: false }, facts(), null).ok).toBe(true);
-      expect(planUpdate(account({ balance: D('0.01') }), { isActive: false }, facts(), null)).toMatchObject({ code: ACCOUNT_DEACTIVATE_BLOCKED });
+    it('blocks a balance-sheet balance of 0.01 but not 0.00, and any ledger net', () => {
+      const asset = (balance: string) => account({ accountNumber: '1.4', rootType: 'ASSET', balance: D(balance) });
+      expect(planUpdate(asset('0.00'), { isActive: false }, facts(), null).ok).toBe(true);
+      expect(planUpdate(asset('0.01'), { isActive: false }, facts(), null)).toMatchObject({ code: ACCOUNT_DEACTIVATE_BLOCKED });
       expect(planUpdate(account(), { isActive: false }, facts({ deactivationNet: D('-0.01') }), null)).toMatchObject({ code: ACCOUNT_DEACTIVATE_BLOCKED });
+    });
+
+    it('does not block a revenue/expense account on its stored balance: it spans closed years too', () => {
+      expect(planUpdate(account({ balance: D(9) }), { isActive: false }, facts(), null)).toEqual({ ok: true, data: { isActive: false } });
+      const expense = account({ accountNumber: '6.1', rootType: 'EXPENSE', balance: D(9) });
+      expect(planUpdate(expense, { isActive: false }, facts(), null).ok).toBe(true);
+      expect(planUpdate(expense, { isActive: false }, facts({ deactivationNet: D(9) }), null)).toMatchObject({ code: ACCOUNT_DEACTIVATE_BLOCKED });
     });
 
     it('blocks a mapped account and one with active children', () => {

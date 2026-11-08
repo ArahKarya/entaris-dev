@@ -1,7 +1,7 @@
 // The one definition of a year-close (CLOSE) journal. A close journal is tagged sourceType FY_CLOSE;
 // rows the source backfill has not tagged are recognised by their number, CLOSE-<year name> or
-// CLOSE-<year name>-R<n>. routes/fiscalYears.ts still has its own copy (closeJournalsWhere) and is to
-// move to closeJournalPredicate(year) with the next change to that file.
+// CLOSE-<year name>-R<n>. Used by routes/fiscalYears.ts (numbering and reopen) and
+// services/reports/balanceSheet.ts.
 import { JournalSourceType, Prisma } from '@prisma/client';
 
 type Tx = Prisma.TransactionClient;

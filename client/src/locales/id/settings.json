@@ -553,6 +553,10 @@
           "title": "Dokumen tercatat ganda di buku besar",
           "hint": "Dokumen ini punya baris buku besar sendiri di samping baris jurnalnya, sehingga laba tahun ini terhitung dua kali. Selisih lama yang sudah ditinjau akuntan tercatat di baseline."
         },
+        "legacy-stt-cancel": {
+          "title": "STT yang dibatalkan dengan cara lama",
+          "hint": "Jurnal STT ini dibatalkan dengan jurnal pembalik -CXL dan belum dipasangkan. Kelas B (barisnya di buku besar ikut batal) membuat saldo Persediaan dan Hutang Belum Ditagih selisih sebesar nilai STT. Jalankan skrip e1-stt-cancel-model setelah akuntan menyetujui CSV-nya."
+        },
         "system-accounts": {
           "title": "Akun sistem tutup buku",
           "hint": "Petakan Laba Tahun Berjalan dan Laba Ditahan ke akun detail yang aktif di Pengaturan > Akun Sistem."

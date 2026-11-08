@@ -1,6 +1,7 @@
 // Diagnostic dashboard endpoints (mounted behind the audit permission). Checks only detect;
 // the one fix left (stored-balance recalculation) needs doc.cancel. Check SQL and the
-// preview/fix transaction live in routes/health/*.ts; this file only dispatches and writes the audit log.
+// preview/fix transaction (with its audit row) live in routes/health/*.ts; this file only dispatches
+// and records a failed fix.
 import { Router } from 'express';
 import { AuthRequest, requireCap } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
@@ -19,12 +20,11 @@ import { checkRequiredTriggers } from './health/schemaGuards';
 import { checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import { checkAleFiscalYear } from './health/fiscalYearChecks';
 import { checkFormerRoleAccounts } from './health/formerRoleAccountChecks';
-import { previewAccountBalanceDrift, fixAccountBalanceDrift } from './health/fixes';
+import { FIX_ACTION, previewAccountBalanceDrift, fixAccountBalanceDrift } from './health/fixes';
 
 const router = Router();
 
 const DETECT_ONLY_MESSAGE = 'Pemeriksaan ini hanya mendeteksi. Koreksi lewat jurnal di periode berjalan atau skrip perbaikan.';
-const FIX_ACTION = 'FIX_ACCOUNT_BALANCE_DRIFT';
 
 // GET /api/health-check: Run all diagnostic checks in parallel
 router.get('/', async (_req, res) => {
@@ -88,28 +88,8 @@ router.post('/fix/:check', requireCap('doc.cancel'), async (req: AuthRequest, re
 
   const startedAt = new Date();
   try {
-    const result = await fixAccountBalanceDrift();
-
-    if (userId) {
-      await prisma.auditLog.create({
-        data: {
-          userId,
-          action: FIX_ACTION,
-          entityType: 'health-check',
-          entityId: check,
-          newValues: {
-            check,
-            fixed: result.fixed,
-            message: result.message,
-            snapshot: result.snapshot ?? null,
-            startedAt: startedAt.toISOString(),
-            finishedAt: new Date().toISOString(),
-          },
-          ipAddress: req.ip,
-          userAgent,
-        },
-      }).catch((err) => logger.error({ err }, 'Audit log write failed for health fix'));
-    }
+    // The success audit row is written inside the fix's transaction.
+    const result = await fixAccountBalanceDrift({ userId, ipAddress: req.ip, userAgent, startedAt });
 
     logger.info({ check, userId, fixed: result.fixed }, 'Health check fix applied');
     res.json({ success: true, data: { fixed: result.fixed, message: result.message } });

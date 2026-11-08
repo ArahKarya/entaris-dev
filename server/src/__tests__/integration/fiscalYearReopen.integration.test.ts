@@ -6,8 +6,8 @@
  * stubbed to return them, so the shared mapping and its balances are never touched). Journals are
  * written with their ledger rows and running balances, the way a posting would.
  * - Profit 100 jt: close posts CLOSE-<name>; reopen with a reason cancels it (kept, with its ledger
- *   rows cancelled and the reason stored), retained earnings go down 100 jt once, and both steps
- *   write a fiscal_year_events row. Closing again numbers CLOSE-<name>-R2; a second reopen voids
+ *   rows cancelled and the reason stored), retained earnings go down 100 jt once, revenue and expense
+ *   balances stay as they are, and both steps write a fiscal_year_events row. Closing again numbers CLOSE-<name>-R2; a second reopen voids
  *   only R2. A loss closes the other way round.
  * - Rejections leave the year closed: reopen without a reason (400), while Y+1 is closed
  *   (FY_LATER_CLOSED), with the lock date on the year end (PERIOD_LOCKED), without doc.cancel (403).
@@ -219,9 +219,9 @@ d('POST /fiscal-years/:id/close and /:id/reopen', () => {
       // Profit: DR current profit / CR retained earnings (both credit-normal).
       expect(await balance(tx, b.retainedId)).toBe(100 * JT);
       expect(await balance(tx, b.currentProfitId)).toBe(-100 * JT);
-      // The (untouched) revenue/expense loop takes this year's contribution off the running balances.
-      expect(await balance(tx, b.revenueId)).toBe(0);
-      expect(await balance(tx, b.expenseId)).toBe(0);
+      // Stored balances are the all-time ledger sum: the close leaves revenue and expense as they were.
+      expect(await balance(tx, b.revenueId)).toBe(300 * JT);
+      expect(await balance(tx, b.expenseId)).toBe(200 * JT);
 
       const r1 = await reopen(b.fy.id, { reason: '  koreksi persediaan akhir tahun  ' });
       expect(r1.status, JSON.stringify(r1.body)).toBe(200);
@@ -239,6 +239,7 @@ d('POST /fiscal-years/:id/close and /:id/reopen', () => {
       expect(ale.every((r) => r.isCancelled)).toBe(true);
       expect(await balance(tx, b.retainedId)).toBe(0);
       expect(await balance(tx, b.currentProfitId)).toBe(0);
+      // ...and so does the reopen.
       expect(await balance(tx, b.revenueId)).toBe(300 * JT);
       expect(await balance(tx, b.expenseId)).toBe(200 * JT);
 

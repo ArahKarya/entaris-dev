@@ -46,7 +46,7 @@
   },
   "src/routes/fiscalYears.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 9
+      "count": 5
     }
   },
   "src/routes/fixedAssets.ts": {

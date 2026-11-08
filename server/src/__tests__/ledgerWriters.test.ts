@@ -40,6 +40,8 @@ const ALLOWLIST: Record<string, Counts> = {
   // One-off repair (scripts/repair/e2-orphan-ale-repair.ts): cancels orphan ledger groups whole. Remove with the script.
   'services/ledger/orphanAleRepair.ts': { 'sql:UPDATE accounting_ledger_entries': 1 },
   'services/ledger/postJournal.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
+  // One-off repair (plan step 5 PR-5.2): pairs legacy STT cancels with their -CXL. Remove with scripts/repair/e1-stt-cancel-model.ts.
+  'services/ledger/sttCancelLegacy.ts': { 'journalEntry.updateMany': 1, 'accountingLedgerEntry.updateMany': 1 },
   'services/openingStockImport.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/paymentSubmit.ts': { 'journalEntry.create': 4, 'accountingLedgerEntry.createMany': 4 },
   'services/productionRunEdit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },

@@ -6,6 +6,7 @@ import { businessDayOf } from '../utils/businessDate';
 import { systemAccounts } from './systemAccounts';
 import { findAleJournalMismatches } from './ledger/aleSyncCheck';
 import { findNonJournalAle } from './ledger/nonJournalAle';
+import { planSttCancelLegacy } from './ledger/sttCancelLegacy';
 import { findUnbalancedAleGroups } from './ledger/ledgerAudit/sections/aleGroups';
 import { SYSTEM_ACCOUNT_ROLES } from '../types/systemAccounts';
 import { DOCUMENT_RULE, postableAccountProblem } from './ledger/accountGuard';
@@ -206,6 +207,31 @@ const nonJournalAleDuplicate: CloseCheck = {
   },
 };
 
+/**
+ * STTs cancelled the old way (original Cancelled next to a JV-<stt>-CXL, not yet paired) with a
+ * journal booked to this year: class A, B, C and REVIEW of services/ledger/sttCancelLegacy.ts. Class
+ * B is invisible to every ledger check (both journals look consistent) while Inventory and the
+ * uninvoiced payable are off by its amount. A warning until scripts/repair/e1-stt-cancel-model.ts has
+ * run in production (owner decision #5c); items keyed GoodsReceipt:<id>, label "<stt> (<class>)".
+ */
+const legacySttCancel: CloseCheck = {
+  id: 'legacy-stt-cancel',
+  severity: 'warn',
+  async run(tx, fy) {
+    const rows = (await planSttCancelLegacy(tx, { fiscalYearId: fy.id })).filter((r) => r.cls !== 'PAIRED');
+    return {
+      count: rows.length,
+      items: rows.slice(0, LIMIT).map((r) => ({
+        key: `GoodsReceipt:${r.sttId}`,
+        kind: 'GoodsReceipt',
+        label: `${r.sttNumber} (${r.cls})`,
+        date: r.original?.day ?? r.cxl.day,
+        amount: money(r.amount),
+      })),
+    };
+  },
+};
+
 const CLOSE_ROLES = ['CURRENT_PROFIT', 'RETAINED_EARNINGS'] as const;
 
 /**
@@ -255,6 +281,7 @@ export const BUILT_IN_CLOSE_CHECKS: readonly CloseCheck[] = [
   ledgerBalanced,
   aleVsJournal,
   nonJournalAleDuplicate,
+  legacySttCancel,
   systemAccountsMapped,
   deliveryOrdersUninvoiced,
 ];

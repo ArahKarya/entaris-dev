@@ -3,6 +3,7 @@
 // route file to keep that under the 800-line target. Ledger row checks are in
 // aleChecks.ts, party checks in partyChecks.ts.
 import { prisma } from '../../lib/prisma';
+import { findAccountBalanceDrift, type AccountBalanceDrift } from '../../services/ledger/storedBalances';
 
 export interface CheckResult {
   name: string;
@@ -13,57 +14,39 @@ export interface CheckResult {
   fixable: boolean;
 }
 
-/**
- * Account balance drift
- * Compare accounts.balance against computed balance from JournalItems.
- */
-export async function checkAccountBalanceDrift(): Promise<CheckResult> {
-  const drifts = await prisma.$queryRaw<Array<{
-    account_id: string;
-    account_code: string;
-    account_name: string;
-    root_type: string;
-    stored_balance: number;
-    computed_balance: number;
-    drift: number;
-  }>>`
-    WITH computed AS (
-      SELECT jea.account_id,
-             a."rootType" AS root_type,
-             CASE
-               WHEN a."rootType" IN ('ASSET', 'EXPENSE')
-                 THEN SUM(jea.debit) - SUM(jea.credit)
-               ELSE SUM(jea.credit) - SUM(jea.debit)
-             END AS computed_balance
-        FROM journal_entry_accounts jea
-        JOIN journal_entries je ON je.id = jea.journal_entry_id
-        JOIN accounts a ON a.id = jea.account_id
-       WHERE je.status != 'Cancelled'
-       GROUP BY jea.account_id, a."rootType"
-    )
-    SELECT c.account_id,
-           a."accountNumber" AS account_code,
-           a.name AS account_name,
-           c.root_type,
-           a.balance AS stored_balance,
-           c.computed_balance,
-           ABS(a.balance - c.computed_balance) AS drift
-      FROM computed c
-      JOIN accounts a ON a.id = c.account_id
-     WHERE ABS(a.balance - c.computed_balance) > 0.01
-     ORDER BY ABS(a.balance - c.computed_balance) DESC
-     LIMIT 20
-  `;
+const DRIFT_DETAIL_LIMIT = 20;
 
+/**
+ * Account balance drift: accounts.balance against the sum of the account's active ledger rows over
+ * every year (services/ledger/storedBalances.ts, the rule the fix and the recalculation script use).
+ * `count` is every drifting account; details are the largest DRIFT_DETAIL_LIMIT. For a revenue or
+ * expense account closed_year_contribution is what closed years hold, which a close before the one
+ * stored-balance rule took off the stored balance.
+ */
+export async function checkAccountBalanceDrift(scope: { accountIds?: readonly string[] } = {}): Promise<CheckResult> {
+  const { total, rows } = await findAccountBalanceDrift(prisma, { accountIds: scope.accountIds, limit: DRIFT_DETAIL_LIMIT });
   return {
     name: 'Account Balance Drift',
-    status: drifts.length > 0 ? 'warning' : 'ok',
-    message: drifts.length > 0
-      ? `${drifts.length} akun memiliki saldo yang tidak sesuai dengan jurnal`
-      : 'Semua saldo akun sesuai',
-    count: drifts.length,
-    details: drifts,
+    status: total > 0 ? 'warning' : 'ok',
+    message: total > 0
+      ? `${total} akun: saldo tersimpan berbeda dengan buku besar`
+      : 'Saldo tersimpan semua akun sama dengan buku besar',
+    count: total,
+    details: rows.map(driftDetail),
     fixable: true,
+  };
+}
+
+/** One drift row for the check and the fix preview. */
+export function driftDetail(r: AccountBalanceDrift) {
+  return {
+    account_code: r.accountNumber,
+    account_name: r.name,
+    root_type: r.rootType,
+    stored_balance: r.stored.toNumber(),
+    ledger_balance: r.fromLedger.toNumber(),
+    difference: r.difference.toNumber(),
+    closed_year_contribution: r.closedYearContribution.toNumber(),
   };
 }
 
