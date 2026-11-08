@@ -6646,7 +6646,7 @@
       "group": "Master & Sistem",
       "toolset": "sistem",
       "module": "audit",
-      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia butuh capability doc.cancel dan ditolak sementara bila ada tahun buku tertutup ber-ALE laba rugi (FIX_DRIFT_CLOSED_YEARS).",
+      "desc": "Pratinjau (tanpa mengubah data) perbaikan otomatis hitung ulang saldo akun. Hanya untuk check: account-balance-drift; pemeriksaan lain hanya mendeteksi (ditolak 400). Saldo tersimpan dibandingkan dengan jumlah ledger aktif sepanjang masa (semua tahun buku); count = semua akun yang selisih, details paling banyak 50 baris (saldo tersimpan, saldo ledger, selisih, sumbangan tahun tertutup untuk akun laba rugi, class closed-year bila selisihnya dijelaskan tutup/buka tahun buku atau unexplained, dan penjelasannya). Perbaikan itu sendiri (fix) tidak tersedia sebagai tool: ia menimpa kolom saldo tersimpan akun yang selisih (baris ledger tidak berubah), butuh capability doc.cancel, dan ditolak seluruhnya (STORED_BALANCE_REVIEW_REQUIRED) selama ada baris unexplained; baris itu ditinjau akuntan lewat skrip e2-stored-balance-recalc.",
       "risk": "read",
       "roles": [
         "Admin"
@@ -6674,8 +6674,7 @@
       "level": 1,
       "phase": 6,
       "errors": [
-        "400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)",
-        "400 FIX_DRIFT_CLOSED_YEARS: hitung ulang saldo ditutup sementara karena ada tahun buku tertutup ber-ALE laba rugi"
+        "400: pemeriksaan ini hanya mendeteksi (check selain account-balance-drift)"
       ],
       "related": [
         "hc_run"
@@ -17582,7 +17581,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo berjalan akun pendapatan & beban pada tahun itu di-nol-kan (running balance dikurangi kontribusi tahun tsb.; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup tetapi saldo tetap direset.",
+      "postingEffect": "Jurnal CLOSE-<nama tahun> pada tanggal akhir tahun (penutupan ulang setelah dibuka kembali: CLOSE-<nama tahun>-R2, -R3, ...): laba → DR Laba Tahun Berjalan (3.4) / CR Laba Ditahan (3.2); rugi sebaliknya. Saldo tersimpan akun pendapatan & beban tidak berubah (saldo akun = jumlah ledger aktif sepanjang masa; ledger tetap utuh). Tahun buku ditandai ditutup (closedAt/closedBy) dan satu baris riwayat tutup buku dicatat (fiscal_year_events). Laba tepat 0 (dihitung desimal) → tanpa jurnal penutup.",
       "confirm_template": "TUTUP BUKU tahun {id}? Posting baru pada periode ini akan ditolak.",
       "prerequisites": [
         "Capability doc.cancel.",
@@ -17645,7 +17644,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), mengembalikan saldo berjalan akun pendapatan & beban, membuka periode, dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...",
+      "postingEffect": "Membatalkan jurnal penutup CLOSE-<nama> yang aktif (status Cancelled dengan alasan, baris ledger-nya ikut dibatalkan, saldo 3.2 dan 3.4 dikembalikan sebesar laba tahun itu; jurnal tidak dihapus), membuka periode (saldo tersimpan akun pendapatan & beban tidak berubah), dan mencatat satu baris riwayat buka kembali (fiscal_year_events). Penutupan berikutnya bernomor CLOSE-<nama>-R2, -R3, ...",
       "confirm_template": "BUKA KEMBALI tahun buku {id} dengan alasan \"{reason}\"? Jurnal penutup akan dibatalkan.",
       "prerequisites": [
         "Capability doc.cancel.",
@@ -28080,7 +28079,7 @@
       "group": "Akuntansi",
       "toolset": "akuntansi",
       "module": "coa",
-      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila saldo tepat 0, bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja). currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
+      "desc": "Mengubah akun: nomor akun, nama, status grup, atau aktif/nonaktif. accountType, rootType, dan parentId tidak dapat diubah (diabaikan). Mengganti nama tidak mengubah tipe akun. Akun yang sudah punya transaksi tidak boleh berganti digit pertama nomor maupun status grup (ACCOUNT_STRUCTURE_LOCKED); akun tanpa transaksi yang digit pertamanya berubah diturunkan ulang tipenya; akun yang punya sub-akun tidak boleh berganti nomor sama sekali. Menonaktifkan akun hanya bila bukan Akun Sistem, tanpa sub-akun aktif, dan tanpa saldo di buku besar (akun pendapatan/beban: tahun buku terbuka saja); akun neraca juga wajib bersaldo tersimpan tepat 0, sedangkan saldo tersimpan akun pendapatan/beban (sepanjang masa) tidak dipakai. currency hanya boleh 'IDR' (pembukuan hanya rupiah, nilai lain ditolak 400) dan tidak disimpan. Nomor akun yang dipetakan sebagai Akun Sistem tidak boleh diganti.",
       "risk": "write",
       "roles": [
         "Admin"

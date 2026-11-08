@@ -4,11 +4,11 @@
 // the reports read. The drift check, the drift fix, the recalculation script and the old
 // utils/accountBalance.ts recalculateAccountBalances all go through this file.
 //
-// Until the year close stops changing revenue/expense balances (PR-5.5), a closed year's
-// contribution is subtracted from those accounts at close and added back at reopen, each time as it
-// stood at that moment, while every recalculation in between restores the whole history. The plan
-// below explains a difference by those close and reopen amounts so the accountant can approve the
-// one-time recalculation.
+// Closing or reopening a fiscal year does not change these balances. Before PR-5.5 it did: a closed
+// year's contribution was subtracted from the revenue/expense accounts at close and added back at
+// reopen, each time as it stood at that moment, while every recalculation in between restored the
+// whole history. The plan below explains a difference by those close and reopen amounts so the
+// accountant can approve the one-time recalculation (applyStoredBalanceRecalc).
 import { Prisma, type RootType } from '@prisma/client';
 import { lockAccounts } from '../coa/accountStructure';
 
@@ -325,4 +325,87 @@ async function yearContributions(db: Db, years: readonly RecalcYear[]): Promise<
     if (list.length > 0) byAccount.set(accountId, list);
   }
   return byAccount;
+}
+
+// ── One-time recalculation (--apply) ─────────────────────────────────────────────────────────
+
+export const STORED_BALANCE_AUDIT_ACTION = 'E2_STORED_BALANCE_RECALC';
+
+export interface StoredBalanceApplyOptions {
+  approvedBy: string;
+  /** Also write `unexplained` rows; only for rows the accountant reviewed one by one. */
+  includeUnexplained?: boolean;
+}
+
+export interface StoredBalanceApplyResult {
+  approvedBy: string;
+  /** Accounts set to the ledger sum, by account number. */
+  applied: AccountBalanceDrift[];
+  /** unexplained without includeUnexplained; changed-since-plan when the difference moved after the plan. */
+  skipped: { accountNumber: string; reason: 'unexplained' | 'changed-since-plan' }[];
+}
+
+/**
+ * Writes the planned `closed-year` rows (and `unexplained` ones with includeUnexplained) through
+ * recalculateAccountBalances, in the caller's transaction, with one audit row per account naming
+ * the accountant. A row whose difference is no longer the planned one is skipped. Refuses without
+ * an approver name, before writing anything.
+ */
+export async function applyStoredBalanceRecalc(
+  tx: Db,
+  plan: readonly StoredBalancePlanRow[],
+  options: StoredBalanceApplyOptions,
+): Promise<StoredBalanceApplyResult> {
+  const approvedBy = options.approvedBy.trim();
+  if (!approvedBy) throw new Error('--apply needs --approved-by "<accountant name>"');
+  const skipped: StoredBalanceApplyResult['skipped'] = [];
+  const wanted = plan.filter((r) => {
+    if (r.class === 'closed-year') return true;
+    if (r.class !== 'unexplained') return false;
+    if (!options.includeUnexplained) skipped.push({ accountNumber: r.accountNumber, reason: 'unexplained' });
+    return Boolean(options.includeUnexplained);
+  });
+  if (wanted.length === 0) return { approvedBy, applied: [], skipped };
+
+  const admin = await tx.user.findFirst({ where: { role: 'Admin', isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  if (!admin) throw new Error('No active Admin user to record the audit rows under.');
+
+  // Locked before the re-read, so the difference compared below is the one that gets written.
+  await lockAccounts(tx, wanted.map((r) => r.accountId));
+  const now = new Map((await findAccountBalanceDrift(tx, { accountIds: wanted.map((r) => r.accountId) })).rows.map((r) => [r.accountId, r]));
+  const ids: string[] = [];
+  for (const row of wanted) {
+    const current = now.get(row.accountId);
+    if (!current || current.difference.minus(row.difference).abs().gt(STORED_BALANCE_TOLERANCE)) {
+      skipped.push({ accountNumber: row.accountNumber, reason: 'changed-since-plan' });
+    } else {
+      ids.push(row.accountId);
+    }
+  }
+  if (ids.length === 0) return { approvedBy, applied: [], skipped };
+
+  const { changed } = await recalculateAccountBalances(tx, ids);
+  const planOf = new Map(wanted.map((r) => [r.accountId, r]));
+  for (const c of changed) {
+    const row = planOf.get(c.accountId)!;
+    await tx.auditLog.create({
+      data: {
+        userId: admin.id,
+        action: STORED_BALANCE_AUDIT_ACTION,
+        entityType: 'Account',
+        entityId: c.accountId,
+        oldValues: { balance: c.stored.toFixed(2) },
+        newValues: {
+          balance: c.fromLedger.toFixed(2),
+          class: row.class,
+          explanation: row.explanation,
+          closedYearContribution: c.closedYearContribution.toFixed(2),
+          approvedBy,
+        },
+        via: 'repair',
+        viaMeta: { script: STORED_BALANCE_AUDIT_ACTION, approvedBy },
+      },
+    });
+  }
+  return { approvedBy, applied: changed, skipped };
 }

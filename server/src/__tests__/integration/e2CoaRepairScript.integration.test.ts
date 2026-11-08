@@ -5,8 +5,8 @@
  * open. Everything runs in a rollback transaction; assertions only look at this file's accounts
  * since the database may hold other findings.
  * - The dry run (the plan) writes nothing and reports every kind of finding.
- * - --apply re-types a 7.x EXPENSE account to REVENUE: balance becomes the contribution of the
- *   open year only, profit per fiscal year is the same before and after, and one audit row names
+ * - --apply re-types a 7.x EXPENSE account to REVENUE: balance becomes the all-time ledger sum
+ *   (closed years included, the one stored-balance rule), profit per fiscal year is the same before and after, and one audit row names
  *   the accountant.
  * - An account with ledger rows in the closed year stops the run, writing nothing, until
  *   --include-closed-years is given.
@@ -156,7 +156,7 @@ d('e2-coa-structure-check core', () => {
     });
   });
 
-  it('--apply re-types 7.x to REVENUE: open-year balance, same profit per year, one audit row', async () => {
+  it('--apply re-types 7.x to REVENUE: ledger balance, same profit per year, one audit row', async () => {
     await inRollback(async (tx) => {
       const admin = await ensureAdmin(tx);
       const open = await halfYear(tx, 2, false);
@@ -187,7 +187,7 @@ d('e2-coa-structure-check core', () => {
     });
   });
 
-  it('keeps profit per year when ledger rows sit in a closed year, and counts only the open year in balance', async () => {
+  it('keeps profit per year when ledger rows sit in a closed year, and counts every year in balance', async () => {
     await inRollback(async (tx) => {
       await ensureAdmin(tx);
       const closed = await halfYear(tx, 1, true);
@@ -196,7 +196,7 @@ d('e2-coa-structure-check core', () => {
       const wrong = await account(tx, 'EXPENSE', numberUnder('7'));
       await post(tx, closed, `${Y}-02-10`, cash.id, wrong.id, 6 * JT);
       await post(tx, open, `${Y}-08-10`, cash.id, wrong.id, 4 * JT);
-      // The close of H1 subtracted its contribution (as the expense side saw it: -6 jt).
+      // A close before the one stored-balance rule subtracted H1's contribution (as the expense side saw it: -6 jt).
       await tx.account.update({ where: { id: wrong.id }, data: { balance: -4 * JT } });
       const [closedProfit, openProfit] = [await profitOf(tx, closed), await profitOf(tx, open)];
       const plan = only(await planCoaStructureCheck(tx), [wrong.id]);
@@ -211,7 +211,8 @@ d('e2-coa-structure-check core', () => {
       expect(result.applied).toEqual([wrong.accountNumber]);
       const after = await tx.account.findUniqueOrThrow({ where: { id: wrong.id } });
       expect(after.rootType).toBe('REVENUE');
-      expect(after.balance.toNumber()).toBe(4 * JT);
+      // Both halves: the stored balance is the all-time ledger sum, the stale -6 jt is gone.
+      expect(after.balance.toNumber()).toBe(10 * JT);
       // Moving 7.x to the revenue side changes the sign of its contribution to the year (it was
       // booked as a negative expense), never the profit: revenue minus expense stays the same.
       expect((await profitOf(tx, closed)).equals(closedProfit)).toBe(true);

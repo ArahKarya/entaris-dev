@@ -8,8 +8,8 @@
 //   stock-reference   StockMovement/StockOpname rows: report only (no code writes these any more)
 // --apply cancels each repair group as a whole (is_cancelled = true, rows stay) and recalculates
 // accounts.balance of the touched accounts from the ledger, except revenue/expense accounts while
-// a fiscal year is closed: those only lose the cancelled rows' amount, since until PR-5.5 their
-// stored balance leaves out the closed years (e2-stored-balance-recalc reports that). It needs --approved-by "<accountant
+// a fiscal year is closed: those only lose the cancelled rows' amount, since a close before PR-5.5
+// took the closed years off their stored balance (e2-stored-balance-recalc puts them back). It needs --approved-by "<accountant
 // name>"; the name goes on one audit row per group and in the CSV, which --apply always writes
 // (default file name when --out is not given) before the transaction starts.
 //

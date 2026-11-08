@@ -104,8 +104,6 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Gagal mengambil data aging.": "Failed to load aging data.",
   "Gagal mengambil data posisi kas.": "Failed to load the cash position.",
   "Gagal mengambil data supplier teratas.": "Failed to load top suppliers.",
-  "{0} akun memiliki saldo yang tidak sesuai dengan jurnal": "{0} accounts have balances that do not match the journals",
-  "Semua saldo akun sesuai": "All account balances match",
   "{0} jurnal tidak balance (debit ≠ kredit)": "{0} journals are not balanced (debit ≠ credit)",
   "Semua jurnal balance": "All journals are balanced",
   "{0} entri ALE merujuk ke record yang tidak ada": "{0} ALE entries refer to records that do not exist",
@@ -128,13 +126,16 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   // health check: former system account role accounts (E2-R8)
   "{0} akun bekas peran akun sistem masih bersaldo; pindahkan sisanya lewat Pengaturan > Akun Sistem": "{0} former system account role accounts still have a balance; move the rest from Settings > System Accounts",
   "Akun bekas peran akun sistem tidak bersaldo": "No former system account role account has a balance",
-  "Dihitung ulang saldo {0} akun dari jurnal": "Recalculated the balances of {0} accounts from journals",
   "Gagal menjalankan health check": "Failed to run the health check",
   "Gagal membuat preview": "Failed to create the preview",
   "Gagal memperbaiki masalah": "Failed to fix the issue",
   // health check (E2-R14)
   "Pemeriksaan ini hanya mendeteksi. Koreksi lewat jurnal di periode berjalan atau skrip perbaikan.": "This check only detects. Correct it with a journal in the current period or a repair script.",
-  "Hitung ulang saldo ditutup sementara: tahun buku tertutup masih mengurangi saldo laba rugi. Tersedia lagi setelah aturan saldo tunggal.": "Balance recalculation is temporarily closed: closed fiscal years still reduce the profit and loss balances. It returns once the single balance rule is in place.",
+  // stored balances (E2-R15)
+  "{0} akun: saldo tersimpan berbeda dengan buku besar": "{0} accounts: the stored balance differs from the ledger",
+  "Saldo tersimpan semua akun sama dengan buku besar": "The stored balance of every account matches the ledger",
+  "Saldo tersimpan {0} akun diisi ulang dari buku besar": "Refilled the stored balance of {0} accounts from the ledger",
+  "Perbaiki ditolak: {0} akun berselisih tanpa penjelasan tutup/buka tahun buku dan perlu ditinjau akuntan lewat skrip e2-stored-balance-recalc": "Fix refused: {0} accounts differ in a way no fiscal year close or reopen explains and need the accountant's review through the e2-stored-balance-recalc script",
   // health checks: ledger rows per journal, non-journal ledger rows, party outstanding (E2-R14)
   "Baris Buku Besar setiap jurnal sama dengan baris jurnalnya": "The General Ledger rows of every journal match its journal lines",
   "{0} jurnal STT dibatalkan dengan cara lama (jurnal -CXL); menunggu skrip data STT lama": "{0} STT journals were cancelled the old way (a -CXL journal); waiting for the legacy STT data script",

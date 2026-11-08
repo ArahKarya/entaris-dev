@@ -5,8 +5,8 @@
 // SYSTEM_DOC journal per role (sourceKey REMAP:<role>:<from>:<to>:<day>), per party for the party
 // roles, dated the current business day. Without transferBalance a non-zero balance refuses the
 // save (ACCOUNT_HAS_BALANCE). Profit and loss roles move without a reclass: the year-end close
-// does not zero their ledger rows (routes/fiscalYears.ts posts one CLOSE pair and lowers
-// accounts.balance), so the old account's net spans every year and moving it would pull closed
+// does not zero their ledger rows (routes/fiscalYears.ts posts one CLOSE pair to the equity
+// accounts only), so the old account's net spans every year and moving it would pull closed
 // years' expense into the current one. Their history stays on the old account and still rolls up
 // into the profit and loss report through its group. Multi-account roles are never reclassed.
 //
