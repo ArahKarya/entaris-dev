@@ -4,10 +4,13 @@ import { logger } from '../lib/logger';
 export class BusinessError extends Error {
   /** Stable machine-readable code for clients; the message may be translated. */
   readonly code?: string;
-  constructor(message: string, code?: string) {
+  /** HTTP status handleRouteError answers with: 400 by default, 409 for a retryable conflict. */
+  readonly status: 400 | 409;
+  constructor(message: string, code?: string, status: 400 | 409 = 400) {
     super(message);
     this.name = 'BusinessError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -33,7 +36,7 @@ export function isLedgerUnbalanced(error: unknown): boolean {
  */
 export function handleRouteError(res: Response, error: any, context: string, fallbackMsg: string) {
   if (error instanceof BusinessError) {
-    return res.status(400).json(error.code ? { error: error.message, code: error.code } : { error: error.message });
+    return res.status(error.status).json(error.code ? { error: error.message, code: error.code } : { error: error.message });
   }
   if (isLedgerUnbalanced(error)) {
     logger.error({ error }, `Ledger balance trigger rejected the transaction: ${context}`);

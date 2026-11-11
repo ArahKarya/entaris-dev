@@ -189,4 +189,10 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Tidak dapat membatalkan transfer {0}: barang yang diterima di gudang tujuan sudah dipakai di transaksi lain ({1}). Batalkan transaksi tersebut terlebih dahulu.": "Cannot cancel transfer {0}: goods received at the destination warehouse are already used in other transactions ({1}). Cancel those transactions first.",
   "Tidak dapat membatalkan transfer {0}: stok '{1}' di {2} hanya {3} {4}, perlu {5}. Barang sudah keluar dari gudang tujuan. Batalkan transaksi tersebut dulu.": "Cannot cancel transfer {0}: stock of '{1}' in {2} is only {3} {4}, {5} is needed. The goods have already left the destination warehouse. Cancel those transactions first.",
   "Status transfer tidak dikenal.": "Unknown transfer status.",
+  // stock locks (E3-R3): services/inventory/stockLocks.ts; "semua gudang" is the place of a legacy
+  // movement without a warehouse and translates inside the patterns.
+  "Stok '{0}' di {1} tidak cukup: tersedia {2} {3}, dibutuhkan {4} {5}.": "Not enough stock of '{0}' in {1}: available {2} {3}, needed {4} {5}.",
+  "Stok '{0}' di {1} tidak cukup untuk pembalikan: tersedia {2} {3}, dibutuhkan {4} {5}.": "Not enough stock of '{0}' in {1} to reverse: available {2} {3}, needed {4} {5}.",
+  "semua gudang": "all warehouses",
+  "Stok barang ini sedang diproses transaksi lain. Coba lagi beberapa saat lagi.": "This item's stock is being processed by another transaction. Try again in a moment.",
 };
