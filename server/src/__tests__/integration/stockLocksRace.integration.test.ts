@@ -6,6 +6,7 @@
  * own, so nothing global is written or remapped:
  * - warehouse A holds 5 t; two Stok Keluar of 4 t at once: one 201, one 400 STOCK_INSUFFICIENT, 1 t left;
  * - 10 t at 10.000; two Stok Masuk of 10 t at 12.000 and 8.000 at once: average 10.000 (no lost update);
+ * - a document that only references the item (KEY SHARE) and a posting do not wait for each other;
  * - two transfers of the same two items in opposite line order, several at once: all 201, no deadlock.
  *
  * Aggregate and per-warehouse checks (rollback transaction, same year):
@@ -13,6 +14,7 @@
  * - transfer with two lines of one item, 600 + 600, from 1.000 -> 400 STOCK_INSUFFICIENT;
  * - edit or cancel of a Stok Masuk already used up at its warehouse -> 400 even while another
  *   warehouse holds the item; an edit to Penyesuaian Stok - is checked like Stok Keluar;
+ * - stock opname adds no empty warehouse row for a counted item without a difference;
  * - stock opname cancel whose surplus already left its warehouse -> 400, and the cancel claims the
  *   opname first (a second cancel cannot reverse twice).
  */
@@ -272,6 +274,48 @@ d('concurrent postings of one item wait for each other (committed fixtures)', ()
     }
   });
 
+  it('a document that only references the item (FK check, KEY SHARE) neither waits for nor blocks a posting', async () => {
+    const f = await committedSetup();
+    try {
+      const gabah = await f.newItem('referensi');
+      await seed(f.db, f.s, gabah.id, f.s.whA, 5000, 6000);
+      const out = () => postMovement(f.s, { itemId: gabah.id, warehouseId: f.s.whA, movementType: 'Out', quantity: 1000 });
+      const keyShare = (t: Tx) => t.$queryRaw`SELECT id FROM inventory_items WHERE id = ${gabah.id} FOR KEY SHARE`;
+
+      // A document line inserted in an open transaction holds KEY SHARE on the item until it commits.
+      let releaseDoc!: () => void;
+      const docHeld = new Promise<void>((r) => { releaseDoc = r; });
+      let docLocked!: () => void;
+      const docReached = new Promise<void>((r) => { docLocked = r; });
+      const doc = prisma.$transaction(async (t) => {
+        await keyShare(t as Tx);
+        docLocked();
+        await docHeld;
+      }, { timeout: 30000 });
+      await docReached;
+      const posted = out();
+      expect(await stillPending(posted, 1000)).toBe(false);
+      releaseDoc();
+      await doc;
+      expect((await posted).status).toBe(201);
+
+      // And a posting holding the item rows does not make a document line wait.
+      const hold = holdNextCommit();
+      const second = out();
+      await hold.reached;
+      const docWhilePosting = prisma.$transaction(async (t) => {
+        await t.$executeRawUnsafe(`SET LOCAL lock_timeout = '1s'`);
+        return keyShare(t as Tx);
+      });
+      await expect(docWhilePosting).resolves.toHaveLength(1);
+      hold.release();
+      expect((await second).status).toBe(201);
+      expect(await stockOf(f.db, gabah.id, f.s.whA)).toMatchObject({ item: 3000, warehouse: 3000 });
+    } finally {
+      await f.cleanup();
+    }
+  });
+
   it('transfers of the same two items in opposite line order, at once, all go through (no deadlock)', async () => {
     const f = await committedSetup();
     try {
@@ -315,6 +359,8 @@ d('aggregate stock checks per warehouse', () => {
       expect(r.status, JSON.stringify(r.body)).toBe(400);
       expect(r.body.code).toBe('GR_CANCEL_INSUFFICIENT_STOCK');
       expect(r.body.error).toContain('tersedia 1000, perlu 1200');
+      const whName = (await tx.warehouse.findUniqueOrThrow({ where: { id: s.whA } })).name;
+      expect(r.body.error).toContain(`stok '${gabah.name}' di ${whName} tidak mencukupi`);
       expect(await stockOf(tx, gabah.id, s.whA)).toMatchObject({ item: 1000, warehouse: 1000 });
       expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } })).status).toBe('Submitted');
     });
@@ -379,6 +425,33 @@ d('aggregate stock checks per warehouse', () => {
       const ok = await edit(300);
       expect(ok.status, JSON.stringify(ok.body)).toBe(200);
       expect(await stockOf(tx, gabah.id, s.whA)).toMatchObject({ item: 1000, warehouse: 0 });
+    });
+  });
+
+  it('stock opname adds a warehouse row only for a counted item with a difference', async () => {
+    await inRollback(async (tx) => {
+      const s = await setup(tx);
+      const held = await item(tx, s, 'disimpan');
+      const elsewhere = await item(tx, s, 'gudang lain');
+      const found = await item(tx, s, 'ditemukan');
+      await seed(tx, s, held.id, s.whA, 100, 6000);
+      await seed(tx, s, elsewhere.id, s.whB, 50, 6000);
+      const opname = await callRoute(stockOpnameRouter, 'post', '/', {
+        body: {
+          date: `${Y}-03-11`,
+          warehouseId: s.whA,
+          items: [
+            { itemId: held.id, actualStock: 100 },
+            { itemId: elsewhere.id, actualStock: 0 },
+            { itemId: found.id, actualStock: 20, unitCost: 6000 },
+          ],
+        },
+        userId: s.actor.userId, role: s.actor.role,
+      });
+      expect(opname.status, JSON.stringify(opname.body)).toBe(201);
+      const rows = await tx.inventoryStock.findMany({ where: { warehouseId: s.whA }, select: { itemId: true, currentStock: true } });
+      expect(rows.map((r) => [r.itemId, Number(r.currentStock)]).sort()).toEqual([[held.id, 100], [found.id, 20]].sort());
+      expect(await stockOf(tx, elsewhere.id, s.whB)).toMatchObject({ item: 50, warehouse: 50 });
     });
   });
 

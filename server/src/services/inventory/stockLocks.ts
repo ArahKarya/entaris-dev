@@ -12,12 +12,21 @@
  * The fiscal-year share lock of the period guards may come before step 1 or 2: it only conflicts
  * with a year close, which takes no stock lock.
  *
+ * Until PR-6.2b and PR-6.2c, the writers listed in PENDING_LOCK (__tests__/inventoryWriters.test.ts)
+ * do not follow this order: a multi-line one updates an item row, takes the 'SM' number, then
+ * updates the next line's item. Against a path that follows the order this can deadlock; the
+ * aborted side answers 409 STOCK_BUSY (handleRouteError maps 40P01), so the client retries.
+ *
+ * The rows are locked FOR NO KEY UPDATE, the lock a plain UPDATE of current_stock takes: stock
+ * writers still exclude each other and the item master edit (FOR UPDATE), but a document line that
+ * only references the item (FK check, FOR KEY SHARE) neither waits for nor blocks a posting.
+ *
  * Stock available is per warehouse (inventory_stocks); inventory_items.current_stock is the total
  * across warehouses and is used only for legacy movements that have no warehouse.
  */
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
-import { BusinessError } from '../../utils/errors';
+import { BusinessError, STOCK_BUSY, STOCK_BUSY_MESSAGE } from '../../utils/errors';
 import { isLockTimeout } from '../../utils/periodGuard';
 import { getWarehouseStockMap } from '../../utils/warehouseStock';
 import { logger } from '../../lib/logger';
@@ -26,8 +35,8 @@ type Tx = Prisma.TransactionClient;
 
 /** Error code (400): a warehouse holds less than the operation takes out. */
 export const STOCK_INSUFFICIENT = 'STOCK_INSUFFICIENT';
-/** Error code (409): another posting held the item rows past STOCK_LOCK_WAIT_MS; retry. */
-export const STOCK_BUSY = 'STOCK_BUSY';
+/** Error code (409): another posting held the item rows past STOCK_LOCK_WAIT_MS (or deadlocked); retry. */
+export { STOCK_BUSY };
 /** How long lockInventoryRows waits for rows held by another posting before STOCK_BUSY. */
 export const STOCK_LOCK_WAIT_MS = 5000;
 
@@ -100,30 +109,33 @@ async function withStockLockWait<T>(tx: Tx, fn: () => Promise<T>): Promise<T> {
     result = await fn();
   } catch (err) {
     if (!isLockTimeout(err)) throw err;
-    throw new BusinessError('Stok barang ini sedang diproses transaksi lain. Coba lagi beberapa saat lagi.', STOCK_BUSY, 409);
+    throw new BusinessError(STOCK_BUSY_MESSAGE, STOCK_BUSY, 409);
   }
   await tx.$queryRaw`SELECT set_config('lock_timeout', ${before[0]?.lock_timeout ?? '0'}, true)`;
   return result;
 }
 
 /**
- * Locks the item rows (ORDER BY id FOR UPDATE), creates the (item, warehouse) rows that do not
+ * Locks the item rows (ORDER BY id FOR NO KEY UPDATE), creates the (item, warehouse) rows that do not
  * exist yet (ON CONFLICT DO NOTHING) so they can be locked too, then locks those rows (ORDER BY id).
  * Call it once per transaction, before the first stock write and before any SM/JV number or
  * account lock (see LOCK ORDER above). Idempotent within a transaction. The returned rows are read
  * after the locks, so callers read stock and average cost from here, not from an earlier read.
  * Pairs whose item or warehouse does not exist are skipped; the caller reports them.
+ * createMissing: false locks only the pairs that already have a row and leaves the others out of
+ * `stocks` (stock 0): for a reader of many items, such as an opname count, that writes few. The
+ * item lock still serializes them, and the writer creates the row when it moves stock.
  */
 export async function lockInventoryRows(
   tx: Tx,
-  rows: { itemIds: string[]; pairs?: { itemId: string; warehouseId: string }[] },
+  rows: { itemIds: string[]; pairs?: { itemId: string; warehouseId: string }[]; createMissing?: boolean },
 ): Promise<LockedInventory> {
   const pairs = rows.pairs ?? [];
   const itemIds = [...new Set([...rows.itemIds, ...pairs.map((p) => p.itemId)])].sort();
   if (itemIds.length === 0) return { items: new Map(), stocks: new Map() };
 
   return withStockLockWait(tx, async () => {
-    await tx.$queryRaw`SELECT id FROM inventory_items WHERE id = ANY(${itemIds}::text[]) ORDER BY id FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM inventory_items WHERE id = ANY(${itemIds}::text[]) ORDER BY id FOR NO KEY UPDATE`;
     const itemRows = await tx.inventoryItem.findMany({
       where: { id: { in: itemIds } },
       select: { id: true, name: true, unit: true, isActive: true, accountId: true, currentStock: true, averageCost: true },
@@ -142,13 +154,16 @@ export async function lockInventoryRows(
     const stocks = new Map<string, LockedStock>();
     if (wanted.length === 0) return { items, stocks };
 
-    await tx.inventoryStock.createMany({
-      data: wanted.map((p) => ({ itemId: p.itemId, warehouseId: p.warehouseId, currentStock: 0 })),
-      skipDuplicates: true,
-    });
+    if (rows.createMissing !== false) {
+      await tx.inventoryStock.createMany({
+        data: wanted.map((p) => ({ itemId: p.itemId, warehouseId: p.warehouseId, currentStock: 0 })),
+        skipDuplicates: true,
+      });
+    }
     const where = { OR: wanted.map((p) => ({ itemId: p.itemId, warehouseId: p.warehouseId })) };
     const ids = (await tx.inventoryStock.findMany({ where, select: { id: true } })).map((r) => r.id);
-    await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
+    if (ids.length === 0) return { items, stocks };
+    await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE id = ANY(${ids}::text[]) ORDER BY id FOR NO KEY UPDATE`;
     for (const r of await tx.inventoryStock.findMany({ where, select: { itemId: true, warehouseId: true, currentStock: true } })) {
       stocks.set(stockKey(r.itemId, r.warehouseId), { ...r, currentStock: new Decimal(r.currentStock.toString()) });
     }

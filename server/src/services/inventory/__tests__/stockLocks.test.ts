@@ -71,10 +71,10 @@ describe('lockInventoryRows', () => {
 
     const raw = fn('$queryRaw').mock.calls;
     const itemLock = raw.find((c) => sqlOf(c).includes('FROM inventory_items'))!;
-    expect(sqlOf(itemLock)).toMatch(/ORDER BY id FOR UPDATE/);
+    expect(sqlOf(itemLock)).toMatch(/ORDER BY id FOR NO KEY UPDATE/);
     expect(itemLock[1]).toEqual([ITEM_A, ITEM_B]);
     const stockLock = raw.find((c) => sqlOf(c).includes('FROM inventory_stocks'))!;
-    expect(sqlOf(stockLock)).toMatch(/ORDER BY id FOR UPDATE/);
+    expect(sqlOf(stockLock)).toMatch(/ORDER BY id FOR NO KEY UPDATE/);
     expect(raw.indexOf(itemLock)).toBeLessThan(raw.indexOf(stockLock));
 
     // One row per pair; the unknown warehouse is skipped (the caller reports it).
@@ -88,6 +88,26 @@ describe('lockInventoryRows', () => {
     expect(locked.stocks.has(stockKey(ITEM_A, 'wh-gone'))).toBe(false);
   });
 
+  it('with createMissing: false locks only the rows that exist and creates none', async () => {
+    const existing = new Set([stockKey(ITEM_A, WH_1)]);
+    const { tx, fn } = stockTx({ [stockKey(ITEM_A, WH_1)]: 400 }, {
+      'inventoryStock.findMany': ({ where }: any) =>
+        (where.OR as { itemId: string; warehouseId: string }[])
+          .filter((p) => existing.has(stockKey(p.itemId, p.warehouseId)))
+          .map((p) => ({ id: `st-${p.itemId}-${p.warehouseId}`, itemId: p.itemId, warehouseId: p.warehouseId, currentStock: '400' })),
+    });
+    const locked = await lockInventoryRows(tx, {
+      itemIds: [ITEM_A, ITEM_B],
+      pairs: [{ itemId: ITEM_A, warehouseId: WH_1 }, { itemId: ITEM_B, warehouseId: WH_1 }],
+      createMissing: false,
+    });
+    expect(fn('inventoryStock.createMany')).not.toHaveBeenCalled();
+    const stockLock = fn('$queryRaw').mock.calls.find((c) => sqlOf(c).includes('FROM inventory_stocks'))!;
+    expect(stockLock[1]).toEqual([`st-${ITEM_A}-${WH_1}`]);
+    expect([...locked.items.keys()]).toEqual([ITEM_A, ITEM_B]);
+    expect([...locked.stocks.keys()]).toEqual([stockKey(ITEM_A, WH_1)]);
+  });
+
   it('bounds the wait with lock_timeout and restores the previous value', async () => {
     const { tx, fn } = stockTx({}, { $queryRaw: (sql: any) => (sql.join('?').includes('current_setting') ? [{ lock_timeout: '2s' }] : []) });
     await lockInventoryRows(tx, { itemIds: [ITEM_A] });
@@ -99,7 +119,7 @@ describe('lockInventoryRows', () => {
     const timeout = Object.assign(new Error('lock timeout'), { meta: { driverAdapterError: { cause: { code: '55P03' } } } });
     const { tx } = stockTx({}, {
       $queryRaw: (sql: any) => {
-        if (sql.join('?').includes('FOR UPDATE')) throw timeout;
+        if (sql.join('?').includes('FOR NO KEY UPDATE')) throw timeout;
         return [];
       },
     });

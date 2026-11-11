@@ -133,7 +133,7 @@ export async function cancelGoodsReceiptInTx(
       allowNegative: opts.allowNegativeStock,
       reason: opts.negativeStockReason,
       error: (s) => new BusinessError(
-        `Tidak dapat membatalkan STT ${stt.sttNumber}: stok '${s.itemName}' tidak mencukupi untuk pembalikan (tersedia ${s.available.toNumber()}, perlu ${s.needed.toNumber()}). ` +
+        `Tidak dapat membatalkan STT ${stt.sttNumber}: stok '${s.itemName}' di ${s.warehouseName ?? 'semua gudang'} tidak mencukupi untuk pembalikan (tersedia ${s.available.toNumber()}, perlu ${s.needed.toNumber()}). ` +
           'Barang sudah keluar (terjual/produksi). Batalkan transaksi tersebut dulu.',
         GOODS_RECEIPT_CANCEL_INSUFFICIENT_STOCK,
       ),

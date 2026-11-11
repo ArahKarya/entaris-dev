@@ -16080,6 +16080,7 @@
         "404: transfer tidak ditemukan",
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "409 TRANSFER_CANCEL_INCOMPLETE: sebagian gerakan stok transfer ini pernah dibatalkan per baris (data lama); transfer tidak dibalik, koreksi stok gudang lewat Penyesuaian Stok",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",

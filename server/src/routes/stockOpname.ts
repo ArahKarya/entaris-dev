@@ -158,11 +158,14 @@ router.post('/', async (req: AuthRequest, res) => {
 
       // Lock every counted item (and its row at the opname warehouse) before reading the system
       // stock, so a movement committing meanwhile cannot make the difference stale. systemStock is
-      // the per-warehouse balance when the user picked a warehouse, else the item total.
+      // the per-warehouse balance when the user picked a warehouse, else the item total. The form
+      // sends every item: only existing rows are locked, so a count without a difference adds no
+      // empty row to the warehouse (adjustWarehouseStock creates one for a difference).
       const allItemIds: string[] = body.items.map((i: any) => i.itemId);
       const locked = await lockInventoryRows(tx, {
         itemIds: allItemIds,
         pairs: opnameWarehouseId ? allItemIds.map((itemId) => ({ itemId, warehouseId: opnameWarehouseId })) : [],
+        createMissing: false,
       });
       const itemMap = locked.items;
 
