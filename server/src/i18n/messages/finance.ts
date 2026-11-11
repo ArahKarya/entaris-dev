@@ -455,6 +455,8 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Item tidak dapat dinonaktifkan selama masih memiliki stok (termasuk stok negatif) atau ada di Surat Jalan yang belum ditagih.": "The item cannot be deactivated while it still has stock (negative stock included) or is on a delivery order that has not been invoiced.",
   "Gudang default tidak bisa dinonaktifkan. Set gudang lain sebagai default dulu.": "The default warehouse cannot be deactivated. Make another warehouse the default first.",
   "Gudang masih punya {0} item dengan saldo. Pindahkan stok ke gudang lain dulu sebelum menonaktifkan.": "The warehouse still holds {0} item(s) with a balance. Move the stock to another warehouse before deactivating it.",
+  "Gudang sedang dipakai transaksi stok. Coba lagi beberapa saat lagi.": "The warehouse is in use by a stock transaction. Try again in a moment.",
+  "{0}: akun {1} {2} bukan bagian dari kelompok akun {3}.": "{0}: account {1} {2} is not part of the {3} account group.",
   "Akun persediaan item: akun {0} bukan bagian dari kelompok akun Persediaan.": "Item inventory account: account {0} is not part of the Inventory account group.",
   "Satuan \"{0}\" berbeda dari satuan item \"{1}\" yang sudah ada (\"{2}\"); satuan item tidak dapat diubah lewat impor.": "Unit \"{0}\" differs from the unit of the existing item \"{1}\" (\"{2}\"); an item's unit cannot be changed by an import.",
   "Baris {0}: gagal membuat jurnal saldo awal akun \"{1}\": {2}": "Row {0}: failed to create the opening balance journal of account \"{1}\": {2}",
