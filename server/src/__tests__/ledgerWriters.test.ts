@@ -43,8 +43,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/ledger/sttCancelLegacy.ts': { 'journalEntry.updateMany': 1, 'accountingLedgerEntry.updateMany': 1 },
   'services/openingStockImport.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/paymentSubmit.ts': { 'journalEntry.create': 4, 'accountingLedgerEntry.createMany': 4 },
-  'services/productionRunEdit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
-  'services/productionRunSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/purchaseInvoiceRevise.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/salesInvoiceSubmit.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
