@@ -44,7 +44,7 @@ Kunci ringkas: **stok bergerak = SM**, **jurnal hanya bila ada nilai uang yang b
 | Tool | Efek stok | Efek GL | Efek WAC |
 |------|-----------|---------|----------|
 | `inv_mov_create` In/AdjustmentIn | + qty (gudang & total) | DR Persediaan (akun item / 1.4.0) / CR akun lawan (default Ekuitas Saldo Awal 3.1) bila qty x unitCost > 0 | dihitung ulang: `(stok x WAC lama + qty x unitCost) / (stok + qty)` hanya bila unitCost > 0 |
-| `inv_mov_create` Out/AdjustmentOut | - qty (ditolak bila stok gudang < qty) | DR akun lawan / CR Persediaan | tidak berubah |
+| `inv_mov_create` Out/AdjustmentOut | - qty (ditolak `STOCK_INSUFFICIENT` bila stok gudang < qty) | DR akun lawan / CR Persediaan | tidak berubah |
 | `inv_mov_update` | batal lama + buat baru | jurnal lama dibatalkan, jurnal baru diposting | dihitung ulang dari replay riwayat (`recomputeAverageCostFromReplay`), COGS backfill diselesaikan ulang |
 | `inv_mov_cancel` | dibalik | jurnal terkait Cancelled, saldo akun dihitung ulang | recompute |
 | `stf_create` | - qty gudang asal, + qty gudang tujuan; total item tetap | **tidak ada** (akun persediaan sama, net nol) | tidak berubah |
@@ -74,11 +74,12 @@ Aturan wajib:
 5. **Transfer langsung berlaku**. `stf_create` tidak punya draft; kesalahan harus diperbaiki dengan `stf_cancel` lalu buat ulang. `stf_update` hanya mengubah metadata cetak (mobil, supir, penerima, catatan).
 6. **Opname langsung final**. `opn_create` memposting penyesuaian dan jurnal saat itu juga. Kirim semua item yang dihitung (termasuk yang tidak berselisih) agar jejak audit lengkap; angka aktual negatif ditolak kecuali sama dengan stok sistem minus historis.
 7. **Revaluasi tak sengaja**. Mengisi `unitCost` pada baris opname yang berbeda dari WAC akan MENGUBAH `averageCost` item dan menjurnal selisih nilai. Isi hanya bila memang revaluasi.
-8. **Pembatalan butuh stok**. `inv_mov_cancel` untuk pergerakan masuk dan `opn_cancel` untuk surplus ditolak bila stok saat ini tidak cukup untuk dibalik.
-9. **Hapus master**. `inv_item_delete` menghapus permanen item + pergerakan batalnya, dan ditolak bila ada mutasi aktif/dipakai invoice. `wh_delete` ditolak untuk gudang default/bersaldo/berriwayat; nonaktifkan saja (`wh_update isActive=false`).
-10. **Batch**. `inv_item_batches` hanya melacak pemakaian yang tertaut `sourceMovementId`; jumlah sisa batch tidak selalu sama dengan stok fisik.
-11. **Data referensi terbuka**. GET items, gudang tidak butuh izin khusus (semua user login boleh membaca) sehingga tool `read` untuk master tersedia bagi semua role; hanya penulisan butuh `edit`.
-12. **Stok minus** (hasil penjualan/produksi dengan bypass) dipantau di dashboard "Stok Minus Aktif"; COGS penjualan yang tertunda diselesaikan otomatis (COGS backfill) ketika stok masuk berikutnya tercatat.
+8. **Pembatalan butuh stok di gudangnya**. `inv_mov_cancel`/`inv_mov_update` untuk pergerakan masuk, `opn_cancel` untuk surplus, dan `gr_cancel` ditolak (`STOCK_INSUFFICIENT` / `GR_CANCEL_INSUFFICIENT_STOCK`) bila stok **di gudang mutasi itu** tidak cukup untuk dibalik; stok di gudang lain tidak dihitung. Baris item yang sama dalam satu dokumen dijumlah (juga di `stf_create`). Mutasi lama tanpa gudang dicek terhadap total item.
+9. **Stok sedang diproses (`STOCK_BUSY`, 409)**. Transaksi stok atas item yang sama berjalan berurutan; bila menunggu lebih dari 5 detik, permintaan ditolak tanpa perubahan apa pun. Ulangi sebentar lagi, jangan ubah isinya.
+10. **Hapus master**. `inv_item_delete` menghapus permanen item + pergerakan batalnya, dan ditolak bila ada mutasi aktif/dipakai invoice. `wh_delete` ditolak untuk gudang default/bersaldo/berriwayat; nonaktifkan saja (`wh_update isActive=false`).
+11. **Batch**. `inv_item_batches` hanya melacak pemakaian yang tertaut `sourceMovementId`; jumlah sisa batch tidak selalu sama dengan stok fisik.
+12. **Data referensi terbuka**. GET items, gudang tidak butuh izin khusus (semua user login boleh membaca) sehingga tool `read` untuk master tersedia bagi semua role; hanya penulisan butuh `edit`.
+13. **Stok minus** (hasil penjualan/produksi dengan bypass) dipantau di dashboard "Stok Minus Aktif"; COGS penjualan yang tertunda diselesaikan otomatis (COGS backfill) ketika stok masuk berikutnya tercatat.
 
 ### Peta istilah
 
@@ -732,7 +733,8 @@ Aturan wajib:
 
 - 400: gerakan sudah dibatalkan
 - 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok
-- 400: stok tidak mencukupi untuk pembalikan
+- 400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
@@ -806,7 +808,8 @@ Aturan wajib:
 **Error umum**
 
 - 400: tidak ada tahun fiskal aktif untuk tanggal ini
-- 400: stok di gudang tidak cukup
+- 400 STOCK_INSUFFICIENT: stok gudang tidak cukup untuk Stok Keluar / Penyesuaian Stok - (pesan menyebut tersedia dan dibutuhkan)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: item tidak aktif / tidak ditemukan
 - 400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
@@ -1025,7 +1028,8 @@ Aturan wajib:
 
 - 400: gerakan sudah dibatalkan
 - 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok
-- 400: pembalikan stok lama membuat stok negatif
+- 400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
@@ -1087,7 +1091,9 @@ Aturan wajib:
 **Error umum**
 
 - 400: stok opname sudah dibatalkan
-- 400: stok item tidak mencukupi untuk pembalikan
+- 400 STOCK_INSUFFICIENT: stok gudang opname tidak cukup untuk membalik surplus (dijumlah per item per gudang)
+- 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan opname ini lebih dulu; tidak ada yang dibalik dua kali
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan
 - 400 JOURNAL_ALREADY_REVERSED: jurnal opname sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah
@@ -1162,6 +1168,7 @@ Aturan wajib:
 
 - 400: tidak ada tahun fiskal aktif
 - 400: masih ada stok opname Draft
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: stok aktual tidak boleh negatif
 - 400: item tidak ditemukan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
@@ -1398,7 +1405,8 @@ Aturan wajib:
 **Error umum**
 
 - 400: gudang asal dan tujuan tidak boleh sama
-- 400: stok item di gudang asal tidak cukup
+- 400 STOCK_INSUFFICIENT: stok item di gudang asal tidak cukup (baris item yang sama dijumlah)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: gudang tidak aktif
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
