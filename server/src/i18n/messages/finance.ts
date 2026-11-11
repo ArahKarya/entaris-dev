@@ -449,6 +449,14 @@ export const FINANCE_MESSAGES: MessageDictionary = {
   "Akun persediaan item": "Item inventory account",
   "Akun pendapatan layanan": "Service revenue account",
   "Akun persediaan item tidak dapat diganti selama item masih memiliki stok (termasuk stok negatif). Kosongkan stok di semua gudang terlebih dahulu.": "The item's inventory account cannot be changed while the item still has stock (negative stock included). Empty the stock in every warehouse first.",
+  // item master (E3-R5): services/inventory/itemMasterGuard.ts, routes/inventory/items.ts, routes/warehouses.ts, routes/import/inventory.ts
+  "Akun persediaan item tidak dapat diganti selama item masih ada di Surat Jalan yang belum ditagih. Buat Invoice dari Surat Jalan itu atau batalkan dulu.": "The item's inventory account cannot be changed while the item is on a delivery order that has not been invoiced. Create the Invoice from that delivery order or cancel it first.",
+  "Satuan item tidak dapat diganti karena item sudah punya mutasi stok atau stok. Buat item baru dengan satuan yang diinginkan.": "The item's unit cannot be changed because the item already has stock movements or stock. Create a new item with the unit you need.",
+  "Item tidak dapat dinonaktifkan selama masih memiliki stok (termasuk stok negatif) atau ada di Surat Jalan yang belum ditagih.": "The item cannot be deactivated while it still has stock (negative stock included) or is on a delivery order that has not been invoiced.",
+  "Gudang default tidak bisa dinonaktifkan. Set gudang lain sebagai default dulu.": "The default warehouse cannot be deactivated. Make another warehouse the default first.",
+  "Gudang masih punya {0} item dengan saldo. Pindahkan stok ke gudang lain dulu sebelum menonaktifkan.": "The warehouse still holds {0} item(s) with a balance. Move the stock to another warehouse before deactivating it.",
+  "Akun persediaan item: akun {0} bukan bagian dari kelompok akun Persediaan.": "Item inventory account: account {0} is not part of the Inventory account group.",
+  "Satuan \"{0}\" berbeda dari satuan item \"{1}\" yang sudah ada (\"{2}\"); satuan item tidak dapat diubah lewat impor.": "Unit \"{0}\" differs from the unit of the existing item \"{1}\" (\"{2}\"); an item's unit cannot be changed by an import.",
   "Baris {0}: gagal membuat jurnal saldo awal akun \"{1}\": {2}": "Row {0}: failed to create the opening balance journal of account \"{1}\": {2}",
   // Account guard rules (services/ledger/accountGuard.ts manualJournalRule / TEMPLATE_RULE / manualCancelRule); hints keep their leading space.
   "Akun jurnal": "Journal account",

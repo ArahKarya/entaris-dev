@@ -11,6 +11,31 @@ import { requestLanguage } from '../middleware/responseLanguage';
 
 const router = Router();
 
+export const WAREHOUSE_HAS_STOCK = 'WAREHOUSE_HAS_STOCK';
+export const WAREHOUSE_IS_DEFAULT = 'WAREHOUSE_IS_DEFAULT';
+
+/** A warehouse is switched off only when it is empty (negative stock counts as stock) and not the default. */
+async function assertWarehouseCanDeactivate(
+  tx: Prisma.TransactionClient,
+  warehouse: { id: string; isDefault: boolean },
+  requestedDefault: boolean | undefined,
+): Promise<void> {
+  if (warehouse.isDefault || requestedDefault === true) {
+    throw new BusinessError(
+      'Gudang default tidak bisa dinonaktifkan. Set gudang lain sebagai default dulu.',
+      WAREHOUSE_IS_DEFAULT,
+    );
+  }
+  await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE warehouse_id = ${warehouse.id} FOR UPDATE`;
+  const stocked = await tx.inventoryStock.count({ where: { warehouseId: warehouse.id, currentStock: { not: 0 } } });
+  if (stocked > 0) {
+    throw new BusinessError(
+      `Gudang masih punya ${stocked} item dengan saldo. Pindahkan stok ke gudang lain dulu sebelum menonaktifkan.`,
+      WAREHOUSE_HAS_STOCK,
+    );
+  }
+}
+
 const CreateWarehouseSchema = z.object({
   code: z.string().min(1, 'Kode wajib diisi.').max(30).regex(/^[A-Za-z0-9_-]+$/, 'Kode hanya huruf, angka, dash, underscore.'),
   name: z.string().min(1, 'Nama wajib diisi.').max(100),
@@ -137,8 +162,13 @@ router.put('/:id', async (req: AuthRequest, res) => {
   if (!body) return;
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const existing = await tx.warehouse.findUnique({ where: { id: req.params.id as string } });
+      const id = req.params.id as string;
+      // Serialises two edits of the warehouse, and with its stock rows locked a posting already writing
+      // to this warehouse finishes before the stock check below reads it.
+      await tx.$queryRaw`SELECT id FROM warehouses WHERE id = ${id} FOR UPDATE`;
+      const existing = await tx.warehouse.findUnique({ where: { id } });
       if (!existing) throw new BusinessError('Gudang tidak ditemukan.');
+      if (body.isActive === false && existing.isActive) await assertWarehouseCanDeactivate(tx, existing, body.isDefault);
       if (body.isDefault === true && !existing.isDefault) {
         await tx.warehouse.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
       }

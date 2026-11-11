@@ -31,6 +31,14 @@ router.post(
         warehouseCode?: string;
       }> = [];
 
+      // The unit of an existing item is locked once it has stock (E3-R5); the import never writes it.
+      const existingUnits = new Map(
+        (await prisma.inventoryItem.findMany({
+          where: { code: { in: rows.map((r) => (r.code || '').trim()).filter(Boolean).map(sanitizeCellValue) } },
+          select: { code: true, unit: true },
+        })).map((i) => [i.code, i.unit]),
+      );
+
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
         const rowNum = i + 2;
@@ -49,6 +57,15 @@ router.post(
         }
         if (!unit) {
           errors.push({ row: rowNum, message: 'Kolom "unit" wajib diisi.' });
+          continue;
+        }
+
+        const existingUnit = existingUnits.get(sanitizeCellValue(code));
+        if (existingUnit !== undefined && existingUnit !== sanitizeCellValue(unit)) {
+          errors.push({
+            row: rowNum,
+            message: `Satuan "${unit}" berbeda dari satuan item "${code}" yang sudah ada ("${existingUnit}"); satuan item tidak dapat diubah lewat impor.`,
+          });
           continue;
         }
 
@@ -99,7 +116,7 @@ router.post(
 
           const item = await prisma.inventoryItem.upsert({
             where: { code: row.code },
-            update: { name: itemData.name, unit: itemData.unit, category: itemData.category, description: itemData.description, minimumStock: itemData.minimumStock },
+            update: { name: itemData.name, category: itemData.category, description: itemData.description, minimumStock: itemData.minimumStock },
             create: itemData,
           });
 
