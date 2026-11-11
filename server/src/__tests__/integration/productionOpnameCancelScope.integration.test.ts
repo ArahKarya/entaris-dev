@@ -22,7 +22,8 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import { JOURNAL_ALREADY_REVERSED } from '../../services/ledger/cancelJournals';
 import { submitProductionRunInTx } from '../../services/productionRunSubmit';
-import { editProductionRunInTx, nextRevisionNumber } from '../../services/productionRunEdit';
+import { editProductionRunInTx } from '../../services/productionRunEdit';
+import { nextRevisionNumber } from '../../services/production/productionPosting';
 import productionRunsRouter from '../../routes/inventory/productionRuns';
 import stockOpnameRouter from '../../routes/stockOpname';
 
