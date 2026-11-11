@@ -360,6 +360,32 @@ d('warehouse master while it carries stock (E3-R5)', () => {
     });
   });
 
+  it('keeps the default warehouse active in both orders: no inactive default through PUT or POST', async () => {
+    await inRollback(async (tx) => {
+      await tx.warehouse.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+      const def = await warehouse(tx, { isDefault: true });
+      const other = await warehouse(tx);
+
+      expect((await putWarehouse(other.id, { isActive: false })).status).toBe(200);
+      const r = await putWarehouse(other.id, { isDefault: true });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('WAREHOUSE_IS_DEFAULT');
+      const both = await putWarehouse(other.id, { isActive: true, isDefault: true });
+      expect(both.status, JSON.stringify(both.body)).toBe(200);
+      expect((await tx.warehouse.findUniqueOrThrow({ where: { id: def.id } })).isDefault).toBe(false);
+
+      // An edit that omits isActive/isDefault leaves them as they are.
+      const renamed = await putWarehouse(other.id, { name: 'Gudang Selatan' });
+      expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+      expect(renamed.body).toMatchObject({ isActive: true, isDefault: true });
+
+      const created = await callRoute(warehousesRouter, 'post', '/', { body: { code: `IT-IMG-${tag()}`, name: 'Gudang baru', isActive: false, isDefault: true } });
+      expect(created.status).toBe(400);
+      expect(created.body.code).toBe('WAREHOUSE_IS_DEFAULT');
+      expect(await tx.warehouse.count({ where: { isDefault: true, isActive: true } })).toBe(1);
+    });
+  });
+
   it('lists rows switched off earlier that still hold stock (the read-only report)', async () => {
     await inRollback(async (tx) => {
       const sub = await inventorySubtree(tx);

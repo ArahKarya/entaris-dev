@@ -20,6 +20,7 @@ export const ITEM_ACCOUNT_RULE: PostableRule = {
   rootTypes: ['ASSET'],
   allowControl: ['INVENTORY', 'INVENTORY_ITEM'],
   alsoRestrict: TAX_ACCOUNT_ROLES,
+  withinGroupOf: { role: 'INVENTORY', code: ITEM_ACCOUNT_NOT_INVENTORY },
 };
 
 /** The account stock posts to: the item's own, else the account mapped to the INVENTORY role. */
@@ -33,44 +34,10 @@ export async function inventoryAccountFor(tx: Tx, item: { accountId: string | nu
   return mapped?.accountId ?? null;
 }
 
-const MAX_TREE_DEPTH = 12;
-
-/** True when the account is `groupId` or sits anywhere below it in the chart. */
-async function isInSubtree(tx: Tx, accountId: string, groupId: string): Promise<boolean> {
-  let current: string | null = accountId;
-  for (let depth = 0; current && depth < MAX_TREE_DEPTH; depth++) {
-    if (current === groupId) return true;
-    const row: { parentId: string | null } | null = await tx.account.findUnique({ where: { id: current }, select: { parentId: true } });
-    current = row?.parentId ?? null;
-  }
-  return false;
-}
-
-/**
- * The inventory subtree is the parent group of the account mapped to the INVENTORY role (1.4 for
- * 1.4.0). Without a mapping, or a mapped account that has no parent, no subtree can be named and
- * only ITEM_ACCOUNT_RULE applies.
- */
-async function inventoryGroupId(tx: Tx): Promise<string | null> {
-  const mappedId = await inventoryAccountFor(tx, { accountId: null });
-  if (!mappedId) return null;
-  const mapped = await tx.account.findUnique({ where: { id: mappedId }, select: { parentId: true } });
-  return mapped?.parentId ?? null;
-}
-
 /** POST: the account must be a valid item account inside the inventory subtree; a new item has no stock. */
 export async function assertItemAccountValid(tx: Tx, accountId: string | null | undefined): Promise<void> {
   if (!accountId) return;
   await assertPostableAccount(tx, accountId, ITEM_ACCOUNT_RULE);
-  const groupId = await inventoryGroupId(tx);
-  if (groupId && !(await isInSubtree(tx, accountId, groupId))) {
-    const acc = await tx.account.findUnique({ where: { id: accountId }, select: { accountNumber: true, name: true } });
-    const label = acc ? `${acc.accountNumber} ${acc.name}` : accountId;
-    throw new BusinessError(
-      `Akun persediaan item: akun ${label} bukan bagian dari kelompok akun Persediaan.`,
-      ITEM_ACCOUNT_NOT_INVENTORY,
-    );
-  }
 }
 
 /**

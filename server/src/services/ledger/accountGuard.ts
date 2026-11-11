@@ -66,6 +66,12 @@ export interface PostableRule {
    * mapping wherever it sits. Default false.
    */
   allowGroupOrInactive?: boolean;
+  /**
+   * The account must be the parent group of the account mapped to `role`, or sit anywhere below it
+   * (1.4 for the INVENTORY account 1.4.0). Without a mapping or a mapped account that has a parent,
+   * no group can be named and the restriction does not apply. Refused with `code`.
+   */
+  withinGroupOf?: { role: SystemAccountRole; code: string };
 }
 
 /** Control kinds a journal.control holder may post manually; the deposit roles are never among them. */
@@ -275,6 +281,41 @@ export interface AssertPostableOptions {
   lineRules?: ReadonlyMap<string, PostableRule>;
 }
 
+const MAX_TREE_DEPTH = 12;
+
+/** The parent group of the account mapped to `role`, or null when none can be named. */
+async function mappedGroupId(tx: Tx, role: SystemAccountRole): Promise<string | null> {
+  const mapping = await tx.systemAccountMapping.findFirst({
+    where: { role },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    select: { account: { select: { parentId: true } } },
+  });
+  return mapping?.account.parentId ?? null;
+}
+
+/** True when the account is `groupId` or sits anywhere below it in the chart. */
+async function isInSubtree(tx: Tx, accountId: string, groupId: string): Promise<boolean> {
+  let current: string | null = accountId;
+  for (let depth = 0; current && depth < MAX_TREE_DEPTH; depth++) {
+    if (current === groupId) return true;
+    const row: { parentId: string | null } | null = await tx.account.findUnique({ where: { id: current }, select: { parentId: true } });
+    current = row?.parentId ?? null;
+  }
+  return false;
+}
+
+async function assertWithinGroup(tx: Tx, acc: AccountLite, rule: PostableRule): Promise<void> {
+  const within = rule.withinGroupOf;
+  if (!within) return;
+  const groupId = await mappedGroupId(tx, within.role);
+  if (groupId && !(await isInSubtree(tx, acc.id, groupId))) {
+    throw new BusinessError(
+      `${rule.label}: akun ${acc.accountNumber} ${acc.name} bukan bagian dari kelompok akun ${KIND_LABELS[within.role] ?? within.role}.`,
+      within.code,
+    );
+  }
+}
+
 /** Loads the accounts and throws BusinessError (with an ACCOUNT_* code) on the first problem. */
 export async function assertPostableAccounts(
   tx: Tx,
@@ -298,6 +339,7 @@ export async function assertPostableAccounts(
   for (const id of unique) {
     const problem = postableAccountProblem(byId.get(id) ?? null, ruleOf(id), control.get(id) ?? null);
     if (problem) throw new BusinessError(problem.message, problem.code);
+    await assertWithinGroup(tx, byId.get(id)!, ruleOf(id));
   }
   return byId;
 }

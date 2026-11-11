@@ -13,6 +13,20 @@ const router = Router();
 
 export const WAREHOUSE_HAS_STOCK = 'WAREHOUSE_HAS_STOCK';
 export const WAREHOUSE_IS_DEFAULT = 'WAREHOUSE_IS_DEFAULT';
+export const WAREHOUSE_BUSY = 'WAREHOUSE_BUSY';
+
+const DEFAULT_INACTIVE_MESSAGE = 'Gudang default tidak bisa dinonaktifkan. Set gudang lain sebagai default dulu.';
+
+/** Deadlock (40P01) or lock timeout (55P03), also as reported through the pg driver adapter. */
+function isLockConflict(err: unknown): boolean {
+  const e = err as { code?: unknown; meta?: { code?: unknown; driverAdapterError?: { cause?: { code?: unknown } } } } | null;
+  return [e?.code, e?.meta?.code, e?.meta?.driverAdapterError?.cause?.code].some((c) => c === '40P01' || c === '55P03');
+}
+
+/** The default warehouse is the one postings fall back to, so it must stay active. */
+function assertDefaultStaysActive(isDefault: boolean, isActive: boolean): void {
+  if (isDefault && !isActive) throw new BusinessError(DEFAULT_INACTIVE_MESSAGE, WAREHOUSE_IS_DEFAULT);
+}
 
 /** A warehouse is switched off only when it is empty (negative stock counts as stock) and not the default. */
 async function assertWarehouseCanDeactivate(
@@ -21,12 +35,16 @@ async function assertWarehouseCanDeactivate(
   requestedDefault: boolean | undefined,
 ): Promise<void> {
   if (warehouse.isDefault || requestedDefault === true) {
-    throw new BusinessError(
-      'Gudang default tidak bisa dinonaktifkan. Set gudang lain sebagai default dulu.',
-      WAREHOUSE_IS_DEFAULT,
-    );
+    throw new BusinessError(DEFAULT_INACTIVE_MESSAGE, WAREHOUSE_IS_DEFAULT);
   }
-  await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE warehouse_id = ${warehouse.id} FOR UPDATE`;
+  // Stock writers lock rows one at a time in line order; id order here keeps this scan from
+  // deadlocking against them in the common case. A remaining conflict is answered as WAREHOUSE_BUSY.
+  try {
+    await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE warehouse_id = ${warehouse.id} ORDER BY id FOR UPDATE`;
+  } catch (err) {
+    if (!isLockConflict(err)) throw err;
+    throw new BusinessError('Gudang sedang dipakai transaksi stok. Coba lagi beberapa saat lagi.', WAREHOUSE_BUSY);
+  }
   const stocked = await tx.inventoryStock.count({ where: { warehouseId: warehouse.id, currentStock: { not: 0 } } });
   if (stocked > 0) {
     throw new BusinessError(
@@ -36,17 +54,25 @@ async function assertWarehouseCanDeactivate(
   }
 }
 
-const CreateWarehouseSchema = z.object({
+const WarehouseFields = z.object({
   code: z.string().min(1, 'Kode wajib diisi.').max(30).regex(/^[A-Za-z0-9_-]+$/, 'Kode hanya huruf, angka, dash, underscore.'),
   name: z.string().min(1, 'Nama wajib diisi.').max(100),
   location: z.string().max(200).nullable().optional(),
   description: z.string().max(500).nullable().optional(),
+  isActive: z.boolean().optional(),
+  isDefault: z.boolean().optional(),
+  sortOrder: z.coerce.number().int().optional(),
+});
+
+const CreateWarehouseSchema = WarehouseFields.extend({
   isActive: z.boolean().optional().default(true),
   isDefault: z.boolean().optional().default(false),
   sortOrder: z.coerce.number().int().optional().default(0),
 });
 
-const UpdateWarehouseSchema = CreateWarehouseSchema.partial();
+// No defaults on update: zod 4 still applies them inside partial(), which would reset an omitted
+// isActive/isDefault/sortOrder on every PUT.
+const UpdateWarehouseSchema = WarehouseFields.partial();
 
 // GET /api/warehouses
 router.get('/', async (req, res) => {
@@ -134,6 +160,7 @@ router.post('/', async (req: AuthRequest, res) => {
   if (!body) return;
 
   try {
+    assertDefaultStaysActive(body.isDefault ?? false, body.isActive ?? true);
     const result = await prisma.$transaction(async (tx) => {
       if (body.isDefault) {
         await tx.warehouse.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
@@ -168,6 +195,9 @@ router.put('/:id', async (req: AuthRequest, res) => {
       await tx.$queryRaw`SELECT id FROM warehouses WHERE id = ${id} FOR UPDATE`;
       const existing = await tx.warehouse.findUnique({ where: { id } });
       if (!existing) throw new BusinessError('Gudang tidak ditemukan.');
+      if (body.isDefault !== undefined || body.isActive !== undefined) {
+        assertDefaultStaysActive(body.isDefault ?? existing.isDefault, body.isActive ?? existing.isActive);
+      }
       if (body.isActive === false && existing.isActive) await assertWarehouseCanDeactivate(tx, existing, body.isDefault);
       if (body.isDefault === true && !existing.isDefault) {
         await tx.warehouse.updateMany({ where: { isDefault: true }, data: { isDefault: false } });

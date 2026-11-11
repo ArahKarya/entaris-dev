@@ -92,6 +92,9 @@ router.post(
           continue;
         }
 
+        // A later row of the same file must agree with the unit the first row of this code sets.
+        existingUnits.set(sanitizeCellValue(code), sanitizeCellValue(unit));
+
         validRows.push({
           code: sanitizeCellValue(code),
           name: sanitizeCellValue(name),

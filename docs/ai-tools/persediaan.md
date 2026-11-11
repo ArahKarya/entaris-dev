@@ -1850,7 +1850,7 @@ Aturan wajib:
 
 ### wh_update
 
-**Ringkasan:** Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama. Menonaktifkan gudang ditolak bila masih ada stok (termasuk negatif) di gudang itu (WAREHOUSE_HAS_STOCK) atau bila gudang itu default (WAREHOUSE_IS_DEFAULT).
+**Ringkasan:** Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama. Menonaktifkan gudang ditolak bila masih ada stok (termasuk negatif) di gudang itu (WAREHOUSE_HAS_STOCK) atau bila gudang itu default (WAREHOUSE_IS_DEFAULT). Gudang default harus aktif: menjadikan gudang nonaktif sebagai default juga ditolak (WAREHOUSE_IS_DEFAULT). Bila gudang sedang dipakai transaksi stok, hasilnya WAREHOUSE_BUSY; coba lagi.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1905,4 +1905,5 @@ Aturan wajib:
 - 400: gudang tidak ditemukan
 - 400: WAREHOUSE_HAS_STOCK: gudang masih punya stok
 - 400: WAREHOUSE_IS_DEFAULT: gudang default tidak bisa dinonaktifkan
+- 400: WAREHOUSE_BUSY: gudang sedang dipakai transaksi stok, coba lagi
 
