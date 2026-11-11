@@ -1,11 +1,11 @@
 import type { Prisma } from '@prisma/client';
-import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { claimCancel } from '../utils/cancelClaim';
 import { logger } from '../lib/logger';
+import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -64,19 +64,22 @@ export async function submitStockTransferInTx(
     throw new BusinessError('Gudang sumber/tujuan tidak aktif.');
   }
 
-  // Per-item stock check at source.
-  for (const it of body.items) {
-    const stockRow = await tx.inventoryStock.findUnique({
-      where: { itemId_warehouseId: { itemId: it.itemId, warehouseId: body.fromWarehouseId } },
-    });
-    const available = stockRow ? new Decimal(stockRow.currentStock.toString()) : new Decimal(0);
-    if (available.lt(it.quantity)) {
-      const item = await tx.inventoryItem.findUnique({ where: { id: it.itemId } });
-      throw new BusinessError(
-        `Stok item "${item?.name ?? it.itemId}" di ${fromWh.name} hanya ${available.toFixed(3)} ${item?.unit ?? ''}, tidak cukup untuk transfer ${it.quantity}.`,
-      );
-    }
-  }
+  // Lock every item at both warehouses, then check the source per item: two lines of one item
+  // are summed, and a concurrent outbound of the same stock waits for this transfer.
+  const locked = await lockInventoryRows(tx, {
+    itemIds: body.items.map((it) => it.itemId),
+    pairs: body.items.flatMap((it) => [
+      { itemId: it.itemId, warehouseId: body.fromWarehouseId },
+      { itemId: it.itemId, warehouseId: body.toWarehouseId },
+    ]),
+  });
+  const missing = body.items.find((it) => !locked.items.has(it.itemId));
+  if (missing) throw new BusinessError('Item tidak ditemukan.');
+  await assertStockAvailable(
+    tx,
+    body.items.map((it) => ({ itemId: it.itemId, warehouseId: body.fromWarehouseId, quantity: it.quantity })),
+    { context: 'stockTransfer.create', userId },
+  );
 
   const transfer = await tx.stockTransfer.create({
     data: {
@@ -106,11 +109,10 @@ export async function submitStockTransferInTx(
 
   // Adjust stocks + create paired movements per line.
   for (const it of body.items) {
-    const item = await tx.inventoryItem.findUnique({ where: { id: it.itemId } });
-    if (!item) throw new BusinessError('Item tidak ditemukan.');
+    const item = locked.items.get(it.itemId)!;
     const qty = it.quantity;
     // A picked batch locks unitCost to its stored cost so the batch consumption ledger stays consistent.
-    let unitCost = Number(item.averageCost);
+    let unitCost = item.averageCost.toNumber();
     if (it.sourceMovementId) {
       const batch = await tx.stockMovement.findUnique({
         where: { id: it.sourceMovementId },
@@ -243,33 +245,29 @@ export async function cancelStockTransferInTx(
     }
   }
 
-  // The destination must still hold what it received (per item, active TransferIn rows summed).
-  const qtyByItem = new Map<string, Decimal>();
-  for (const m of transferIns) {
-    qtyByItem.set(m.itemId, (qtyByItem.get(m.itemId) ?? new Decimal(0)).plus(m.quantity.toString()));
-  }
-  for (const [itemId, qty] of qtyByItem) {
-    // Lock the destination row first; the read below then sees any outbound movement that committed meanwhile.
-    await tx.$queryRaw`SELECT id FROM inventory_stocks WHERE item_id = ${itemId} AND warehouse_id = ${transfer.toWarehouseId} FOR UPDATE`;
-    const stockRow = await tx.inventoryStock.findUnique({
-      where: { itemId_warehouseId: { itemId, warehouseId: transfer.toWarehouseId } },
-    });
-    const available = stockRow ? new Decimal(stockRow.currentStock.toString()) : new Decimal(0);
-    if (available.gte(qty)) continue;
-    if (!opts.allowNegativeStock) {
-      const item = await tx.inventoryItem.findUnique({ where: { id: itemId }, select: { name: true, unit: true } });
-      const toWh = await tx.warehouse.findUnique({ where: { id: transfer.toWarehouseId }, select: { name: true } });
-      throw new BusinessError(
-        `Tidak dapat membatalkan transfer ${transfer.transferNumber}: stok '${item?.name ?? itemId}' di ${toWh?.name ?? transfer.toWarehouseId} hanya ${available.toFixed(3)} ${item?.unit ?? ''}, perlu ${qty.toFixed(3)}. ` +
+  // Lock the items at both warehouses; the destination must still hold what it received (per item,
+  // active TransferIn rows summed).
+  await lockInventoryRows(tx, {
+    itemIds: active.map((m) => m.itemId),
+    pairs: active.flatMap((m) => [
+      { itemId: m.itemId, warehouseId: transfer.fromWarehouseId },
+      { itemId: m.itemId, warehouseId: transfer.toWarehouseId },
+    ]),
+  });
+  await assertStockAvailable(
+    tx,
+    transferIns.map((m) => ({ itemId: m.itemId, warehouseId: transfer.toWarehouseId, quantity: m.quantity.toString() })),
+    {
+      context: 'stockTransfer.cancel',
+      allowNegative: opts.allowNegativeStock,
+      reason: opts.negativeStockReason,
+      error: (s) => new BusinessError(
+        `Tidak dapat membatalkan transfer ${transfer.transferNumber}: stok '${s.itemName}' di ${s.warehouseName} hanya ${s.available.toFixed(3)} ${s.unit}, perlu ${s.needed.toFixed(3)}. ` +
           'Barang sudah keluar dari gudang tujuan. Batalkan transaksi tersebut dulu.',
         STOCK_TRANSFER_CANCEL_INSUFFICIENT_STOCK,
-      );
-    }
-    logger.warn(
-      { transferId, itemId, available: available.toNumber(), reverseQty: qty.toNumber(), reason: opts.negativeStockReason },
-      'Stock transfer cancel with negative stock bypass',
-    );
-  }
+      ),
+    },
+  );
 
   // TransferOut returns to the source, TransferIn leaves the destination. Upsert: with the bypass
   // the destination row may be missing.

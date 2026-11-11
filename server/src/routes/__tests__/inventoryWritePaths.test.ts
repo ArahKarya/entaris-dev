@@ -78,8 +78,20 @@ const fiscalYearHandlers = (closed: string[] = []) => ({
   $queryRaw: (_sql: unknown, id: string) => [{ is_closed: closed.includes(id) }],
 });
 
+/**
+ * Rows lockInventoryRows reads after its FOR UPDATE (the raw lock queries themselves hit $queryRaw):
+ * the item, every warehouse asked for, and its stock rows at `stock`.
+ */
+const lockHandlers = (stock = '50') => ({
+  'inventoryItem.findMany': () => [ITEM],
+  'warehouse.findMany': ({ where }: any) => (where.id.in as string[]).map((id) => ({ id })),
+  'inventoryStock.findMany': ({ where }: any) =>
+    (where.OR as { itemId: string; warehouseId: string }[]).map((p) => ({ id: `st-${p.warehouseId}`, ...p, currentStock: stock })),
+});
+
 const journalHandlers = {
   ...fiscalYearHandlers(),
+  ...lockHandlers(),
   'inventoryItem.findUnique': () => ITEM,
   'journalEntry.create': ({ data }: any) => ({ id: 'je-1', ...data, items: data.items.create }),
 };
@@ -136,8 +148,8 @@ describe('stock opname header warehouse', () => {
   const opnameTx = (systemStock: string) =>
     makeAutoTx({
       ...fiscalYearHandlers(),
+      ...lockHandlers(systemStock),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: systemStock }],
-      'inventoryStock.findMany': () => [{ itemId: ITEM_ID, currentStock: systemStock }],
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
     });
 
@@ -156,6 +168,7 @@ describe('stock opname header warehouse', () => {
   it('falls back to the default warehouse when none is picked', async () => {
     current = makeAutoTx({
       ...fiscalYearHandlers(),
+      ...lockHandlers(),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: '10' }],
       'warehouse.findFirst': () => ({ id: 'wh-default' }),
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
@@ -234,11 +247,14 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
     current = makeAutoTx({
       ...fiscalYearHandlers(['fy-2026']),
       'stockOpname.findUnique': () => ({ id: 'so-1', opnameNumber: 'SO-1', status: 'Submitted', date: new Date('2026-12-20'), fiscalYearId: 'fy-2026', items: [] }),
+      'stockOpname.updateMany': () => ({ count: 1 }),
     });
     const res = await send('PUT', '/stock-opname/so-1/cancel', {});
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe('PERIOD_CLOSED');
-    expect(current.fn('stockOpname.update')).not.toHaveBeenCalled();
+    // The cancel claim ran first; the rejection rolls it back with the transaction.
+    expect(current.fn('stockOpname.updateMany')).toHaveBeenCalledTimes(1);
+    expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
   });
 });
 
@@ -302,6 +318,13 @@ describe('document movement lock and references (E3-R2)', () => {
   it('opname cancel skips a line whose movement was already cancelled', async () => {
     current = makeAutoTx({
       ...fiscalYearHandlers(),
+      ...lockHandlers(),
+      'stockOpname.updateMany': () => ({ count: 1 }),
+      'stockMovement.findMany': ({ where }: any) =>
+        [
+          { id: 'm-live', itemId: ITEM_ID, warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn', quantity: '2' },
+          { id: 'm-dead', itemId: ITEM_ID, warehouseId: WH, isCancelled: true, movementType: 'AdjustmentOut', quantity: '3' },
+        ].filter((m) => (where.id.in as string[]).includes(m.id) && m.isCancelled === where.isCancelled),
       'stockOpname.findUnique': () => ({
         id: 'so-1', opnameNumber: 'SO-1', status: 'Submitted', date: new Date('2026-10-10'), fiscalYearId: 'fy-2026',
         items: [
@@ -309,10 +332,6 @@ describe('document movement lock and references (E3-R2)', () => {
           { itemId: ITEM_ID, difference: '-3', movementId: 'm-dead', item: ITEM },
         ],
       }),
-      'stockMovement.findUnique': ({ where }: any) =>
-        where.id === 'm-dead'
-          ? { warehouseId: WH, isCancelled: true, movementType: 'AdjustmentOut', quantity: '3' }
-          : { warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn', quantity: '2' },
     });
     const res = await send('PUT', '/stock-opname/so-1/cancel', {});
     expect(res.status).toBe(200);

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
+import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { recomputeAverageCostFromReplay } from './averageCostRecompute';
@@ -38,7 +39,7 @@ export async function cancelGoodsReceiptInTx(
   const stt = await tx.goodsReceipt.findUnique({
     where: { id: sttId },
     include: {
-      items: { include: { stockMovement: true, inventoryItem: { select: { name: true } } } },
+      items: { include: { stockMovement: true } },
     },
   });
   if (!stt) throw new BusinessError('STT tidak ditemukan.');
@@ -114,30 +115,30 @@ export async function cancelGoodsReceiptInTx(
     }
   }
 
-  // Don't drive stock negative on reversal; allowNegativeStock logs a warning instead of throwing.
-  for (const grItem of stt.items) {
-    const sm = grItem.stockMovement;
-    if (!sm || sm.isCancelled) continue;
-    const qty = Number(sm.quantity);
-    const itemRow = await tx.inventoryItem.findUnique({
-      where: { id: grItem.inventoryItemId },
-      select: { currentStock: true },
-    });
-    const available = Number(itemRow?.currentStock ?? 0);
-    if (available < qty) {
-      if (!opts.allowNegativeStock) {
-        throw new BusinessError(
-          `Tidak dapat membatalkan STT ${stt.sttNumber}: stok '${grItem.inventoryItem?.name ?? grItem.inventoryItemId}' tidak mencukupi untuk pembalikan (tersedia ${available}, perlu ${qty}). ` +
-            'Barang sudah keluar (terjual/produksi). Batalkan transaksi tersebut dulu.',
-          GOODS_RECEIPT_CANCEL_INSUFFICIENT_STOCK,
-        );
-      }
-      logger.warn(
-        { sttId, itemId: grItem.inventoryItemId, available, reverseQty: qty, reason: opts.negativeStockReason },
-        'STT cancel reverse with negative stock bypass',
-      );
-    }
-  }
+  // Lock the items, then check the reversal per (item, warehouse of the movement), lines of one
+  // item summed. allowNegativeStock logs the shortage instead of throwing.
+  const activeMovements = stt.items
+    .map((it) => it.stockMovement)
+    .filter((sm): sm is NonNullable<typeof sm> => !!sm && !sm.isCancelled);
+  await lockInventoryRows(tx, {
+    itemIds: activeMovements.map((sm) => sm.itemId),
+    pairs: activeMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
+  });
+  await assertStockAvailable(
+    tx,
+    activeMovements.map((sm) => ({ itemId: sm.itemId, warehouseId: sm.warehouseId, quantity: sm.quantity.toString() })),
+    {
+      context: 'goodsReceipt.cancel',
+      userId,
+      allowNegative: opts.allowNegativeStock,
+      reason: opts.negativeStockReason,
+      error: (s) => new BusinessError(
+        `Tidak dapat membatalkan STT ${stt.sttNumber}: stok '${s.itemName}' tidak mencukupi untuk pembalikan (tersedia ${s.available.toNumber()}, perlu ${s.needed.toNumber()}). ` +
+          'Barang sudah keluar (terjual/produksi). Batalkan transaksi tersebut dulu.',
+        GOODS_RECEIPT_CANCEL_INSUFFICIENT_STOCK,
+      ),
+    },
+  );
 
   const affectedItemIds = new Set<string>();
   for (const grItem of stt.items) {
