@@ -108,6 +108,16 @@ const itemState = async (tx: Tx, itemId: string) => {
   };
 };
 
+const accountBalances = async (tx: Tx, w: ProductionWorld) => {
+  const rows = await tx.account.findMany({ where: { id: { in: Object.values(w.accounts).map((a) => a.id) } } });
+  const byId = new Map(rows.map((r) => [r.id, Number(r.balance)]));
+  return {
+    inventory: byId.get(w.accounts.inventory.id),
+    cogs: byId.get(w.accounts.cogs.id),
+    conversion: byId.get(w.accounts.conversion.id),
+  };
+};
+
 const runRow = (tx: Tx, runId: string) => tx.productionRun.findUniqueOrThrow({ where: { id: runId } });
 
 const lineOf = async (tx: Tx, runId: string, itemId: string) => {
@@ -217,6 +227,7 @@ d('production costing characterization - PRD R1 fixture', () => {
   it('cancel restores stock and averages and voids the journal', async () => {
     await inWorld(async (tx, w) => {
       await seedWorldStock(tx, w, 'gkp', 2000, 6000);
+      const seeded = await accountBalances(tx, w);
       const run = await submit(tx, w, r1Body(w));
       await cancelProductionRunInTx(tx, run.id, { userId: w.userId, reason: 'IT characterization' });
 
@@ -224,8 +235,11 @@ d('production costing characterization - PRD R1 fixture', () => {
       expect((await journalLinesByRole(tx, w, `JV-${run.runNumber}`)).status).toBe('Cancelled');
       expect((await movementsOf(tx, run.id)).every((m) => m.isCancelled)).toBe(true);
       expect(await itemState(tx, w.items.gkp.id)).toEqual({ currentStock: 2000, averageCost: 6000, warehouseSum: 2000 });
-      expect((await itemState(tx, w.items.beras.id)).currentStock).toBe(0);
-      expect((await itemState(tx, w.items.beras.id)).warehouseSum).toBe(0);
+      // Today's cancel keeps the stale output averages (no reset to 0); PR-6.5a/6.12 changes must show here.
+      expect(await itemState(tx, w.items.beras.id)).toEqual({ currentStock: 0, averageCost: 10166.67, warehouseSum: 0 });
+      expect(await itemState(tx, w.items.bekatul.id)).toEqual({ currentStock: 0, averageCost: 2000, warehouseSum: 0 });
+      // Cancel leaves no residual value: every fixture account is back at its post-seed balance.
+      expect(await accountBalances(tx, w)).toEqual(seeded);
       await assertBalancesMatchAle(tx, w);
     });
   });
