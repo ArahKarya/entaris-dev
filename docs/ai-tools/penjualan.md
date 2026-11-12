@@ -82,8 +82,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Retur -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi, aplikasi uang muka aktif, atau retur aktif (`INVOICE_HAS_ACTIVE_RETURNS`; batalkan returnya dulu dengan `sret_cancel`); `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
 4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.
 5. **Status invoice mengikuti sisa tagihan**: Paid bila sisa <= Rp 0,01, Submitted bila belum ada yang dilunasi, selain itu PartiallyPaid. Invoice yang diretur penuh berstatus Paid dan tidak menerima alokasi pembayaran. Status `Overdue` tidak pernah disimpan; jatuh tempo dibaca dari `dueDate`.
-6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak.
-7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak.
+6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak. `sret_cancel` juga ditolak (`STOCK_INSUFFICIENT`) bila barang retur sudah keluar lagi dari gudang retur; membatalkan juga butuh `allowNegativeStock` + `negativeStockReason` dan capability `inventory.negative_stock` (stok jadi minus).
+7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak. `si_create`, `do_update` dan `do_cancel` atas DO yang sama berjalan berurutan: yang menunggu melihat hasil yang lain (dua invoice atas satu DO: yang kedua ditolak; DO yang sudah diedit: baris lamanya "tidak ditemukan", ambil ulang barisnya). `do_create`/`do_update` menjumlah baris item yang sama per gudang dan menjawab `STOCK_INSUFFICIENT`; `STOCK_BUSY` (409) berarti stok sedang diproses transaksi lain, ulangi sebentar lagi.
 8. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
 9. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
 10. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.
@@ -1547,6 +1547,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 
 ### do_create
 
@@ -1625,7 +1626,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Error umum**
 
-- 400: stok tidak cukup.
+- 400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup (baris item yang sama dijumlah per gudang; pesan menyebut tersedia dan dibutuhkan)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: item perlu gudang sumber.
 - 400: pelanggan tidak aktif.
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
@@ -1967,6 +1969,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: SJ sudah masuk invoice — batalkan invoice dulu.
 - 400: SJ sudah dibatalkan.
 - 403: bypass stok minus butuh capability.
+- 400 STOCK_INSUFFICIENT: setelah stok SJ lama dikembalikan, stok gudang sumber tidak cukup untuk baris baru (dijumlah per item per gudang)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 - 400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem
@@ -3949,7 +3953,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 400: pelanggan tidak ditemukan/tidak aktif.
 - 400: stok tidak cukup.
-- 400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.
+- 400: baris SJ sudah dibatalkan, sudah masuk invoice lain, atau sudah diganti edit SJ (dicek saat SJ dikunci; dua invoice atas satu SJ: yang kedua ditolak)
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak
 - 400 PARTY_TYPE_MISMATCH: mitra bertipe Supplier tidak punya sisi Piutang; Invoice penjualan hanya untuk Customer atau Both
@@ -4637,6 +4641,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID retur. |
+| `allowNegativeStock` | body | `boolean` | tidak | true = tetap membatalkan walau barang retur sudah keluar lagi dari gudangnya (stok jadi minus); butuh capability inventory.negative_stock. |
+| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |
 | `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal retur dan uang muka kreditnya. |
 
 **Contoh pemanggilan**
@@ -4676,6 +4682,10 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.
 - 400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
+- 400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
+- 400: alasan bypass stok minus wajib (min 10 karakter)
+- 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
@@ -4752,6 +4762,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 400: qty retur melebihi sisa yang bisa diretur.
 - 400: invoice sudah dibatalkan.
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
