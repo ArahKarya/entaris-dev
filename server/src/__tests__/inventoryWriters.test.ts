@@ -43,9 +43,7 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/inventory/stockLocks.ts': { 'inventoryStock.createMany': 1 },
   'services/invoiceCancellation.ts': { 'inventoryStock.update': 2, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 2 },
   'services/openingStockImport.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
-  'services/productionRunCancel.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
-  'services/productionRunEdit.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
-  'services/productionRunSubmit.ts': { 'stockMovement.create': 2, 'inventoryItem.update(stock)': 2, adjustWarehouseStock: 2 },
+  'services/production/productionPosting.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
   'services/purchaseInvoiceRevise.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/salesReturnCancel.ts': { 'inventoryStock.update': 1, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
@@ -65,9 +63,7 @@ const LOCK_EXEMPT: Record<string, string> = {
 
 /** Writers that do not lock yet, with the PR that locks them. May only shrink; empty after PR-6.2b. */
 const PENDING_LOCK: Record<string, string> = {
-  'services/productionRunSubmit.ts': 'PR-6.2b: production inputs checked per item at the production warehouse',
-  'services/productionRunEdit.ts': 'PR-6.2b: lock old and new items before the reversal',
-  'services/productionRunCancel.ts': 'PR-6.2b: run claim, then the lock',
+  'services/production/productionPosting.ts': 'PR-6.2b: lock old and new items before the reversal, run claim first (the production writers now live here)',
 };
 
 function sourceFiles(dir: string): string[] {
