@@ -17,6 +17,7 @@ import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStoc
 import { assertStockAvailable, lockInventoryRows, stockKey } from '../services/inventory/stockLocks';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
 import { INBOUND_TYPES } from '../services/stockMovementList';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 import {
   buildStockOpnameWhere,
   DEFAULT_STOCK_OPNAME_SORT,
@@ -195,7 +196,7 @@ router.post('/', async (req: AuthRequest, res) => {
         const oldCost = item.averageCost.toNumber();
         const hasManualCost = input.unitCost !== undefined && input.unitCost !== null;
         const unitCost = hasManualCost
-          ? new Decimal(input.unitCost).toDecimalPlaces(2).toNumber()
+          ? new Decimal(input.unitCost).toDecimalPlaces(UNIT_COST_DP).toNumber()
           : oldCost;
         if (hasManualCost && unitCost !== oldCost) {
           revaluations.push({ itemId: input.itemId, oldCost, newCost: unitCost });

@@ -11,12 +11,13 @@
  *     terganggu (STT yang punya)
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { cancelPurchaseInvoiceInTx } from '../../services/invoiceCancellation';
+import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -175,6 +176,57 @@ d('PI from STT — Phase 3 flow', () => {
         const ap = jv!.items.find((i) => i.account.accountNumber === apNo && Number(i.credit) > 0);
         expect(Number(ap!.credit)).toBe(1_100_000);
         expect(ap!.partyId).toBe(supplierId);
+
+        throw new RollbackSentinel();
+      }, { timeout: 30000 });
+    } catch (err) {
+      if (!(err instanceof RollbackSentinel)) throw err;
+    }
+  });
+
+  it('landed cost and a price revision keep the unit cost and average at 6 decimals (UNIT_COST_DP)', async () => {
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const today = new Date().toISOString().slice(0, 10);
+    const avgOf = async (tx: Prisma.TransactionClient, id: string) => Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id } })).averageCost);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const item = await tx.inventoryItem.create({
+          data: { code: `TEST-6DP-${stamp}`, name: `6dp ${stamp}`, unit: 'kg', currentStock: 0, averageCost: 0, isActive: true },
+        });
+        const receive = (quantity: number, lockedUnitCost: number) => submitGoodsReceiptInTx(tx, {
+          date: today,
+          partyId: supplierId,
+          items: [{ inventoryItemId: item.id, warehouseId, itemName: item.name, quantity, unit: 'kg', lockedUnitCost }],
+        }, userId);
+
+        // 2 kg @ 9.000 + 1 kg @ 10.000: 28.000 / 3 = 9.333,333333 (2 dp would store 9.333,33).
+        await receive(2, 9_000);
+        const stt = await receive(1, 10_000);
+        expect(await avgOf(tx, item.id)).toBe(9_333.333333);
+        const grItem = await tx.goodsReceiptItem.findFirstOrThrow({ where: { goodsReceiptId: stt.id } });
+
+        // PI at 10.400 for that 1 kg: landed +400 on 3 kg in stock -> (3 x 9.333,333333 + 400) / 3.
+        const pi = await submitPurchaseInvoiceInTx(tx, {
+          date: today,
+          partyId: supplierId,
+          items: [{
+            itemName: item.name, inventoryItemId: item.id, warehouseId, quantity: 1, unit: 'kg',
+            rate: 10_400, taxPct: 0, pphPct: 0, goodsReceiptItemId: grItem.id,
+          }],
+        }, userId);
+        expect(await avgOf(tx, item.id)).toBe(9_466.666666);
+        const sttMove = await tx.stockMovement.findUniqueOrThrow({ where: { id: grItem.stockMovementId! } });
+        expect(Number(sttMove.unitCost)).toBe(10_400);
+        expect(Number(sttMove.totalValue)).toBe(10_400);
+
+        // Revision to 10.450,50: +50,50 still in stock -> (3 x 9.466,666666 + 50,5) / 3 = 9.483,499999.
+        const piItem = await tx.purchaseInvoiceItem.findFirstOrThrow({ where: { purchaseInvoiceId: pi.id } });
+        await revisePurchaseInvoiceInTx(tx, { invoiceId: pi.id, lines: [{ itemId: piItem.id, newRate: 10_450.5 }], reason: 'Revisi harga uji presisi' }, userId);
+        expect(await avgOf(tx, item.id)).toBe(9_483.499999);
+        // The rupiah value of the batch stays at 2 dp.
+        const revised = await tx.stockMovement.findUniqueOrThrow({ where: { id: grItem.stockMovementId! } });
+        expect(Number(revised.unitCost)).toBe(10_450.5);
+        expect(Number(revised.totalValue)).toBe(10_450.5);
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });

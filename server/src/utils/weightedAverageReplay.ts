@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { calcWeightedAverage } from './weightedAverage';
+import { UNIT_COST_DP } from './costPrecision';
 
 /**
  * Weighted-average-cost (WAC) REPLAY.
@@ -103,7 +104,7 @@ export function replayWeightedAverage(
 
   const resolved = hasCostedInbound ? avg : new Decimal(options.fallbackAverageCost.toString());
   return {
-    averageCost: resolved.toDecimalPlaces(2).toNumber(),
+    averageCost: resolved.toDecimalPlaces(UNIT_COST_DP).toNumber(),
     stock: stock.toNumber(),
     hasCostedInbound,
   };

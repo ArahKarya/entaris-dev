@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import type { Prisma } from '@prisma/client';
 import { replayWeightedAverage, sortMovementsForReplay, type ReplayMovement } from '../../utils/weightedAverageReplay';
+import { UNIT_COST_DP } from '../../utils/costPrecision';
 
 type Db = Pick<Prisma.TransactionClient, 'stockMovement' | 'systemAccountMapping'>;
 
@@ -36,7 +37,7 @@ export interface ManualMovementAuditRow {
   note: string;
 }
 
-/** Below this per-unit gap the stored cost counts as the average (both are stored at 2 dp). */
+/** Below this per-unit gap the stored cost counts as the average (rows before PR-6.4a were stored at 2 dp). */
 const COST_TOLERANCE = new Decimal('0.005');
 
 const OUTBOUND = new Set(['Out', 'AdjustmentOut']);
@@ -67,7 +68,7 @@ export function outboundCostFindings(rows: readonly AuditMovement[]): ManualMove
     const quantity = new Decimal(row.quantity.toString());
     out.push({
       ...rowFields(row, 'a'),
-      replayedAverage: average.toFixed(2),
+      replayedAverage: average.toFixed(UNIT_COST_DP),
       difference: quantity.mul(unitCost.minus(average)).toDecimalPlaces(2).toFixed(2),
       note: replay.hasCostedInbound ? 'unit cost differs from the replayed average' : 'no costed inbound before the row (stock may predate its movements)',
     });

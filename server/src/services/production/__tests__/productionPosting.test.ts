@@ -17,14 +17,28 @@ function r1(over: { hppOverride?: number; bekatulPrice?: number } = {}) {
 }
 
 describe('productionJournalLines', () => {
-  it('R1: CR input, DR outputs, the gain to conversion then COGS; postJournal accepts it as balanced', () => {
+  it('R1: CR input, DR outputs, the gain to conversion (no COGS rest at 6 dp); postJournal accepts it as balanced', () => {
     const lines = productionJournalLines({ plan: r1().journalPlan, accounts, ...names });
     expect(lines).toEqual([
       { accountId: 'inv-gkp', debit: 0, credit: 6_000_000, description: 'Bahan baku keluar GKP: PR-1' },
-      { accountId: 'inv-beras', debit: 6_100_000.02, credit: 0, description: 'Produksi masuk Beras: PR-1' },
+      { accountId: 'inv-beras', debit: 6_100_000, credit: 0, description: 'Produksi masuk Beras: PR-1' },
       { accountId: 'inv-bekatul', debit: 200_000, credit: 0, description: 'Produksi masuk Bekatul: PR-1' },
       { accountId: 'conv', debit: 0, credit: 300_000, description: 'Biaya konversi dibebankan: PR-1' },
-      { accountId: 'cogs', debit: 0, credit: 0.02, description: 'HPP konversi produksi: PR-1' },
+    ]);
+    expect(validateJournalLines(lines).ok).toBe(true);
+  });
+
+  it('a gain above the conversion cost credits the rest to COGS', () => {
+    // Typed main price 11.000: output 6.600.000 + 200.000 against 6.000.000 -> 300.000 conversion, 500.000 COGS.
+    const plan = computeProductionCosting({
+      inputs: [{ quantity: 1000, unitCost: 6000 }],
+      outputs: [{ quantity: 600, unitPrice: 11_000 }, { quantity: 100, unitPrice: 2000, isByProduct: true }],
+      costs: [{ description: 'Konversi', costSide: 'InputSide', basis: 'InputQty', rate: 300 }],
+    }).journalPlan;
+    const lines = productionJournalLines({ plan, accounts, ...names });
+    expect(lines.filter((l) => l.accountId === 'conv' || l.accountId === 'cogs')).toEqual([
+      { accountId: 'conv', debit: 0, credit: 300_000, description: 'Biaya konversi dibebankan: PR-1' },
+      { accountId: 'cogs', debit: 0, credit: 500_000, description: 'HPP konversi produksi: PR-1' },
     ]);
     expect(validateJournalLines(lines).ok).toBe(true);
   });

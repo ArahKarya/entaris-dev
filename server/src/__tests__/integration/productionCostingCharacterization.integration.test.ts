@@ -4,9 +4,10 @@
  * Pins what submitProductionRunInTx / editProductionRunInTx / cancelProductionRunInTx produce
  * for the PRD R1 fixture and its variants, so the refactors that follow (pure costing module,
  * posting module, journals through postJournal) can prove they change nothing. The pinned
- * numbers include today's rounding quirks: loaded HPP is 4 decimals while the movement
- * unit_cost column is 2, so the output movement value (600 x 10.166,6667 = 6.100.000,02) is not
- * qty x stored unit cost, and the 0,02 lands in COGS. A later PR that changes a number here
+ * numbers include the rounding: since PR-6.4a the loaded HPP, the movement unit_cost and the
+ * average are all 6 decimals (UNIT_COST_DP), so the output movement value is round(600 x
+ * 10.166,666667, 2) = 6.100.000 and nothing is left for COGS (with a 4 dp HPP and a 2 dp unit_cost
+ * the value was 6.100.000,02 and the 0,02 landed in COGS). A later PR that changes a number here
  * changes it on purpose, in its own diff.
  *
  * Fixture R1: GKP 1.000 kg @ 6.000, conversion 300/kg on input qty, bekatul 100 kg NRV 2.000,
@@ -137,7 +138,7 @@ d('production costing characterization - PRD R1 fixture', () => {
       const run = await submit(tx, w, r1Body(w));
 
       const stored = await runRow(tx, run.id);
-      expect(Number(stored.computedHpp)).toBe(10166.6667);
+      expect(Number(stored.computedHpp)).toBe(10166.666667);
       expect(stored.hppManualOverride).toBe(false);
       expect(Number(stored.totalMaterialCost)).toBe(6_000_000);
       expect(Number(stored.totalCostInputSide)).toBe(300_000);
@@ -145,32 +146,31 @@ d('production costing characterization - PRD R1 fixture', () => {
       expect(Number(stored.totalByproductValue)).toBe(200_000);
       expect(Number(stored.yieldPct)).toBeCloseTo(60, 6);
 
-      // Movements: the material goes out at its average, the output value is qty x HPP(4 dp)
-      // although unit_cost keeps 2 decimals.
+      // Movements: the material goes out at its average, the output value is qty x HPP, both 6 dp,
+      // rounded to the rupiah cent.
       const moves = await movementsOf(tx, run.id);
       const gkp = moves.find((m) => m.itemId === w.items.gkp.id)!;
       const beras = moves.find((m) => m.itemId === w.items.beras.id)!;
       const bekatul = moves.find((m) => m.itemId === w.items.bekatul.id)!;
       expect(gkp).toMatchObject({ type: 'Out', quantity: 1000, unitCost: 6000, totalValue: 6_000_000 });
-      expect(beras).toMatchObject({ type: 'In', quantity: 600, unitCost: 10166.67, totalValue: 6_100_000.02, unitCostLoaded: 10166.6667 });
-      expect(600 * beras.unitCost).not.toBe(beras.totalValue);
+      expect(beras).toMatchObject({ type: 'In', quantity: 600, unitCost: 10166.666667, totalValue: 6_100_000, unitCostLoaded: 10166.666667 });
       expect(bekatul).toMatchObject({ type: 'In', quantity: 100, unitCost: 2000, totalValue: 200_000, unitCostLoaded: 2000 });
 
-      // Journal: output 6.300.000,02 against input 6.000.000; conversion 300.000, the 0,02 rest to COGS.
+      // Journal: output 6.300.000 against input 6.000.000, all of it conversion; no rounding rest to COGS.
       const jv = await journalLinesByRole(tx, w, `JV-${run.runNumber}`);
       expect(jv.status).toBe('Submitted');
-      expect(jv.lines.inventory).toEqual({ debit: 6_300_000.02, credit: 6_000_000 });
+      expect(jv.lines.inventory).toEqual({ debit: 6_300_000, credit: 6_000_000 });
       expect(jv.lines.conversion).toEqual({ debit: 0, credit: 300_000 });
-      expect(jv.lines.cogs).toEqual({ debit: 0, credit: 0.02 });
+      expect(jv.lines.cogs).toBeUndefined();
 
       // Item totals, per-warehouse rows and averages.
       expect(await itemState(tx, w.items.gkp.id)).toEqual({ currentStock: 1000, averageCost: 6000, warehouseSum: 1000 });
-      expect(await itemState(tx, w.items.beras.id)).toEqual({ currentStock: 600, averageCost: 10166.67, warehouseSum: 600 });
+      expect(await itemState(tx, w.items.beras.id)).toEqual({ currentStock: 600, averageCost: 10166.666667, warehouseSum: 600 });
       expect(await itemState(tx, w.items.bekatul.id)).toEqual({ currentStock: 100, averageCost: 2000, warehouseSum: 100 });
 
       // Persisted lines: the main output carries the back-filled HPP at 2 dp.
       expect(await lineOf(tx, run.id, w.items.gkp.id)).toMatchObject({ lineType: 'Input', quantity: 1000, unitPrice: null, batchUnitCost: null });
-      expect(await lineOf(tx, run.id, w.items.beras.id)).toMatchObject({ lineType: 'Output', quantity: 600, unitPrice: 10166.67 });
+      expect(await lineOf(tx, run.id, w.items.beras.id)).toMatchObject({ lineType: 'Output', quantity: 600, unitPrice: 10166.666667 });
       expect(await lineOf(tx, run.id, w.items.bekatul.id)).toMatchObject({ lineType: 'ByProduct', quantity: 100, unitPrice: 2000 });
 
       const cost = await tx.productionRunCost.findFirstOrThrow({ where: { productionRunId: run.id } });
@@ -236,7 +236,7 @@ d('production costing characterization - PRD R1 fixture', () => {
       expect((await movementsOf(tx, run.id)).every((m) => m.isCancelled)).toBe(true);
       expect(await itemState(tx, w.items.gkp.id)).toEqual({ currentStock: 2000, averageCost: 6000, warehouseSum: 2000 });
       // Today's cancel keeps the stale output averages (no reset to 0); PR-6.5a/6.12 changes must show here.
-      expect(await itemState(tx, w.items.beras.id)).toEqual({ currentStock: 0, averageCost: 10166.67, warehouseSum: 0 });
+      expect(await itemState(tx, w.items.beras.id)).toEqual({ currentStock: 0, averageCost: 10166.666667, warehouseSum: 0 });
       expect(await itemState(tx, w.items.bekatul.id)).toEqual({ currentStock: 0, averageCost: 2000, warehouseSum: 0 });
       // Cancel leaves no residual value: every fixture account is back at its post-seed balance.
       expect(await accountBalances(tx, w)).toEqual(seeded);
@@ -278,9 +278,9 @@ d('production costing characterization - variants', () => {
         ],
       }));
 
-      expect(Number((await runRow(tx, run.id)).computedHpp)).toBe(10166.6667);
+      expect(Number((await runRow(tx, run.id)).computedHpp)).toBe(10166.666667);
       const beras = (await movementsOf(tx, run.id)).find((m) => m.itemId === w.items.beras.id)!;
-      expect(beras).toMatchObject({ unitCost: 11_000, totalValue: 6_600_000, unitCostLoaded: 10166.6667 });
+      expect(beras).toMatchObject({ unitCost: 11_000, totalValue: 6_600_000, unitCostLoaded: 10166.666667 });
 
       // Gain 800.000: the conversion cost (300.000) first, the other 500.000 to COGS.
       const jv = await journalLinesByRole(tx, w, `JV-${run.runNumber}`);

@@ -7,6 +7,7 @@ import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 
 type Tx = Prisma.TransactionClient;
 
@@ -142,7 +143,7 @@ export async function settleCogsBackfillForItem(
       const oldAvg = new Decimal(fresh.averageCost.toString());
       const oldGlValue = stockDec.mul(oldAvg);
       const newGlValue = oldGlValue.minus(totalDifferential);
-      const newAvg = newGlValue.div(stockDec).toDecimalPlaces(2);
+      const newAvg = newGlValue.div(stockDec).toDecimalPlaces(UNIT_COST_DP);
       await tx.inventoryItem.update({
         where: { id: itemId },
         data: { averageCost: newAvg.toNumber() < 0 ? 0 : newAvg.toNumber() },
