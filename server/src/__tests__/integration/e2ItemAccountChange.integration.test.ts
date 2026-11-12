@@ -71,8 +71,20 @@ const numberUnder = (prefix: string) => `${prefix}.97${Date.now() % 100000}${++s
 
 type RootType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
 
-const account = (tx: Tx, rootType: RootType, accountNumber: string, extra: { isGroup?: boolean; isActive?: boolean } = {}) =>
+const account = (tx: Tx, rootType: RootType, accountNumber: string, extra: { isGroup?: boolean; isActive?: boolean; parentId?: string } = {}) =>
   tx.account.create({ data: { name: `IT-ITEM ${tag()}`, accountNumber, accountType: rootType, rootType, ...extra } });
+
+/**
+ * The inventory subtree this file owns inside its rollback (E3-R5 limits item accounts to it): a group
+ * with the INVENTORY mapping on one child, so the result does not depend on the seed.
+ */
+async function inventorySubtree(tx: Tx) {
+  await tx.systemAccountMapping.deleteMany({ where: { role: 'INVENTORY' } });
+  const group = await account(tx, 'ASSET', numberUnder('1'), { isGroup: true });
+  const mapped = await account(tx, 'ASSET', numberUnder('1'), { parentId: group.id });
+  await tx.systemAccountMapping.create({ data: { role: 'INVENTORY', accountId: mapped.id } });
+  return { group, mapped, child: () => account(tx, 'ASSET', numberUnder('1'), { parentId: group.id }) };
+}
 
 /** An item on `accountId` holding `stock` units at 10.000, with the matching value in the ledger. */
 async function itemWithStock(tx: Tx, accountId: string, stock: number) {
@@ -103,8 +115,9 @@ const accountOf = async (tx: Tx, id: string) => (await tx.inventoryItem.findUniq
 d('item inventory account (E2-R6)', () => {
   it('refuses to change the account of an item holding 8.000 units, and leaves the item alone', async () => {
     await inRollback(async (tx) => {
-      const from = await account(tx, 'ASSET', numberUnder('1'));
-      const to = await account(tx, 'ASSET', numberUnder('1'));
+      const sub = await inventorySubtree(tx);
+      const from = await sub.child();
+      const to = await sub.child();
       const item = await itemWithStock(tx, from.id, 8000);
 
       const r = await putItem(item.id, { accountId: to.id, name: 'Nama baru' });
@@ -118,8 +131,9 @@ d('item inventory account (E2-R6)', () => {
 
   it('changes the account of an item with no stock', async () => {
     await inRollback(async (tx) => {
-      const from = await account(tx, 'ASSET', numberUnder('1'));
-      const to = await account(tx, 'ASSET', numberUnder('1'));
+      const sub = await inventorySubtree(tx);
+      const from = await sub.child();
+      const to = await sub.child();
       const item = await itemWithStock(tx, from.id, 0);
 
       const r = await putItem(item.id, { accountId: to.id });
@@ -131,8 +145,9 @@ d('item inventory account (E2-R6)', () => {
 
   it('counts negative stock and stock that only sits in a warehouse as stock', async () => {
     await inRollback(async (tx) => {
-      const from = await account(tx, 'ASSET', numberUnder('1'));
-      const to = await account(tx, 'ASSET', numberUnder('1'));
+      const sub = await inventorySubtree(tx);
+      const from = await sub.child();
+      const to = await sub.child();
       const negative = await itemWithStock(tx, from.id, 0);
       await tx.inventoryItem.update({ where: { id: negative.id }, data: { currentStock: -5 } });
       const r1 = await putItem(negative.id, { accountId: to.id });
@@ -150,7 +165,8 @@ d('item inventory account (E2-R6)', () => {
 
   it('accepts only an active ASSET detail account that is not another control account', async () => {
     await inRollback(async (tx) => {
-      const from = await account(tx, 'ASSET', numberUnder('1'));
+      const sub = await inventorySubtree(tx);
+      const from = await sub.child();
       const item = await itemWithStock(tx, from.id, 0);
       const group = await account(tx, 'ASSET', numberUnder('1'), { isGroup: true });
       const expense = await account(tx, 'EXPENSE', numberUnder('6'));
@@ -177,11 +193,9 @@ d('item inventory account (E2-R6)', () => {
 
   it('lets the same account through with stock, and treats clearing it as a change', async () => {
     await inRollback(async (tx) => {
-      // This file owns the INVENTORY mapping inside its rollback so the result does not depend on the seed.
-      await tx.systemAccountMapping.deleteMany({ where: { role: 'INVENTORY' } });
-      const mapped = await account(tx, 'ASSET', numberUnder('1'));
-      await tx.systemAccountMapping.create({ data: { role: 'INVENTORY', accountId: mapped.id } });
-      const own = await account(tx, 'ASSET', numberUnder('1'));
+      const sub = await inventorySubtree(tx);
+      const mapped = sub.mapped;
+      const own = await sub.child();
 
       const withOwn = await itemWithStock(tx, own.id, 8000);
       const same = await putItem(withOwn.id, { accountId: own.id, minimumStock: 5 });
@@ -200,7 +214,8 @@ d('item inventory account (E2-R6)', () => {
 
   it('validates the account on create without looking at stock', async () => {
     await inRollback(async (tx) => {
-      const asset = await account(tx, 'ASSET', numberUnder('1'));
+      const sub = await inventorySubtree(tx);
+      const asset = await sub.child();
       const expense = await account(tx, 'EXPENSE', numberUnder('6'));
       const bad = await postItem({ code: `IT-ITEM-${tag()}`, name: 'Uji', unit: 'kg', accountId: expense.id });
       expect(bad.status).toBe(400);

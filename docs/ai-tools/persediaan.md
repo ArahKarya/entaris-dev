@@ -470,7 +470,7 @@ Aturan wajib:
 
 ### inv_item_delete
 
-**Ringkasan:** Menghapus PERMANEN master item beserta seluruh baris pergerakan stok-nya yang sudah dibatalkan. Ditolak bila item punya mutasi stok aktif atau sudah dipakai di invoice penjualan/pembelian; gunakan inv_item_update isActive=false untuk menonaktifkan.
+**Ringkasan:** Menghapus PERMANEN master item beserta seluruh baris pergerakan stok-nya yang sudah dibatalkan. Ditolak bila item punya mutasi stok aktif, masih memiliki stok (termasuk negatif; ITEM_HAS_STOCK) atau sudah dipakai di invoice penjualan/pembelian; gunakan inv_item_update isActive=false untuk menonaktifkan.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -516,6 +516,7 @@ Aturan wajib:
 **Error umum**
 
 - 400: item punya mutasi stok aktif
+- 400: ITEM_HAS_STOCK: item masih memiliki stok (termasuk negatif)
 - 400: item sudah dipakai di invoice
 - 404: item tidak ditemukan
 
@@ -523,7 +524,7 @@ Aturan wajib:
 
 ### inv_item_update
 
-**Ringkasan:** Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif (ITEM_ACCOUNT_HAS_STOCK).
+**Ringkasan:** Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); accountId juga harus berada di kelompok akun Persediaan (ITEM_ACCOUNT_NOT_INVENTORY). Mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif, atau masih ada di Surat Jalan yang belum ditagih (ITEM_ACCOUNT_HAS_STOCK). Mengganti satuan ditolak bila item sudah punya mutasi stok aktif atau stok (ITEM_UNIT_IN_USE). Menonaktifkan item ditolak selama item punya stok atau ada di Surat Jalan yang belum ditagih (ITEM_HAS_STOCK).
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -543,7 +544,7 @@ Aturan wajib:
 | `description` | body | `string` | tidak | Keterangan. |
 | `minimumStock` | body | `number` | tidak |  |
 | `accountId` | body | `string` | tidak | ID akun COA. |
-| `isActive` | body | `boolean` | tidak | false = nonaktifkan item (tidak bisa dipakai transaksi baru). |
+| `isActive` | body | `boolean` | tidak | false = nonaktifkan item (tidak bisa dipakai transaksi baru); ditolak bila item masih punya stok (ITEM_HAS_STOCK). |
 
 **Contoh pemanggilan**
 
@@ -578,7 +579,10 @@ Aturan wajib:
 
 - 404: item tidak ditemukan
 - 400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan tidak valid
-- 400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok
+- 400: ITEM_ACCOUNT_NOT_INVENTORY: akun bukan bagian dari kelompok akun Persediaan
+- 400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok atau Surat Jalan belum ditagih
+- 400: ITEM_UNIT_IN_USE: satuan tidak dapat diganti setelah item punya mutasi stok atau stok
+- 400: ITEM_HAS_STOCK: item tidak dapat dinonaktifkan selama masih punya stok atau Surat Jalan belum ditagih
 
 **Tool terkait:** [`inv_items_list`](#inv_items_list)
 
@@ -1870,7 +1874,7 @@ Aturan wajib:
 
 ### wh_update
 
-**Ringkasan:** Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama.
+**Ringkasan:** Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama. Menonaktifkan gudang ditolak bila masih ada stok (termasuk negatif) di gudang itu (WAREHOUSE_HAS_STOCK) atau bila gudang itu default (WAREHOUSE_IS_DEFAULT). Gudang default tidak bisa dilepas lewat isDefault=false; jadikan gudang lain default (WAREHOUSE_IS_DEFAULT). Gudang default harus aktif: menjadikan gudang nonaktif sebagai default juga ditolak (WAREHOUSE_IS_DEFAULT). Bila gudang sedang dipakai transaksi stok, hasilnya WAREHOUSE_BUSY; coba lagi.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1887,7 +1891,7 @@ Aturan wajib:
 | `name` | body | `string` | tidak | Nama. |
 | `location` | body | `string` | tidak |  |
 | `description` | body | `string` | tidak | Keterangan. |
-| `isActive` | body | `boolean` | tidak | false = nonaktifkan (disarankan ketimbang menghapus gudang berriwayat). |
+| `isActive` | body | `boolean` | tidak | false = nonaktifkan (disarankan ketimbang menghapus gudang berriwayat); ditolak bila gudang masih bersaldo atau default. |
 | `isDefault` | body | `boolean` | tidak |  |
 | `sortOrder` | body | `number` | tidak |  |
 
@@ -1923,4 +1927,7 @@ Aturan wajib:
 **Error umum**
 
 - 400: gudang tidak ditemukan
+- 400: WAREHOUSE_HAS_STOCK: gudang masih punya stok
+- 400: WAREHOUSE_IS_DEFAULT: gudang default tidak bisa dinonaktifkan atau dilepas dari status default
+- 400: WAREHOUSE_BUSY: gudang sedang dipakai transaksi stok, coba lagi
 

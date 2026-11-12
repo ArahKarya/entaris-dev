@@ -18,7 +18,7 @@ import {
   usesListMode,
 } from '../../services/inventoryItemList';
 import { logger } from '../../lib/logger';
-import { assertItemAccountChange, assertItemAccountValid } from '../../services/inventory/itemAccount';
+import { assertItemAccountValid, assertItemChangeAllowed, itemHoldsStock, ITEM_HAS_STOCK } from '../../services/inventory/itemMasterGuard';
 
 const router = Router();
 
@@ -269,7 +269,11 @@ router.put('/:id', async (req: AuthRequest, res) => {
       // accountId before they lock the item, so a posting already in flight can still land on the old account.
       const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM inventory_items WHERE id = ${id} FOR UPDATE`;
       if (locked.length === 0) return null;
-      if (body.accountId !== undefined) await assertItemAccountChange(tx, id, body.accountId || null);
+      await assertItemChangeAllowed(tx, id, {
+        unit: body.unit,
+        isActive: body.isActive,
+        accountId: body.accountId === undefined ? undefined : body.accountId || null,
+      });
       return tx.inventoryItem.update({
         where: { id },
         data: {
@@ -298,34 +302,49 @@ router.delete('/:id', async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
 
-    // Check if item has stock movements
-    const movementCount = await prisma.stockMovement.count({
-      where: { itemId: id, isCancelled: false },
+    const found = await prisma.$transaction(async (tx) => {
+      // Same row lock as PUT, so a posting or an edit in flight cannot slip between the checks and the delete.
+      const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM inventory_items WHERE id = ${id} FOR UPDATE`;
+      if (locked.length === 0) return false;
+
+      // Check if item has stock movements
+      const movementCount = await tx.stockMovement.count({ where: { itemId: id, isCancelled: false } });
+      if (movementCount > 0) {
+        throw new BusinessError(
+          `Item memiliki ${movementCount} mutasi stok aktif. Batalkan semua mutasi terlebih dahulu atau nonaktifkan item.`,
+        );
+      }
+
+      // Check if item is used in purchase/sales invoice items
+      const [purchaseUsage, salesUsage] = await Promise.all([
+        tx.purchaseInvoiceItem.count({ where: { inventoryItemId: id } }),
+        tx.salesInvoiceItem.count({ where: { inventoryItemId: id } }),
+      ]);
+      if (purchaseUsage > 0 || salesUsage > 0) {
+        throw new BusinessError('Item sudah digunakan di invoice. Nonaktifkan item jika tidak ingin dipakai lagi.');
+      }
+
+      // Stock without an active movement behind it (drift) would vanish from the stock book with the item
+      // and its warehouse rows, while the GL still carries the value.
+      const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id }, select: { currentStock: true } });
+      if (await itemHoldsStock(tx, id, item.currentStock)) {
+        throw new BusinessError(
+          'Item tidak dapat dihapus selama masih memiliki stok (termasuk stok negatif). Kosongkan stok di semua gudang atau nonaktifkan item.',
+          ITEM_HAS_STOCK,
+        );
+      }
+
+      // Safe to delete — also remove cancelled movements
+      await tx.stockMovement.deleteMany({ where: { itemId: id } });
+      await tx.inventoryItem.delete({ where: { id } });
+      return true;
     });
-    if (movementCount > 0) {
-      return res.status(400).json({
-        error: `Item memiliki ${movementCount} mutasi stok aktif. Batalkan semua mutasi terlebih dahulu atau nonaktifkan item.`,
-      });
-    }
-
-    // Check if item is used in purchase/sales invoice items
-    const purchaseUsage = await prisma.purchaseInvoiceItem.count({ where: { inventoryItemId: id as string } });
-    const salesUsage = await prisma.salesInvoiceItem.count({ where: { inventoryItemId: id as string } });
-    if (purchaseUsage > 0 || salesUsage > 0) {
-      return res.status(400).json({
-        error: 'Item sudah digunakan di invoice. Nonaktifkan item jika tidak ingin dipakai lagi.',
-      });
-    }
-
-    // Safe to delete — also remove cancelled movements
-    await prisma.stockMovement.deleteMany({ where: { itemId: id as string } });
-    await prisma.inventoryItem.delete({ where: { id: id as string } });
+    if (!found) return res.status(404).json({ error: 'Item stok tidak ditemukan.' });
 
     return res.json({ message: 'Item stok dihapus.' });
   } catch (error: any) {
     if (error.code === 'P2025') return res.status(404).json({ error: 'Item stok tidak ditemukan.' });
-    logger.error({ error }, 'DELETE /inventory/items/:id error');
-    return res.status(500).json({ error: 'Gagal menghapus item stok.' });
+    return handleRouteError(res, error, 'DELETE /inventory/items/:id', 'Gagal menghapus item stok.');
   }
 });
 
