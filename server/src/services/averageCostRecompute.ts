@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { logger } from '../lib/logger';
+import { lockInventoryRows } from './inventory/stockLocks';
 import { replayWeightedAverage, type ReplayMovement } from '../utils/weightedAverageReplay';
 
 type Tx = Prisma.TransactionClient;
@@ -23,6 +24,9 @@ export async function replayAverageCost(
   itemId: string,
   opts: { excludeMovementIds?: string[] } = {},
 ): Promise<ReplayedAverage | null> {
+  // Callers lock the item before they cancel or edit its movements; taking it again is free, and
+  // the stock and movements read below then cannot change before commit.
+  await lockInventoryRows(tx, { itemIds: [itemId] });
   const item = await tx.inventoryItem.findUnique({
     where: { id: itemId },
     select: { averageCost: true, currentStock: true },

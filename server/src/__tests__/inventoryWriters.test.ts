@@ -13,7 +13,8 @@ import path from 'node:path';
  *
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
  * it writes, unless it is in LOCK_EXEMPT (wipe, seed, the helpers themselves) or still in
- * PENDING_LOCK with the PR that locks it. PENDING_LOCK may only shrink too, and is empty after PR-6.2c.
+ * PENDING_LOCK with the PR that locks it. PENDING_LOCK may only shrink too: PR-6.2c locked the
+ * sales, purchase and import writers, and PR-6.2b empties it with production.
  */
 const SRC = path.resolve(__dirname, '..');
 
@@ -62,22 +63,11 @@ const LOCK_EXEMPT: Record<string, string> = {
   'scripts/fixPotonganAllocation.ts': 'one-off legacy repair script, deleted in PR-6.4e',
 };
 
-/** Writers that do not lock yet, with the PR that locks them. May only shrink; empty after PR-6.2c. */
+/** Writers that do not lock yet, with the PR that locks them. May only shrink; empty after PR-6.2b. */
 const PENDING_LOCK: Record<string, string> = {
   'services/productionRunSubmit.ts': 'PR-6.2b: production inputs checked per item at the production warehouse',
   'services/productionRunEdit.ts': 'PR-6.2b: lock old and new items before the reversal',
   'services/productionRunCancel.ts': 'PR-6.2b: run claim, then the lock',
-  'services/deliveryOrderSubmit.ts': 'PR-6.2c: lock before the aggregate check, average from the lock',
-  'services/deliveryOrderEdit.ts': 'PR-6.2c: DO row lock, then the items',
-  'services/deliveryOrderCancel.ts': 'PR-6.2c: re-read invoiceId after the claim, then the items',
-  'services/salesReturnSubmit.ts': 'PR-6.2c: lock the returned items before the inbound',
-  'services/salesReturnCancel.ts': 'PR-6.2c: lock items before voiding journals, reversal per warehouse',
-  'services/invoiceCancellation.ts': 'PR-6.2c: lock items before voiding journals, reversal per warehouse',
-  'services/purchaseInvoiceSubmit.ts': 'PR-6.2c: lock only (landed cost realign)',
-  'services/purchaseInvoiceRevise.ts': 'PR-6.2c: lock only',
-  'services/openingStockImport.ts': 'PR-6.2c: lock only; routes/import/inventory.ts re-reads the item inside the transaction',
-  'services/cogsBackfillService.ts': 'PR-6.2c: lock only',
-  'services/averageCostRecompute.ts': 'PR-6.2c: lock only (runs inside callers)',
 };
 
 function sourceFiles(dir: string): string[] {

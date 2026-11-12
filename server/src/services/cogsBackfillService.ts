@@ -5,6 +5,7 @@ import { updateAccountBalance } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
 import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
+import { lockInventoryRows } from './inventory/stockLocks';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 
 type Tx = Prisma.TransactionClient;
@@ -54,6 +55,9 @@ export async function settleCogsBackfillForItem(
     orderBy: { createdAt: 'asc' },
   });
   if (pendings.length === 0) return null;
+  // The caller already holds the item lock (its stock-in locked it); taking it again is free and
+  // keeps the average read below behind it if a caller ever does not.
+  await lockInventoryRows(tx, { itemIds: [itemId] });
 
   let remaining = new Decimal(qtyAvailable);
   let totalDifferential = new Decimal(0);

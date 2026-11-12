@@ -8,6 +8,7 @@ import { CancelReasonSchema, CreatePurchaseInvoiceSchema, RevisePurchaseInvoiceS
 import { cancelTrail } from '../utils/cancelClaim';
 import { handleRouteError } from '../utils/errors';
 import { cancelPurchaseInvoiceInTx } from '../services/invoiceCancellation';
+import { negativeStockBypassDenied, negativeStockForbiddenBody } from '../utils/negativeStockGate';
 import { submitPurchaseInvoiceInTx } from '../services/purchaseInvoiceSubmit';
 import { revisePurchaseInvoiceInTx } from '../services/purchaseInvoiceRevise';
 import { computePurchaseInvoiceTotals } from '../services/purchaseInvoiceCalc';
@@ -261,9 +262,18 @@ router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, re
   const body = validateBody(CancelReasonSchema, req.body ?? {}, res);
   if (!body) return;
   try {
+    // Legacy PI-owned stock may have left the warehouse; taking it out anyway needs the bypass.
+    const allowNegativeStock = req.body?.allowNegativeStock === true;
+    const negativeStockReason = typeof req.body?.negativeStockReason === 'string' ? req.body.negativeStockReason : null;
+    if (allowNegativeStock && (!negativeStockReason || negativeStockReason.trim().length < 10)) {
+      return res.status(400).json({ error: 'Alasan bypass stok minus wajib diisi (minimal 10 karakter).' });
+    }
+    if (await negativeStockBypassDenied(req.user!.role, allowNegativeStock)) {
+      return res.status(403).json(negativeStockForbiddenBody());
+    }
     const result = await prisma.$transaction(
-      (tx) => cancelPurchaseInvoiceInTx(tx, req.params.id as string, cancelTrail(req.user!.userId, body.reason)),
-      { timeout: 15000 },
+      (tx) => cancelPurchaseInvoiceInTx(tx, req.params.id as string, cancelTrail(req.user!.userId, body.reason), { allowNegativeStock, negativeStockReason }),
+      { timeout: 30000 },
     );
     return res.json(result);
   } catch (error: any) {

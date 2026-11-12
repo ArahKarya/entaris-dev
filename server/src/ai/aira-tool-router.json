@@ -17304,7 +17304,8 @@
         "Stok cukup di gudang sumber."
       ],
       "errors": [
-        "400: stok tidak cukup.",
+        "400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup (baris item yang sama dijumlah per gudang; pesan menyebut tersedia dan dibutuhkan)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: item perlu gudang sumber.",
         "400: pelanggan tidak aktif.",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
@@ -17356,7 +17357,8 @@
         "400: surat jalan sudah dibatalkan.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "prerequisites": [
         "Tahun buku tanggal SJ masih terbuka."
@@ -25129,7 +25131,8 @@
         "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
         "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both"
+        "400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "related": [
         "gr_pending",
@@ -25151,6 +25154,8 @@
       ],
       "input": {
         "id": "string",
+        "allowNegativeStock": "boolean",
+        "negativeStockReason": "string",
         "reason": "string"
       },
       "params": [
@@ -25160,6 +25165,20 @@
           "type": "string",
           "required": true,
           "description": "ID invoice pembelian (UUID)."
+        },
+        {
+          "name": "allowNegativeStock",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true = tetap membatalkan walau stok yang dibuat invoice lama (tanpa STT) sudah keluar dari gudangnya (stok jadi minus); butuh capability inventory.negative_stock."
+        },
+        {
+          "name": "negativeStockReason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true."
         },
         {
           "name": "reason",
@@ -25188,6 +25207,10 @@
         "400: Invoice sudah lunas",
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
+        "400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
@@ -25279,7 +25302,8 @@
         "400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup",
         "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan"
+        "400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "related": [
         "pi_get",
@@ -26370,7 +26394,8 @@
       ],
       "errors": [
         "403: bypass stok minus butuh capability.",
-        "400: stok tidak cukup.",
+        "400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup (baris item yang sama dijumlah per gudang; pesan menyebut tersedia dan dibutuhkan)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: SO bukan Submitted/PartiallyDelivered."
       ],
       "related": [
@@ -26527,6 +26552,7 @@
       "errors": [
         "400: qty retur melebihi sisa yang bisa diretur.",
         "400: invoice sudah dibatalkan.",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
@@ -26549,6 +26575,8 @@
       ],
       "input": {
         "id": "string",
+        "allowNegativeStock": "boolean",
+        "negativeStockReason": "string",
         "reason": "string"
       },
       "params": [
@@ -26558,6 +26586,20 @@
           "type": "string",
           "required": true,
           "description": "ID retur."
+        },
+        {
+          "name": "allowNegativeStock",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true = tetap membatalkan walau barang retur sudah keluar lagi dari gudangnya (stok jadi minus); butuh capability inventory.negative_stock."
+        },
+        {
+          "name": "negativeStockReason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true."
         },
         {
           "name": "reason",
@@ -26583,6 +26625,10 @@
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
+        "400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
@@ -26833,7 +26879,8 @@
       "errors": [
         "400: pelanggan tidak ditemukan/tidak aktif.",
         "400: stok tidak cukup.",
-        "400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.",
+        "400: baris SJ sudah dibatalkan, sudah masuk invoice lain, atau sudah diganti edit SJ (dicek saat SJ dikunci; dua invoice atas satu SJ: yang kedua ditolak)",
+        "409 STOCK_BUSY: surat jalan yang ditagih sedang dikunci transaksi lain (batal/edit SJ atau invoice lain) dan terjadi deadlock; coba lagi sebentar lagi",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak",
         "400 PARTY_TYPE_MISMATCH: mitra bertipe Supplier tidak punya sisi Piutang; Invoice penjualan hanya untuk Customer atau Both"
@@ -26896,7 +26943,8 @@
         "400 INVOICE_HAS_ACTIVE_RETURNS: Invoice masih punya retur yang belum dibatalkan (termasuk Invoice yang diretur penuh, yang berstatus Paid). Batalkan returnya dulu (sret_cancel), lalu ulangi si_cancel",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
-        "400: alasan pembatalan maksimal 500 karakter"
+        "400: alasan pembatalan maksimal 500 karakter",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -28348,6 +28396,8 @@
         "400: SJ sudah masuk invoice — batalkan invoice dulu.",
         "400: SJ sudah dibatalkan.",
         "403: bypass stok minus butuh capability.",
+        "400 STOCK_INSUFFICIENT: setelah stok SJ lama dikembalikan, stok gudang sumber tidak cukup untuk baris baru (dijumlah per item per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
         "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem",

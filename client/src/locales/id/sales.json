@@ -76,6 +76,13 @@
       "title": "Batalkan Alokasi Uang Muka",
       "description": "Yakin ingin membatalkan alokasi uang muka ini? Saldo deposit akan dikembalikan dan outstanding invoice akan bertambah kembali.",
       "confirm": "Batalkan Alokasi"
+    },
+    "forceCancel": {
+      "title": "Paksa pembatalan invoice?",
+      "description": "{{message}} Untuk memaksa pembatalan (stok bisa jadi minus), isi alasan (min 10 karakter).",
+      "confirm": "Paksa Batalkan",
+      "reasonLabel": "Alasan pembatalan paksa",
+      "reasonPlaceholder": "Tuliskan alasan (min 10 karakter)…"
     }
   },
   "invoiceDOPicker": {
@@ -741,6 +748,13 @@
       "description": "Stok dan jurnal akan dibalik. Tindakan ini tidak dapat diurungkan.",
       "confirm": "Batalkan Retur",
       "cancel": "Kembali"
+    },
+    "forceCancel": {
+      "title": "Paksa pembatalan retur {{number}}?",
+      "description": "{{message}} Untuk memaksa pembatalan (stok bisa jadi minus), isi alasan (min 10 karakter).",
+      "confirm": "Paksa Batalkan",
+      "reasonLabel": "Alasan pembatalan paksa",
+      "reasonPlaceholder": "Tuliskan alasan (min 10 karakter)…"
     }
   },
   "salesReturnModal": {

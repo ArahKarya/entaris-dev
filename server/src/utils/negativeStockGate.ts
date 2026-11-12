@@ -17,3 +17,9 @@ export const negativeStockForbiddenBody = () => ({ error: NEGATIVE_STOCK_FORBIDD
 export async function negativeStockBypassDenied(role: string, allowNegativeStock: boolean): Promise<boolean> {
   return allowNegativeStock && !(await hasCap(role, NEGATIVE_STOCK_CAP));
 }
+
+/** The bypass a route passes on to a service after the reason and capability checks above. */
+export interface NegativeStockBypass {
+  allowNegativeStock?: boolean;
+  negativeStockReason?: string | null;
+}

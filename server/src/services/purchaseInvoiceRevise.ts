@@ -11,6 +11,7 @@ import { systemAccounts, mappedAccount } from '../services/systemAccounts';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
+import { lockInventoryRows } from './inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -49,6 +50,18 @@ export async function revisePurchaseInvoiceInTx(
   if (!input.reason || input.reason.trim().length < 10) {
     throw new BusinessError('Alasan revisi harga wajib diisi (minimal 10 karakter).');
   }
+
+  // The invoice row first (step 1 of the lock order in services/inventory/stockLocks.ts, as PI
+  // cancel claims it before its items): a concurrent cancel or revise of this invoice waits here,
+  // and the status read below comes after the lock. Then its items, before reading their stock and
+  // average and before the journal locks its accounts: the WAC correction works on figures no
+  // concurrent posting can change.
+  await tx.$queryRaw`SELECT id FROM purchase_invoices WHERE id = ${input.invoiceId} FOR UPDATE`;
+  const lineItems = await tx.purchaseInvoiceItem.findMany({
+    where: { purchaseInvoiceId: input.invoiceId },
+    select: { inventoryItemId: true },
+  });
+  await lockInventoryRows(tx, { itemIds: lineItems.flatMap((l) => (l.inventoryItemId ? [l.inventoryItemId] : [])) });
 
   const invoice = await tx.purchaseInvoice.findUnique({
     where: { id: input.invoiceId },

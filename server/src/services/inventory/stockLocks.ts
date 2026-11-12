@@ -10,9 +10,13 @@
  *   3. stock movement and journal numbers (generateDocumentNumber 'SM' / 'JV');
  *   4. the account rows that posting a journal locks (postJournal, updateAccountBalance).
  * The fiscal-year share lock of the period guards may come before step 1 or 2: it only conflicts
- * with a year close, which takes no stock lock.
+ * with a year close, which takes no stock lock. A sales return (submit and cancel) and the sales
+ * invoice cancel lock the AR account row before their document (lockArThenSalesInvoiceInTx, the
+ * order payments take), so for them that row is part of step 1: no path may lock AR while it holds
+ * item rows unless it locked AR first. Delivery notes are documents of the invoice that bills them
+ * (sales invoice submit and cancel lock them in id order before any item or account).
  *
- * Until PR-6.2b and PR-6.2c, the writers listed in PENDING_LOCK (__tests__/inventoryWriters.test.ts)
+ * Until PR-6.2b, the production writers listed in PENDING_LOCK (__tests__/inventoryWriters.test.ts)
  * do not follow this order: a multi-line one updates an item row, takes the 'SM' number, then
  * updates the next line's item. Against a path that follows the order this can deadlock; the
  * aborted side answers 409 STOCK_BUSY (handleRouteError maps 40P01), so the client retries.
