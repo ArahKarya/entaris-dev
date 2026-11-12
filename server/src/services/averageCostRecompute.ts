@@ -10,9 +10,14 @@ const STOCK_TOLERANCE = new Decimal('0.001');
 /**
  * Re-derive averageCost by replaying the item's active movements; historical COGS/journals stay.
  * Skipped (warning logged) when movements don't explain the stock. Call after the movements were
- * cancelled/edited in the same transaction.
+ * cancelled/edited in the same transaction. `excludeMovementIds` leaves rows out of the replay whose
+ * stock the caller has already reversed but not yet rewritten (a manual movement edit).
  */
-export async function recomputeAverageCostFromReplay(tx: Tx, itemId: string): Promise<number> {
+export async function recomputeAverageCostFromReplay(
+  tx: Tx,
+  itemId: string,
+  opts: { excludeMovementIds?: string[] } = {},
+): Promise<number> {
   const item = await tx.inventoryItem.findUnique({
     where: { id: itemId },
     select: { averageCost: true, currentStock: true },
@@ -20,7 +25,7 @@ export async function recomputeAverageCostFromReplay(tx: Tx, itemId: string): Pr
   if (!item) return 0;
 
   const rows = await tx.stockMovement.findMany({
-    where: { itemId, isCancelled: false },
+    where: { itemId, isCancelled: false, ...(opts.excludeMovementIds?.length ? { id: { notIn: opts.excludeMovementIds } } : {}) },
     select: { id: true, movementType: true, quantity: true, unitCost: true, createdAt: true, referenceType: true },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });

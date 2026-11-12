@@ -156,16 +156,22 @@ export async function createMasters(ctx: DemoContext): Promise<void> {
   ctx.serviceItems.milling = { id: svc.id, name: 'Jasa Giling Gabah', rate: 450 };
 }
 
-/** Owner capital into cash and bank, and opening stock per item, one day before the demo span. */
+/**
+ * Owner capital into cash and bank, and opening stock per item, one day before the demo span. A
+ * manual stock in needs an offset other than the opening equity, so the capital also covers the
+ * opening stock and each stock in is paid from the bank: the closing balances are the same as an
+ * opening stock credited to equity.
+ */
 export async function postOpeningBalances(ctx: DemoContext): Promise<void> {
   const date = ymd(addDays(ctx.today, -DEMO_SPAN_DAYS - 1));
+  const stockValue = ITEMS.reduce((sum, item) => sum + item.opening * item.cost, 0);
   await ctx.api.post(ctx.admin, '/journals', {
     date,
     narration: 'Setoran modal awal pemilik',
     items: [
-      { accountId: ctx.accounts.bank, debit: 450_000_000, credit: 0 },
+      { accountId: ctx.accounts.bank, debit: 450_000_000 + stockValue, credit: 0 },
       { accountId: ctx.accounts.cash, debit: 50_000_000, credit: 0 },
-      { accountId: ctx.accounts.openingEquity, debit: 0, credit: 500_000_000 },
+      { accountId: ctx.accounts.openingEquity, debit: 0, credit: 500_000_000 + stockValue },
     ],
   });
   for (const item of ITEMS) {
@@ -175,6 +181,7 @@ export async function postOpeningBalances(ctx: DemoContext): Promise<void> {
       movementType: 'In',
       quantity: item.opening,
       unitCost: item.cost,
+      offsetAccountId: ctx.accounts.bank,
       date,
       notes: 'Saldo awal stok',
     });

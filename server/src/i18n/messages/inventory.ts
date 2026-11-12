@@ -196,6 +196,9 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "semua gudang": "all warehouses",
   "Stok barang ini sedang diproses transaksi lain. Coba lagi beberapa saat lagi.": "This item's stock is being processed by another transaction. Try again in a moment.",
   // manual movement (E3-R4): services/inventory/manualMovement.ts, varianceAccount.ts, the offset rule in accountGuard.ts
+  "Stok masuk manual wajib memakai harga satuan lebih dari 0.": "A manual stock in needs a unit cost above 0.",
+  "Akun lawan wajib dipilih untuk stok masuk manual.": "Choose an offset account for a manual stock in.",
+  "Gudang tidak aktif.": "The warehouse is inactive.",
   "Akun lawan mutasi stok": "Stock movement offset account",
   "Pilih akun lawan biasa; stok awal diisi lewat impor stok awal.": "Choose an ordinary offset account; opening stock goes through the opening stock import.",
   "{0}: akun {1} {2} berada di kelompok akun {3}.": "{0}: account {1} {2} sits in the {3} account group.",

@@ -99,11 +99,6 @@
       "count": 4
     }
   },
-  "src/routes/inventory/movements.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    }
-  },
   "src/routes/inventory/productionCostStandards.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
