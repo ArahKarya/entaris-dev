@@ -43,10 +43,10 @@ Kunci ringkas: **stok bergerak = SM**, **jurnal hanya bila ada nilai uang yang b
 
 | Tool | Efek stok | Efek GL | Efek WAC |
 |------|-----------|---------|----------|
-| `inv_mov_create` In/AdjustmentIn | + qty (gudang & total) | DR Persediaan (akun item / 1.4.0) / CR akun lawan (default Ekuitas Saldo Awal 3.1) bila qty x unitCost > 0 | dihitung ulang: `(stok x WAC lama + qty x unitCost) / (stok + qty)` hanya bila unitCost > 0 |
-| `inv_mov_create` Out/AdjustmentOut | - qty (ditolak `STOCK_INSUFFICIENT` bila stok gudang < qty) | DR akun lawan / CR Persediaan | tidak berubah |
+| `inv_mov_create` In/AdjustmentIn | + qty (gudang & total) | DR Persediaan (akun item / 1.4.0) / CR akun lawan (wajib); `unitCost` wajib > 0 (`MANUAL_IN_ZERO_COST`), akun lawan wajib (`OFFSET_REQUIRED`) | dihitung ulang: `(stok x WAC lama + qty x unitCost) / (stok + qty)` |
+| `inv_mov_create` Out/AdjustmentOut | - qty (ditolak `STOCK_INSUFFICIENT` bila stok gudang < qty) | DR akun lawan (default Selisih Persediaan, role `INVENTORY_VARIANCE`) / CR Persediaan sebesar qty x WAC item; `unitCost` dari input diabaikan | tidak berubah |
 | `inv_mov_update` | batal lama + buat baru | jurnal lama dibatalkan, jurnal baru diposting | dihitung ulang dari replay riwayat (`recomputeAverageCostFromReplay`), COGS backfill diselesaikan ulang |
-| `inv_mov_cancel` | dibalik | jurnal terkait Cancelled, saldo akun dihitung ulang | recompute |
+| `inv_mov_cancel` | dibalik | jurnal terkait Cancelled, saldo akun dikurangi per baris jurnal | recompute |
 | `stf_create` | - qty gudang asal, + qty gudang tujuan; total item tetap | **tidak ada** (akun persediaan sama, net nol) | tidak berubah |
 | `stf_cancel` | dibalik | tidak ada | tidak berubah |
 | `opn_create` | disesuaikan = stok aktual - stok sistem per item | surplus: DR Persediaan / CR Selisih Persediaan (6.38 default, role `INVENTORY_VARIANCE`); defisit: DR Selisih Persediaan / CR Persediaan; revaluasi `unitCost` manual: selisih nilai dijurnal ke akun yang sama | `averageCost` item diganti ke `unitCost` manual bila berbeda |
@@ -68,8 +68,8 @@ Aturan wajib:
 ### Jebakan umum
 
 1. **Stok total vs per gudang**. `inv_items_list` tanpa `warehouseId` menampilkan total semua gudang; dengan `warehouseId` menampilkan saldo gudang itu (0 bila tak ada baris). Jangan menjumlah ulang sendiri.
-2. **Biaya satuan nol**. `inv_mov_create` dengan `unitCost` kosong/0 tidak menjurnal dan tidak mengubah WAC (stok bertambah tanpa nilai). Untuk stok awal selalu isi `unitCost`.
-3. **Akun lawan default 3.1**. Tanpa `offsetAccountId`, pergerakan masuk menjurnal CR Ekuitas Saldo Awal; untuk koreksi biasa sebaiknya tentukan akun lawan yang tepat (mis. akun selisih persediaan).
+2. **Harga stok masuk dan keluar**. Stok masuk manual (`In`, `AdjustmentIn`, termasuk "barang ditemukan") wajib `unitCost` > 0 (`MANUAL_IN_ZERO_COST`). Stok keluar (`Out`, `AdjustmentOut`) selalu dinilai WAC item saat disimpan; `unitCost` yang dikirim diabaikan, jadi jangan menjanjikan nilai lain kepada user. Stok awal diisi lewat impor stok awal.
+3. **Akun lawan**. Stok masuk wajib `offsetAccountId` (`OFFSET_REQUIRED`); tidak ada lagi default Ekuitas Saldo Awal 3.1. Stok keluar tanpa akun lawan dibukukan ke akun Selisih Persediaan (role `INVENTORY_VARIANCE`); selama role itu dipetakan ke akun grup atau ke akun yang sama dengan akun Pembulatan, sistem menolak (`INVENTORY_VARIANCE_UNSAFE`) dan Pemeriksaan Sistem memberi peringatan "Akun Selisih Persediaan tersendiri". Akun lawan yang ditolak: 3.1 Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, akun nonaktif, dan akun di kelompok persediaan (`STOCK_OFFSET_INVENTORY`).
 4. **Edit = batal + buat ulang**. `inv_mov_update` bukan edit draft; nomor SM berubah dan jurnal lama berstatus Cancelled.
 5. **Transfer langsung berlaku**. `stf_create` tidak punya draft; kesalahan harus diperbaiki dengan `stf_cancel` lalu buat ulang. `stf_update` hanya mengubah metadata cetak (mobil, supir, penerima, catatan).
 6. **Opname langsung final**. `opn_create` memposting penyesuaian dan jurnal saat itu juga. Kirim semua item yang dihitung (termasuk yang tidak berselisih) agar jejak audit lengkap; angka aktual negatif ditolak kecuali sama dengan stok sistem minus historis.
@@ -97,7 +97,7 @@ Aturan wajib:
 | Nilai persediaan | stok x `averageCost` |
 | Stok minimum / stok rendah | `minimumStock`; status stok `low` / `out` / `ok` |
 | Batch / lot | pergerakan masuk aktif + sisa tersedia (`inv_item_batches`) |
-| Akun persediaan umum | 1.4.0; akun lawan default stok awal 3.1 Ekuitas Saldo Awal |
+| Akun persediaan umum | 1.4.0 |
 | Tahun fiskal terbuka | `FiscalYear.isClosed=false` yang mencakup tanggal transaksi |
 | Bypass stok minus | capability `inventory.negative_stock` |
 
@@ -679,7 +679,7 @@ Aturan wajib:
 
 ### inv_mov_cancel
 
-**Ringkasan:** Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.
+**Ringkasan:** Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dikurangi per baris jurnal). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -718,7 +718,7 @@ Aturan wajib:
 
 **Isi hasil:** Pesan sukses pembatalan.
 
-**Efek pembukuan/stok:** Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dihitung ulang; WAC dan COGS backfill disesuaikan.
+**Efek pembukuan/stok:** Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; WAC dan COGS backfill disesuaikan.
 
 **Teks konfirmasi:** Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.
 
@@ -743,7 +743,7 @@ Aturan wajib:
 
 ### inv_mov_create
 
-**Ringkasan:** Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.
+**Ringkasan:** Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang aktif. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis. Stok masuk wajib harga satuan > 0 dan akun lawan; stok keluar selalu dinilai rata-rata (WAC) item (unitCost dari input diabaikan) dengan akun lawan default Selisih Persediaan. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -756,12 +756,12 @@ Aturan wajib:
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `itemId` | body | `string` | ya | UUID item persediaan (harus aktif). |
-| `warehouseId` | body | `uuid` | tidak | UUID gudang; kosong = gudang default aktif. |
+| `warehouseId` | body | `uuid` | tidak | UUID gudang aktif; kosong = gudang default aktif. |
 | `movementType` | body | enum: `In`, `Out`, `AdjustmentIn`, `AdjustmentOut` | ya | In = stok masuk, Out = stok keluar, AdjustmentIn/AdjustmentOut = penyesuaian tambah/kurang. |
 | `quantity` | body | `number` | ya | Kuantitas (> 0). |
-| `unitCost` | body | `number` | tidak | Biaya satuan; jika 0/kosong tidak ada jurnal dan WAC tidak berubah. |
+| `unitCost` | body | `number` | tidak | Harga satuan stok masuk (In/AdjustmentIn), wajib > 0. Diabaikan untuk stok keluar (Out/AdjustmentOut): sistem selalu menilai stok keluar dengan rata-rata (WAC) item saat disimpan. |
 | `date` | body | `date` | ya | Tanggal transaksi (YYYY-MM-DD) - harus berada di tahun fiskal aktif. |
-| `offsetAccountId` | body | `string` | tidak | UUID akun lawan jurnal (default Ekuitas Saldo Awal 3.1). |
+| `offsetAccountId` | body | `string` | tidak | UUID akun lawan jurnal. Wajib untuk In/AdjustmentIn. Untuk Out/AdjustmentOut opsional: kosong = akun Selisih Persediaan (role INVENTORY_VARIANCE). Ditolak: Ekuitas Saldo Awal, akun kontrol, akun pajak, akun grup/nonaktif, akun di kelompok persediaan. |
 | `referenceType` | body | `string` | tidak | Diabaikan: referensi dokumen hanya diisi sistem oleh dokumen pemiliknya. |
 | `referenceId` | body | `string` | tidak | Diabaikan: referensi dokumen hanya diisi sistem oleh dokumen pemiliknya. |
 | `referenceNumber` | body | `string` | tidak | Nomor referensi teks bebas (mis. nomor nota). |
@@ -790,29 +790,37 @@ Aturan wajib:
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Catat In 1 untuk item <id> tanggal 2026-01-31 (biaya satuan {unitCost})? Stok dan jurnal akan langsung berubah."
+  "confirm": "Catat In 1 untuk item <id> tanggal 2026-01-31 (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal akan langsung berubah."
 }
 ```
 
 **Isi hasil:** Pergerakan stok yang dibuat (201) dengan nomor SM dan journalEntryId bila ada jurnal.
 
-**Efek pembukuan/stok:** Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn dengan unitCost > 0. GL (bila qty x unitCost > 0, status jurnal Submitted JV-...): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan / CR Persediaan. Akun lawan default Ekuitas Saldo Awal 3.1 bila offsetAccountId kosong atau sama dengan akun persediaan.
+**Efek pembukuan/stok:** Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn. Nilai: masuk = qty x unitCost; keluar = qty x WAC item saat disimpan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.
 
-**Teks konfirmasi:** Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost})? Stok dan jurnal akan langsung berubah.
+**Teks konfirmasi:** Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal akan langsung berubah.
 
 **Prasyarat**
 
 - Tahun fiskal terbuka untuk tanggal transaksi.
 - Stok gudang cukup untuk Out/AdjustmentOut.
+- In/AdjustmentIn: unitCost > 0 dan offsetAccountId diisi.
+- Out/AdjustmentOut tanpa offsetAccountId: akun Selisih Persediaan dipetakan ke akun rinci tersendiri (bukan akun Pembulatan).
 
 **Error umum**
 
 - 400: tidak ada tahun fiskal aktif untuk tanggal ini
 - 400 STOCK_INSUFFICIENT: stok gudang tidak cukup untuk Stok Keluar / Penyesuaian Stok - (pesan menyebut tersedia dan dibutuhkan)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
-- 400: item tidak aktif / tidak ditemukan
+- 400: item tidak aktif / tidak ditemukan, gudang tidak aktif
 - 400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 MANUAL_IN_ZERO_COST: stok masuk / Penyesuaian Stok + tanpa unitCost > 0; isi harga satuan
+- 400 OFFSET_REQUIRED: stok masuk / Penyesuaian Stok + tanpa offsetAccountId; pilih akun lawan
+- 400 ACCOUNT_CONTROL / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun lawan adalah Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, atau akun nonaktif
+- 400 STOCK_OFFSET_INVENTORY: akun lawan berada di kelompok akun persediaan
+- 400 INVENTORY_VARIANCE_UNSAFE: stok keluar tanpa akun lawan sementara akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan; isi offsetAccountId atau minta akuntan memetakan akun Selisih Persediaan tersendiri
+- 400 ACCOUNT_MAPPING_MISSING: stok keluar tanpa akun lawan sementara akun Selisih Persediaan belum dipetakan
 
 **Tool terkait:** [`inv_mov_cancel`](#inv_mov_cancel), [`inv_mov_list`](#inv_mov_list), [`opn_create`](#opn_create)
 
@@ -963,7 +971,7 @@ Aturan wajib:
 
 ### inv_mov_update
 
-**Ringkasan:** Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.
+**Ringkasan:** Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -978,9 +986,9 @@ Aturan wajib:
 | `id` | path | `string` | ya | UUID pergerakan stok yang diedit. |
 | `movementType` | body | enum: `In`, `Out`, `AdjustmentIn`, `AdjustmentOut` | ya | Jenis mutasi stok. |
 | `quantity` | body | `number` | ya | Jumlah (qty). |
-| `unitCost` | body | `number` | tidak |  |
+| `unitCost` | body | `number` | tidak | Harga satuan stok masuk (In/AdjustmentIn), wajib > 0. Diabaikan untuk stok keluar (Out/AdjustmentOut): sistem selalu menilai stok keluar dengan rata-rata (WAC) item saat disimpan. |
 | `date` | body | `date` | ya | Tanggal dokumen (YYYY-MM-DD). |
-| `offsetAccountId` | body | `string` | tidak |  |
+| `offsetAccountId` | body | `string` | tidak | UUID akun lawan jurnal. Wajib untuk In/AdjustmentIn. Untuk Out/AdjustmentOut opsional: kosong = akun Selisih Persediaan (role INVENTORY_VARIANCE). Ditolak: Ekuitas Saldo Awal, akun kontrol, akun pajak, akun grup/nonaktif, akun di kelompok persediaan. |
 | `referenceType` | body | `string` | tidak | Diabaikan: kolom referenceType tidak diubah lewat edit. |
 | `referenceNumber` | body | `string` | tidak | Nomor referensi teks bebas. |
 | `notes` | body | `string` | tidak | Catatan bebas. |
@@ -1007,15 +1015,15 @@ Aturan wajib:
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Ubah pergerakan stok <id> menjadi In 1 biaya satuan {unitCost} tanggal 2026-01-31? Stok dan jurnal lama dibalik lalu dibuat ulang."
+  "confirm": "Ubah pergerakan stok <id> menjadi In 1 tanggal 2026-01-31 (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang."
 }
 ```
 
 **Isi hasil:** Pergerakan stok hasil edit (pergerakan baru).
 
-**Efek pembukuan/stok:** Membalik stok & jurnal lama (jurnal lama berstatus Cancelled), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create), reverse+settle ulang COGS backfill, recompute WAC item dari replay.
+**Efek pembukuan/stok:** Membalik stok & jurnal lama (jurnal lama berstatus Cancelled, saldo akun dikurangi per baris), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar pada WAC sesudah pembalikan), reverse+settle ulang COGS backfill, recompute WAC item dari replay.
 
-**Teks konfirmasi:** Ubah pergerakan stok {id} menjadi {movementType} {quantity} biaya satuan {unitCost} tanggal {date}? Stok dan jurnal lama dibalik lalu dibuat ulang.
+**Teks konfirmasi:** Ubah pergerakan stok {id} menjadi {movementType} {quantity} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang.
 
 **Prasyarat**
 
@@ -1033,6 +1041,12 @@ Aturan wajib:
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 400 MANUAL_IN_ZERO_COST: stok masuk / Penyesuaian Stok + tanpa unitCost > 0; isi harga satuan
+- 400 OFFSET_REQUIRED: stok masuk / Penyesuaian Stok + tanpa offsetAccountId; pilih akun lawan
+- 400 ACCOUNT_CONTROL / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun lawan adalah Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, atau akun nonaktif
+- 400 STOCK_OFFSET_INVENTORY: akun lawan berada di kelompok akun persediaan
+- 400 INVENTORY_VARIANCE_UNSAFE: stok keluar tanpa akun lawan sementara akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan; isi offsetAccountId atau minta akuntan memetakan akun Selisih Persediaan tersendiri
+- 400 ACCOUNT_MAPPING_MISSING: stok keluar tanpa akun lawan sementara akun Selisih Persediaan belum dipetakan
 - 403: tanpa capability doc.cancel
 
 **Tool terkait:** [`inv_mov_get`](#inv_mov_get), [`inv_mov_cancel`](#inv_mov_cancel)

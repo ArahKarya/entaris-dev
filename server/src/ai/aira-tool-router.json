@@ -21643,7 +21643,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.",
+      "desc": "Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang aktif. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis. Stok masuk wajib harga satuan > 0 dan akun lawan; stok keluar selalu dinilai rata-rata (WAC) item (unitCost dari input diabaikan) dengan akun lawan default Selisih Persediaan. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -21677,7 +21677,7 @@
           "in": "body",
           "type": "uuid",
           "required": false,
-          "description": "UUID gudang; kosong = gudang default aktif."
+          "description": "UUID gudang aktif; kosong = gudang default aktif."
         },
         {
           "name": "movementType",
@@ -21704,7 +21704,7 @@
           "in": "body",
           "type": "number",
           "required": false,
-          "description": "Biaya satuan; jika 0/kosong tidak ada jurnal dan WAC tidak berubah."
+          "description": "Harga satuan stok masuk (In/AdjustmentIn), wajib > 0. Diabaikan untuk stok keluar (Out/AdjustmentOut): sistem selalu menilai stok keluar dengan rata-rata (WAC) item saat disimpan."
         },
         {
           "name": "date",
@@ -21718,7 +21718,7 @@
           "in": "body",
           "type": "string",
           "required": false,
-          "description": "UUID akun lawan jurnal (default Ekuitas Saldo Awal 3.1)."
+          "description": "UUID akun lawan jurnal. Wajib untuk In/AdjustmentIn. Untuk Out/AdjustmentOut opsional: kosong = akun Selisih Persediaan (role INVENTORY_VARIANCE). Ditolak: Ekuitas Saldo Awal, akun kontrol, akun pajak, akun grup/nonaktif, akun di kelompok persediaan."
         },
         {
           "name": "referenceType",
@@ -21766,19 +21766,27 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn dengan unitCost > 0. GL (bila qty x unitCost > 0, status jurnal Submitted JV-...): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan / CR Persediaan. Akun lawan default Ekuitas Saldo Awal 3.1 bila offsetAccountId kosong atau sama dengan akun persediaan.",
-      "confirm_template": "Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost})? Stok dan jurnal akan langsung berubah.",
+      "postingEffect": "Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn. Nilai: masuk = qty x unitCost; keluar = qty x WAC item saat disimpan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.",
+      "confirm_template": "Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal akan langsung berubah.",
       "prerequisites": [
         "Tahun fiskal terbuka untuk tanggal transaksi.",
-        "Stok gudang cukup untuk Out/AdjustmentOut."
+        "Stok gudang cukup untuk Out/AdjustmentOut.",
+        "In/AdjustmentIn: unitCost > 0 dan offsetAccountId diisi.",
+        "Out/AdjustmentOut tanpa offsetAccountId: akun Selisih Persediaan dipetakan ke akun rinci tersendiri (bukan akun Pembulatan)."
       ],
       "errors": [
         "400: tidak ada tahun fiskal aktif untuk tanggal ini",
         "400 STOCK_INSUFFICIENT: stok gudang tidak cukup untuk Stok Keluar / Penyesuaian Stok - (pesan menyebut tersedia dan dibutuhkan)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
-        "400: item tidak aktif / tidak ditemukan",
+        "400: item tidak aktif / tidak ditemukan, gudang tidak aktif",
         "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 MANUAL_IN_ZERO_COST: stok masuk / Penyesuaian Stok + tanpa unitCost > 0; isi harga satuan",
+        "400 OFFSET_REQUIRED: stok masuk / Penyesuaian Stok + tanpa offsetAccountId; pilih akun lawan",
+        "400 ACCOUNT_CONTROL / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun lawan adalah Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, atau akun nonaktif",
+        "400 STOCK_OFFSET_INVENTORY: akun lawan berada di kelompok akun persediaan",
+        "400 INVENTORY_VARIANCE_UNSAFE: stok keluar tanpa akun lawan sementara akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan; isi offsetAccountId atau minta akuntan memetakan akun Selisih Persediaan tersendiri",
+        "400 ACCOUNT_MAPPING_MISSING: stok keluar tanpa akun lawan sementara akun Selisih Persediaan belum dipetakan"
       ],
       "related": [
         "inv_mov_cancel",
@@ -30195,7 +30203,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
+      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30244,7 +30252,8 @@
           "name": "unitCost",
           "in": "body",
           "type": "number",
-          "required": false
+          "required": false,
+          "description": "Harga satuan stok masuk (In/AdjustmentIn), wajib > 0. Diabaikan untuk stok keluar (Out/AdjustmentOut): sistem selalu menilai stok keluar dengan rata-rata (WAC) item saat disimpan."
         },
         {
           "name": "date",
@@ -30257,7 +30266,8 @@
           "name": "offsetAccountId",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "UUID akun lawan jurnal. Wajib untuk In/AdjustmentIn. Untuk Out/AdjustmentOut opsional: kosong = akun Selisih Persediaan (role INVENTORY_VARIANCE). Ditolak: Ekuitas Saldo Awal, akun kontrol, akun pajak, akun grup/nonaktif, akun di kelompok persediaan."
         },
         {
           "name": "referenceType",
@@ -30292,8 +30302,8 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik stok & jurnal lama (jurnal lama berstatus Cancelled), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create), reverse+settle ulang COGS backfill, recompute WAC item dari replay.",
-      "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} biaya satuan {unitCost} tanggal {date}? Stok dan jurnal lama dibalik lalu dibuat ulang.",
+      "postingEffect": "Membalik stok & jurnal lama (jurnal lama berstatus Cancelled, saldo akun dikurangi per baris), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar pada WAC sesudah pembalikan), reverse+settle ulang COGS backfill, recompute WAC item dari replay.",
+      "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang.",
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
         "Bukan mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama), bukan saldo awal, dan bukan TransferIn/TransferOut.",
@@ -30308,6 +30318,12 @@
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 MANUAL_IN_ZERO_COST: stok masuk / Penyesuaian Stok + tanpa unitCost > 0; isi harga satuan",
+        "400 OFFSET_REQUIRED: stok masuk / Penyesuaian Stok + tanpa offsetAccountId; pilih akun lawan",
+        "400 ACCOUNT_CONTROL / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun lawan adalah Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, atau akun nonaktif",
+        "400 STOCK_OFFSET_INVENTORY: akun lawan berada di kelompok akun persediaan",
+        "400 INVENTORY_VARIANCE_UNSAFE: stok keluar tanpa akun lawan sementara akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan; isi offsetAccountId atau minta akuntan memetakan akun Selisih Persediaan tersendiri",
+        "400 ACCOUNT_MAPPING_MISSING: stok keluar tanpa akun lawan sementara akun Selisih Persediaan belum dipetakan",
         "403: tanpa capability doc.cancel"
       ],
       "related": [
@@ -30320,7 +30336,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.",
+      "desc": "Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dikurangi per baris jurnal). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30349,7 +30365,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dihitung ulang; WAC dan COGS backfill disesuaikan.",
+      "postingEffect": "Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; WAC dan COGS backfill disesuaikan.",
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
