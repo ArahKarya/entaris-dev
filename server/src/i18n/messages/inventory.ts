@@ -195,4 +195,10 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Stok '{0}' di {1} tidak cukup untuk pembalikan: tersedia {2} {3}, dibutuhkan {4} {5}.": "Not enough stock of '{0}' in {1} to reverse: available {2} {3}, needed {4} {5}.",
   "semua gudang": "all warehouses",
   "Stok barang ini sedang diproses transaksi lain. Coba lagi beberapa saat lagi.": "This item's stock is being processed by another transaction. Try again in a moment.",
+  // manual movement (E3-R4): services/inventory/manualMovement.ts, varianceAccount.ts, the offset rule in accountGuard.ts
+  "Akun lawan mutasi stok": "Stock movement offset account",
+  "Pilih akun lawan biasa; stok awal diisi lewat impor stok awal.": "Choose an ordinary offset account; opening stock goes through the opening stock import.",
+  "{0}: akun {1} {2} berada di kelompok akun {3}.": "{0}: account {1} {2} sits in the {3} account group.",
+  "Akun Selisih Persediaan dipetakan ke akun grup {0} {1}. Minta akuntan membuat akun rinci Selisih Persediaan dan memetakannya di Pengaturan > Akun Sistem.": "The Inventory Variance account is mapped to group account {0} {1}. Ask the accountant to create an Inventory Variance detail account and map it under Settings > System Accounts.",
+  "Akun Selisih Persediaan sama dengan akun Pembulatan ({0} {1}). Minta akuntan membuat akun rinci Selisih Persediaan tersendiri dan memetakannya di Pengaturan > Akun Sistem.": "The Inventory Variance account is the same as the Rounding account ({0} {1}). Ask the accountant to create a separate Inventory Variance detail account and map it under Settings > System Accounts.",
 };
