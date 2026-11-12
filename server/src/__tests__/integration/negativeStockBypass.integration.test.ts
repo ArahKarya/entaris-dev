@@ -18,6 +18,8 @@ import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
+import { mapProductionLeafAccounts } from '../helpers/productionFixture';
+import { systemAccounts } from '../../services/systemAccounts';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -57,10 +59,13 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
       state.tx = tx;
       invalidatePermissionCache();
       try {
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
         await fn(tx);
       } finally {
         state.tx = null;
         invalidatePermissionCache();
+        systemAccounts.invalidateCache();
       }
       throw new RollbackSentinel();
     }, { timeout: 60000 });
