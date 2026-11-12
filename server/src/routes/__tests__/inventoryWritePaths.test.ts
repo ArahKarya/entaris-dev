@@ -50,13 +50,18 @@ vi.mock('../../services/ledger/accountGuard', async (importActual) => ({
 }));
 vi.mock('../../services/cogsBackfillService', () => ({ settleCogsBackfillForItem: vi.fn(async () => undefined) }));
 vi.mock('../../services/cogsBackfillReverse', () => ({ reverseCogsSettlementsByTrigger: vi.fn(async () => undefined) }));
-vi.mock('../../services/averageCostRecompute', () => ({ recomputeAverageCostFromReplay: vi.fn(async () => 9000) }));
+vi.mock('../../services/averageCostRecompute', () => ({
+  recomputeAverageCostFromReplay: vi.fn(async () => 9000),
+  replayAverageCost: vi.fn(async () => ({ averageCost: 9000, explained: true })),
+}));
 
 import movementsRouter from '../inventory/movements';
 import stockOpnameRouter from '../stockOpname';
 import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
 import { postJournal } from '../../services/ledger/postJournal';
 import { STOCK_OFFSET_RULE } from '../../services/ledger/accountGuard';
+import { generateDocumentNumber } from '../../utils/documentNumber';
+import { updateAccountBalance } from '../../utils/accountBalance';
 
 let server: Server;
 let base = '';
@@ -157,6 +162,26 @@ describe('manual stock movement GL descriptions', () => {
       { accountId: 'acc-inv', debit: 0, credit: '36000', description: narration },
     ]);
     expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ unitCost: '9000', totalValue: '36000', offsetAccountId: 'acc-var' });
+  });
+
+  it('PUT takes the new JV number before voiding the old journal (number before account rows)', async () => {
+    current = makeAutoTx({
+      ...journalHandlers,
+      'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, journalEntryId: 'je-old' }),
+      'journalEntry.findUnique': () => ({
+        id: 'je-old', entryNumber: 'JV-OLD', fiscalYearId: 'fy-2026', date: new Date('2026-12-20'), status: 'Submitted', reversedById: null,
+        items: [{ accountId: 'acc-inv', debit: '10000', credit: '0' }, { accountId: 'acc-offset', debit: '0', credit: '10000' }],
+      }),
+      'journalEntry.updateMany': () => ({ count: 1 }),
+    });
+    const res = await send('PUT', '/movements/sm-1', { movementType: 'Out', quantity: 4, date: '2026-10-10', offsetAccountId: 'acc-offset' });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const jvCall = vi.mocked(generateDocumentNumber).mock.calls.findIndex((c) => c[1] === 'JV');
+    expect(jvCall).toBeGreaterThanOrEqual(0);
+    const jvOrder = vi.mocked(generateDocumentNumber).mock.invocationCallOrder[jvCall]!;
+    expect(vi.mocked(updateAccountBalance)).toHaveBeenCalledTimes(2);
+    for (const order of vi.mocked(updateAccountBalance).mock.invocationCallOrder) expect(jvOrder).toBeLessThan(order);
+    expect(posted().entryNumber).toBe('JV-202610-0001');
   });
 });
 

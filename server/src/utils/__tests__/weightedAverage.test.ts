@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calcWeightedAverage } from '../weightedAverage';
+import { calcAverageAfterRemoval, calcWeightedAverage } from '../weightedAverage';
 
 describe('calcWeightedAverage', () => {
   it('calculates WAC for first stock-in (empty stock)', () => {
@@ -47,5 +47,24 @@ describe('calcWeightedAverage', () => {
     const result = calcWeightedAverage(1234.567, 7890, 567.123, 8100);
     const expected = (1234.567 * 7890 + 567.123 * 8100) / (1234.567 + 567.123);
     expect(result).toBeCloseTo(expected, 2);
+  });
+});
+
+describe('calcAverageAfterRemoval', () => {
+  it('takes a stock-in back out at its own cost', () => {
+    // 11.000 kg @ 6.545,45 (10.000 @ 6.000 + 1.000 @ 12.000); removing the 1.000 @ 12.000 leaves 6.000.
+    expect(calcAverageAfterRemoval(11_000, 6_545.45, 1_000, 12_000)).toBe(6_000);
+    expect(calcAverageAfterRemoval(200, 6_000, 100, 7_000)).toBe(5_000);
+  });
+
+  it('is the inverse of calcWeightedAverage', () => {
+    const avg = calcWeightedAverage(100, 5_000, 50, 6_000);
+    expect(calcAverageAfterRemoval(150, avg, 50, 6_000)).toBe(5_000);
+  });
+
+  it('keeps the current average when nothing would be left or the value left is negative', () => {
+    expect(calcAverageAfterRemoval(100, 6_000, 100, 7_000)).toBe(6_000);
+    expect(calcAverageAfterRemoval(100, 6_000, 150, 7_000)).toBe(6_000);
+    expect(calcAverageAfterRemoval(200, 1_000, 100, 7_000)).toBe(1_000);
   });
 });

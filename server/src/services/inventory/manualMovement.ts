@@ -9,8 +9,9 @@
  * Every offset passes STOCK_OFFSET_RULE. The journal goes through postJournal (SYSTEM_DOC); an
  * edit or cancel voids it through cancelJournalsInTx, so stored balances move per journal line.
  *
- * Lock order (stockLocks.ts): the movement row, lockInventoryRows, the SM number, then the journal
- * number and account rows inside postJournal.
+ * Lock order (stockLocks.ts): the movement row, lockInventoryRows, the SM or JV number, then the
+ * account rows (an edit takes the new JV number before it voids the old journal, whose balance
+ * updates lock account rows).
  */
 import type { Prisma, StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
@@ -21,10 +22,10 @@ import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { mappedAccount } from '../systemAccounts';
-import { calcWeightedAverage } from '../../utils/weightedAverage';
+import { calcAverageAfterRemoval, calcWeightedAverage } from '../../utils/weightedAverage';
 import { settleCogsBackfillForItem } from '../cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../cogsBackfillReverse';
-import { recomputeAverageCostFromReplay } from '../averageCostRecompute';
+import { recomputeAverageCostFromReplay, replayAverageCost } from '../averageCostRecompute';
 import { adjustWarehouseStock, resolveWarehouseId } from '../../utils/warehouseStock';
 import { assertStockAvailable, lockInventoryRows, stockKey } from './stockLocks';
 import { assertVarianceAccountUsable } from './varianceAccount';
@@ -112,6 +113,8 @@ interface JournalInput {
   date: Date;
   notes?: string | null;
   edit?: boolean;
+  /** Taken by the caller before it voided the old journal (lock order); postJournal takes one otherwise. */
+  entryNumber?: string;
   userId: string;
   fiscalYearId: string;
 }
@@ -135,6 +138,7 @@ async function postMovementJournal(tx: Tx, j: JournalInput): Promise<string> {
     lineRules: new Map([[j.offsetAccountId, STOCK_OFFSET_RULE]]),
     partyRule: 'off',
     expectFiscalYearId: j.fiscalYearId,
+    entryNumber: j.entryNumber,
   });
   return journal.id;
 }
@@ -248,12 +252,18 @@ async function lockManualMovement(tx: Tx, id: string, action: 'edit' | 'cancel')
   return movement;
 }
 
+interface ItemState {
+  stock: Decimal;
+  average: Decimal;
+}
+
 /**
  * Takes the row's stock back out (inbound) or puts it back (outbound) at its own warehouse, after
  * the per-warehouse check of an inbound reversal; a legacy row without a warehouse is checked
- * against the item total. Locks the item first and returns its average cost read under the lock.
+ * against the item total. Locks the item first and returns its stock and average read under the lock,
+ * before the reversal.
  */
-async function reverseMovementStock(tx: Tx, movement: StockMovement, context: string, userId: string): Promise<Decimal> {
+async function reverseMovementStock(tx: Tx, movement: StockMovement, context: string, userId: string): Promise<ItemState> {
   const locked = await lockInventoryRows(tx, {
     itemIds: [movement.itemId],
     pairs: movement.warehouseId ? [{ itemId: movement.itemId, warehouseId: movement.warehouseId }] : [],
@@ -265,23 +275,30 @@ async function reverseMovementStock(tx: Tx, movement: StockMovement, context: st
   const reverseDelta = isInbound(movement.movementType) ? -qty : qty;
   await tx.inventoryItem.update({ where: { id: movement.itemId }, data: { currentStock: { increment: reverseDelta } } });
   await adjustWarehouseStock(tx, movement.itemId, movement.warehouseId, reverseDelta);
-  return locked.items.get(movement.itemId)?.averageCost ?? new Decimal(0);
+  const item = locked.items.get(movement.itemId);
+  return { stock: item?.currentStock ?? new Decimal(0), average: item?.averageCost ?? new Decimal(0) };
 }
 
 /**
- * The average an edited outbound row is valued at: the average after the reversal. Reversing an
- * outbound row leaves it unchanged; reversing an inbound row is replayed without that row (its
- * stock is already out, so the replay still explains the item's stock).
+ * The item's stock and average after the old row is reversed. Reversing an outbound row leaves the
+ * average unchanged. Reversing an inbound row replays the movements without it; when they do not
+ * explain the stock (stock without a movement behind it), the row is taken out of the locked
+ * average at its own cost instead, so the stored average no longer carries the reversed cost.
  */
-async function averageAfterReversal(tx: Tx, oldMov: StockMovement, lockedAverage: Decimal): Promise<Decimal.Value> {
-  if (!isInbound(oldMov.movementType)) return lockedAverage;
-  return recomputeAverageCostFromReplay(tx, oldMov.itemId, { excludeMovementIds: [oldMov.id] });
+async function stateAfterReversal(tx: Tx, oldMov: StockMovement, locked: ItemState): Promise<ItemState> {
+  const qty = new Decimal(oldMov.quantity.toString());
+  if (!isInbound(oldMov.movementType)) return { stock: locked.stock.plus(qty), average: locked.average };
+  const replayed = await replayAverageCost(tx, oldMov.itemId, { excludeMovementIds: [oldMov.id] });
+  const average = replayed?.explained
+    ? replayed.averageCost
+    : calcAverageAfterRemoval(locked.stock, locked.average, qty, new Decimal(oldMov.unitCost.toString()));
+  return { stock: locked.stock.minus(qty), average: new Decimal(average) };
 }
 
 /**
  * Edits a manual movement: the old stock and journal are reversed, then the row is re-posted from
  * the body on the same warehouse. An outbound row is re-valued at the average after the reversal,
- * never at the client's cost.
+ * never at the client's cost; an inbound row is weighted into that average.
  */
 export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMovementFields, userId: string) {
   const oldMov = await lockManualMovement(tx, id, 'edit');
@@ -292,12 +309,10 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
   await assertPeriodOpen(tx, { date: oldMov.date }, 'mutasi stok');
   const fiscalYear = await assertPeriodOpen(tx, { date: movementDate }, 'mutasi stok');
 
-  const lockedAverage = await reverseMovementStock(tx, oldMov, 'inventory.movement.edit', userId);
-  await voidMovementJournal(tx, oldMov.journalEntryId, userId);
-
+  const locked = await reverseMovementStock(tx, oldMov, 'inventory.movement.edit', userId);
+  const after = await stateAfterReversal(tx, oldMov, locked);
   const newIsIn = isInbound(input.movementType);
-  const averageCost = newIsIn ? 0 : await averageAfterReversal(tx, oldMov, lockedAverage);
-  const { unitCost, totalValue } = manualMovementValue(input.movementType, input.quantity, input.unitCost, averageCost);
+  const { unitCost, totalValue } = manualMovementValue(input.movementType, input.quantity, input.unitCost, after.average);
   if (!newIsIn) {
     await assertStockAvailable(tx, [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId, quantity: input.quantity }], {
       context: 'inventory.movement.edit', userId,
@@ -305,16 +320,13 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
   }
   const offsetAccountId = await resolveOffsetAccountId(tx, input.movementType, input.offsetAccountId, totalValue);
   const newDelta = newIsIn ? input.quantity : -input.quantity;
-  await tx.inventoryItem.update({ where: { id: oldMov.itemId }, data: { currentStock: { increment: newDelta } } });
+  const averageCost = newIsIn ? calcWeightedAverage(after.stock, after.average, input.quantity, unitCost) : after.average.toNumber();
+  await tx.inventoryItem.update({ where: { id: oldMov.itemId }, data: { currentStock: { increment: newDelta }, averageCost } });
   await adjustWarehouseStock(tx, oldMov.itemId, oldMov.warehouseId, newDelta);
 
-  const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: oldMov.itemId }, select: { name: true, unit: true, accountId: true } });
-  const journalEntryId = totalValue.gt(0) && offsetAccountId
-    ? await postMovementJournal(tx, {
-      type: input.movementType, item, offsetAccountId, totalValue, quantity: input.quantity,
-      date: movementDate, notes: input.notes, edit: true, userId, fiscalYearId: fiscalYear.id,
-    })
-    : null;
+  const journalEntryId = await repostMovementJournal(tx, oldMov, {
+    input, offsetAccountId, totalValue, movementDate, userId, fiscalYearId: fiscalYear.id,
+  });
   const updated = await tx.stockMovement.update({
     where: { id },
     data: {
@@ -329,6 +341,26 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
   });
   await resettleEditedInbound(tx, oldMov, input, unitCost, { movementDate, userId });
   return updated;
+}
+
+/**
+ * Voids the old journal and posts the edited one. The new JV number is taken first: voiding
+ * updates account balances (row locks), and every JV writer takes the number before account rows.
+ */
+async function repostMovementJournal(
+  tx: Tx,
+  oldMov: StockMovement,
+  j: { input: ManualMovementFields; offsetAccountId: string | null; totalValue: Decimal; movementDate: Date; userId: string; fiscalYearId: string },
+): Promise<string | null> {
+  const offsetAccountId = j.totalValue.gt(0) ? j.offsetAccountId : null;
+  const entryNumber = offsetAccountId ? await generateDocumentNumber(tx, 'JV', j.movementDate, j.fiscalYearId) : undefined;
+  await voidMovementJournal(tx, oldMov.journalEntryId, j.userId);
+  if (!offsetAccountId) return null;
+  const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: oldMov.itemId }, select: { name: true, unit: true, accountId: true } });
+  return postMovementJournal(tx, {
+    type: j.input.movementType, item, offsetAccountId, totalValue: j.totalValue, quantity: j.input.quantity,
+    date: j.movementDate, notes: j.input.notes, edit: true, entryNumber, userId: j.userId, fiscalYearId: j.fiscalYearId,
+  });
 }
 
 /**
