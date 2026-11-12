@@ -4,7 +4,7 @@ import { recalcPartyOutstanding } from '../utils/accountBalance';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
-import { setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
+import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
 import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
@@ -29,6 +29,12 @@ export async function cancelSalesReturnInTx(
   trail?: CancelTrail,
   opts: NegativeStockBypass = {},
 ): Promise<{ id: string; status: 'Cancelled' }> {
+  // AR row and invoice first, the order return submit and invoice cancel take (lock order in
+  // services/inventory/stockLocks.ts): the journal voids below lock AR while this holds item rows.
+  // The return's invoice never changes, so the plain read is safe.
+  const head = await tx.salesReturn.findUnique({ where: { id: returnId }, select: { salesInvoiceId: true } });
+  if (!head) throw new BusinessError('Retur tidak ditemukan.');
+  await lockArThenSalesInvoiceInTx(tx, head.salesInvoiceId);
   // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
   await tx.$queryRaw`SELECT id FROM sales_returns WHERE id = ${returnId} FOR UPDATE`;
   const ret = await tx.salesReturn.findUnique({

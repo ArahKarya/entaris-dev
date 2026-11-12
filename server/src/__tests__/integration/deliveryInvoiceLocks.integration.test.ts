@@ -9,7 +9,11 @@
  * - invoice submit and delivery note cancel at once, either first: never "Cancelled and invoiced";
  * - two invoices billing one delivery note at once: one 201, one 400;
  * - delivery note edit and invoice submit at once, either first: the second is refused;
- * - two delivery notes of 4 t from 5 t at once: one 201, one 400 STOCK_INSUFFICIENT.
+ * - two delivery notes of 4 t from 5 t at once: one 201, one 400 STOCK_INSUFFICIENT;
+ * - sales return cancel waits for the AR row before it locks the return or its items (the order
+ *   return submit and invoice cancel take), so it cannot deadlock against them;
+ * - purchase invoice price revise waits for the invoice row before it locks the items, and then
+ *   sees the cancel that held it.
  *
  * Stock checks (rollback transaction, same year):
  * - a delivery note with two lines of one item, 60 + 60, from 100 -> 400 STOCK_INSUFFICIENT;
@@ -79,6 +83,7 @@ import purchaseRouter from '../../routes/purchase';
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { submitSalesReturnInTx } from '../../services/salesReturnSubmit';
+import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise';
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
@@ -218,6 +223,9 @@ async function committedSetup() {
   const cleanup = async () => {
     state.beforeCommit = null;
     const fiscalYearId = s.fy.id;
+    await prisma.salesReturn.deleteMany({ where: { fiscalYearId } });
+    await prisma.purchaseInvoiceItem.deleteMany({ where: { purchaseInvoice: { fiscalYearId } } });
+    await prisma.purchaseInvoice.deleteMany({ where: { fiscalYearId } });
     await prisma.salesInvoiceItem.deleteMany({ where: { salesInvoice: { fiscalYearId } } });
     await prisma.salesInvoice.deleteMany({ where: { fiscalYearId } });
     await prisma.deliveryOrderItem.deleteMany({ where: { deliveryOrder: { fiscalYearId } } });
@@ -376,6 +384,95 @@ d('delivery note against invoice, edit and cancel (committed fixtures)', () => {
       expect(b.body.code).toBe(STOCK_INSUFFICIENT);
       expect(await stockOf(f.db, gabah.id, f.s.whA)).toEqual({ item: 1000, warehouse: 1000 });
     } finally {
+      await f.cleanup();
+    }
+  });
+
+  it('sales return cancel takes the AR row before the return and its items', async () => {
+    const f = await committedSetup();
+    const holder = await pool.connect();
+    const probe = await pool.connect();
+    try {
+      // A zero-value return that restocked 40 at A (no journals, so only the lock order matters).
+      const beras = await f.newItem('beras');
+      await seed(f.db, f.s, beras.id, f.s.whA, 40, 0);
+      const invoice = await prisma.salesInvoice.create({
+        data: {
+          invoiceNumber: `IT-E3SJ-SI-${tag()}`, date: DAY, partyId: f.s.customerId, status: 'Paid',
+          grandTotal: 0, outstanding: 0, fiscalYearId: f.s.fy.id, createdBy: f.s.actor.userId,
+        },
+      });
+      const ret = await prisma.salesReturn.create({
+        data: {
+          returnNumber: `IT-E3SJ-RN-${tag()}`, date: DAY, partyId: f.s.customerId, salesInvoiceId: invoice.id,
+          subtotal: 0, totalReturn: 0, fiscalYearId: f.s.fy.id, createdBy: f.s.actor.userId,
+        },
+      });
+      const sm = await prisma.stockMovement.findFirstOrThrow({ where: { itemId: beras.id, warehouseId: f.s.whA } });
+      await prisma.stockMovement.update({ where: { id: sm.id }, data: { referenceType: 'SalesReturn', referenceId: ret.id } });
+
+      // Another transaction (a return submit, a payment) holds AR.
+      const ar = await systemAccounts.getAccount('AR');
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM accounts WHERE id = $1 FOR UPDATE', [ar.id]);
+      const cancel = callRoute(salesReturnsRouter, 'post', '/:id/cancel', { params: { id: ret.id }, ...as(f.s) });
+      expect(await stillPending(cancel)).toBe(true);
+      // While it waits for AR, the cancel holds neither the return nor its item rows.
+      await probe.query('BEGIN');
+      await probe.query('SELECT id FROM sales_returns WHERE id = $1 FOR UPDATE NOWAIT', [ret.id]);
+      await probe.query('SELECT id FROM inventory_items WHERE id = $1 FOR NO KEY UPDATE NOWAIT', [beras.id]);
+      await probe.query('ROLLBACK');
+      await holder.query('ROLLBACK');
+
+      const done = await cancel;
+      expect(done.status, JSON.stringify(done.body)).toBe(200);
+      expect((await prisma.salesReturn.findUniqueOrThrow({ where: { id: ret.id } })).status).toBe('Cancelled');
+      expect(await stockOf(f.db, beras.id, f.s.whA)).toEqual({ item: 0, warehouse: 0 });
+    } finally {
+      await probe.query('ROLLBACK').catch(() => undefined);
+      await holder.query('ROLLBACK').catch(() => undefined);
+      probe.release();
+      holder.release();
+      await f.cleanup();
+    }
+  });
+
+  it('purchase invoice revise takes the invoice row before its items, then sees the cancel', async () => {
+    const f = await committedSetup();
+    const holder = await pool.connect();
+    const probe = await pool.connect();
+    try {
+      const gkp = await f.newItem('gkp');
+      const ar = await systemAccounts.getAccount('AR');
+      const pi = await prisma.purchaseInvoice.create({
+        data: {
+          invoiceNumber: `IT-E3SJ-PI-${tag()}`, date: DAY, partyId: f.s.supplierId, status: 'Submitted',
+          grandTotal: 0, outstanding: 0, fiscalYearId: f.s.fy.id, createdBy: f.s.actor.userId,
+          items: { create: [{ itemName: gkp.name, inventoryItemId: gkp.id, quantity: 10, unit: 'kg', rate: 0, amount: 0, accountId: ar.id }] },
+        },
+        include: { items: true },
+      });
+
+      // A cancel of the same invoice holds its row.
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM purchase_invoices WHERE id = $1 FOR UPDATE', [pi.id]);
+      const revise = prisma.$transaction((tx) => revisePurchaseInvoiceInTx(
+        tx as Tx, { invoiceId: pi.id, lines: [{ itemId: pi.items[0].id, newRate: 0 }], reason: 'supplier koreksi harga faktur' }, f.s.actor.userId,
+      )).then(() => 'revised', (e: Error) => e.message);
+      expect(await stillPending(revise)).toBe(true);
+      // While it waits for the invoice, the revise holds no item row.
+      await probe.query('BEGIN');
+      await probe.query('SELECT id FROM inventory_items WHERE id = $1 FOR NO KEY UPDATE NOWAIT', [gkp.id]);
+      await probe.query('ROLLBACK');
+      await holder.query(`UPDATE purchase_invoices SET status = 'Cancelled' WHERE id = $1`, [pi.id]);
+      await holder.query('COMMIT');
+
+      expect(await revise).toBe('Invoice sudah dibatalkan, tidak bisa direvisi.');
+    } finally {
+      await probe.query('ROLLBACK').catch(() => undefined);
+      await holder.query('ROLLBACK').catch(() => undefined);
+      probe.release();
+      holder.release();
       await f.cleanup();
     }
   });

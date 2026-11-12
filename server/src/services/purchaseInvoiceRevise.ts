@@ -51,9 +51,12 @@ export async function revisePurchaseInvoiceInTx(
     throw new BusinessError('Alasan revisi harga wajib diisi (minimal 10 karakter).');
   }
 
-  // Lock the invoice's items before reading their stock and average (and before the journal locks
-  // its accounts, lock order in services/inventory/stockLocks.ts): the WAC correction below then
-  // works on figures no concurrent posting can change.
+  // The invoice row first (step 1 of the lock order in services/inventory/stockLocks.ts, as PI
+  // cancel claims it before its items): a concurrent cancel or revise of this invoice waits here,
+  // and the status read below comes after the lock. Then its items, before reading their stock and
+  // average and before the journal locks its accounts: the WAC correction works on figures no
+  // concurrent posting can change.
+  await tx.$queryRaw`SELECT id FROM purchase_invoices WHERE id = ${input.invoiceId} FOR UPDATE`;
   const lineItems = await tx.purchaseInvoiceItem.findMany({
     where: { purchaseInvoiceId: input.invoiceId },
     select: { inventoryItemId: true },
