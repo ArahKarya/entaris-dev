@@ -9,6 +9,7 @@ import {
   cancelManualMovementInTx,
   createManualMovementInTx,
   editManualMovementInTx,
+  stockOffsetAllowed,
 } from '../../services/inventory/manualMovement';
 import { parseListPaging, parseSort } from '../../utils/listQuery';
 import {
@@ -101,7 +102,9 @@ router.get('/:id', async (req, res) => {
       },
     });
     if (!movement) return res.status(404).json({ error: 'Gerakan stok tidak ditemukan.' });
-    return res.json(movement);
+    // The edit form clears an offset an edit would refuse (a legacy 3.1 row) instead of sending it back.
+    const offsetAllowed = movement.offsetAccountId ? await stockOffsetAllowed(prisma, movement.offsetAccountId) : true;
+    return res.json({ ...movement, offsetAllowed });
   } catch (error) {
     return handleRouteError(res, error, 'GET /inventory/movements/:id', 'Gagal mengambil data gerakan stok.');
   }

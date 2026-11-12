@@ -229,6 +229,23 @@ d('manual Stock In needs a cost and an offset', () => {
     });
   });
 
+  it('GET of a legacy row posted against the opening equity flags its offset as no longer allowed', async () => {
+    await inRollback(async (tx) => {
+      const s = await setup(tx);
+      const openingEquity = await account(tx, 'EQUITY', 'Ekuitas Saldo Awal');
+      await mapRole(tx, 'OPENING_EQUITY', openingEquity.id);
+      const ok = expectCreated(await post(s, { movementType: 'Out', quantity: 10, offsetAccountId: s.offsetId }));
+      const get = () => callRoute(movementsRouter, 'get', '/:id', { params: { id: ok.id }, userId: s.actor.userId, role: s.actor.role });
+      expect((await get()).body.offsetAllowed).toBe(true);
+      // Before E3-R4 a manual row without an offset was stored against 3.1.
+      await tx.stockMovement.update({ where: { id: ok.id }, data: { offsetAccountId: openingEquity.id } });
+      const r = await get();
+      expect(r.status).toBe(200);
+      expect(r.body.offsetAllowed).toBe(false);
+      expect(r.body.offsetAccount.id).toBe(openingEquity.id);
+    });
+  });
+
   it('a warehouse that is inactive is refused', async () => {
     await inRollback(async (tx) => {
       const s = await setup(tx);

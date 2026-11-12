@@ -104,6 +104,20 @@ async function resolveOffsetAccountId(
   return totalValue.gt(0) ? (await assertVarianceAccountUsable(tx)).id : null;
 }
 
+/**
+ * Whether a stored offset still passes STOCK_OFFSET_RULE. Older rows were posted against the opening
+ * balance equity (3.1), which an edit now refuses; the edit form clears such an offset up front.
+ */
+export async function stockOffsetAllowed(tx: Tx, offsetAccountId: string): Promise<boolean> {
+  try {
+    await assertPostableAccounts(tx, [offsetAccountId], STOCK_OFFSET_RULE);
+    return true;
+  } catch (error) {
+    if (error instanceof BusinessError) return false;
+    throw error;
+  }
+}
+
 interface JournalInput {
   type: ManualMovementType;
   item: { name: string; unit: string; accountId: string | null };

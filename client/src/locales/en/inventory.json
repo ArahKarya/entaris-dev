@@ -435,6 +435,7 @@
     "hints": {
       "averageCost": "A stock out is always valued at the system average when saved; the value here is an estimate.",
       "offsetRequired": "Required for a stock in. Opening balance equity, control accounts, tax accounts and inventory accounts cannot be used.",
+      "offsetNoLongerAllowed": "The stored offset {{account}} can no longer be used for a stock movement (for example opening balance equity). Choose another account.",
       "offsetVariance": "Leave empty to post to the Inventory Variance account.",
       "stockCurrent": "Current stock: {{qty}} {{unit}}",
       "stockInWarehouse": "Stock in this warehouse: {{qty}} {{unit}}",

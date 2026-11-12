@@ -435,6 +435,7 @@
     "hints": {
       "averageCost": "Stok keluar selalu dinilai rata-rata sistem saat disimpan; nilai di sini perkiraan.",
       "offsetRequired": "Wajib untuk stok masuk. Ekuitas Saldo Awal, akun kontrol, akun pajak, dan akun persediaan tidak bisa dipakai.",
+      "offsetNoLongerAllowed": "Akun lawan tersimpan {{account}} tidak bisa dipakai lagi untuk mutasi stok (misalnya Ekuitas Saldo Awal). Pilih akun lain.",
       "offsetVariance": "Kosongkan untuk membukukan ke akun Selisih Persediaan.",
       "stockCurrent": "Stok saat ini: {{qty}} {{unit}}",
       "stockInWarehouse": "Stok di gudang ini: {{qty}} {{unit}}",
