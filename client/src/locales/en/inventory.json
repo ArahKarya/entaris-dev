@@ -414,7 +414,9 @@
     "description": "Stock in, out, or adjustment movements, posted to the chart of accounts.",
     "errors": {
       "dateRequired": "Date is required.",
-      "quantityMin": "Quantity must be at least 0.001."
+      "offsetRequired": "Choose an offset account for a stock in.",
+      "quantityMin": "Quantity must be at least 0.001.",
+      "unitCostRequired": "A stock in needs a unit cost above 0."
     },
     "fields": {
       "date": "Date",
@@ -422,16 +424,18 @@
       "movementType": "Movement type",
       "notes": "Notes",
       "offsetAccount": "Offset account",
-      "offsetAccountOptional": "Offset account (optional)",
+      "offsetAccountVariance": "Offset account (empty = Inventory Variance)",
       "quantity": "Quantity",
       "referenceNumber": "Reference number",
       "totalValue": "Total value",
       "unitCost": "Unit cost",
+      "unitCostAverage": "Unit cost (system average)",
       "warehouse": "Warehouse"
     },
     "hints": {
-      "offsetMissing": "Select an offset account so the stock value is posted to the chart of accounts.",
-      "offsetPurpose": "For posting to the chart of accounts.",
+      "averageCost": "A stock out is always valued at the system average when saved; the value here is an estimate.",
+      "offsetRequired": "Required for a stock in. Opening balance equity, control accounts, tax accounts and inventory accounts cannot be used.",
+      "offsetVariance": "Leave empty to post to the Inventory Variance account.",
       "stockCurrent": "Current stock: {{qty}} {{unit}}",
       "stockInWarehouse": "Stock in this warehouse: {{qty}} {{unit}}",
       "warehouseLocked": "The warehouse cannot be changed when editing."
