@@ -30,6 +30,20 @@ async function mapRole(tx: Tx, role: string, accountId: string) {
   await tx.systemAccountMapping.create({ data: { role, accountId } });
 }
 
+/**
+ * Points COGS and PRODUCTION_CONVERSION at fresh leaf accounts. Call it only inside a rollback
+ * transaction: a database may map COGS to a group account, which production posting refuses.
+ * Invalidate the system-account cache again once the transaction has rolled back.
+ */
+export async function mapProductionLeafAccounts(tx: Tx) {
+  const cogs = await leaf(tx, 'COGS', 'EXPENSE');
+  const conversion = await leaf(tx, 'CONV', 'EXPENSE');
+  await mapRole(tx, 'COGS', cogs.id);
+  await mapRole(tx, 'PRODUCTION_CONVERSION', conversion.id);
+  systemAccounts.invalidateCache();
+  return { cogs, conversion };
+}
+
 async function makeItem(tx: Tx, label: string, unit: string, accountId: string) {
   return tx.inventoryItem.create({
     data: { code: `IT-61A-${label}-${tag()}`, name: `IT-6.1a ${label}`, unit, isActive: true, accountId },
@@ -46,10 +60,7 @@ export async function createProductionWorld(tx: Tx, year: number): Promise<Produ
   await createFiscalYear(tx, { year });
   const user = await tx.user.findFirstOrThrow({ where: { role: 'Admin', isActive: true } });
   const inventory = await leaf(tx, 'INV', 'ASSET');
-  const cogs = await leaf(tx, 'COGS', 'EXPENSE');
-  const conversion = await leaf(tx, 'CONV', 'EXPENSE');
-  await mapRole(tx, 'COGS', cogs.id);
-  await mapRole(tx, 'PRODUCTION_CONVERSION', conversion.id);
+  const { cogs, conversion } = await mapProductionLeafAccounts(tx);
   await mapRole(tx, 'INVENTORY', inventory.id);
   systemAccounts.invalidateCache();
 

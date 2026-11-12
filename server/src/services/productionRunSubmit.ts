@@ -1,18 +1,12 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
-import { updateAccountBalance } from '../utils/accountBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
-import { calcWeightedAverage } from '../utils/weightedAverage';
-import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
-import { systemAccounts } from './systemAccounts';
-import { productionDiffAccounts } from './ledger/systemRoleAccounts';
-import { settleCogsBackfillForItem } from './cogsBackfillService';
-import { persistOeeInTx } from './oee';
+import { resolveWarehouseId } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
-import { buildProductionRunLineItems } from './productionRunLines';
-import { computeProductionCosting, type ProductionJournalPlan } from './production/productionCosting';
+import { computeProductionCosting } from './production/productionCosting';
 import { loadProductionCostContext } from './production/productionCostContext';
+import { persistProductionRunDetails, postProductionEffectsInTx } from './production/productionPosting';
 
 type Tx = Prisma.TransactionClient;
 
@@ -67,67 +61,9 @@ export interface SubmitProductionRunInput {
   endAt?: Date | string | null;
 }
 
-export interface ProductionJournalLine {
-  accountId: string;
-  debit: number;
-  credit: number;
-  description: string;
-}
-
 /**
- * Journal lines of a run from its costing plan: CR each input and DR each output on the item's
- * account (else INVENTORY), then the difference on the mapped PRODUCTION_CONVERSION / COGS
- * accounts. Submit and edit share it; PR-6.1c moves it into the production posting module.
- */
-export async function productionJournalLines(
-  tx: Tx,
-  args: {
-    plan: ProductionJournalPlan;
-    inputs: ReadonlyArray<{ itemId: string }>;
-    outputs: ReadonlyArray<{ itemId: string }>;
-    itemMap: ReadonlyMap<string, { name: string; accountId: string | null }>;
-    defaultAccountId: string;
-    runNumber: string;
-  },
-): Promise<ProductionJournalLine[]> {
-  const { plan, itemMap, defaultAccountId, runNumber } = args;
-  const lines: ProductionJournalLine[] = [];
-  for (const { index, amount } of plan.inputCredits) {
-    const item = itemMap.get(args.inputs[index]!.itemId);
-    lines.push({
-      accountId: item?.accountId || defaultAccountId,
-      debit: 0,
-      credit: amount,
-      description: `Bahan baku keluar ${item?.name || ''}: ${runNumber}`,
-    });
-  }
-  for (const { index, amount } of plan.outputDebits) {
-    const item = itemMap.get(args.outputs[index]!.itemId);
-    lines.push({
-      accountId: item?.accountId || defaultAccountId,
-      debit: amount,
-      credit: 0,
-      description: `Produksi masuk ${item?.name || ''}: ${runNumber}`,
-    });
-  }
-  if (plan.diff === 0) return lines;
-  const { cogs, conversion } = await productionDiffAccounts(tx, plan.diff);
-  if (plan.toConversion > 0) {
-    lines.push({ accountId: conversion!.id, debit: 0, credit: plan.toConversion, description: `Biaya konversi dibebankan: ${runNumber}` });
-  }
-  if (plan.toCogs > 0) {
-    lines.push({ accountId: cogs.id, debit: 0, credit: plan.toCogs, description: `HPP konversi produksi: ${runNumber}` });
-  }
-  if (plan.loss > 0) {
-    lines.push({ accountId: cogs.id, debit: plan.loss, credit: 0, description: `HPP rugi produksi: ${runNumber}` });
-  }
-  return lines;
-}
-
-/**
- * Submit a production run: stock out per input, stock in per output with WAC recalc, settle
- * pending COGS backfill on outputs (earlier negative-stock sales), and post the production JE:
- * CR per input account, DR per output account, balanced via HPP accounts (see below).
+ * Submit a production run: load and cost it (productionCostContext, productionCosting), create the
+ * run, then post its stock, COGS auto-settle and journal JV-<runNumber> (productionPosting).
  */
 export async function submitProductionRunInTx(
   tx: Tx,
@@ -146,7 +82,6 @@ export async function submitProductionRunInTx(
     costs: body.costs,
     hppOverride: body.hppOverride,
   });
-  const { computedHpp, resolvedCosts, totalMaterialCost, totalCostInputSide, totalCostOutputSide, totalByproductValue } = costing;
 
   const runNumber = await generateDocumentNumber(tx, 'PR', txDate, fiscalYear.id);
 
@@ -187,219 +122,34 @@ export async function submitProductionRunInTx(
     );
   }
 
-  // Inputs: stock-out + StockMovement Out
-  for (let i = 0; i < body.inputs.length; i++) {
-    const input = body.inputs[i]!;
-    const line = costing.inputLines[i]!;
-    await tx.inventoryItem.update({
-      where: { id: input.itemId },
-      data: { currentStock: { decrement: input.quantity } },
-    });
-    await adjustWarehouseStock(tx, input.itemId, productionWarehouseId, -input.quantity);
-
-    const movNumber = await generateDocumentNumber(tx, 'SM', txDate, fiscalYear.id);
-    await tx.stockMovement.create({
-      data: {
-        movementNumber: movNumber,
-        date: txDate,
-        itemId: input.itemId,
-        warehouseId: productionWarehouseId,
-        movementType: 'Out',
-        quantity: input.quantity,
-        unitCost: line.unitCost,
-        totalValue: line.totalValue,
-        // Batch back-link so /items/:id/batches can sum consumption from every source.
-        sourceMovementId: costedInputs[i]!.sourceMovementId,
-        referenceType: 'ProductionRun',
-        referenceId: run.id,
-        referenceNumber: runNumber,
-        notes: body.notes || null,
-        fiscalYearId: fiscalYear.id,
-        createdById: userId,
-      },
-    });
-  }
-
   if (costing.clampedNegativeNumerator) {
     logger.warn(
       {
         runNumber,
-        totalMaterialCost: totalMaterialCost.toString(),
-        totalCostInputSide: totalCostInputSide.toString(),
-        totalCostOutputSide: totalCostOutputSide.toString(),
-        totalByproductValue: totalByproductValue.toString(),
+        totalMaterialCost: costing.totalMaterialCost.toString(),
+        totalCostInputSide: costing.totalCostInputSide.toString(),
+        totalCostOutputSide: costing.totalCostOutputSide.toString(),
+        totalByproductValue: costing.totalByproductValue.toString(),
       },
       'Loaded HPP numerator negative (by-product NRV > total cost) — clamped to 0',
     );
   }
 
-  // Outputs: stock-in + StockMovement In + WAC recalc + COGS backfill settlement
-  for (let i = 0; i < body.outputs.length; i++) {
-    const output = body.outputs[i]!;
-    const { unitCost, totalValue, unitCostLoaded } = costing.outputLines[i]!;
-    const outputItem = await tx.inventoryItem.findUnique({ where: { id: output.itemId } });
-    const newAvgCost = outputItem && unitCost > 0
-      ? calcWeightedAverage(outputItem.currentStock, outputItem.averageCost, output.quantity, unitCost)
-      : undefined;
-
-    await tx.inventoryItem.update({
-      where: { id: output.itemId },
-      data: {
-        currentStock: { increment: output.quantity },
-        ...(newAvgCost !== undefined ? { averageCost: newAvgCost } : {}),
-      },
-    });
-    await adjustWarehouseStock(tx, output.itemId, productionWarehouseId, output.quantity);
-
-    const movNumber = await generateDocumentNumber(tx, 'SM', txDate, fiscalYear.id);
-    await tx.stockMovement.create({
-      data: {
-        movementNumber: movNumber,
-        date: txDate,
-        itemId: output.itemId,
-        warehouseId: productionWarehouseId,
-        movementType: 'In',
-        quantity: output.quantity,
-        unitCost,
-        totalValue,
-        unitCostLoaded,
-        referenceType: 'ProductionRun',
-        referenceId: run.id,
-        referenceNumber: runNumber,
-        notes: body.notes || null,
-        fiscalYearId: fiscalYear.id,
-        createdById: userId,
-      },
-    });
-
-    await settleCogsBackfillForItem(tx, {
-      itemId: output.itemId,
-      qtyAvailable: output.quantity,
-      unitCostNow: unitCost,
-      userId,
-      settleDate: txDate,
-      source: { type: 'ProductionRun', refId: run.id, refNo: runNumber },
-    });
-  }
-
-  // GL posting: DR output accounts / CR input accounts / balance via HPP Beras.
-  const defaultInvAccount = await systemAccounts.getAccount('INVENTORY');
-  const inputNames = body.inputs.map((i) => itemMap.get(i.itemId)?.name || '').join(', ');
-  const outputNames = body.outputs.map((o) => itemMap.get(o.itemId)?.name || '').join(', ');
-
-  const jvNumber = `JV-${runNumber}`;
-  const journalItems = await productionJournalLines(tx, {
-    plan: costing.journalPlan,
+  await postProductionEffectsInTx(tx, {
+    run: { id: run.id, runNumber },
+    date: txDate,
+    fiscalYearId: fiscalYear.id,
+    warehouseId: productionWarehouseId,
+    notes: body.notes || null,
+    userId,
     inputs: body.inputs,
     outputs: body.outputs,
+    costedInputs,
+    costing,
     itemMap,
-    defaultAccountId: defaultInvAccount.id,
-    runNumber,
+    revision: false,
   });
-
-  if (journalItems.length > 0) {
-    const journalEntry = await tx.journalEntry.create({
-      data: {
-        entryNumber: jvNumber,
-        date: txDate,
-        narration: `Produksi: ${runNumber} (${inputNames} → ${outputNames})`,
-        status: 'Submitted',
-        fiscalYearId: fiscalYear.id,
-        createdBy: userId,
-        submittedAt: new Date(),
-        items: { create: journalItems },
-      },
-    });
-
-    await tx.accountingLedgerEntry.createMany({
-      data: journalItems.map((ji) => ({
-        date: txDate,
-        accountId: ji.accountId,
-        debit: ji.debit,
-        credit: ji.credit,
-        referenceType: 'JournalEntry',
-        referenceId: journalEntry.id,
-        description: ji.description,
-        fiscalYearId: fiscalYear.id,
-      })),
-    });
-
-    // Aggregate debit/credit per account to batch the balance updates.
-    const balanceMap = new Map<string, { debit: number; credit: number }>();
-    for (const ji of journalItems) {
-      const entry = balanceMap.get(ji.accountId) || { debit: 0, credit: 0 };
-      entry.debit += ji.debit;
-      entry.credit += ji.credit;
-      balanceMap.set(ji.accountId, entry);
-    }
-    for (const [acctId, bal] of balanceMap) {
-      await updateAccountBalance(tx, acctId, bal.debit, bal.credit);
-    }
-  }
-
-  // Persist line items for audit/record-keeping.
-  await tx.productionRunItem.createMany({
-    data: buildProductionRunLineItems({
-      runId: run.id,
-      warehouseId: productionWarehouseId,
-      inputs: body.inputs,
-      outputs: body.outputs,
-      batchSnapshots: costedInputs,
-      outputCosting: costing.outputLines,
-    }),
-  });
-
-  // Persist cost component snapshots + HPP breakdown on the run.
-  if (resolvedCosts.length > 0) {
-    await tx.productionRunCost.createMany({
-      data: resolvedCosts.map((c) => ({
-        productionRunId: run.id,
-        standardId: c.standardId ?? null,
-        description: c.description,
-        costSide: c.costSide,
-        basis: c.basis,
-        rate: c.rate,
-        qtyBasis: c.qtyBasis.toDecimalPlaces(3).toNumber(),
-        totalAmount: c.totalAmount.toNumber(),
-        costAccountId: c.costAccountId ?? null,
-      })),
-    });
-  }
-
-  // OEE: persist downtime + machine rows. Quality/output comes from item lines: inputQty = sum
-  // of inputs, produkQty = main outputs only, sampingQty = by-products. No machines/time = null.
-  await persistOeeInTx(tx, run.id, {
-    plannedStart: body.plannedStart,
-    plannedEnd: body.plannedEnd,
-    breakStart: body.breakStart,
-    breakEnd: body.breakEnd,
-    runMachines: body.runMachines,
-    downtimes: body.downtimes,
-    inputQty: costing.totalInputQty,
-    produkQty: costing.totalMainOutputQty,
-    sampingQty: costing.byProductQty,
-  });
-
-  await tx.productionRun.update({
-    where: { id: run.id },
-    data: {
-      totalMaterialCost: totalMaterialCost.toDecimalPlaces(4).toNumber(),
-      totalCostInputSide: totalCostInputSide.toDecimalPlaces(4).toNumber(),
-      totalCostOutputSide: totalCostOutputSide.toDecimalPlaces(4).toNumber(),
-      totalByproductValue: totalByproductValue.toDecimalPlaces(4).toNumber(),
-      computedHpp: computedHpp ? computedHpp.toNumber() : null,
-      hppManualOverride: costing.hppOverridden,
-    },
-  });
-
-  // Traceability: persist process selections (junction). Dedupe defensively.
-  if (body.processIds && body.processIds.length > 0) {
-    const uniqueIds = Array.from(new Set(body.processIds));
-    await tx.productionRunProcess.createMany({
-      data: uniqueIds.map(processId => ({ productionRunId: run.id, processId })),
-      skipDuplicates: true,
-    });
-  }
+  await persistProductionRunDetails(tx, run.id, { body, warehouseId: productionWarehouseId, costedInputs, costing });
 
   return tx.productionRun.findUnique({
     where: { id: run.id },
