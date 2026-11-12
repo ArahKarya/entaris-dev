@@ -1209,6 +1209,8 @@ enum StockMovementType {
   AdjustmentOut
   TransferOut
   TransferIn
+  // Value-only row (qty 0, no warehouse): written by the value ledger from 6.4b1 on.
+  Revaluation
 }
 
 // Storage location. Stock is tracked per (item, warehouse) in InventoryStock; averageCost

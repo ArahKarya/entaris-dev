@@ -285,6 +285,7 @@
   "recentMovements": {
     "adjIn": "Adj+",
     "adjOut": "Adj-",
+    "revaluation": "Reval",
     "title": "Gerakan Stok Terkini",
     "empty": "Belum ada gerakan stok",
     "caption": "Gerakan stok terkini",

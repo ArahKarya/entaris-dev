@@ -3,6 +3,8 @@ import {
   formatQty,
   isInbound,
   isProductionLinkedMovement,
+  isValueOnly,
+  MOVEMENT_TYPES,
   itemStockStatus,
   movementCancelBlock,
   movementEditBlock,
@@ -60,6 +62,11 @@ describe('movement rules', () => {
     expect(movementTypeLabel('AdjustmentOut')).toBe('Penyesuaian −');
     expect(isInbound('TransferIn')).toBe(true);
     expect(isInbound('TransferOut')).toBe(false);
+    expect(movementTypeLabel('Revaluation')).toBe('Revaluasi Nilai');
+    expect(isInbound('Revaluation')).toBe(false);
+    expect(isValueOnly('Revaluation')).toBe(true);
+    expect(isValueOnly('Out')).toBe(false);
+    expect(MOVEMENT_TYPES).toContain('Revaluation');
     expect(referenceTypeLabel('GoodsReceipt')).toBe('STT');
     expect(referenceTypeLabel('Custom')).toBe('Custom');
     expect(referenceTypeLabel(null)).toBe('');

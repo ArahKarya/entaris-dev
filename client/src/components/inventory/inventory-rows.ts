@@ -73,9 +73,9 @@ export function toItemExportRows(items: readonly InventoryItemRow[]): Record<str
 
 // Stock movements
 
-export type MovementType = 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut' | 'TransferIn' | 'TransferOut';
+export type MovementType = 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut' | 'TransferIn' | 'TransferOut' | 'Revaluation';
 
-export const MOVEMENT_TYPES: readonly MovementType[] = ['In', 'Out', 'AdjustmentIn', 'AdjustmentOut', 'TransferIn', 'TransferOut'];
+export const MOVEMENT_TYPES: readonly MovementType[] = ['In', 'Out', 'AdjustmentIn', 'AdjustmentOut', 'TransferIn', 'TransferOut', 'Revaluation'];
 
 const isMovementType = (type: string): type is MovementType => (MOVEMENT_TYPES as readonly string[]).includes(type);
 
@@ -95,6 +95,9 @@ export const MOVEMENT_TYPE_LABEL: Readonly<Record<MovementType, string>> = Objec
 const INBOUND = new Set<string>(['In', 'AdjustmentIn', 'TransferIn']);
 
 export const isInbound = (type: string): boolean => INBOUND.has(type);
+
+/** A Revaluation moves value only (quantity 0): it is neither inbound nor outbound. */
+export const isValueOnly = (type: string): boolean => type === 'Revaluation';
 
 /** Source documents of system-generated movements (label key: inventoryRows.referenceType.<type>). */
 const REFERENCE_TYPES = [
@@ -147,6 +150,9 @@ export interface StockMovementSummary {
   outCount: number;
   outQty: number;
   outValue: number;
+  /** Value-only Revaluation rows, outside the in/out totals. */
+  revaluationCount: number;
+  revaluationValue: number;
 }
 
 /** Documents that write their own movements (server: services/documentMovementLock.ts). */

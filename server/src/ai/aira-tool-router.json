@@ -7717,7 +7717,7 @@
           "in": "query",
           "type": "string",
           "required": false,
-          "description": "Jenis: In, Out, AdjustmentIn, AdjustmentOut, TransferIn, TransferOut (sesuai enum StockMovementType)."
+          "description": "Jenis: In, Out, AdjustmentIn, AdjustmentOut, TransferIn, TransferOut, Revaluation (sesuai enum StockMovementType). Revaluation = koreksi nilai saja (qty 0, tanpa gudang), dibuat sistem."
         },
         {
           "name": "status",
@@ -7874,7 +7874,7 @@
           "in": "query",
           "type": "string",
           "required": false,
-          "description": "Jenis mutasi stok."
+          "description": "Jenis mutasi stok (enum StockMovementType, termasuk Revaluation)."
         },
         {
           "name": "status",
@@ -7912,7 +7912,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai).",
+      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar.",
       "handler": "GET /api/inventory/movements/summary",
       "permAction": "view",
       "enabled": true,

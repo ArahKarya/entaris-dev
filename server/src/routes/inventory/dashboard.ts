@@ -125,7 +125,8 @@ router.get('/movement-trend', async (_req, res) => {
     const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
 
     const movements = await prisma.stockMovement.findMany({
-      where: { isCancelled: false, date: { gte: startDate } },
+      // Quantity trend: value-only Revaluation rows (qty 0) are left out.
+      where: { isCancelled: false, date: { gte: startDate }, movementType: { not: 'Revaluation' } },
       select: { date: true, movementType: true, quantity: true },
     });
 

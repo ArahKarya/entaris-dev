@@ -18,7 +18,9 @@ import { UNIT_COST_DP } from './costPrecision';
  *  - In from SalesReturn and AdjustmentIn from StockOpname are stock-only:
  *    the live paths restock at the original/current cost WITHOUT touching avg;
  *  - Out / AdjustmentOut -> stock -= qty, avg untouched;
- *  - TransferIn / TransferOut -> stock only (item-level they net to zero).
+ *  - TransferIn / TransferOut -> stock only (item-level they net to zero);
+ *  - Revaluation (qty 0, value only) -> nothing yet: no path writes one before the value
+ *    ledger (6.4b1), which makes the replay value-based.
  *
  * Pure function: no I/O, no mutation of its input.
  */
@@ -29,7 +31,8 @@ export type ReplayMovementType =
   | 'AdjustmentIn'
   | 'AdjustmentOut'
   | 'TransferIn'
-  | 'TransferOut';
+  | 'TransferOut'
+  | 'Revaluation';
 
 export interface ReplayMovement {
   id: string;
