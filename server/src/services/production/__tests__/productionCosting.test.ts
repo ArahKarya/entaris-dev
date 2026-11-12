@@ -32,10 +32,10 @@ describe('computeProductionCosting', () => {
 
     expect(c.inputLines).toEqual([{ unitCost: 6000, totalValue: 6_000_000 }]);
     expect(c.outputLines[0]).toEqual({
-      unitCost: 10166.6667, totalValue: 6_100_000.02, unitCostLoaded: 10166.6667, persistedUnitPrice: 10166.6667, yieldPct: 60,
+      unitCost: 10166.6667, totalValue: 6_100_000.02, unitCostLoaded: 10166.6667, persistedUnitPrice: 10166.6667, priceIsManual: false, yieldPct: 60,
     });
     expect(c.outputLines[1]).toEqual({
-      unitCost: 2000, totalValue: 200_000, unitCostLoaded: 2000, persistedUnitPrice: 2000, yieldPct: null,
+      unitCost: 2000, totalValue: 200_000, unitCostLoaded: 2000, persistedUnitPrice: 2000, priceIsManual: false, yieldPct: null,
     });
 
     expect(c.resolvedCosts[0]!.qtyBasis.toNumber()).toBe(1000);
@@ -55,7 +55,7 @@ describe('computeProductionCosting', () => {
     const c = computeProductionCosting(r1({ hppOverride: 9000 }));
     expect(c.computedHpp?.toNumber()).toBe(9000);
     expect(c.hppOverridden).toBe(true);
-    expect(c.outputLines[0]).toMatchObject({ unitCost: 9000, totalValue: 5_400_000, unitCostLoaded: 9000, persistedUnitPrice: 9000 });
+    expect(c.outputLines[0]).toMatchObject({ unitCost: 9000, totalValue: 5_400_000, unitCostLoaded: 9000, persistedUnitPrice: 9000, priceIsManual: false });
     expect(c.journalPlan).toMatchObject({ diff: -400_000, toConversion: 0, toCogs: 0, loss: 400_000 });
   });
 
@@ -71,7 +71,7 @@ describe('computeProductionCosting', () => {
       outputs: [{ quantity: 600, unitPrice: 11_000 }, { quantity: 100, unitPrice: 2000, isByProduct: true }],
     }));
     expect(c.computedHpp?.toNumber()).toBe(10166.6667);
-    expect(c.outputLines[0]).toMatchObject({ unitCost: 11_000, totalValue: 6_600_000, unitCostLoaded: 10166.6667, persistedUnitPrice: 11_000 });
+    expect(c.outputLines[0]).toMatchObject({ unitCost: 11_000, totalValue: 6_600_000, unitCostLoaded: 10166.6667, persistedUnitPrice: 11_000, priceIsManual: true });
     expect(c.journalPlan).toMatchObject({ diff: 800_000, toConversion: 300_000, toCogs: 500_000, loss: 0 });
   });
 
@@ -90,7 +90,7 @@ describe('computeProductionCosting', () => {
     expect(c.computedHpp?.toNumber()).toBe(0);
     expect(c.clampedNegativeNumerator).toBe(true);
     expect(c.hppOverridden).toBe(false);
-    expect(c.outputLines[0]).toEqual({ unitCost: 0, totalValue: 0, unitCostLoaded: 0, persistedUnitPrice: null, yieldPct: 60 });
+    expect(c.outputLines[0]).toEqual({ unitCost: 0, totalValue: 0, unitCostLoaded: 0, persistedUnitPrice: null, priceIsManual: false, yieldPct: 60 });
     expect(c.journalPlan).toEqual({
       diff: 100_000,
       inputCredits: [{ index: 0, amount: 100_000 }],
@@ -133,7 +133,7 @@ describe('computeProductionCosting', () => {
     });
     expect(c.computedHpp).toBeNull();
     expect(c.yieldPct).toBe(0);
-    expect(c.outputLines[0]).toEqual({ unitCost: 1500, totalValue: 75_000, unitCostLoaded: 1500, persistedUnitPrice: 1500, yieldPct: null });
+    expect(c.outputLines[0]).toEqual({ unitCost: 1500, totalValue: 75_000, unitCostLoaded: 1500, persistedUnitPrice: 1500, priceIsManual: false, yieldPct: null });
     expect(c.journalPlan).toMatchObject({ diff: -25_000, loss: 25_000, toConversion: 0, toCogs: 0 });
   });
 
