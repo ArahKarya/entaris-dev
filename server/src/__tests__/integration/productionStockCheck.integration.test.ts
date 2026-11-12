@@ -11,7 +11,9 @@
  *
  * Committed fixtures (same year, deleted after; no value, so no journal or account balance moves):
  * - two cancels of one run at once: one cancels, the other gets STALE_STATUS, stock reversed once;
- * - an edit started while a cancel holds the run waits for it and is then refused.
+ * - an edit started while a cancel holds the run waits for it and is then refused;
+ * - a cancel waiting on an edit checks the period of the run as the edit left it (the edit moves
+ *   it into a period locked before the cancel wakes): PERIOD_LOCKED, nothing reversed.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -37,6 +39,7 @@ import { logger } from '../../lib/logger';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
 import { STALE_STATUS } from '../../utils/cancelClaim';
+import { PERIOD_LOCKED } from '../../utils/periodGuard';
 import { submitProductionRunInTx, type SubmitProductionRunInput } from '../../services/productionRunSubmit';
 import { editProductionRunInTx } from '../../services/productionRunEdit';
 import { cancelProductionRunInTx } from '../../services/productionRunCancel';
@@ -346,6 +349,35 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       expect(await stockAt(db, f.gkp, f.wh)).toBe(1000);
       expect(await stockAt(db, f.beras, f.wh)).toBe(0);
     } finally {
+      await f.cleanup();
+    }
+  });
+
+  it('a cancel waiting on an edit checks the period of the run as the edit left it', async () => {
+    const f = await committedRun();
+    const [lock] = await prisma.$queryRaw<{ lock_date: string | null }[]>`SELECT lock_date::text AS lock_date FROM period_lock WHERE id = 1`;
+    try {
+      if (!lock) await prisma.$executeRaw`INSERT INTO period_lock (id, lock_date) VALUES (1, NULL) ON CONFLICT (id) DO NOTHING`;
+      // The edit moves the run from 5 March back to 10 January; January is locked before it commits,
+      // so the cancel wakes after both. The run's old date (March) stays open.
+      const r = await race(
+        async (tx) => {
+          await editProductionRunInTx(tx, f.runId, { ...f.body, date: `${YEAR}-01-10` }, f.userId);
+          await tx.$executeRaw`UPDATE period_lock SET lock_date = ${`${YEAR}-02-01`}::date WHERE id = 1`;
+        },
+        (tx) => cancelProductionRunInTx(tx, f.runId, { userId: f.userId }),
+      );
+      expect(r.waited).toBe(true);
+      expect(reasonOf(r.first)).toBe('ok');
+      expect(reasonOf(r.second)).toBe(PERIOD_LOCKED);
+      const run = await prisma.productionRun.findUniqueOrThrow({ where: { id: f.runId }, select: { isCancelled: true, date: true } });
+      expect(run.isCancelled).toBe(false);
+      expect(run.date.toISOString().slice(0, 10)).toBe(`${YEAR}-01-10`);
+      const db = prisma as unknown as Tx;
+      expect(await stockAt(db, f.gkp, f.wh)).toBe(400);
+      expect(await stockAt(db, f.beras, f.wh)).toBe(300);
+    } finally {
+      await prisma.$executeRaw`UPDATE period_lock SET lock_date = ${lock?.lock_date ?? null}::date WHERE id = 1`;
       await f.cleanup();
     }
   });

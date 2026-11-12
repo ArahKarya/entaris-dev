@@ -28,16 +28,19 @@ export async function cancelProductionRunInTx(
   runId: string,
   opts: CancelOptions = {},
 ): Promise<void> {
-  const run = await tx.productionRun.findUnique({ where: { id: runId } });
+  const run = await tx.productionRun.findUnique({ where: { id: runId }, select: { isCancelled: true } });
   if (!run) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (run.isCancelled) throw new BusinessError('Proses produksi sudah dibatalkan.');
   await claimCancel(tx.productionRun, runId, { isCancelled: true });
+  // Re-read under the claim: the claim may have waited on an edit that moved the run's date and
+  // fiscal year, and the period check must cover the run as it now stands.
+  const claimed = await tx.productionRun.findUniqueOrThrow({ where: { id: runId } });
   // Its journals and auto-settle journals check their own years when voided; this covers the run.
-  await assertPeriodsOpen(tx, [{ date: run.date }, { fiscalYearId: run.fiscalYearId, date: run.date }], 'produksi');
+  await assertPeriodsOpen(tx, [{ date: claimed.date }, { fiscalYearId: claimed.fiscalYearId, date: claimed.date }], 'produksi');
 
   // Lock order: the claim above, then the items of the run's movements, then the journals.
   await lockProductionStockInTx(tx, { runId });
-  await reverseProductionEffectsInTx(tx, { id: runId, runNumber: run.runNumber }, {
+  await reverseProductionEffectsInTx(tx, { id: runId, runNumber: claimed.runNumber }, {
     mode: 'cancel',
     allowNegativeStock: opts.allowNegativeStock,
     negativeStockReason: opts.negativeStockReason,
