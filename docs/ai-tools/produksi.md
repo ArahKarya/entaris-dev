@@ -1082,6 +1082,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 404: draft tidak ditemukan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain
+- 400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem
 
 **Tool terkait:** [`prod_draft_get`](#prod_draft_get), [`prod_run_get`](#prod_run_get), [`prod_run_update`](#prod_run_update)
 
@@ -1719,6 +1720,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)
+- 400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal revisi tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem (juga saat disetujui; pengajuan tetap Pending)
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)
 
