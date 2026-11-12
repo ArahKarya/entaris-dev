@@ -16280,7 +16280,8 @@
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
         "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
         "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending",
-        "400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending"
+        "400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: eksekusi ProductionRun/ProductionRunEdit ditolak karena batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; minta pengaju memilih batch masuk aktif item yang sama, pengajuan tetap Pending"
       ],
       "related": [
         "appr_request_get",
@@ -22384,7 +22385,8 @@
         "400: stok input tidak cukup (draft tetap Draft, lastError terisi)",
         "404: draft tidak ditemukan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain"
+        "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama lewat prod_draft_update lalu posting ulang"
       ],
       "related": [
         "prod_draft_get",
@@ -30951,7 +30953,8 @@
         "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)"
+        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama (juga saat disetujui; pengajuan tetap Pending)"
       ],
       "related": [
         "prod_run_get",
