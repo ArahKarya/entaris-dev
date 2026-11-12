@@ -15,6 +15,7 @@ export const WAREHOUSE_HAS_STOCK = 'WAREHOUSE_HAS_STOCK';
 export const WAREHOUSE_IS_DEFAULT = 'WAREHOUSE_IS_DEFAULT';
 export const WAREHOUSE_BUSY = 'WAREHOUSE_BUSY';
 
+const DEFAULT_UNSET_MESSAGE = 'Gudang default tidak bisa dilepas dari status default. Set gudang lain sebagai default dulu.';
 const DEFAULT_INACTIVE_MESSAGE = 'Gudang default tidak bisa dinonaktifkan. Set gudang lain sebagai default dulu.';
 
 /** Deadlock (40P01) or lock timeout (55P03), also as reported through the pg driver adapter. */
@@ -198,6 +199,8 @@ router.put('/:id', async (req: AuthRequest, res) => {
       if (body.isDefault !== undefined || body.isActive !== undefined) {
         assertDefaultStaysActive(body.isDefault ?? existing.isDefault, body.isActive ?? existing.isActive);
       }
+      // The default only moves by making another warehouse the default; unticking it would leave none.
+      if (existing.isDefault && body.isDefault === false) throw new BusinessError(DEFAULT_UNSET_MESSAGE, WAREHOUSE_IS_DEFAULT);
       if (body.isActive === false && existing.isActive) await assertWarehouseCanDeactivate(tx, existing, body.isDefault);
       if (body.isDefault === true && !existing.isDefault) {
         await tx.warehouse.updateMany({ where: { isDefault: true }, data: { isDefault: false } });

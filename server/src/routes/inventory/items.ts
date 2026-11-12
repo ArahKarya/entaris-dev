@@ -18,7 +18,7 @@ import {
   usesListMode,
 } from '../../services/inventoryItemList';
 import { logger } from '../../lib/logger';
-import { assertItemAccountValid, assertItemChangeAllowed } from '../../services/inventory/itemMasterGuard';
+import { assertItemAccountValid, assertItemChangeAllowed, itemHoldsStock, ITEM_HAS_STOCK } from '../../services/inventory/itemMasterGuard';
 
 const router = Router();
 
@@ -322,6 +322,16 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       ]);
       if (purchaseUsage > 0 || salesUsage > 0) {
         throw new BusinessError('Item sudah digunakan di invoice. Nonaktifkan item jika tidak ingin dipakai lagi.');
+      }
+
+      // Stock without an active movement behind it (drift) would vanish from the stock book with the item
+      // and its warehouse rows, while the GL still carries the value.
+      const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id }, select: { currentStock: true } });
+      if (await itemHoldsStock(tx, id, item.currentStock)) {
+        throw new BusinessError(
+          'Item tidak dapat dihapus selama masih memiliki stok (termasuk stok negatif). Kosongkan stok di semua gudang atau nonaktifkan item.',
+          ITEM_HAS_STOCK,
+        );
       }
 
       // Safe to delete — also remove cancelled movements

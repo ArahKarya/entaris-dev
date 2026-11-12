@@ -28,6 +28,7 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Item stok tidak ditemukan.": "Stock item not found.",
   "Gagal mengupdate item stok.": "Failed to update the stock item.",
   "Item memiliki {0} mutasi stok aktif. Batalkan semua mutasi terlebih dahulu atau nonaktifkan item.": "Item has {0} active stock movements. Cancel them first or deactivate the item.",
+  "Item tidak dapat dihapus selama masih memiliki stok (termasuk stok negatif). Kosongkan stok di semua gudang atau nonaktifkan item.": "The item cannot be deleted while it still holds stock (negative stock included). Empty its stock in every warehouse or deactivate the item.",
   "Item sudah digunakan di invoice. Nonaktifkan item jika tidak ingin dipakai lagi.": "Item is already used on invoices. Deactivate it if it should no longer be used.",
   "Item stok dihapus.": "Stock item deleted.",
   "Gagal menghapus item stok.": "Failed to delete the stock item.",

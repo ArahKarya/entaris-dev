@@ -315,6 +315,19 @@ d('item master while it carries stock (E3-R5)', () => {
       expect((await deleteItem('00000000-0000-4000-8000-000000000000')).status).toBe(404);
     });
   });
+
+  it('refuses to delete an item whose stock has no active movement behind it', async () => {
+    await inRollback(async (tx) => {
+      const sub = await inventorySubtree(tx);
+      const own = await sub.child();
+      const { item } = await stockedItem(tx, own.id, 120);
+      const refused = await deleteItem(item.id);
+      expect(refused.status).toBe(400);
+      expect(refused.body.code).toBe('ITEM_HAS_STOCK');
+      expect(await tx.inventoryItem.count({ where: { id: item.id } })).toBe(1);
+      expect(await tx.inventoryStock.count({ where: { itemId: item.id } })).toBe(1);
+    });
+  });
 });
 
 d('warehouse master while it carries stock (E3-R5)', () => {
@@ -357,6 +370,21 @@ d('warehouse master while it carries stock (E3-R5)', () => {
       expect(off.status, JSON.stringify(off.body)).toBe(200);
       expect(off.body.isActive).toBe(false);
       expect((await putWarehouse(empty.id, { isActive: true })).status).toBe(200);
+    });
+  });
+
+  it('does not let the default warehouse be unticked, so a second call cannot deactivate it', async () => {
+    await inRollback(async (tx) => {
+      await tx.warehouse.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+      const def = await warehouse(tx, { isDefault: true });
+      const other = await warehouse(tx);
+      const r = await putWarehouse(def.id, { isDefault: false });
+      expect(r.status).toBe(400);
+      expect(r.body.code).toBe('WAREHOUSE_IS_DEFAULT');
+      expect((await tx.warehouse.findUniqueOrThrow({ where: { id: def.id } })).isDefault).toBe(true);
+      // The default moves by naming another warehouse as the default.
+      expect((await putWarehouse(other.id, { isDefault: true })).status).toBe(200);
+      expect((await tx.warehouse.findUniqueOrThrow({ where: { id: def.id } })).isDefault).toBe(false);
     });
   });
 

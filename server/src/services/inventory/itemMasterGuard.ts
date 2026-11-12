@@ -73,7 +73,7 @@ export async function assertItemAccountChange(tx: Tx, itemId: string, newAccount
 }
 
 /** Stock on hand, negative included, in the item total or in any warehouse. */
-async function itemHoldsStock(tx: Tx, itemId: string, itemTotal: Prisma.Decimal): Promise<boolean> {
+export async function itemHoldsStock(tx: Tx, itemId: string, itemTotal: Prisma.Decimal): Promise<boolean> {
   if (!itemTotal.isZero()) return true;
   return (await tx.inventoryStock.count({ where: { itemId, currentStock: { not: 0 } } })) > 0;
 }

@@ -469,7 +469,7 @@ Aturan wajib:
 
 ### inv_item_delete
 
-**Ringkasan:** Menghapus PERMANEN master item beserta seluruh baris pergerakan stok-nya yang sudah dibatalkan. Ditolak bila item punya mutasi stok aktif atau sudah dipakai di invoice penjualan/pembelian; gunakan inv_item_update isActive=false untuk menonaktifkan.
+**Ringkasan:** Menghapus PERMANEN master item beserta seluruh baris pergerakan stok-nya yang sudah dibatalkan. Ditolak bila item punya mutasi stok aktif, masih memiliki stok (termasuk negatif; ITEM_HAS_STOCK) atau sudah dipakai di invoice penjualan/pembelian; gunakan inv_item_update isActive=false untuk menonaktifkan.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -515,6 +515,7 @@ Aturan wajib:
 **Error umum**
 
 - 400: item punya mutasi stok aktif
+- 400: ITEM_HAS_STOCK: item masih memiliki stok (termasuk negatif)
 - 400: item sudah dipakai di invoice
 - 404: item tidak ditemukan
 
@@ -1850,7 +1851,7 @@ Aturan wajib:
 
 ### wh_update
 
-**Ringkasan:** Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama. Menonaktifkan gudang ditolak bila masih ada stok (termasuk negatif) di gudang itu (WAREHOUSE_HAS_STOCK) atau bila gudang itu default (WAREHOUSE_IS_DEFAULT). Gudang default harus aktif: menjadikan gudang nonaktif sebagai default juga ditolak (WAREHOUSE_IS_DEFAULT). Bila gudang sedang dipakai transaksi stok, hasilnya WAREHOUSE_BUSY; coba lagi.
+**Ringkasan:** Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama. Menonaktifkan gudang ditolak bila masih ada stok (termasuk negatif) di gudang itu (WAREHOUSE_HAS_STOCK) atau bila gudang itu default (WAREHOUSE_IS_DEFAULT). Gudang default tidak bisa dilepas lewat isDefault=false; jadikan gudang lain default (WAREHOUSE_IS_DEFAULT). Gudang default harus aktif: menjadikan gudang nonaktif sebagai default juga ditolak (WAREHOUSE_IS_DEFAULT). Bila gudang sedang dipakai transaksi stok, hasilnya WAREHOUSE_BUSY; coba lagi.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1904,6 +1905,6 @@ Aturan wajib:
 
 - 400: gudang tidak ditemukan
 - 400: WAREHOUSE_HAS_STOCK: gudang masih punya stok
-- 400: WAREHOUSE_IS_DEFAULT: gudang default tidak bisa dinonaktifkan
+- 400: WAREHOUSE_IS_DEFAULT: gudang default tidak bisa dinonaktifkan atau dilepas dari status default
 - 400: WAREHOUSE_BUSY: gudang sedang dipakai transaksi stok, coba lagi
 
