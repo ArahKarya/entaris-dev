@@ -9,6 +9,7 @@ import { systemAccounts } from './systemAccounts';
 import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 import { resolvePurchaseLineType, resolvePurchaseOrderIdFromReceipts } from './purchaseInvoiceLinks';
 import { logger } from '../lib/logger';
+import { lockInventoryRows } from './inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -330,6 +331,14 @@ export async function submitPurchaseInvoiceInTx(
       debitByAccount.delete(accountId);
     }
   }
+
+  // Lock the items whose average the landed cost realigns below, before the journal locks its
+  // accounts (lock order in services/inventory/stockLocks.ts): the stock and average read there
+  // then cannot change under a concurrent posting.
+  await lockInventoryRows(tx, {
+    itemIds: landedAdjustments.flatMap((adj) =>
+      !adj.delta.isZero() && adj.grItem?.stockMovementId && adj.invItem.inventoryItemId ? [adj.invItem.inventoryItemId] : []),
+  });
 
   const jvNumber = `JV-${invoice.invoiceNumber}`;
   const debitJournalItems: { accountId: string; partyId?: string | null; debit: number; credit: number; description: string }[] =

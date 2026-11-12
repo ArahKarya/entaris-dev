@@ -12,11 +12,16 @@ vi.mock('../systemAccounts', () => ({
 import { postOpeningStockInTx } from '../openingStockImport';
 import { makeAutoTx } from '../../__tests__/helpers/autoTx';
 
-const item = { id: 'item-1', code: 'GKP', name: 'Gabah', accountId: null, currentStock: 0, averageCost: 0 };
+const item = { id: 'item-1', code: 'GKP' };
+/** The row lockInventoryRows reads back after locking the item. */
+const lockedRow = (accountId: string | null = null) => () => [
+  { id: 'item-1', name: 'Gabah', unit: 'Kg', isActive: true, accountId, currentStock: '0', averageCost: '0' },
+];
 
 function journalTx(extra: Record<string, (a: any) => unknown> = {}) {
   return makeAutoTx({
     'warehouse.findFirst': () => ({ id: 'wh-default' }),
+    'inventoryItem.findMany': lockedRow(),
     'journalEntry.create': ({ data }) => ({
       id: 'je-1',
       items: data.items.create.map((i: object, n: number) => ({ id: `ji-${n}`, ...i })),
@@ -67,6 +72,27 @@ describe('postOpeningStockInTx', () => {
     ).rejects.toThrow('Gudang dengan kode "NOPE" tidak ditemukan.');
   });
 
+  it('locks the item and takes its stock and average from the locked row, not the caller', async () => {
+    const { tx, fn } = journalTx({
+      'inventoryItem.findMany': () => [
+        { id: 'item-1', name: 'Gabah', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '4000' },
+      ],
+    });
+    await postOpeningStockInTx(tx, { item, quantity: 100, unitCost: 6000, totalValue: 600_000, userId: 'u1' });
+    const lockSql = fn('$queryRaw').mock.calls.map((c) => (c[0] as string[]).join('?'));
+    expect(lockSql.some((q) => q.includes('FROM inventory_items') && q.includes('FOR NO KEY UPDATE'))).toBe(true);
+    // (100 x 4000 + 100 x 6000) / 200 = 5000: the locked stock and average, not zeros from the caller.
+    expect(fn('inventoryItem.update').mock.calls[0]![0].data.averageCost).toBe(5000);
+  });
+
+  it('rejects an item that no longer exists', async () => {
+    const { tx, fn } = journalTx({ 'inventoryItem.findMany': () => [] });
+    await expect(
+      postOpeningStockInTx(tx, { item, quantity: 1, unitCost: 1, totalValue: 1, userId: 'u1' }),
+    ).rejects.toThrow('Item stok tidak ditemukan.');
+    expect(fn('journalEntry.create')).not.toHaveBeenCalled();
+  });
+
   it('fails clearly when no warehouse can be resolved', async () => {
     const { tx, fn } = makeAutoTx();
     await expect(
@@ -76,8 +102,8 @@ describe('postOpeningStockInTx', () => {
   });
 
   it('leaves counter account and journal empty when the item account is missing (no GL posted)', async () => {
-    const { tx, fn } = journalTx();
-    await postOpeningStockInTx(tx, { item: { ...item, accountId: 'acc-gone' }, quantity: 1, unitCost: 1, totalValue: 1, userId: 'u1' });
+    const { tx, fn } = journalTx({ 'inventoryItem.findMany': lockedRow('acc-gone') });
+    await postOpeningStockInTx(tx, { item, quantity: 1, unitCost: 1, totalValue: 1, userId: 'u1' });
     expect(fn('journalEntry.create')).not.toHaveBeenCalled();
     expect(fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({ offsetAccountId: null, journalEntryId: null });
   });
