@@ -59,6 +59,11 @@ const IGNORED = new Set<string>([
   // Party opening audit (scripts/repair/e2-party-opening-audit.ts, services/ledger/partyOpeningAudit.ts),
   // CLI only: its other refusals are the shared ones above; this one rolls an --apply batch back.
   'Party {0} is {1} after the {2} repair; nothing was applied.',
+  // Item vs warehouse drift repair (services/inventory/stockDriftRepair.ts, run by
+  // scripts/repair/e3-stock-drift.ts), CLI only; its other refusals are the shared ones above.
+  'Unknown warehouse_code: {0}. Nothing was applied.',
+  'The plan is stale; nothing was applied. {0}',
+  'Drift left after the repair on {0}; nothing was applied.',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */
