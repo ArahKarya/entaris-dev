@@ -8,6 +8,8 @@ import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { CreateProductionRunSchema } from '../utils/schemas';
+import { getWarehouseStockMap, resolveWarehouseId } from '../utils/warehouseStock';
+import { stockKey } from './inventory/stockLocks';
 import { queueApproval } from './approvalGate';
 import { submitProductionRunInTx } from './productionRunSubmit';
 
@@ -46,10 +48,14 @@ export function summarizeDraftPayload(
   };
 }
 
-/** Peringatan non-blocking: stok input saat ini kurang (dicek ulang saat posting). */
+/**
+ * Non-blocking warning: the input stock at the production warehouse is short now, lines of one item
+ * summed (posting checks again, under the stock locks). `stock` holds that warehouse's stock.
+ */
 export function buildStockWarnings(
   inputs: Array<{ itemId: string; quantity: number }>,
   stock: ReadonlyMap<string, { name: string; unit: string; currentStock: number }>,
+  warehouseName: string,
 ): string[] {
   const need = new Map<string, number>();
   for (const i of inputs) need.set(i.itemId, (need.get(i.itemId) ?? 0) + Number(i.quantity));
@@ -57,26 +63,44 @@ export function buildStockWarnings(
   for (const [itemId, qty] of need) {
     const s = stock.get(itemId);
     if (s && s.currentStock < qty) {
-      out.push(`Stok '${s.name}' saat ini ${fmtQty(s.currentStock)} ${s.unit}, dibutuhkan ${fmtQty(qty)} ${s.unit}. Dicek ulang saat posting.`);
+      out.push(`Stok '${s.name}' di gudang ${warehouseName} saat ini ${fmtQty(s.currentStock)} ${s.unit}, dibutuhkan ${fmtQty(qty)} ${s.unit}. Dicek ulang saat posting.`);
     }
   }
   return out;
 }
 
-/** Lookup nama + stok item yang dipakai payload (1 query). */
-async function loadItemInfo(tx: Tx, body: Pick<Body, 'inputs' | 'outputs'>) {
+/** Names of the payload's items (1 query). */
+async function loadItemNames(tx: Tx, body: Pick<Body, 'inputs' | 'outputs'>) {
   const ids = [...new Set([...body.inputs, ...body.outputs].map((l) => l.itemId))];
   const items = await tx.inventoryItem.findMany({
     where: { id: { in: ids } },
-    select: { id: true, name: true, unit: true, currentStock: true },
+    select: { id: true, name: true, unit: true },
   });
-  return new Map(items.map((i) => [i.id, { name: i.name, unit: i.unit, currentStock: Number(i.currentStock) }]));
+  return new Map(items.map((i) => [i.id, { name: i.name, unit: i.unit }]));
+}
+
+/**
+ * Warnings for the inputs against the stock at the production warehouse (the payload's, else the
+ * default), read without a lock. No warehouse: none (posting rejects the run).
+ */
+async function stockWarnings(tx: Tx, body: Body, names: Map<string, { name: string; unit: string }>): Promise<string[]> {
+  if (body.allowNegativeStock) return [];
+  const warehouseId = await resolveWarehouseId(tx, body.warehouseId);
+  if (!warehouseId) return [];
+  const warehouse = await tx.warehouse.findUnique({ where: { id: warehouseId }, select: { name: true } });
+  const ids = [...new Set(body.inputs.map((i) => i.itemId))];
+  const atWarehouse = await getWarehouseStockMap(tx, ids.map((itemId) => ({ itemId, warehouseId })));
+  const stock = new Map(ids.flatMap((id) => {
+    const n = names.get(id);
+    return n ? [[id, { ...n, currentStock: atWarehouse.get(stockKey(id, warehouseId)) ?? 0 }] as const] : [];
+  }));
+  return buildStockWarnings(body.inputs, stock, warehouse?.name ?? warehouseId);
 }
 
 async function describe(tx: Tx, body: Body) {
-  const info = await loadItemInfo(tx, body);
-  const summary = summarizeDraftPayload(body, new Map([...info].map(([k, v]) => [k, v.name])));
-  const warnings = body.allowNegativeStock ? [] : buildStockWarnings(body.inputs, info);
+  const names = await loadItemNames(tx, body);
+  const summary = summarizeDraftPayload(body, new Map([...names].map(([k, v]) => [k, v.name])));
+  const warnings = await stockWarnings(tx, body, names);
   return { summary: summary as unknown as Prisma.InputJsonValue, warnings };
 }
 
