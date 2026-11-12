@@ -7,6 +7,8 @@ import { cancelDocumentJournals } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
+import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
+import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
 type Tx = Prisma.TransactionClient;
 
@@ -71,6 +73,22 @@ export async function cancelSalesInvoiceInTx(
     throw new BusinessError('Invoice memiliki alokasi uang muka customer aktif. Batalkan alokasi terlebih dahulu.');
   }
 
+  // The delivery notes this invoice bills are documents too: lock them (id order) before the
+  // items, as their own edit and cancel do; they are released below.
+  await tx.$queryRaw`SELECT id FROM delivery_orders WHERE invoice_id = ${invoice.id} ORDER BY id FOR UPDATE`;
+
+  // Only direct-sale movements are reversed; from-DO movements belong to the DO and stay valid.
+  // Their items are locked before the journals lock accounts other than AR (lock order in
+  // services/inventory/stockLocks.ts; the AR row above is the document lock of this cancel). An
+  // Out reversal puts stock back and needs no check.
+  const stockMovements = await tx.stockMovement.findMany({
+    where: { referenceType: 'SalesInvoice', referenceId: invoice.id, isCancelled: false },
+  });
+  await lockInventoryRows(tx, {
+    itemIds: stockMovements.map((sm) => sm.itemId),
+    pairs: stockMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
+  });
+
   // Revenue/AR journal, COGS journal and every satellite of either (JV-<no>-CORR, -CORR-PPN,
   // -CORR-QTY-n, -WAPU, -RATE-FIX, …). Satellites left active would keep moving AR, revenue, PPh
   // and PPN for an invoice that no longer exists.
@@ -80,10 +98,6 @@ export async function cancelSalesInvoiceInTx(
   // auto-settle JVs, otherwise later stock-ins keep moving inventory value into HPP.
   await closeCogsBackfillForSalesInvoice(tx, invoice.id, trail);
 
-  // Only direct-sale movements are reversed; from-DO movements belong to the DO and stay valid.
-  const stockMovements = await tx.stockMovement.findMany({
-    where: { referenceType: 'SalesInvoice', referenceId: invoice.id, isCancelled: false },
-  });
   for (const sm of stockMovements) {
     await tx.inventoryItem.update({
       where: { id: sm.itemId },
@@ -122,12 +136,14 @@ export async function cancelSalesInvoiceInTx(
 
 /**
  * Mirror of cancelSalesInvoiceInTx for purchase invoices. Inventory deltas
- * flip direction (decrement instead of increment).
+ * flip direction (decrement instead of increment), so a legacy PI-owned movement whose warehouse
+ * no longer holds the goods is rejected with STOCK_INSUFFICIENT unless opts allows negative stock.
  */
 export async function cancelPurchaseInvoiceInTx(
   tx: Tx,
   invoiceId: string,
   trail?: CancelTrail,
+  opts: NegativeStockBypass = {},
 ): Promise<{ id: string; status: 'Cancelled' }> {
   const invoice = await tx.purchaseInvoice.findUnique({
     where: { id: invoiceId },
@@ -155,6 +171,29 @@ export async function cancelPurchaseInvoiceInTx(
     throw new BusinessError('Invoice memiliki alokasi uang muka aktif. Batalkan alokasi terlebih dahulu.');
   }
 
+  // Only PI-owned movements (standalone/legacy lines) are reversed; STT-linked stock belongs to the STT.
+  // Lock their items before the journals lock accounts, then check that each warehouse still holds
+  // what the invoice brought in. allowNegativeStock (the route checked inventory.negative_stock)
+  // logs the shortage instead.
+  const stockMovements = await tx.stockMovement.findMany({
+    where: { referenceType: 'PurchaseInvoice', referenceId: invoice.id, isCancelled: false },
+  });
+  await lockInventoryRows(tx, {
+    itemIds: stockMovements.map((sm) => sm.itemId),
+    pairs: stockMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
+  });
+  await assertStockAvailable(
+    tx,
+    stockMovements.map((sm) => ({ itemId: sm.itemId, warehouseId: sm.warehouseId, quantity: sm.quantity.toString() })),
+    {
+      context: 'purchaseInvoice.cancel',
+      userId: trail?.cancelledById,
+      allowNegative: opts.allowNegativeStock,
+      reason: opts.negativeStockReason,
+      reversal: true,
+    },
+  );
+
   // Main AP journal plus satellites (JV-<no>-CORR, -CORR-2, …).
   const jvNumber = `JV-${invoice.invoiceNumber}`;
   const mainExisted = await tx.journalEntry.count({ where: { entryNumber: jvNumber } });
@@ -169,10 +208,6 @@ export async function cancelPurchaseInvoiceInTx(
 
   await recalcPartyOutstanding(tx, invoice.partyId);
 
-  // Only PI-owned movements (standalone/legacy lines) are reversed; STT-linked stock belongs to the STT.
-  const stockMovements = await tx.stockMovement.findMany({
-    where: { referenceType: 'PurchaseInvoice', referenceId: invoice.id, isCancelled: false },
-  });
   for (const sm of stockMovements) {
     await tx.inventoryItem.update({
       where: { id: sm.itemId },
