@@ -12,11 +12,14 @@
  * Lock order (stockLocks.ts): the movement row, lockInventoryRows, the SM or JV number, then the
  * account rows (an edit takes the new JV number before it voids the old journal, whose balance
  * updates lock account rows).
+ *
+ * The item vs warehouse drift repair (PR-6.3d) writes its stock here too: placeUnplacedStockInTx
+ * and writeOffUnplacedStockInTx at the end of this file.
  */
 import type { Prisma, StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../utils/errors';
-import { MOVEMENT_DOCUMENT_LOCKED, documentMovementLockMessage } from '../documentMovementLock';
+import { MOVEMENT_DOCUMENT_LOCKED, STOCK_DRIFT_REFERENCE, documentMovementLockMessage } from '../documentMovementLock';
 import { assertBatchSource } from './batchSource';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
@@ -27,7 +30,7 @@ import { settleCogsBackfillForItem } from '../cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../cogsBackfillReverse';
 import { recomputeAverageCostFromReplay, replayAverageCost } from '../averageCostRecompute';
 import { adjustWarehouseStock, resolveWarehouseId } from '../../utils/warehouseStock';
-import { assertStockAvailable, lockInventoryRows, stockKey } from './stockLocks';
+import { assertStockAvailable, lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
 import { assertVarianceAccountUsable } from './varianceAccount';
 import { postJournal } from '../ledger/postJournal';
 import { DOCUMENT_RULE, STOCK_OFFSET_RULE, assertPostableAccounts } from '../ledger/accountGuard';
@@ -40,6 +43,8 @@ type Tx = Prisma.TransactionClient;
 export const MANUAL_IN_ZERO_COST = 'MANUAL_IN_ZERO_COST';
 /** Error code (400): a manual Stock In or Adjustment + without an offset account. */
 export const OFFSET_REQUIRED = 'OFFSET_REQUIRED';
+/** Error code (400): a drift repair quantity beyond the stock that no warehouse holds. */
+export const DRIFT_QUANTITY_EXCEEDED = 'DRIFT_QUANTITY_EXCEEDED';
 
 export type ManualMovementType = 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut';
 
@@ -174,6 +179,33 @@ async function activeWarehouseId(tx: Tx, preferred: string | null | undefined): 
   return warehouseId;
 }
 
+/**
+ * The one place this module writes stock: the warehouse row (skipped for null) and the item total,
+ * with the item's new average when given. Callers hold the rows through lockInventoryRows.
+ */
+async function writeStock(
+  tx: Tx,
+  w: { itemId: string; warehouseId: string | null; warehouseDelta: Decimal.Value; itemDelta: Decimal.Value; averageCost?: number },
+): Promise<void> {
+  const warehouseDelta = new Decimal(w.warehouseDelta);
+  const itemDelta = new Decimal(w.itemDelta);
+  if (w.warehouseId && !warehouseDelta.isZero()) {
+    await tx.inventoryStock.upsert({
+      where: { itemId_warehouseId: { itemId: w.itemId, warehouseId: w.warehouseId } },
+      create: { itemId: w.itemId, warehouseId: w.warehouseId, currentStock: warehouseDelta.toString() },
+      update: { currentStock: { increment: warehouseDelta.toString() } },
+    });
+  }
+  if (itemDelta.isZero() && w.averageCost === undefined) return;
+  await tx.inventoryItem.update({
+    where: { id: w.itemId },
+    data: {
+      currentStock: { increment: itemDelta.toString() },
+      ...(w.averageCost !== undefined ? { averageCost: w.averageCost } : {}),
+    },
+  });
+}
+
 /** Stock and average of a new row; the movement row itself is written by the caller. */
 async function applyCreateStock(
   tx: Tx,
@@ -184,18 +216,15 @@ async function applyCreateStock(
   unitCost: Decimal,
 ): Promise<void> {
   const stockDelta = isInbound(type) ? quantity : -quantity;
-  await tx.inventoryStock.upsert({
-    where: { itemId_warehouseId: { itemId: item.id, warehouseId } },
-    create: { itemId: item.id, warehouseId, currentStock: stockDelta },
-    update: { currentStock: { increment: stockDelta } },
+  await writeStock(tx, {
+    itemId: item.id, warehouseId, warehouseDelta: stockDelta, itemDelta: stockDelta,
+    averageCost: isInbound(type) ? calcWeightedAverage(item.currentStock, item.averageCost, quantity, unitCost) : undefined,
   });
-  await tx.inventoryItem.update({
-    where: { id: item.id },
-    data: {
-      currentStock: { increment: stockDelta },
-      ...(isInbound(type) ? { averageCost: calcWeightedAverage(item.currentStock, item.averageCost, quantity, unitCost) } : {}),
-    },
-  });
+}
+
+/** The movement row of a new manual movement (also of a drift write-off). */
+function insertMovement(tx: Tx, data: Prisma.StockMovementUncheckedCreateInput) {
+  return tx.stockMovement.create({ data, include: ITEM_SUMMARY });
 }
 
 /** Posts a new manual movement: stock, average, journal and the COGS auto-settle of an inbound row. */
@@ -229,17 +258,14 @@ export async function createManualMovementInTx(tx: Tx, input: ManualMovementCrea
     })
     : null;
 
-  const movement = await tx.stockMovement.create({
-    data: {
-      movementNumber, date: movementDate, itemId: item.id, warehouseId, movementType: input.movementType,
-      quantity: input.quantity, unitCost: unitCost.toString(), totalValue: totalValue.toString(),
-      notes: input.notes || null,
-      // Only documents set referenceType/referenceId (that is what locks a movement); a manual
-      // movement keeps the client's free-text referenceNumber.
-      referenceType: null, referenceId: null, referenceNumber: input.referenceNumber || null,
-      offsetAccountId, sourceMovementId, journalEntryId, fiscalYearId: fiscalYear.id, createdById: userId,
-    },
-    include: ITEM_SUMMARY,
+  const movement = await insertMovement(tx, {
+    movementNumber, date: movementDate, itemId: item.id, warehouseId, movementType: input.movementType,
+    quantity: input.quantity, unitCost: unitCost.toString(), totalValue: totalValue.toString(),
+    notes: input.notes || null,
+    // Only documents set referenceType/referenceId (that is what locks a movement); a manual
+    // movement keeps the client's free-text referenceNumber.
+    referenceType: null, referenceId: null, referenceNumber: input.referenceNumber || null,
+    offsetAccountId, sourceMovementId, journalEntryId, fiscalYearId: fiscalYear.id, createdById: userId,
   });
 
   if (inbound) {
@@ -408,4 +434,90 @@ export async function cancelManualMovementInTx(tx: Tx, id: string, userId: strin
   await tx.stockMovement.update({ where: { id }, data: { isCancelled: true } });
   await reverseCogsSettlementsByTrigger(tx, 'StockMovement', id);
   await recomputeAverageCostFromReplay(tx, movement.itemId);
+}
+
+// Item vs warehouse drift repair (owner decision #18, PR-6.3d; driven by stockDriftRepair.ts).
+// inventory_items.current_stock above the sum of inventory_stocks is stock that no warehouse holds:
+// it cannot be taken out of any warehouse, yet it counts in the inventory value. The accountant
+// decides per item whether the goods are there (assign) or gone (writeoff).
+
+const formatQty = (d: Decimal) => d.toNumber().toLocaleString('id-ID', { maximumFractionDigits: 3 });
+
+/** Item total minus the sum of its warehouse rows, read under the item lock (negative: the warehouses hold more). */
+async function unplacedStock(tx: Tx, item: LockedItem): Promise<Decimal> {
+  const sum = await tx.inventoryStock.aggregate({ where: { itemId: item.id }, _sum: { currentStock: true } });
+  return item.currentStock.minus(sum._sum.currentStock?.toString() ?? 0);
+}
+
+function driftExceeded(item: LockedItem, unplaced: Decimal, quantity: Decimal): BusinessError {
+  return new BusinessError(
+    `Stok '${item.name}' di luar gudang ${formatQty(unplaced)} ${item.unit}; perbaikan ${formatQty(quantity)} ${item.unit} ditolak.`,
+    DRIFT_QUANTITY_EXCEEDED,
+  );
+}
+
+/**
+ * Drift repair `assign`: the goods are there, so stock that no warehouse holds is booked into
+ * `warehouseId`; a negative quantity takes a warehouse's excess over the item total back out of it.
+ * The item total, its average and the GL do not change, and no movement row is written (the
+ * caller's audit row records it).
+ */
+export async function placeUnplacedStockInTx(
+  tx: Tx,
+  input: { itemId: string; warehouseId: string; quantity: Decimal.Value },
+): Promise<void> {
+  const quantity = new Decimal(input.quantity);
+  const warehouse = await tx.warehouse.findUnique({ where: { id: input.warehouseId }, select: { isActive: true } });
+  if (!warehouse) throw new BusinessError('Gudang tidak ditemukan.');
+  if (quantity.gt(0) && !warehouse.isActive) throw new BusinessError('Gudang tidak aktif.');
+  const locked = await lockInventoryRows(tx, { itemIds: [input.itemId], pairs: [{ itemId: input.itemId, warehouseId: input.warehouseId }] });
+  const item = locked.items.get(input.itemId);
+  if (!item) throw new BusinessError('Item stok tidak ditemukan.');
+  const unplaced = await unplacedStock(tx, item);
+  const held = locked.stocks.get(stockKey(item.id, input.warehouseId))?.currentStock ?? new Decimal(0);
+  const fits = quantity.gt(0)
+    ? quantity.lte(unplaced)
+    : quantity.lt(0) && quantity.gte(unplaced) && held.plus(quantity).gte(0);
+  if (!fits) throw driftExceeded(item, unplaced, quantity);
+  await writeStock(tx, { itemId: item.id, warehouseId: input.warehouseId, warehouseDelta: quantity, itemDelta: 0 });
+}
+
+/**
+ * Drift repair `writeoff`: the goods that no warehouse holds are gone. An Adjustment − without a
+ * warehouse takes `quantity` off the item total at the average read under the lock; its journal
+ * debits the Inventory Variance account (a detail account of its own, varianceAccount.ts) and
+ * credits the item's inventory account, dated `day` in an open period. An item without a cost
+ * (average 0) posts no journal. The row (referenceType STOCK_DRIFT_REFERENCE) cannot be edited or
+ * cancelled per row.
+ */
+export async function writeOffUnplacedStockInTx(
+  tx: Tx,
+  input: { itemId: string; quantity: Decimal.Value; day: string; notes: string },
+  userId: string,
+) {
+  const quantity = new Decimal(input.quantity);
+  const movementDate = new Date(input.day);
+  const fiscalYear = await assertPeriodOpen(tx, { date: movementDate }, 'mutasi stok');
+  const locked = await lockInventoryRows(tx, { itemIds: [input.itemId] });
+  const item = locked.items.get(input.itemId);
+  if (!item) throw new BusinessError('Item stok tidak ditemukan.');
+  const unplaced = await unplacedStock(tx, item);
+  if (quantity.lte(0) || quantity.gt(unplaced)) throw driftExceeded(item, unplaced, quantity);
+
+  const { unitCost, totalValue } = manualMovementValue('AdjustmentOut', quantity, undefined, item.averageCost);
+  const offsetAccountId = await resolveOffsetAccountId(tx, 'AdjustmentOut', null, totalValue);
+  const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
+  await writeStock(tx, { itemId: item.id, warehouseId: null, warehouseDelta: 0, itemDelta: quantity.neg() });
+  const journalEntryId = offsetAccountId
+    ? await postMovementJournal(tx, {
+      type: 'AdjustmentOut', item, offsetAccountId, totalValue, quantity,
+      date: movementDate, notes: input.notes, userId, fiscalYearId: fiscalYear.id,
+    })
+    : null;
+  return insertMovement(tx, {
+    movementNumber, date: movementDate, itemId: item.id, warehouseId: null, movementType: 'AdjustmentOut',
+    quantity: quantity.toString(), unitCost: unitCost.toString(), totalValue: totalValue.toString(), notes: input.notes,
+    referenceType: STOCK_DRIFT_REFERENCE, referenceId: null, referenceNumber: null,
+    offsetAccountId, journalEntryId, fiscalYearId: fiscalYear.id, createdById: userId,
+  });
 }

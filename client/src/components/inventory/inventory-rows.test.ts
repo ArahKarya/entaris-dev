@@ -43,9 +43,11 @@ describe('movement rules', () => {
     expect(isProductionLinkedMovement(null)).toBe(false);
   });
 
-  it('always blocks opening balance and transfer rows', () => {
+  it('always blocks opening balance, drift repair and transfer rows', () => {
     expect(movementCancelBlock(row('OpeningBalance', null))).toMatch(/Penyesuaian Stok/);
     expect(movementEditBlock(row('OpeningBalance', null))).toMatch(/saldo awal/);
+    expect(movementCancelBlock(row('StockDriftRepair', null, 'AdjustmentOut'))).toMatch(/selisih gudang .*Penyesuaian Stok/);
+    expect(movementEditBlock(row('StockDriftRepair', null, 'AdjustmentOut'))).toMatch(/selisih gudang/);
     expect(movementCancelBlock(row(null, null, 'TransferOut'))).toMatch(/Transfer Stok/);
     expect(movementEditBlock(row('StockTransfer', 'st-1', 'TransferIn'))).toMatch(/transfer stok/);
   });

@@ -205,4 +205,8 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "{0}: akun {1} {2} berada di kelompok akun {3}.": "{0}: account {1} {2} sits in the {3} account group.",
   "Akun Selisih Persediaan dipetakan ke akun grup {0} {1}. Minta akuntan membuat akun rinci Selisih Persediaan dan memetakannya di Pengaturan > Akun Sistem.": "The Inventory Variance account is mapped to group account {0} {1}. Ask the accountant to create an Inventory Variance detail account and map it under Settings > System Accounts.",
   "Akun Selisih Persediaan sama dengan akun Pembulatan ({0} {1}). Minta akuntan membuat akun rinci Selisih Persediaan tersendiri dan memetakannya di Pengaturan > Akun Sistem.": "The Inventory Variance account is the same as the Rounding account ({0} {1}). Ask the accountant to create a separate Inventory Variance detail account and map it under Settings > System Accounts.",
+  // stock drift repair (decision #18): services/inventory/manualMovement.ts, documentMovementLock.ts
+  "Stok '{0}' di luar gudang {1} {2}; perbaikan {3} {4} ditolak.": "Stock of '{0}' outside any warehouse is {1} {2}; the repair of {3} {4} is refused.",
+  "Gerakan stok perbaikan selisih gudang tidak dapat diedit per baris. Koreksi lewat Penyesuaian Stok.": "A warehouse drift repair movement cannot be edited per row. Correct it with a stock adjustment.",
+  "Gerakan stok perbaikan selisih gudang tidak dapat dibatalkan per baris. Koreksi lewat Penyesuaian Stok.": "A warehouse drift repair movement cannot be cancelled per row. Correct it with a stock adjustment.",
 };
