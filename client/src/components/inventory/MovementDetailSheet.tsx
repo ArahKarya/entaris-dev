@@ -6,13 +6,14 @@
 import type { ReactNode } from 'react';
 import { Factory, Pencil, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { formatDate, formatDateTime, formatRupiah } from '@/lib/format';
+import { formatDate, formatDateTime, formatRupiah, formatUnitCost } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { StatusBadge } from '@/components/shared';
 import {
   formatQty,
   isInbound,
+  isValueOnly,
   movementCancelBlock,
   movementEditBlock,
   movementTypeLabel,
@@ -71,13 +72,17 @@ export function MovementDetailSheet({ movement: m, onClose, onEdit, onCancel, on
                 </Detail>
                 <Detail label={t('movementDetailSheet.fields.type')}>{movementTypeLabel(m.movementType)}</Detail>
                 <Detail label={t('movementDetailSheet.fields.quantity')}>
-                  <span className="num font-medium">
-                    {isInbound(m.movementType) ? '+' : '−'}
-                    {formatQty(m.quantity)} {m.item?.unit ?? ''}
-                  </span>
+                  {isValueOnly(m.movementType) ? (
+                    '—'
+                  ) : (
+                    <span className="num font-medium">
+                      {isInbound(m.movementType) ? '+' : '−'}
+                      {formatQty(m.quantity)} {m.item?.unit ?? ''}
+                    </span>
+                  )}
                 </Detail>
                 <Detail label={t('movementDetailSheet.fields.unitCost')}>
-                  <span className="num">{formatRupiah(m.unitCost ?? 0)}</span>
+                  <span className="num">{formatUnitCost(m.unitCost ?? 0)}</span>
                 </Detail>
                 <Detail label={t('movementDetailSheet.fields.value')}>
                   <span className="num font-medium">{m.totalValue != null ? formatRupiah(m.totalValue) : '—'}</span>

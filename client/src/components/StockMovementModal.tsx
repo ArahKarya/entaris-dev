@@ -20,7 +20,7 @@ import {
 import { ComboboxField } from '@/components/overlays/ComboboxField';
 import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField';
 import { useTranslation } from 'react-i18next';
-import { formatNumber } from '@/lib/format';
+import { UNIT_COST_DP, formatNumber } from '@/lib/format';
 import { todayLocal } from '@/lib/date';
 import { isProductionLinkedMovement } from '@/components/inventory/inventory-rows';
 
@@ -315,7 +315,7 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
                 <Field label={t('stockMovementModal.fields.unitCostAverage')} hint={t('stockMovementModal.hints.averageCost')}>
                   <Input
                     readOnly
-                    value={selectedItem ? formatNumber(averageCost, { maxDecimals: 2 }) : '—'}
+                    value={selectedItem ? formatNumber(averageCost, { maxDecimals: UNIT_COST_DP }) : '—'}
                     className="bg-muted text-right tabular-nums"
                   />
                 </Field>

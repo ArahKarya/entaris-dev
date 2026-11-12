@@ -1,7 +1,7 @@
 import { Factory, Truck, ShoppingCart, Warehouse as WarehouseIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { formatNumber, formatRupiah } from '@/lib/format';
+import { formatNumber, formatRupiah, formatUnitCost } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ReportDataTable, ReportMetricGrid, ReportSection, type DataColumn } from '@/components/report-kit';
 import type { DailyData, ProductionRun, StockItem, TradeInvoice } from './types';
@@ -112,7 +112,7 @@ const stockColumns = (t: T): DataColumn<StockItem>[] => [
     header: t('dailyReport.stock.cols.avgCost'),
     numeric: true,
     className: 'text-muted-foreground',
-    render: (i) => (i.averageCost > 0 ? formatNumber(i.averageCost) : '—'),
+    render: (i) => (i.averageCost > 0 ? formatUnitCost(i.averageCost, { symbol: false }) : '—'),
   },
   {
     key: 'value',

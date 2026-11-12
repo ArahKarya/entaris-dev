@@ -11,7 +11,7 @@ import { pdf } from '@react-pdf/renderer';
 import { AlertTriangle, Boxes, FileDown, Loader2, Package, Wallet, Warehouse as WarehouseIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
-import { formatDate, formatNumber, formatRupiah } from '@/lib/format';
+import { formatDate, formatNumber, formatRupiah, formatUnitCost } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import { CATEGORY_ORDER, categoryGroupLabel } from '@/lib/stockCategories';
@@ -260,7 +260,7 @@ export const WarehouseStockDashboard = () => {
           cellClassName: 'text-muted-foreground',
         },
         cell: ({ row }) =>
-          row.original.averageCost > 0 ? formatRupiah(row.original.averageCost, { symbol: false }) : '—',
+          row.original.averageCost > 0 ? formatUnitCost(row.original.averageCost, { symbol: false }) : '—',
       },
       {
         id: 'value',
