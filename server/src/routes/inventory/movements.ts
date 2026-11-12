@@ -17,7 +17,8 @@ import { calcWeightedAverage } from '../../utils/weightedAverage';
 import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../../services/cogsBackfillReverse';
 import { recomputeAverageCostFromReplay } from '../../services/averageCostRecompute';
-import { adjustWarehouseStock } from '../../utils/warehouseStock';
+import { adjustWarehouseStock, resolveWarehouseId } from '../../utils/warehouseStock';
+import { assertStockAvailable, lockInventoryRows, stockKey } from '../../services/inventory/stockLocks';
 import { parseListPaging, parseSort } from '../../utils/listQuery';
 import {
   DEFAULT_STOCK_MOVEMENT_SORT,
@@ -93,32 +94,27 @@ router.post('/', async (req: AuthRequest, res) => {
       const txDate = new Date(body.date);
       const fiscalYear = await getOpenFiscalYear(tx, txDate);
 
-      const item = await tx.inventoryItem.findUnique({ where: { id: body.itemId } });
+      // Warehouse from the body, else the default warehouse.
+      const warehouseId = await resolveWarehouseId(tx, body.warehouseId || null);
+      if (!warehouseId) throw new BusinessError('Gudang tidak ditemukan dan tidak ada gudang default aktif.');
+
+      // Lock first (stockLocks LOCK ORDER): the stock check and the average below read rows no
+      // concurrent posting can change before this one commits.
+      const locked = await lockInventoryRows(tx, { itemIds: [body.itemId], pairs: [{ itemId: body.itemId, warehouseId }] });
+      const item = locked.items.get(body.itemId);
       if (!item) throw new BusinessError('Item stok tidak ditemukan.');
       if (!item.isActive) throw new BusinessError('Item stok tidak aktif.');
-
-      // Warehouse from the body, else the default warehouse.
-      let warehouseId: string | null = body.warehouseId || null;
-      if (!warehouseId) {
-        const defaultWh = await tx.warehouse.findFirst({ where: { isDefault: true, isActive: true } });
-        warehouseId = defaultWh?.id ?? null;
-      }
-      if (!warehouseId) throw new BusinessError('Gudang tidak ditemukan dan tidak ada gudang default aktif.');
+      if (!locked.stocks.has(stockKey(item.id, warehouseId))) throw new BusinessError('Gudang tidak ditemukan.');
 
       const qty = body.quantity;
       const isOut = body.movementType === 'Out' || body.movementType === 'AdjustmentOut';
       const isIn = body.movementType === 'In' || body.movementType === 'AdjustmentIn';
 
-      // Stock check is per warehouse (the source of truth) and only for regular Out.
-      const stockRow = await tx.inventoryStock.findUnique({
-        where: { itemId_warehouseId: { itemId: item.id, warehouseId } },
-      });
-      const stockAtWarehouse = Number(stockRow?.currentStock ?? 0);
-      if (isOut && stockAtWarehouse < qty) {
-        const wh = await tx.warehouse.findUnique({ where: { id: warehouseId } });
-        throw new BusinessError(
-          `Stok di ${wh?.name ?? 'gudang'} tidak cukup. Tersedia: ${stockAtWarehouse.toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${item.unit}`,
-        );
+      // Stock check is per warehouse (the source of truth), for Out and AdjustmentOut.
+      if (isOut) {
+        await assertStockAvailable(tx, [{ itemId: item.id, warehouseId, quantity: qty }], {
+          context: 'inventory.movement.create', userId: req.user!.userId,
+        });
       }
 
       // Outbound movements may link to an inbound batch so batch consumption stays accurate.
@@ -140,13 +136,12 @@ router.post('/', async (req: AuthRequest, res) => {
         create: { itemId: item.id, warehouseId, currentStock: stockDelta },
         update: { currentStock: { increment: stockDelta } },
       });
-      const updateData: Record<string, unknown> = { currentStock: { increment: stockDelta } };
-      if (isIn && unitCost > 0) {
-        updateData.averageCost = calcWeightedAverage(item.currentStock, item.averageCost, qty, unitCost);
-      }
       await tx.inventoryItem.update({
         where: { id: item.id },
-        data: updateData,
+        data: {
+          currentStock: { increment: stockDelta },
+          ...(isIn && unitCost > 0 ? { averageCost: calcWeightedAverage(item.currentStock, item.averageCost, qty, unitCost) } : {}),
+        },
       });
 
       // Always post to the GL when totalValue > 0.
@@ -324,10 +319,9 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const oldMov = await tx.stockMovement.findUnique({
-        where: { id },
-        include: { item: true },
-      });
+      // The movement is the document here: a concurrent edit or cancel of it waits, then re-reads.
+      await tx.$queryRaw`SELECT id FROM stock_movements WHERE id = ${id} FOR UPDATE`;
+      const oldMov = await tx.stockMovement.findUnique({ where: { id } });
       if (!oldMov) throw new BusinessError('Gerakan stok tidak ditemukan.');
       if (oldMov.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan, tidak bisa diedit.');
 
@@ -347,10 +341,15 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
       const oldQty = Number(oldMov.quantity);
       const oldReverseDelta = oldIsIn ? -oldQty : oldQty;
 
-      // Check if reversal would cause negative stock
-      const currentStock = Number(oldMov.item.currentStock);
-      if (currentStock + oldReverseDelta < 0) {
-        throw new BusinessError('Tidak dapat mengedit: pembalikan stok lama menyebabkan stok negatif.');
+      // Both the reversal and the new row use the movement's warehouse; a legacy row without one
+      // is checked against the item total.
+      await lockInventoryRows(tx, {
+        itemIds: [oldMov.itemId],
+        pairs: oldMov.warehouseId ? [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId }] : [],
+      });
+      const stockOpts = { context: 'inventory.movement.edit', userId: req.user!.userId };
+      if (oldIsIn) {
+        await assertStockAvailable(tx, [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId, quantity: oldQty }], { ...stockOpts, reversal: true });
       }
 
       await tx.inventoryItem.update({
@@ -386,10 +385,8 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
       const itemAfterReversal = await tx.inventoryItem.findUnique({ where: { id: oldMov.itemId } });
       if (!itemAfterReversal) throw new BusinessError('Item stok tidak ditemukan.');
 
-      if (body.movementType === 'Out' && Number(itemAfterReversal.currentStock) < newQty) {
-        throw new BusinessError(
-          `Stok tidak cukup. Stok saat ini (setelah pembalikan): ${Number(itemAfterReversal.currentStock).toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${itemAfterReversal.unit}`
-        );
+      if (!newIsIn) {
+        await assertStockAvailable(tx, [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId, quantity: newQty }], stockOpts);
       }
 
       const newStockDelta = newIsIn ? newQty : -newQty;
@@ -533,10 +530,9 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
 
   try {
     await prisma.$transaction(async (tx) => {
-      const movement = await tx.stockMovement.findUnique({
-        where: { id },
-        include: { item: true },
-      });
+      // A second concurrent cancel waits here, then sees isCancelled and stops.
+      await tx.$queryRaw`SELECT id FROM stock_movements WHERE id = ${id} FOR UPDATE`;
+      const movement = await tx.stockMovement.findUnique({ where: { id } });
       if (!movement) throw new BusinessError('Gerakan stok tidak ditemukan.');
       if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
       const cancelLock = documentMovementLockMessage(movement, 'cancel');
@@ -548,9 +544,15 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
       const isOut = movement.movementType === 'Out' || movement.movementType === 'AdjustmentOut';
       const qty = Number(movement.quantity);
 
-      // Validate reversal won't cause negative stock
-      if (isIn && Number(movement.item.currentStock) < qty) {
-        throw new BusinessError('Tidak dapat membatalkan: stok tidak mencukupi untuk pembalikan.');
+      // Reversing an inbound row takes its quantity back out of its warehouse.
+      await lockInventoryRows(tx, {
+        itemIds: [movement.itemId],
+        pairs: movement.warehouseId ? [{ itemId: movement.itemId, warehouseId: movement.warehouseId }] : [],
+      });
+      if (isIn) {
+        await assertStockAvailable(tx, [{ itemId: movement.itemId, warehouseId: movement.warehouseId, quantity: qty }], {
+          context: 'inventory.movement.cancel', userId: req.user!.userId, reversal: true,
+        });
       }
 
       // Reverse stock (item-level total + per-warehouse)

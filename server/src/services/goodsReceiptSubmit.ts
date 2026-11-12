@@ -6,6 +6,7 @@ import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { adjustWarehouseStock } from '../utils/warehouseStock';
+import { lockInventoryRows } from './inventory/stockLocks';
 import { calcWeightedAverage } from '../utils/weightedAverage';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
@@ -133,6 +134,14 @@ export async function submitGoodsReceiptInTx(
       createdBy: userId,
       submittedAt: new Date(),
     },
+  });
+
+  // Lock every line's item (and its row at the line warehouse) once, before the first SM number:
+  // the reads inside the loop then see the stock and average no concurrent posting can change.
+  // A line repeating an item reads the row again after the earlier line's update.
+  await lockInventoryRows(tx, {
+    itemIds: body.items.map((l) => l.inventoryItemId),
+    pairs: body.items.map((l) => ({ itemId: l.inventoryItemId, warehouseId: l.warehouseId })),
   });
 
   const drByAccount = new Map<string, { amount: Decimal; names: string[] }>();
