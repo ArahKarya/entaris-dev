@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js';
+
 /**
  * Build the production_run_items rows persisted for a posted run (submit and
  * edit share it). Every line carries the production warehouse the run's
@@ -102,6 +104,6 @@ export function dropBackfilledOutputPrices<T extends { itemId: string; unitPrice
     seen.set(o.itemId, nth + 1);
     const old = oldByItem.get(o.itemId)?.[nth];
     if (!old || old.priceIsManual || o.unitPrice == null) return o;
-    return Math.abs(o.unitPrice - oldComputedHpp) <= BACKFILL_PRICE_TOLERANCE ? { ...o, unitPrice: null } : o;
+    return new Decimal(o.unitPrice).minus(oldComputedHpp).abs().lte(BACKFILL_PRICE_TOLERANCE) ? { ...o, unitPrice: null } : o;
   });
 }

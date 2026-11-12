@@ -4,7 +4,7 @@
  * 2122, everything in a rollback transaction on fixtures made here.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -174,9 +174,10 @@ d('production price_is_manual (E6-R8)', () => {
 
   it('migration backfill marks typed main output prices only', async () => {
     await inWorld(async (tx, w) => {
-      const sql = readFileSync(
-        join(__dirname, '../../../prisma/migrations/20261112000000_production_item_price_is_manual/migration.sql'), 'utf8',
-      );
+      const migrationsDir = join(__dirname, '../../../prisma/migrations');
+      const folder = readdirSync(migrationsDir).find((n) => n.endsWith('_production_item_price_is_manual'));
+      if (!folder) throw new Error('migration folder *_production_item_price_is_manual not found');
+      const sql = readFileSync(join(migrationsDir, folder, 'migration.sql'), 'utf8');
       const update = sql.slice(sql.indexOf('UPDATE "production_run_items"'));
       const fy = await tx.fiscalYear.findFirstOrThrow({ where: { startDate: new Date(`${YEAR}-01-01`) } });
       const mkRun = (n: string, hpp: number | null, override = false) => tx.productionRun.create({

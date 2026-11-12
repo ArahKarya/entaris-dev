@@ -61,6 +61,11 @@ describe('dropBackfilledOutputPrices', () => {
     expect(out[0]!.unitPrice).toBeNull();
   });
 
+  it('drops a price sitting exactly a half cent from the old HPP (no float drift)', () => {
+    expect(dropBackfilledOutputPrices([{ itemId: 'a', unitPrice: 11000.01 }], [old('a', 11000.01)], 11000.005)[0]!.unitPrice).toBeNull();
+    expect(dropBackfilledOutputPrices([{ itemId: 'a', unitPrice: 6000.13 }], [old('a', 6000.13)], 6000.125)[0]!.unitPrice).toBeNull();
+  });
+
   it('keeps a typed line, a different price and a by-product', () => {
     const out = dropBackfilledOutputPrices(
       [{ itemId: 'a', unitPrice: 10166.67 }, { itemId: 'b', unitPrice: 9000 }, { itemId: 'c', unitPrice: 10166.67, isByProduct: true }],
