@@ -6,7 +6,6 @@ import { adjustWarehouseStock } from '../../utils/warehouseStock';
 import { journalFamilyWhere } from '../../utils/journalFamily';
 import type { CancelTrail } from '../../utils/cancelClaim';
 import type { JournalLineInput } from '../../utils/journalLineRules';
-import { logger } from '../../lib/logger';
 import { systemAccounts } from '../systemAccounts';
 import { settleCogsBackfillForItem } from '../cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../cogsBackfillReverse';
@@ -17,6 +16,7 @@ import { DOCUMENT_RULE } from '../ledger/accountGuard';
 import { cancelJournalsInTx, findDocumentJournals } from '../ledger/cancelJournals';
 import { postJournal } from '../ledger/postJournal';
 import { productionDiffAccounts } from '../ledger/systemRoleAccounts';
+import { assertStockAvailable, lockInventoryRows, STOCK_INSUFFICIENT, type StockShortage } from '../inventory/stockLocks';
 import type { ProductionCosting, ProductionJournalPlan } from './productionCosting';
 import type { CostedInput } from './productionCostContext';
 
@@ -26,6 +26,10 @@ import type { CostedInput } from './productionCostContext';
  * and the journal goes through postJournal (owner decision #14: source SYSTEM_DOC, the document
  * account rule, balances applied per line). Stock moves through three thin primitives
  * (consumeInput / receiveOutput / reverseRunMovements) that the inventory ledger replaces (PR-6.4e).
+ *
+ * Lock order (services/inventory/stockLocks.ts): the run (submit: its PR number; edit: the run row;
+ * cancel: the cancel claim), then lockProductionStockInTx once with every item of the run, old and
+ * new, then the SM and JV numbers and the accounts postJournal locks.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -146,6 +150,40 @@ export async function receiveOutput(
   });
 }
 
+/**
+ * Locks every item a production transaction touches, once and before its first stock write or SM/JV
+ * number (stockLocks.ts LOCK ORDER): the items of the run's active movements (an edit or cancel
+ * reverses them; their rows at the movement warehouse) and the new input and output lines at the
+ * production warehouse. The cost context reads stock and WAC only after this.
+ */
+export async function lockProductionStockInTx(
+  tx: Tx,
+  args: {
+    /** The run being edited or cancelled; omitted for a new run. */
+    runId?: string;
+    /** The production warehouse of the new lines; omitted for a cancel. */
+    warehouseId?: string;
+    inputs?: ReadonlyArray<{ itemId: string }>;
+    outputs?: ReadonlyArray<{ itemId: string }>;
+  },
+): Promise<void> {
+  const old = args.runId
+    ? await tx.stockMovement.findMany({
+      where: { referenceType: 'ProductionRun', referenceId: args.runId, isCancelled: false },
+      select: { itemId: true, warehouseId: true },
+    })
+    : [];
+  const newItemIds = [...(args.inputs ?? []), ...(args.outputs ?? [])].map((l) => l.itemId);
+  const warehouseId = args.warehouseId;
+  await lockInventoryRows(tx, {
+    itemIds: [...old.map((m) => m.itemId), ...newItemIds],
+    pairs: [
+      ...old.flatMap((m) => (m.warehouseId ? [{ itemId: m.itemId, warehouseId: m.warehouseId }] : [])),
+      ...(warehouseId ? newItemIds.map((itemId) => ({ itemId, warehouseId })) : []),
+    ],
+  });
+}
+
 export type ProductionReversalMode = 'edit' | 'cancel';
 
 export interface ReverseRunOptions {
@@ -154,42 +192,50 @@ export interface ReverseRunOptions {
   /** Skip the guard that an output's stock still covers its reversal; logged instead. */
   allowNegativeStock?: boolean;
   negativeStockReason?: string | null;
+  /** The user editing or cancelling, for the bypass log. */
+  userId?: string;
 }
 
-function outputUsedMessage(mode: ProductionReversalMode, name: string, available: number, needed: number): string {
-  const head = mode === 'edit' ? 'Tidak dapat mengedit' : 'Tidak dapat membatalkan';
-  const tail = mode === 'edit' ? '' : ' Batalkan transaksi tersebut dulu.';
-  return `${head}: stok '${name}' tidak mencukupi untuk pembalikan output (tersedia ${available}, perlu ${needed}). Output sudah dipakai produksi/penjualan berikutnya.${tail}`;
+function outputUsedError(mode: ProductionReversalMode, s: StockShortage): BusinessError {
+  const where = s.warehouseName ?? 'semua gudang';
+  const available = s.available.toNumber();
+  const needed = s.needed.toNumber();
+  return new BusinessError(
+    mode === 'edit'
+      ? `Tidak dapat mengedit: stok '${s.itemName}' di ${where} tidak mencukupi untuk pembalikan output (tersedia ${available}, perlu ${needed}). Output sudah dipakai produksi/penjualan berikutnya.`
+      : `Tidak dapat membatalkan: stok '${s.itemName}' di ${where} tidak mencukupi untuk pembalikan output (tersedia ${available}, perlu ${needed}). Output sudah dipakai produksi/penjualan berikutnya. Batalkan transaksi tersebut dulu.`,
+    STOCK_INSUFFICIENT,
+  );
 }
 
 /**
- * Reverses the run's active stock movements (restores stock, marks them cancelled). Reversing an
- * output must not drive its stock negative unless bypassed. Returns the items touched.
+ * Reverses the run's active stock movements (restores stock, marks them cancelled). Reversing the
+ * outputs must not drive stock negative at the movement's warehouse (lines of one item summed)
+ * unless bypassed, which is logged. Call it under lockProductionStockInTx. Returns the items touched.
  */
 export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRunOptions): Promise<Set<string>> {
   const movements = await tx.stockMovement.findMany({
     where: { referenceType: 'ProductionRun', referenceId: runId, isCancelled: false },
-    include: { item: true },
   });
+  const isIn = (type: string) => type === 'In' || type === 'AdjustmentIn';
+  await assertStockAvailable(
+    tx,
+    movements.filter((m) => isIn(m.movementType))
+      .map((m) => ({ itemId: m.itemId, warehouseId: m.warehouseId, quantity: m.quantity.toString() })),
+    {
+      context: `productionRun.${opts.mode}`,
+      userId: opts.userId,
+      allowNegative: opts.allowNegativeStock,
+      reason: opts.negativeStockReason,
+      error: (s) => outputUsedError(opts.mode, s),
+    },
+  );
 
   const affectedItemIds = new Set<string>();
   for (const mov of movements) {
-    const isIn = mov.movementType === 'In' || mov.movementType === 'AdjustmentIn';
-    const isOut = mov.movementType === 'Out' || mov.movementType === 'AdjustmentOut';
-    const qty = Number(mov.quantity);
-    const available = Number(mov.item.currentStock);
-
-    if (isIn && available < qty) {
-      if (!opts.allowNegativeStock) {
-        throw new BusinessError(outputUsedMessage(opts.mode, mov.item.name, available, qty));
-      }
-      logger.warn(
-        { itemId: mov.itemId, itemName: mov.item.name, currentStock: available, reverseQty: qty, reason: opts.negativeStockReason },
-        `Production ${opts.mode} reverse with negative stock bypass`,
-      );
-    }
     affectedItemIds.add(mov.itemId);
-
+    const qty = Number(mov.quantity);
+    const isOut = mov.movementType === 'Out' || mov.movementType === 'AdjustmentOut';
     const reverseDelta = isOut ? qty : -qty;
     await tx.inventoryItem.update({
       where: { id: mov.itemId },

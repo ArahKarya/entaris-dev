@@ -16,11 +16,6 @@
  * item rows unless it locked AR first. Delivery notes are documents of the invoice that bills them
  * (sales invoice submit and cancel lock them in id order before any item or account).
  *
- * Until PR-6.2b, the production writers listed in PENDING_LOCK (__tests__/inventoryWriters.test.ts)
- * do not follow this order: a multi-line one updates an item row, takes the 'SM' number, then
- * updates the next line's item. Against a path that follows the order this can deadlock; the
- * aborted side answers 409 STOCK_BUSY (handleRouteError maps 40P01), so the client retries.
- *
  * The rows are locked FOR NO KEY UPDATE, the lock a plain UPDATE of current_stock takes: stock
  * writers still exclude each other and the item master edit (FOR UPDATE), but a document line that
  * only references the item (FK check, FOR KEY SHARE) neither waits for nor blocks a posting.

@@ -9,6 +9,7 @@ import { computeProductionCosting } from './production/productionCosting';
 import { loadProductionCostContext } from './production/productionCostContext';
 import {
   clearProductionRunDetails,
+  lockProductionStockInTx,
   persistProductionRunDetails,
   postProductionEffectsInTx,
   reverseProductionEffectsInTx,
@@ -27,6 +28,9 @@ export async function editProductionRunInTx(
   body: SubmitProductionRunInput,
   userId: string,
 ) {
+  // Lock order (productionPosting.ts): the run row first, so a concurrent cancel or edit of the
+  // same run waits here and then sees its outcome, then the items.
+  await tx.$queryRaw`SELECT id FROM production_runs WHERE id = ${runId} FOR UPDATE`;
   const oldRun = await tx.productionRun.findUnique({ where: { id: runId } });
   if (!oldRun) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (oldRun.isCancelled) throw new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.');
@@ -38,17 +42,31 @@ export async function editProductionRunInTx(
   await assertPeriodsOpen(tx, [{ date: oldRun.date }, { fiscalYearId: oldRun.fiscalYearId, date: oldRun.date }], 'produksi');
   const fiscalYear = await assertPeriodOpen(tx, { date: txDate }, 'produksi');
 
+  const productionWarehouseId = await resolveWarehouseId(tx, body.warehouseId);
+  if (!productionWarehouseId) {
+    throw new BusinessError(
+      'Gudang produksi wajib dipilih. Pilih gudang di form atau set salah satu gudang sebagai default.',
+    );
+  }
+  // One lock for the old run's items and the new lines, before the reversal: the stock checked
+  // after the reversal cannot change before commit.
+  await lockProductionStockInTx(tx, { runId, warehouseId: productionWarehouseId, inputs: body.inputs, outputs: body.outputs });
+
   await reverseProductionEffectsInTx(tx, { id: runId, runNumber: oldRun.runNumber }, {
     mode: 'edit',
     allowNegativeStock: body.allowNegativeStock,
     negativeStockReason: body.negativeStockReason,
+    userId,
     trail: cancelTrail(userId, 'Revisi produksi'),
   });
   await clearProductionRunDetails(tx, runId);
 
-  // Loaded after the reversal, so inputs are costed at the replayed WAC.
+  // Loaded after the reversal, so inputs are checked against the restored stock and costed at the
+  // replayed WAC.
   const { itemMap, inputs: costedInputs } = await loadProductionCostContext(tx, body, {
-    bypassLog: 'Production edit input with negative stock bypass',
+    warehouseId: productionWarehouseId,
+    context: 'productionRun.edit',
+    userId,
   });
   const costing = computeProductionCosting({
     inputs: body.inputs.map((input, i) => ({ quantity: input.quantity, unitCost: costedInputs[i]!.unitCost })),
@@ -83,13 +101,6 @@ export async function editProductionRunInTx(
       fiscalYearId: fiscalYear.id,
     },
   });
-
-  const productionWarehouseId = await resolveWarehouseId(tx, body.warehouseId);
-  if (!productionWarehouseId) {
-    throw new BusinessError(
-      'Gudang produksi wajib dipilih. Pilih gudang di form atau set salah satu gudang sebagai default.',
-    );
-  }
 
   if (costing.clampedNegativeNumerator) {
     logger.warn(

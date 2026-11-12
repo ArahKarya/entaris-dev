@@ -1,15 +1,16 @@
 import type { InventoryItem, Prisma } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
-import { logger } from '../../lib/logger';
 import { assertBatchSource } from '../inventory/batchSource';
+import { assertStockAvailable, STOCK_INSUFFICIENT } from '../inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
 /**
  * Read-only loader for production costing (E6-R1): the run's items with their validation, the
- * picked batches through assertBatchSource, and the unit cost each input is consumed at. Submit
- * and edit call it once, at the point where the stock and WAC they cost against are current
- * (edit: after its old movements are reversed). The row-lock hook (E3-PR2) lands here.
+ * input stock check at the production warehouse, the picked batches through assertBatchSource,
+ * and the unit cost each input is consumed at. Submit and edit call it once, under
+ * lockProductionStockInTx (productionPosting.ts) and at the point where the stock and WAC they
+ * cost against are current (edit: after its old movements are reversed).
  */
 
 export interface ContextInputLine {
@@ -42,37 +43,28 @@ export interface CostedInput {
   unitCost: number;
 }
 
+/** Where the inputs are taken from, and who takes them (for the bypass log). */
+export interface ProductionStockScope {
+  warehouseId: string;
+  /** Log context of the stock check, e.g. 'productionRun.submit'. */
+  context: string;
+  userId?: string;
+}
+
 export interface ProductionCostContext {
   itemMap: Map<string, InventoryItem>;
   /** One entry per input line, same order. */
   inputs: CostedInput[];
 }
 
-const qtyText = (n: number) => n.toLocaleString('id-ID', { maximumFractionDigits: 3 });
+const qtyText = (n: { toNumber(): number }) => n.toNumber().toLocaleString('id-ID', { maximumFractionDigits: 3 });
 
-/** Inputs must exist, be active and (unless bypassed) be in stock in total; outputs must exist and be active. */
-function validateItems(body: ProductionCostContextInput, itemMap: Map<string, InventoryItem>, bypassLog: string): void {
+/** Inputs must exist and be active; outputs must exist, be active and carry a valid price. */
+function validateItems(body: ProductionCostContextInput, itemMap: Map<string, InventoryItem>): void {
   for (const input of body.inputs) {
     const item = itemMap.get(input.itemId);
     if (!item) throw new BusinessError('Item input tidak ditemukan.');
     if (!item.isActive) throw new BusinessError(`Item '${item.name}' tidak aktif.`);
-    if (Number(item.currentStock) < input.quantity) {
-      if (!body.allowNegativeStock) {
-        throw new BusinessError(
-          `Stok '${item.name}' tidak cukup. Tersedia: ${qtyText(Number(item.currentStock))} ${item.unit}, dibutuhkan: ${qtyText(input.quantity)} ${item.unit}. Buat penerimaan/transfer dulu.`,
-        );
-      }
-      logger.warn(
-        {
-          itemId: item.id,
-          itemName: item.name,
-          currentStock: Number(item.currentStock),
-          requested: input.quantity,
-          reason: body.negativeStockReason,
-        },
-        bypassLog,
-      );
-    }
   }
   for (const output of body.outputs) {
     const item = itemMap.get(output.itemId);
@@ -87,6 +79,28 @@ function validateItems(body: ProductionCostContextInput, itemMap: Map<string, In
       throw new BusinessError(`Harga/HPP '${item.name}' tidak boleh negatif.`);
     }
   }
+}
+
+/**
+ * The inputs, lines of one item summed, must be in stock at the production warehouse (E6-R4): stock
+ * held in another warehouse does not count. allowNegativeStock (the caller passed the
+ * negative-stock gate) logs the shortage instead.
+ */
+async function assertInputStock(tx: Tx, body: ProductionCostContextInput, stock: ProductionStockScope): Promise<void> {
+  await assertStockAvailable(
+    tx,
+    body.inputs.map((input) => ({ itemId: input.itemId, warehouseId: stock.warehouseId, quantity: input.quantity })),
+    {
+      context: stock.context,
+      userId: stock.userId,
+      allowNegative: body.allowNegativeStock,
+      reason: body.negativeStockReason,
+      error: (s) => new BusinessError(
+        `Stok '${s.itemName}' di gudang ${s.warehouseName} tidak cukup. Tersedia: ${qtyText(s.available)} ${s.unit}, dibutuhkan: ${qtyText(s.needed)} ${s.unit}. Buat penerimaan/transfer dulu.`,
+        STOCK_INSUFFICIENT,
+      ),
+    },
+  );
 }
 
 /**
@@ -120,17 +134,18 @@ async function costInputs(tx: Tx, inputs: ReadonlyArray<ContextInputLine>, itemM
 }
 
 /**
- * Loads and validates the run's items, then resolves each input's batch and unit cost.
- * `bypassLog` is the log message for an input taken past its stock under the negative-stock bypass.
+ * Loads and validates the run's items, checks the input stock at the production warehouse, then
+ * resolves each input's batch and unit cost. Call it under lockProductionStockInTx.
  */
 export async function loadProductionCostContext(
   tx: Tx,
   body: ProductionCostContextInput,
-  opts: { bypassLog: string },
+  stock: ProductionStockScope,
 ): Promise<ProductionCostContext> {
   const allItemIds = [...body.inputs.map((i) => i.itemId), ...body.outputs.map((o) => o.itemId)];
   const allItems = await tx.inventoryItem.findMany({ where: { id: { in: allItemIds } } });
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
-  validateItems(body, itemMap, opts.bypassLog);
+  validateItems(body, itemMap);
+  await assertInputStock(tx, body, stock);
   return { itemMap, inputs: await costInputs(tx, body.inputs, itemMap) };
 }
