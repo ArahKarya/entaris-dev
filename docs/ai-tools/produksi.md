@@ -52,7 +52,7 @@ Saat sebuah run diposting (langsung oleh Admin, atau setelah disetujui):
    - `hppOverride` (>= 0) mengunci HPP per kg secara manual.
    - `unitPrice` output utama opsional: bila kosong diisi HPP terhitung.
 4. **Jurnal** `JV-<nomor run>` (seimbang):
-   - DR Persediaan setiap item output (akun item atau 1.4.0) sebesar nilai output;
+   - DR Persediaan setiap item output (akun item atau 1.4.0; harus akun detail aktif, bila tidak jurnal ditolak ACCOUNT_INACTIVE / ACCOUNT_GROUP) sebesar nilai output;
    - CR Persediaan setiap item input sebesar nilai input;
    - selisih nilai (output - input) > 0: CR **5.12 Biaya Konversi Dibebankan ke Persediaan** sebesar min(selisih, total biaya konversi), sisanya CR **5.1 HPP Beras** (atau akun COGS); selisih < 0 (rugi produksi): DR 5.1 HPP Beras.
    - Komponen `costs` hanya memengaruhi HPP; **tidak** membuat jurnal biaya sendiri (biaya riil tetap masuk lewat jurnal/invoice).
