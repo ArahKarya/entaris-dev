@@ -3861,6 +3861,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 
 ### si_create
 
@@ -3954,6 +3955,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: pelanggan tidak ditemukan/tidak aktif.
 - 400: stok tidak cukup.
 - 400: baris SJ sudah dibatalkan, sudah masuk invoice lain, atau sudah diganti edit SJ (dicek saat SJ dikunci; dua invoice atas satu SJ: yang kedua ditolak)
+- 409 STOCK_BUSY: surat jalan yang ditagih sedang dikunci transaksi lain (batal/edit SJ atau invoice lain) dan terjadi deadlock; coba lagi sebentar lagi
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak
 - 400 PARTY_TYPE_MISMATCH: mitra bertipe Supplier tidak punya sisi Piutang; Invoice penjualan hanya untuk Customer atau Both
@@ -4357,7 +4359,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 **Error umum**
 
 - 403: bypass stok minus butuh capability.
-- 400: stok tidak cukup.
+- 400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup (baris item yang sama dijumlah per gudang; pesan menyebut tersedia dan dibutuhkan)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: SO bukan Submitted/PartiallyDelivered.
 
 **Tool terkait:** [`so_submit`](#so_submit), [`do_get`](#do_get), [`inv_items_list`](persediaan.md#inv_items_list)
