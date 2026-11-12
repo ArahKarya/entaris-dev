@@ -74,6 +74,7 @@ export interface PostableRule {
    * be named and the restriction does not apply. Refused with `code`.
    */
   outsideGroupOf?: { role: SystemAccountRole; code: string };
+  /**
    * The account must be the parent group of the account mapped to `role`, or sit anywhere below it
    * (1.4 for the INVENTORY account 1.4.0). Without a mapping or a mapped account that has a parent,
    * no group can be named and the restriction does not apply. Refused with `code`.
