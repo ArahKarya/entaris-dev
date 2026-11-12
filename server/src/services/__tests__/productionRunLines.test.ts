@@ -7,12 +7,14 @@ describe('buildProductionRunLineItems', () => {
     warehouseId: 'wh-prod',
     inputs: [{ itemId: 'gkp', quantity: 1000 }],
     outputs: [
-      { itemId: 'beras', quantity: 600, unitPrice: null },
-      { itemId: 'dedak', quantity: 100, unitPrice: 1500, isByProduct: true },
+      { itemId: 'beras', quantity: 600 },
+      { itemId: 'dedak', quantity: 100, isByProduct: true },
     ],
-    batchSnapshots: new Map([[0, { sourceMovementId: 'sm-batch', batchUnitCost: 6000 }]]),
-    totalInputQty: 1000,
-    computedHppNum: 9500,
+    batchSnapshots: [{ sourceMovementId: 'sm-batch', batchUnitCost: 6000 }],
+    outputCosting: [
+      { persistedUnitPrice: 9500, yieldPct: 60 },
+      { persistedUnitPrice: 1500, yieldPct: null },
+    ],
   };
 
   it('stamps the production warehouse on every input and output line', () => {
@@ -30,7 +32,7 @@ describe('buildProductionRunLineItems', () => {
   });
 
   it('falls back to an empty batch snapshot for unpicked inputs', () => {
-    const [input] = buildProductionRunLineItems({ ...base, batchSnapshots: new Map() });
+    const [input] = buildProductionRunLineItems({ ...base, batchSnapshots: [] });
     expect(input).toMatchObject({ sourceMovementId: null, batchUnitCost: null });
   });
 });

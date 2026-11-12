@@ -164,6 +164,7 @@ Untuk produksi yang berasal dari draf (`production_run_drafts`): approve membuat
 - 400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending
 - 400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending
 - 400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending
+- 400 MOVEMENT_SOURCE_BATCH_INVALID: eksekusi ProductionRun/ProductionRunEdit ditolak karena batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; minta pengaju memilih batch masuk aktif item yang sama, pengajuan tetap Pending
 
 **Tool terkait:** [`appr_request_get`](#appr_request_get), [`appr_reject`](#appr_reject), [`appr_request_revision`](#appr_request_revision)
 

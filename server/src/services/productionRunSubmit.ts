@@ -1,5 +1,4 @@
 import type { Prisma } from '@prisma/client';
-import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
@@ -7,11 +6,13 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { calcWeightedAverage } from '../utils/weightedAverage';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
 import { systemAccounts } from './systemAccounts';
-import { productionDiffAccounts, splitProductionDiff } from './ledger/systemRoleAccounts';
+import { productionDiffAccounts } from './ledger/systemRoleAccounts';
 import { settleCogsBackfillForItem } from './cogsBackfillService';
 import { persistOeeInTx } from './oee';
 import { logger } from '../lib/logger';
 import { buildProductionRunLineItems } from './productionRunLines';
+import { computeProductionCosting, type ProductionJournalPlan } from './production/productionCosting';
+import { loadProductionCostContext } from './production/productionCostContext';
 
 type Tx = Prisma.TransactionClient;
 
@@ -66,6 +67,63 @@ export interface SubmitProductionRunInput {
   endAt?: Date | string | null;
 }
 
+export interface ProductionJournalLine {
+  accountId: string;
+  debit: number;
+  credit: number;
+  description: string;
+}
+
+/**
+ * Journal lines of a run from its costing plan: CR each input and DR each output on the item's
+ * account (else INVENTORY), then the difference on the mapped PRODUCTION_CONVERSION / COGS
+ * accounts. Submit and edit share it; PR-6.1c moves it into the production posting module.
+ */
+export async function productionJournalLines(
+  tx: Tx,
+  args: {
+    plan: ProductionJournalPlan;
+    inputs: ReadonlyArray<{ itemId: string }>;
+    outputs: ReadonlyArray<{ itemId: string }>;
+    itemMap: ReadonlyMap<string, { name: string; accountId: string | null }>;
+    defaultAccountId: string;
+    runNumber: string;
+  },
+): Promise<ProductionJournalLine[]> {
+  const { plan, itemMap, defaultAccountId, runNumber } = args;
+  const lines: ProductionJournalLine[] = [];
+  for (const { index, amount } of plan.inputCredits) {
+    const item = itemMap.get(args.inputs[index]!.itemId);
+    lines.push({
+      accountId: item?.accountId || defaultAccountId,
+      debit: 0,
+      credit: amount,
+      description: `Bahan baku keluar ${item?.name || ''}: ${runNumber}`,
+    });
+  }
+  for (const { index, amount } of plan.outputDebits) {
+    const item = itemMap.get(args.outputs[index]!.itemId);
+    lines.push({
+      accountId: item?.accountId || defaultAccountId,
+      debit: amount,
+      credit: 0,
+      description: `Produksi masuk ${item?.name || ''}: ${runNumber}`,
+    });
+  }
+  if (plan.diff === 0) return lines;
+  const { cogs, conversion } = await productionDiffAccounts(tx, plan.diff);
+  if (plan.toConversion > 0) {
+    lines.push({ accountId: conversion!.id, debit: 0, credit: plan.toConversion, description: `Biaya konversi dibebankan: ${runNumber}` });
+  }
+  if (plan.toCogs > 0) {
+    lines.push({ accountId: cogs.id, debit: 0, credit: plan.toCogs, description: `HPP konversi produksi: ${runNumber}` });
+  }
+  if (plan.loss > 0) {
+    lines.push({ accountId: cogs.id, debit: plan.loss, credit: 0, description: `HPP rugi produksi: ${runNumber}` });
+  }
+  return lines;
+}
+
 /**
  * Submit a production run: stock out per input, stock in per output with WAC recalc, settle
  * pending COGS backfill on outputs (earlier negative-stock sales), and post the production JE:
@@ -77,54 +135,20 @@ export async function submitProductionRunInTx(
   userId: string,
 ) {
   const txDate = new Date(body.date);
-  const fiscalYear = await getOpenFiscalYear(tx, txDate);
+  const fiscalYear = await getOpenFiscalYear(tx, txDate, { label: 'produksi' });
 
-  // Pre-fetch all referenced items in one round-trip.
-  const allItemIds = [...body.inputs.map((i) => i.itemId), ...body.outputs.map((o) => o.itemId)];
-  const allItems = await tx.inventoryItem.findMany({ where: { id: { in: allItemIds } } });
-  const itemMap = new Map(allItems.map((i) => [i.id, i]));
-
-  for (const input of body.inputs) {
-    const item = itemMap.get(input.itemId);
-    if (!item) throw new BusinessError('Item input tidak ditemukan.');
-    if (!item.isActive) throw new BusinessError(`Item '${item.name}' tidak aktif.`);
-    if (Number(item.currentStock) < input.quantity) {
-      if (!body.allowNegativeStock) {
-        throw new BusinessError(
-          `Stok '${item.name}' tidak cukup. Tersedia: ${Number(item.currentStock).toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${item.unit}, dibutuhkan: ${input.quantity.toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${input.quantity > 0 ? item.unit : ''}. Buat penerimaan/transfer dulu.`,
-        );
-      }
-      logger.warn(
-        {
-          itemId: item.id,
-          itemName: item.name,
-          currentStock: Number(item.currentStock),
-          requested: input.quantity,
-          reason: body.negativeStockReason,
-        },
-        'Production input submitted with negative stock bypass',
-      );
-    }
-  }
-
-  for (const output of body.outputs) {
-    const item = itemMap.get(output.itemId);
-    if (!item) throw new BusinessError('Item output tidak ditemukan.');
-    if (!item.isActive) throw new BusinessError(`Item output '${item.name}' tidak aktif.`);
-    // Main output unitPrice is OPTIONAL — auto-filled from computed loaded
-    // HPP later in the flow. Only by-products still need explicit NRV.
-    if (output.isByProduct && (output.unitPrice == null || output.unitPrice < 0)) {
-      throw new BusinessError(`NRV '${item.name}' wajib diisi (minimal 0).`);
-    }
-  }
+  const { itemMap, inputs: costedInputs } = await loadProductionCostContext(tx, body, {
+    bypassLog: 'Production input submitted with negative stock bypass',
+  });
+  const costing = computeProductionCosting({
+    inputs: body.inputs.map((input, i) => ({ quantity: input.quantity, unitCost: costedInputs[i]!.unitCost })),
+    outputs: body.outputs,
+    costs: body.costs,
+    hppOverride: body.hppOverride,
+  });
+  const { computedHpp, resolvedCosts, totalMaterialCost, totalCostInputSide, totalCostOutputSide, totalByproductValue } = costing;
 
   const runNumber = await generateDocumentNumber(tx, 'PR', txDate, fiscalYear.id);
-
-  const totalInputQty = body.inputs.reduce((s, i) => s + i.quantity, 0);
-  const totalMainOutputQty = body.outputs
-    .filter((o) => !o.isByProduct)
-    .reduce((s, o) => s + o.quantity, 0);
-  const yieldPct = totalInputQty > 0 ? (totalMainOutputQty / totalInputQty) * 100 : null;
 
   const run = await tx.productionRun.create({
     data: {
@@ -134,7 +158,7 @@ export async function submitProductionRunInTx(
       referenceType: body.referenceType || null,
       referenceId: body.referenceId || null,
       referenceNumber: body.referenceNumber || null,
-      yieldPct: yieldPct !== null ? yieldPct : null,
+      yieldPct: costing.yieldPct,
       // OEE capture fields (optional). Single machineId/startAt/endAt are persisted for
       // backward compat but not used in the OEE compute below.
       machineId: body.machineId ?? null,
@@ -163,65 +187,10 @@ export async function submitProductionRunInTx(
     );
   }
 
-  // sourceMovementId must be a non-cancelled inbound movement of the same item. Per-batch
-  // remaining qty is not enforced (race-prone); the currentStock guard covers total stock.
-  const batchSnapshots = new Map<number, { sourceMovementId: string | null; batchUnitCost: number | null }>();
-  for (let i = 0; i < body.inputs.length; i++) {
-    const input = body.inputs[i]!;
-    if (!input.sourceMovementId) {
-      batchSnapshots.set(i, { sourceMovementId: null, batchUnitCost: null });
-      continue;
-    }
-    const batch = await tx.stockMovement.findUnique({
-      where: { id: input.sourceMovementId },
-      select: {
-        id: true, itemId: true, isCancelled: true, movementType: true,
-        unitCost: true, quantity: true,
-      },
-    });
-    if (!batch) {
-      throw new BusinessError(`Batch sumber tidak ditemukan untuk input ke-${i + 1}.`);
-    }
-    if (batch.itemId !== input.itemId) {
-      throw new BusinessError(`Batch sumber tidak cocok dengan item input ke-${i + 1}.`);
-    }
-    if (batch.isCancelled) {
-      throw new BusinessError(`Batch sumber sudah dibatalkan (input ke-${i + 1}).`);
-    }
-    // TransferIn juga sah: stok yang dipindah antar-gudang (mis. barang setengah
-    // jadi diproduksi di gudang A lalu ditransfer ke gudang B) membawa cost-nya & layak jadi batch
-    // input — konsisten dgn batch picker (/items/:id/batches) & stockTransfer.
-    if (batch.movementType !== 'In' && batch.movementType !== 'AdjustmentIn' && batch.movementType !== 'TransferIn') {
-      throw new BusinessError(`Batch sumber bukan stok masuk (input ke-${i + 1}).`);
-    }
-    // Prefer client-supplied batchUnitCost (captured at pick time); fall back
-    // to the batch's stored unitCost for robustness.
-    const snapshotCost = input.batchUnitCost != null && input.batchUnitCost >= 0
-      ? Number(input.batchUnitCost)
-      : Number(batch.unitCost);
-    batchSnapshots.set(i, {
-      sourceMovementId: batch.id,
-      batchUnitCost: snapshotCost,
-    });
-  }
-
   // Inputs: stock-out + StockMovement Out
-  let totalInputValue = new Decimal(0);
-  let totalMaterialCost = new Decimal(0);
   for (let i = 0; i < body.inputs.length; i++) {
     const input = body.inputs[i]!;
-    const item = itemMap.get(input.itemId);
-    if (!item) continue;
-    const snapshot = batchSnapshots.get(i)!;
-    // When a batch is picked, use its snapshot cost (locked). Otherwise fall
-    // back to WAC (legacy behavior).
-    const inputUnitCost = snapshot.batchUnitCost != null
-      ? snapshot.batchUnitCost
-      : (Number(item.averageCost) > 0 ? Number(item.averageCost) : 0);
-    const inputTotalValue = new Decimal(input.quantity).mul(new Decimal(inputUnitCost)).toDecimalPlaces(2).toNumber();
-    totalInputValue = totalInputValue.plus(new Decimal(inputTotalValue));
-    totalMaterialCost = totalMaterialCost.plus(new Decimal(inputTotalValue));
-
+    const line = costing.inputLines[i]!;
     await tx.inventoryItem.update({
       where: { id: input.itemId },
       data: { currentStock: { decrement: input.quantity } },
@@ -237,10 +206,10 @@ export async function submitProductionRunInTx(
         warehouseId: productionWarehouseId,
         movementType: 'Out',
         quantity: input.quantity,
-        unitCost: inputUnitCost,
-        totalValue: inputTotalValue,
+        unitCost: line.unitCost,
+        totalValue: line.totalValue,
         // Batch back-link so /items/:id/batches can sum consumption from every source.
-        sourceMovementId: snapshot.sourceMovementId,
+        sourceMovementId: costedInputs[i]!.sourceMovementId,
         referenceType: 'ProductionRun',
         referenceId: run.id,
         referenceNumber: runNumber,
@@ -251,81 +220,24 @@ export async function submitProductionRunInTx(
     });
   }
 
-  // Loaded HPP (informational, no GL impact). Resolve qtyBasis before creating output
-  // movements so unit_cost_loaded can be set on main outputs at insert time.
-  const totalInputQtyDec = body.inputs.reduce(
-    (s, i) => s.plus(new Decimal(i.quantity)),
-    new Decimal(0),
-  );
-  const totalMainOutputQtyDec = body.outputs
-    .filter((o) => !o.isByProduct)
-    .reduce((s, o) => s.plus(new Decimal(o.quantity)), new Decimal(0));
-
-  const resolvedCosts = (body.costs ?? []).map((c) => {
-    let qtyBasis: Decimal;
-    if (c.basis === 'InputQty') qtyBasis = totalInputQtyDec;
-    else if (c.basis === 'OutputQty') qtyBasis = totalMainOutputQtyDec;
-    else qtyBasis = new Decimal(1); // Fixed: rate IS the total
-    const totalAmount = new Decimal(c.rate).mul(qtyBasis).toDecimalPlaces(4);
-    return { ...c, qtyBasis, totalAmount };
-  });
-
-  const totalCostInputSide = resolvedCosts
-    .filter((c) => c.costSide === 'InputSide')
-    .reduce((s, c) => s.plus(c.totalAmount), new Decimal(0));
-  const totalCostOutputSide = resolvedCosts
-    .filter((c) => c.costSide === 'OutputSide')
-    .reduce((s, c) => s.plus(c.totalAmount), new Decimal(0));
-
-  const totalByproductValue = body.outputs
-    .filter((o) => o.isByProduct)
-    .reduce(
-      (s, o) =>
-        s.plus(new Decimal(o.quantity).mul(new Decimal(o.unitPrice ?? 0))),
-      new Decimal(0),
+  if (costing.clampedNegativeNumerator) {
+    logger.warn(
+      {
+        runNumber,
+        totalMaterialCost: totalMaterialCost.toString(),
+        totalCostInputSide: totalCostInputSide.toString(),
+        totalCostOutputSide: totalCostOutputSide.toString(),
+        totalByproductValue: totalByproductValue.toString(),
+      },
+      'Loaded HPP numerator negative (by-product NRV > total cost) — clamped to 0',
     );
-
-  // Loaded HPP per kg of main output: override (>= 0) verbatim, else computed; null when
-  // there is no main output qty.
-  let computedHpp: Decimal | null = null;
-  const hppOverridden = body.hppOverride != null && body.hppOverride >= 0;
-  if (hppOverridden) {
-    computedHpp = new Decimal(body.hppOverride!);
-  } else if (totalMainOutputQtyDec.gt(0)) {
-    const numerator = totalMaterialCost
-      .plus(totalCostInputSide)
-      .plus(totalCostOutputSide)
-      .minus(totalByproductValue);
-    // By-product NRV above total cost would give a negative HPP and corrupt main-output
-    // WAC/GL: clamp to 0 and warn (the by-product NRV is likely overstated).
-    if (numerator.lt(0)) {
-      logger.warn(
-        {
-          runNumber,
-          totalMaterialCost: totalMaterialCost.toString(),
-          totalCostInputSide: totalCostInputSide.toString(),
-          totalCostOutputSide: totalCostOutputSide.toString(),
-          totalByproductValue: totalByproductValue.toString(),
-        },
-        'Loaded HPP numerator negative (by-product NRV > total cost) — clamped to 0',
-      );
-      computedHpp = new Decimal(0);
-    } else {
-      computedHpp = numerator.div(totalMainOutputQtyDec).toDecimalPlaces(4);
-    }
   }
 
   // Outputs: stock-in + StockMovement In + WAC recalc + COGS backfill settlement
-  let totalOutputValue = new Decimal(0);
-  // Main outputs without unitPrice are back-filled with the loaded HPP so WAC and GL stay
-  // balanced; by-products always carry an explicit NRV.
-  const computedHppNum = computedHpp ? computedHpp.toNumber() : 0;
-  for (const output of body.outputs) {
+  for (let i = 0; i < body.outputs.length; i++) {
+    const output = body.outputs[i]!;
+    const { unitCost, totalValue, unitCostLoaded } = costing.outputLines[i]!;
     const outputItem = await tx.inventoryItem.findUnique({ where: { id: output.itemId } });
-    const explicitPrice = output.unitPrice;
-    const unitCost = output.isByProduct
-      ? (explicitPrice ?? 0)
-      : (explicitPrice != null && explicitPrice > 0 ? explicitPrice : computedHppNum);
     const newAvgCost = outputItem && unitCost > 0
       ? calcWeightedAverage(outputItem.currentStock, outputItem.averageCost, output.quantity, unitCost)
       : undefined;
@@ -338,14 +250,6 @@ export async function submitProductionRunInTx(
       },
     });
     await adjustWarehouseStock(tx, output.itemId, productionWarehouseId, output.quantity);
-    const totalValue = new Decimal(output.quantity).mul(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
-    totalOutputValue = totalOutputValue.plus(new Decimal(totalValue));
-
-    // Main outputs share computedHpp; by-products use their NRV (the amount deducted from
-    // main HPP), so unit_cost_loaded is consistent for margin reports.
-    const unitCostLoaded = output.isByProduct
-      ? unitCost
-      : (computedHpp ? computedHpp.toNumber() : null);
 
     const movNumber = await generateDocumentNumber(tx, 'SM', txDate, fiscalYear.id);
     await tx.stockMovement.create({
@@ -384,90 +288,14 @@ export async function submitProductionRunInTx(
   const outputNames = body.outputs.map((o) => itemMap.get(o.itemId)?.name || '').join(', ');
 
   const jvNumber = `JV-${runNumber}`;
-  const journalItems: { accountId: string; debit: number; credit: number; description: string }[] = [];
-
-  let totalInputCost = new Decimal(0);
-  for (let i = 0; i < body.inputs.length; i++) {
-    const input = body.inputs[i]!;
-    const item = itemMap.get(input.itemId);
-    if (!item) continue;
-    const snapshot = batchSnapshots.get(i)!;
-    const inputUnitCost = snapshot.batchUnitCost != null
-      ? snapshot.batchUnitCost
-      : (Number(item.averageCost) > 0 ? Number(item.averageCost) : 0);
-    const val = new Decimal(input.quantity)
-      .mul(new Decimal(inputUnitCost))
-      .toDecimalPlaces(2)
-      .toNumber();
-    if (val <= 0) continue;
-    totalInputCost = totalInputCost.plus(new Decimal(val));
-    const acctId = item.accountId || defaultInvAccount.id;
-    journalItems.push({
-      accountId: acctId,
-      debit: 0,
-      credit: val,
-      description: `Bahan baku keluar ${item.name}: ${runNumber}`,
-    });
-  }
-
-  let totalOutputCost = new Decimal(0);
-  for (const output of body.outputs) {
-    // Same back-fill rule as the stockMovement loop: main outputs without an
-    // explicit unitPrice borrow the loaded HPP so DR/CR stays balanced.
-    const explicitPrice = output.unitPrice;
-    const unitCost = output.isByProduct
-      ? (explicitPrice ?? 0)
-      : (explicitPrice != null && explicitPrice > 0 ? explicitPrice : computedHppNum);
-    const val = new Decimal(output.quantity).mul(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
-    if (val <= 0) continue;
-    totalOutputCost = totalOutputCost.plus(new Decimal(val));
-    const outItem = await tx.inventoryItem.findUnique({
-      where: { id: output.itemId },
-      select: { accountId: true, name: true },
-    });
-    const acctId = outItem?.accountId || defaultInvAccount.id;
-    journalItems.push({
-      accountId: acctId,
-      debit: val,
-      credit: 0,
-      description: `Produksi masuk ${outItem?.name || ''}: ${runNumber}`,
-    });
-  }
-
-  // Output minus input value: up to total conversion cost goes to CR PRODUCTION_CONVERSION
-  // (conversion cost absorbed into inventory, PSAK 14); any remainder to CR COGS; a production
-  // loss to DR COGS. Both accounts come from the system account mapping.
-  const diff = totalOutputCost.minus(totalInputCost).toDecimalPlaces(2).toNumber();
-  if (Math.abs(diff) > 0) {
-    const { cogs: cogsAccount, conversion: conversionAccount } = await productionDiffAccounts(tx, diff);
-    if (diff > 0) {
-      const convCost = totalCostInputSide.plus(totalCostOutputSide).toDecimalPlaces(2).toNumber();
-      const { toConversion: to512, toCogs: to51 } = splitProductionDiff(diff, convCost);
-      if (to512 > 0) {
-        journalItems.push({
-          accountId: conversionAccount!.id,
-          debit: 0,
-          credit: to512,
-          description: `Biaya konversi dibebankan: ${runNumber}`,
-        });
-      }
-      if (to51 > 0) {
-        journalItems.push({
-          accountId: cogsAccount.id,
-          debit: 0,
-          credit: to51,
-          description: `HPP konversi produksi: ${runNumber}`,
-        });
-      }
-    } else {
-      journalItems.push({
-        accountId: cogsAccount.id,
-        debit: Math.abs(diff),
-        credit: 0,
-        description: `HPP rugi produksi: ${runNumber}`,
-      });
-    }
-  }
+  const journalItems = await productionJournalLines(tx, {
+    plan: costing.journalPlan,
+    inputs: body.inputs,
+    outputs: body.outputs,
+    itemMap,
+    defaultAccountId: defaultInvAccount.id,
+    runNumber,
+  });
 
   if (journalItems.length > 0) {
     const journalEntry = await tx.journalEntry.create({
@@ -516,9 +344,8 @@ export async function submitProductionRunInTx(
       warehouseId: productionWarehouseId,
       inputs: body.inputs,
       outputs: body.outputs,
-      batchSnapshots,
-      totalInputQty,
-      computedHppNum,
+      batchSnapshots: costedInputs,
+      outputCosting: costing.outputLines,
     }),
   });
 
@@ -541,9 +368,6 @@ export async function submitProductionRunInTx(
 
   // OEE: persist downtime + machine rows. Quality/output comes from item lines: inputQty = sum
   // of inputs, produkQty = main outputs only, sampingQty = by-products. No machines/time = null.
-  const oeeSampingQty = body.outputs
-    .filter((o) => o.isByProduct)
-    .reduce((s, o) => s + o.quantity, 0);
   await persistOeeInTx(tx, run.id, {
     plannedStart: body.plannedStart,
     plannedEnd: body.plannedEnd,
@@ -551,9 +375,9 @@ export async function submitProductionRunInTx(
     breakEnd: body.breakEnd,
     runMachines: body.runMachines,
     downtimes: body.downtimes,
-    inputQty: totalInputQty,
-    produkQty: totalMainOutputQty,
-    sampingQty: oeeSampingQty,
+    inputQty: costing.totalInputQty,
+    produkQty: costing.totalMainOutputQty,
+    sampingQty: costing.byProductQty,
   });
 
   await tx.productionRun.update({
@@ -564,7 +388,7 @@ export async function submitProductionRunInTx(
       totalCostOutputSide: totalCostOutputSide.toDecimalPlaces(4).toNumber(),
       totalByproductValue: totalByproductValue.toDecimalPlaces(4).toNumber(),
       computedHpp: computedHpp ? computedHpp.toNumber() : null,
-      hppManualOverride: hppOverridden,
+      hppManualOverride: costing.hppOverridden,
     },
   });
 
