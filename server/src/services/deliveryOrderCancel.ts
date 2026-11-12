@@ -6,6 +6,7 @@ import { assertPeriodOpen } from '../utils/periodGuard';
 import { recomputeDeliveredQtyInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
 import { claimCancel } from '../utils/cancelClaim';
+import { lockInventoryRows } from './inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -17,7 +18,16 @@ export async function cancelDeliveryOrderInTx(
   tx: Tx,
   doId: string,
 ): Promise<{ id: string; status: 'Cancelled' }> {
-  const deliveryOrder = await tx.deliveryOrder.findUnique({
+  const current = await tx.deliveryOrder.findUnique({ where: { id: doId }, select: { status: true } });
+  if (!current) throw new BusinessError('Surat jalan tidak ditemukan.');
+  if (current.status === 'Cancelled') {
+    throw new BusinessError('Surat jalan sudah dibatalkan.');
+  }
+  // First write, and before the SO recompute below so the cancelled note's lines drop out of it.
+  await claimCancel(tx.deliveryOrder, doId, { status: 'Cancelled', cancelledAt: new Date() });
+  // Read again after the claim: an invoice submit that billed the note, or an edit that replaced
+  // its lines, committed while the claim waited for the row and must be seen here.
+  const deliveryOrder = await tx.deliveryOrder.findUniqueOrThrow({
     where: { id: doId },
     include: {
       items: {
@@ -25,17 +35,18 @@ export async function cancelDeliveryOrderInTx(
       },
     },
   });
-  if (!deliveryOrder) throw new BusinessError('Surat jalan tidak ditemukan.');
-  if (deliveryOrder.status === 'Cancelled') {
-    throw new BusinessError('Surat jalan sudah dibatalkan.');
-  }
-  // First write, and before the SO recompute below so the cancelled note's lines drop out of it.
-  await claimCancel(tx.deliveryOrder, doId, { status: 'Cancelled', cancelledAt: new Date() });
   if (deliveryOrder.invoiceId) {
     throw new BusinessError('Batalkan invoice terkait dulu sebelum batalkan surat jalan.');
   }
   // By date: the stored fiscal year can be stale after an older edit moved the note.
   await assertPeriodOpen(tx, { date: deliveryOrder.date }, 'surat jalan');
+
+  // Lock the items of the lines being returned (an Out reversal needs no stock check).
+  const returning = deliveryOrder.items.filter((line) => line.inventoryItemId && line.stockMovement && !line.stockMovement.isCancelled);
+  await lockInventoryRows(tx, {
+    itemIds: returning.map((line) => line.inventoryItemId!),
+    pairs: returning.flatMap((line) => (line.warehouseId ? [{ itemId: line.inventoryItemId!, warehouseId: line.warehouseId }] : [])),
+  });
 
   for (const line of deliveryOrder.items) {
     if (!line.stockMovementId) continue;
