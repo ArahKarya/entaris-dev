@@ -415,7 +415,7 @@ d('aggregate stock checks per warehouse', () => {
       const out = await postMovement(s, { itemId: gabah.id, warehouseId: s.whA, movementType: 'Out', quantity: 100, unitCost: 6000 });
       expect(out.status, JSON.stringify(out.body)).toBe(201);
       const edit = (quantity: number) => callRoute(movementsRouter, 'put', '/:id', {
-        params: { id: out.body.id }, body: { movementType: 'AdjustmentOut', quantity, unitCost: 6000, date: `${Y}-03-12` }, userId: s.actor.userId, role: s.actor.role,
+        params: { id: out.body.id }, body: { movementType: 'AdjustmentOut', quantity, unitCost: 6000, date: `${Y}-03-12`, offsetAccountId: s.offsetAccountId }, userId: s.actor.userId, role: s.actor.role,
       });
       // After the reversal A holds 300 again: 301 is refused, 300 goes through.
       const refused = await edit(301);

@@ -27,7 +27,6 @@ const LOCK_CALL = /\blockInventoryRows\s*\(/;
 type Counts = Record<string, number>;
 
 const ALLOWLIST: Record<string, Counts> = {
-  'routes/inventory/movements.ts': { 'inventoryStock.upsert': 1, 'stockMovement.create': 1, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 4, adjustWarehouseStock: 3 },
   'routes/stockOpname.ts': { 'stockMovement.create': 1, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 2 },
   'scripts/fixLandedCost.ts': { 'stockMovement.updateMany': 1 },
   'scripts/fixPotonganAllocation.ts': { 'stockMovement.update': 1 },
@@ -39,6 +38,7 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/demoData/wipe.ts': { 'sql:UPDATE inventory_items': 1 },
   'services/goodsReceiptCancel.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
   'services/goodsReceiptSubmit.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
+  'services/inventory/manualMovement.ts': { 'inventoryStock.upsert': 1, 'stockMovement.create': 1, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 2 },
   'services/inventory/stockLocks.ts': { 'inventoryStock.createMany': 1 },
   'services/invoiceCancellation.ts': { 'inventoryStock.update': 2, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 2 },
   'services/openingStockImport.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },

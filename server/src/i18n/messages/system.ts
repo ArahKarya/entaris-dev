@@ -126,6 +126,11 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   // health check: former system account role accounts (E2-R8)
   "{0} akun bekas peran akun sistem masih bersaldo; pindahkan sisanya lewat Pengaturan > Akun Sistem": "{0} former system account role accounts still have a balance; move the rest from Settings > System Accounts",
   "Akun bekas peran akun sistem tidak bersaldo": "No former system account role account has a balance",
+  // inventory checks (routes/health/inventoryChecks.ts)
+  "Akun Selisih Persediaan belum dipetakan; mutasi stok keluar tanpa akun lawan ditolak": "The Inventory Variance account is not mapped; a stock out without an offset account is refused",
+  "Akun Selisih Persediaan dipetakan ke akun grup; mutasi stok keluar tanpa akun lawan ditolak": "The Inventory Variance account is mapped to a group account; a stock out without an offset account is refused",
+  "Akun Selisih Persediaan sama dengan akun Pembulatan; mutasi stok keluar tanpa akun lawan ditolak": "The Inventory Variance account is the same as the Rounding account; a stock out without an offset account is refused",
+  "Akun Selisih Persediaan adalah akun rinci tersendiri": "The Inventory Variance account is a separate detail account",
   "Gagal menjalankan health check": "Failed to run the health check",
   "Gagal membuat preview": "Failed to create the preview",
   "Gagal memperbaiki masalah": "Failed to fix the issue",

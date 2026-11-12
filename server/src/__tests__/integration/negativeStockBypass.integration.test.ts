@@ -100,10 +100,15 @@ async function stockItem(tx: Tx, warehouseId: string, stock: number, averageCost
   return item;
 }
 
-/** A manual "Penyesuaian Stok -" through the movements route: no sourceMovementId. */
+/**
+ * A manual "Penyesuaian Stok -" through the movements route: no sourceMovementId. It is valued at
+ * the average; its own expense offset keeps the test off the INVENTORY_VARIANCE mapping.
+ */
 async function adjustOut(tx: Tx, who: Actor, warehouseId: string, itemId: string, quantity: number, unitCost: number) {
+  const code = `IT-E3R1-${tag()}`;
+  const offset = await tx.account.create({ data: { name: `Lawan ${code}`, accountNumber: code, accountType: 'EXPENSE', rootType: 'EXPENSE' } });
   const r = await callRoute(movementsRouter, 'post', '/', {
-    body: { warehouseId, itemId, movementType: 'AdjustmentOut', quantity, unitCost, date: `${Y}-03-12` },
+    body: { warehouseId, itemId, movementType: 'AdjustmentOut', quantity, unitCost, date: `${Y}-03-12`, offsetAccountId: offset.id },
     userId: who.userId,
     role: who.role,
   });

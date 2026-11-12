@@ -89,6 +89,12 @@ async function item(tx: Tx, name: string, warehouseId: string, stock: number) {
   return it;
 }
 
+/** An expense account to post a manual inbound movement against (it requires an offset). */
+async function offsetAccount(tx: Tx): Promise<string> {
+  const code = `IT-E3R2-${tag()}`;
+  return (await tx.account.create({ data: { name: `Lawan ${code}`, accountNumber: code, accountType: 'EXPENSE', rootType: 'EXPENSE' } })).id;
+}
+
 let movSeq = 0;
 /** A movement row as a document (or old code) would have written it; stock is not touched. */
 function movement(
@@ -231,7 +237,7 @@ d('references sent by a client', () => {
       const wh = await warehouse(tx, 'Gudang');
       const beras = await item(tx, 'Beras', wh.id, 0);
       const created = await createMovement({
-        itemId: beras.id, warehouseId: wh.id, movementType: 'In', quantity: 20, date: DAY,
+        itemId: beras.id, warehouseId: wh.id, movementType: 'In', quantity: 20, unitCost: 1_000, date: DAY, offsetAccountId: await offsetAccount(tx),
         referenceType: 'SalesReturn', referenceId: '00000000-0000-4000-8000-000000000001', referenceNumber: 'NOTA-9',
       });
       expect(created.status).toBe(201);
@@ -252,8 +258,9 @@ d('references sent by a client', () => {
       // Before E3-R2 the modal offered PurchaseInvoice/SalesInvoice: a reference type without a referenceId.
       const legacy = await movement(tx, { itemId: beras.id, warehouseId: wh.id, movementType: 'In', quantity: 10, referenceType: 'PurchaseInvoice' });
 
+      const offsetAccountId = await offsetAccount(tx);
       for (const [row, expected] of [[manual, null], [legacy, 'PurchaseInvoice']] as const) {
-        const res = await editMovement(row.id, { movementType: 'In', quantity: 12, date: DAY, referenceType: 'GoodsReceipt' });
+        const res = await editMovement(row.id, { movementType: 'In', quantity: 12, unitCost: 1_000, date: DAY, offsetAccountId, referenceType: 'GoodsReceipt' });
         expect(res.status).toBe(200);
         const after = await tx.stockMovement.findUniqueOrThrow({ where: { id: row.id } });
         expect(after.referenceType).toBe(expected);

@@ -1,24 +1,16 @@
 import { Router } from 'express';
-import Decimal from 'decimal.js';
 import { prisma } from '../../lib/prisma';
 import { AuthRequest, requireCap } from '../../middleware/auth';
 import { validateBody } from '../../utils/validate';
 import { CreateStockMovementSchema, UpdateStockMovementSchema } from '../../utils/schemas';
-import { BusinessError, handleRouteError } from '../../utils/errors';
-import { MOVEMENT_DOCUMENT_LOCKED, documentMovementLockMessage } from '../../services/documentMovementLock';
-import { assertBatchSource } from '../../services/inventory/batchSource';
-import { generateDocumentNumber } from '../../utils/documentNumber';
-import { getOpenFiscalYear } from '../../utils/fiscalYear';
-import { assertPeriodOpen } from '../../utils/periodGuard';
-import { updateAccountBalance, recalculateAccountBalances } from '../../utils/accountBalance';
-import { systemAccounts } from '../../services/systemAccounts';
+import { handleRouteError } from '../../utils/errors';
 import { logger } from '../../lib/logger';
-import { calcWeightedAverage } from '../../utils/weightedAverage';
-import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
-import { reverseCogsSettlementsByTrigger } from '../../services/cogsBackfillReverse';
-import { recomputeAverageCostFromReplay } from '../../services/averageCostRecompute';
-import { adjustWarehouseStock, resolveWarehouseId } from '../../utils/warehouseStock';
-import { assertStockAvailable, lockInventoryRows, stockKey } from '../../services/inventory/stockLocks';
+import {
+  cancelManualMovementInTx,
+  createManualMovementInTx,
+  editManualMovementInTx,
+  stockOffsetAllowed,
+} from '../../services/inventory/manualMovement';
 import { parseListPaging, parseSort } from '../../utils/listQuery';
 import {
   DEFAULT_STOCK_MOVEMENT_SORT,
@@ -84,211 +76,16 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-// POST /api/inventory/movements
+// POST /api/inventory/movements: manual movement (services/inventory/manualMovement.ts). Outbound
+// rows are valued at the average cost; inbound rows need a unit cost > 0 and an offset account.
 router.post('/', async (req: AuthRequest, res) => {
   const body = validateBody(CreateStockMovementSchema, req.body, res);
   if (!body) return;
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      const txDate = new Date(body.date);
-      const fiscalYear = await getOpenFiscalYear(tx, txDate);
-
-      // Warehouse from the body, else the default warehouse.
-      const warehouseId = await resolveWarehouseId(tx, body.warehouseId || null);
-      if (!warehouseId) throw new BusinessError('Gudang tidak ditemukan dan tidak ada gudang default aktif.');
-
-      // Lock first (stockLocks LOCK ORDER): the stock check and the average below read rows no
-      // concurrent posting can change before this one commits.
-      const locked = await lockInventoryRows(tx, { itemIds: [body.itemId], pairs: [{ itemId: body.itemId, warehouseId }] });
-      const item = locked.items.get(body.itemId);
-      if (!item) throw new BusinessError('Item stok tidak ditemukan.');
-      if (!item.isActive) throw new BusinessError('Item stok tidak aktif.');
-      if (!locked.stocks.has(stockKey(item.id, warehouseId))) throw new BusinessError('Gudang tidak ditemukan.');
-
-      const qty = body.quantity;
-      const isOut = body.movementType === 'Out' || body.movementType === 'AdjustmentOut';
-      const isIn = body.movementType === 'In' || body.movementType === 'AdjustmentIn';
-
-      // Stock check is per warehouse (the source of truth), for Out and AdjustmentOut.
-      if (isOut) {
-        await assertStockAvailable(tx, [{ itemId: item.id, warehouseId, quantity: qty }], {
-          context: 'inventory.movement.create', userId: req.user!.userId,
-        });
-      }
-
-      // Outbound movements may link to an inbound batch so batch consumption stays accurate.
-      const sourceMovementId = isOut && body.sourceMovementId
-        ? (await assertBatchSource(tx, { sourceMovementId: body.sourceMovementId, inventoryItemId: item.id, itemName: item.name })).id
-        : null;
-
-      const movementDate = new Date(body.date);
-      const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
-
-      // Decimal math avoids float tails in GL amounts.
-      const unitCost = body.unitCost ?? 0;
-      const totalValue = new Decimal(qty).mul(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
-
-      // Keep inventory_stocks (per warehouse) and the denormalized inventory_items.current_stock in sync.
-      const stockDelta = isIn ? qty : -qty;
-      await tx.inventoryStock.upsert({
-        where: { itemId_warehouseId: { itemId: item.id, warehouseId } },
-        create: { itemId: item.id, warehouseId, currentStock: stockDelta },
-        update: { currentStock: { increment: stockDelta } },
-      });
-      await tx.inventoryItem.update({
-        where: { id: item.id },
-        data: {
-          currentStock: { increment: stockDelta },
-          ...(isIn && unitCost > 0 ? { averageCost: calcWeightedAverage(item.currentStock, item.averageCost, qty, unitCost) } : {}),
-        },
-      });
-
-      // Always post to the GL when totalValue > 0.
-      // Auto-resolve offsetAccountId: use provided value, or fall back to item's inventory account
-      let resolvedOffsetAccountId = body.offsetAccountId || null;
-      let journalEntryId: string | null = null;
-      if (totalValue > 0) {
-        // Use item's accountId or fall back to default INVENTORY account (1.4.0)
-        let inventoryAccountId = item.accountId;
-        if (!inventoryAccountId) {
-          const defaultInvAccount = await systemAccounts.getAccount('INVENTORY');
-          inventoryAccountId = defaultInvAccount.id;
-        }
-
-        // If no offset account provided, use Ekuitas Saldo Awal as default for opening stock
-        if (!resolvedOffsetAccountId) {
-          const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
-          resolvedOffsetAccountId = openingEquity.id;
-        }
-
-        // Prevent offset account being the same as inventory account (would cancel out)
-        if (resolvedOffsetAccountId === inventoryAccountId) {
-          const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
-          resolvedOffsetAccountId = openingEquity.id;
-        }
-
-        const userId = req.user!.userId;
-        const typeLabels: Record<string, string> = {
-          In: 'Stok Masuk',
-          Out: 'Stok Keluar',
-          AdjustmentIn: 'Penyesuaian Stok +',
-          AdjustmentOut: 'Penyesuaian Stok −',
-        };
-
-        // Determine DR/CR
-        let debitAccountId: string;
-        let creditAccountId: string;
-
-        if (isIn) {
-          debitAccountId = inventoryAccountId;
-          creditAccountId = resolvedOffsetAccountId!;
-        } else {
-          debitAccountId = resolvedOffsetAccountId!;
-          creditAccountId = inventoryAccountId;
-        }
-
-        const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
-
-        // Ledger and journal lines carry the narration so Buku Besar and the
-        // reconciliation workspace show a description instead of an empty cell.
-        const narration = `${typeLabels[body.movementType]}: ${item.name} ${qty} ${item.unit}${body.notes ? ' - ' + body.notes : ''}`;
-
-        const je = await tx.journalEntry.create({
-          data: {
-            entryNumber,
-            date: movementDate,
-            status: 'Submitted',
-            submittedAt: new Date(),
-            narration,
-            fiscalYearId: fiscalYear.id,
-            createdBy: userId,
-            items: {
-              create: [
-                { accountId: debitAccountId, debit: totalValue, credit: 0, description: narration },
-                { accountId: creditAccountId, debit: 0, credit: totalValue, description: narration },
-              ],
-            },
-          },
-          include: { items: true },
-        });
-
-        // Post to immutable ledger
-        await tx.accountingLedgerEntry.createMany({
-          data: [
-            {
-              accountId: debitAccountId,
-              date: movementDate,
-              debit: totalValue,
-              credit: 0,
-              referenceType: 'JournalEntry',
-              referenceId: je.id,
-              description: narration,
-              fiscalYearId: fiscalYear.id,
-            },
-            {
-              accountId: creditAccountId,
-              date: movementDate,
-              debit: 0,
-              credit: totalValue,
-              referenceType: 'JournalEntry',
-              referenceId: je.id,
-              description: narration,
-              fiscalYearId: fiscalYear.id,
-            },
-          ],
-        });
-
-        await updateAccountBalance(tx, debitAccountId, totalValue, 0);
-        await updateAccountBalance(tx, creditAccountId, 0, totalValue);
-
-        journalEntryId = je.id;
-      }
-
-      const movement = await tx.stockMovement.create({
-        data: {
-          movementNumber,
-          date: movementDate,
-          itemId: item.id,
-          warehouseId,
-          movementType: body.movementType as any,
-          quantity: qty,
-          unitCost,
-          totalValue,
-          notes: body.notes || null,
-          // Only documents set referenceType/referenceId (that is what locks a movement); a manual
-          // movement keeps the client's free-text referenceNumber and ignores the other two.
-          referenceType: null,
-          referenceId: null,
-          referenceNumber: body.referenceNumber || null,
-          offsetAccountId: resolvedOffsetAccountId || body.offsetAccountId || null,
-          sourceMovementId,
-          journalEntryId,
-          fiscalYearId: fiscalYear.id,
-          createdById: req.user!.userId,
-        },
-        include: {
-          item: { select: { id: true, name: true, code: true, unit: true } },
-        },
-      });
-
-      // Stock-in auto-settles pending COGS backfill.
-      if (isIn) {
-        await settleCogsBackfillForItem(tx, {
-          itemId: item.id,
-          qtyAvailable: qty,
-          unitCostNow: unitCost,
-          userId: req.user!.userId,
-          settleDate: movementDate,
-          source: { type: 'StockMovement', refId: movement.id, refNo: movementNumber },
-        });
-      }
-
-      return movement;
-    }, { timeout: 15000 });
-
+    const result = await prisma.$transaction((tx) => createManualMovementInTx(tx, body, req.user!.userId), { timeout: 15000 });
     return res.status(201).json(result);
-  } catch (error: any) {
+  } catch (error) {
     return handleRouteError(res, error, 'POST /inventory/movements', 'Gagal mencatat gerakan stok.');
   }
 });
@@ -305,221 +102,24 @@ router.get('/:id', async (req, res) => {
       },
     });
     if (!movement) return res.status(404).json({ error: 'Gerakan stok tidak ditemukan.' });
-    return res.json(movement);
+    // The edit form clears an offset an edit would refuse (a legacy 3.1 row) instead of sending it back.
+    const offsetAllowed = movement.offsetAccountId ? await stockOffsetAllowed(prisma, movement.offsetAccountId) : true;
+    return res.json({ ...movement, offsetAllowed });
   } catch (error) {
     return handleRouteError(res, error, 'GET /inventory/movements/:id', 'Gagal mengambil data gerakan stok.');
   }
 });
 
-// PUT /api/inventory/movements/:id — edit movement (cancel old + create new)
+// PUT /api/inventory/movements/:id — edit movement (reverse old + re-post)
 router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const body = validateBody(UpdateStockMovementSchema, req.body, res);
   if (!body) return;
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      // The movement is the document here: a concurrent edit or cancel of it waits, then re-reads.
-      await tx.$queryRaw`SELECT id FROM stock_movements WHERE id = ${id} FOR UPDATE`;
-      const oldMov = await tx.stockMovement.findUnique({ where: { id } });
-      if (!oldMov) throw new BusinessError('Gerakan stok tidak ditemukan.');
-      if (oldMov.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan, tidak bisa diedit.');
-
-      // Document movements are changed from their document: a per-line edit would orphan its journal.
-      const editLock = documentMovementLockMessage(oldMov, 'edit');
-      if (editLock) throw new BusinessError(editLock, MOVEMENT_DOCUMENT_LOCKED);
-
-      // The edit voids the old journal and auto-settle and re-posts on body.date, so the old and
-      // the new period must both be open, also when no journal is posted (unit cost 0). The stored
-      // fiscalYearId is not checked: older edits never updated it, and the journals check their own year.
-      const movementDate = new Date(body.date);
-      if (isNaN(movementDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
-      await assertPeriodOpen(tx, { date: oldMov.date }, 'mutasi stok');
-      const fiscalYear = await assertPeriodOpen(tx, { date: movementDate }, 'mutasi stok');
-
-      const oldIsIn = oldMov.movementType === 'In' || oldMov.movementType === 'AdjustmentIn';
-      const oldQty = Number(oldMov.quantity);
-      const oldReverseDelta = oldIsIn ? -oldQty : oldQty;
-
-      // Both the reversal and the new row use the movement's warehouse; a legacy row without one
-      // is checked against the item total.
-      await lockInventoryRows(tx, {
-        itemIds: [oldMov.itemId],
-        pairs: oldMov.warehouseId ? [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId }] : [],
-      });
-      const stockOpts = { context: 'inventory.movement.edit', userId: req.user!.userId };
-      if (oldIsIn) {
-        await assertStockAvailable(tx, [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId, quantity: oldQty }], { ...stockOpts, reversal: true });
-      }
-
-      await tx.inventoryItem.update({
-        where: { id: oldMov.itemId },
-        data: { currentStock: { increment: oldReverseDelta } },
-      });
-      await adjustWarehouseStock(tx, oldMov.itemId, oldMov.warehouseId, oldReverseDelta);
-
-      const oldAffectedAccountIds: string[] = [];
-      if (oldMov.journalEntryId) {
-        const oldJe = await tx.journalEntry.findUnique({
-          where: { id: oldMov.journalEntryId },
-          include: { items: true },
-        });
-        if (oldJe) {
-          await assertPeriodOpen(tx, { fiscalYearId: oldJe.fiscalYearId, date: oldJe.date }, 'mutasi stok');
-          oldAffectedAccountIds.push(...oldJe.items.map(ji => ji.accountId));
-          await tx.accountingLedgerEntry.updateMany({
-            where: { referenceId: oldMov.journalEntryId },
-            data: { isCancelled: true },
-          });
-          await tx.journalEntry.update({
-            where: { id: oldMov.journalEntryId },
-            data: { status: 'Cancelled', cancelledAt: new Date() },
-          });
-        }
-      }
-
-      const newIsIn = body.movementType === 'In' || body.movementType === 'AdjustmentIn';
-      const newQty = body.quantity;
-
-      // Re-fetch stock after reversal
-      const itemAfterReversal = await tx.inventoryItem.findUnique({ where: { id: oldMov.itemId } });
-      if (!itemAfterReversal) throw new BusinessError('Item stok tidak ditemukan.');
-
-      if (!newIsIn) {
-        await assertStockAvailable(tx, [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId, quantity: newQty }], stockOpts);
-      }
-
-      const newStockDelta = newIsIn ? newQty : -newQty;
-      await tx.inventoryItem.update({
-        where: { id: oldMov.itemId },
-        data: { currentStock: { increment: newStockDelta } },
-      });
-      // Reuse the same warehouse the movement was originally posted to.
-      await adjustWarehouseStock(tx, oldMov.itemId, oldMov.warehouseId, newStockDelta);
-
-      const newUnitCost = body.unitCost ?? 0;
-      const newTotalValue = new Decimal(newQty).mul(new Decimal(newUnitCost)).toDecimalPlaces(2).toNumber();
-      let newJournalEntryId: string | null = null;
-      let resolvedEditOffsetAccountId = body.offsetAccountId || null;
-
-      if (newTotalValue > 0) {
-        let inventoryAccountId = itemAfterReversal.accountId;
-        if (!inventoryAccountId) {
-          const defaultInvAccount = await systemAccounts.getAccount('INVENTORY');
-          inventoryAccountId = defaultInvAccount.id;
-        }
-
-        // Auto-resolve offset account if not provided
-        if (!resolvedEditOffsetAccountId) {
-          const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
-          resolvedEditOffsetAccountId = openingEquity.id;
-        }
-
-        // Prevent offset account being the same as inventory account (would cancel out)
-        if (resolvedEditOffsetAccountId === inventoryAccountId) {
-          const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
-          resolvedEditOffsetAccountId = openingEquity.id;
-        }
-
-        const typeLabels: Record<string, string> = {
-          In: 'Stok Masuk',
-          Out: 'Stok Keluar',
-          AdjustmentIn: 'Penyesuaian Stok +',
-          AdjustmentOut: 'Penyesuaian Stok −',
-        };
-
-        let debitAccountId: string;
-        let creditAccountId: string;
-
-        if (newIsIn) {
-          debitAccountId = inventoryAccountId;
-          creditAccountId = resolvedEditOffsetAccountId;
-        } else {
-          debitAccountId = resolvedEditOffsetAccountId;
-          creditAccountId = inventoryAccountId;
-        }
-
-        const editNarration = `${typeLabels[body.movementType]}: ${itemAfterReversal.name} ${newQty} ${itemAfterReversal.unit}${body.notes ? ' - ' + body.notes : ''} (Edit)`;
-        const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
-
-        const je = await tx.journalEntry.create({
-          data: {
-            entryNumber,
-            date: movementDate,
-            status: 'Submitted',
-            submittedAt: new Date(),
-            narration: editNarration,
-            fiscalYearId: fiscalYear.id,
-            createdBy: req.user!.userId,
-            items: {
-              create: [
-                { accountId: debitAccountId, debit: newTotalValue, credit: 0, description: editNarration },
-                { accountId: creditAccountId, debit: 0, credit: newTotalValue, description: editNarration },
-              ],
-            },
-          },
-          include: { items: true },
-        });
-
-        await tx.accountingLedgerEntry.createMany({
-          data: [
-            { accountId: debitAccountId, date: movementDate, debit: newTotalValue, credit: 0, referenceType: 'JournalEntry', referenceId: je.id, description: editNarration, fiscalYearId: fiscalYear.id },
-            { accountId: creditAccountId, date: movementDate, debit: 0, credit: newTotalValue, referenceType: 'JournalEntry', referenceId: je.id, description: editNarration, fiscalYearId: fiscalYear.id },
-          ],
-        });
-
-        // Recalculate balances for all affected accounts (old + new)
-        const allAffectedIds = [...new Set([...oldAffectedAccountIds, debitAccountId, creditAccountId])];
-        await recalculateAccountBalances(tx, allAffectedIds);
-
-        newJournalEntryId = je.id;
-      } else if (oldAffectedAccountIds.length > 0) {
-        // No new GL but old was cancelled — recalculate old affected accounts
-        await recalculateAccountBalances(tx, [...new Set(oldAffectedAccountIds)]);
-      }
-
-      const updated = await tx.stockMovement.update({
-        where: { id },
-        data: {
-          date: movementDate,
-          fiscalYearId: fiscalYear.id,
-          movementType: body.movementType as any,
-          quantity: newQty,
-          unitCost: newUnitCost,
-          totalValue: newTotalValue,
-          notes: body.notes || null,
-          // referenceType is never written from the body (see POST); an inbound row consumes no batch.
-          referenceNumber: body.referenceNumber || null,
-          offsetAccountId: resolvedEditOffsetAccountId || body.offsetAccountId || null,
-          journalEntryId: newJournalEntryId,
-          ...(newIsIn ? { sourceMovementId: null } : {}),
-        },
-        include: {
-          item: { select: { id: true, name: true, code: true, unit: true } },
-        },
-      });
-
-      // Editing an inbound movement makes its COGS auto-settle stale: reverse it, then re-settle if still stock-in.
-      await reverseCogsSettlementsByTrigger(tx, "StockMovement", oldMov.id);
-      if (newIsIn && newQty > 0) {
-        await settleCogsBackfillForItem(tx, {
-          itemId: oldMov.itemId,
-          qtyAvailable: newQty,
-          unitCostNow: newUnitCost,
-          userId: req.user!.userId,
-          settleDate: movementDate,
-          source: { type: "StockMovement", refId: oldMov.id, refNo: oldMov.movementNumber },
-        });
-      }
-
-      // An edit can change type/qty/cost, so WAC is re-derived by replaying all active movements in order.
-      await recomputeAverageCostFromReplay(tx, oldMov.itemId);
-
-      return updated;
-    }, { timeout: 15000 });
-
+    const result = await prisma.$transaction((tx) => editManualMovementInTx(tx, id, body, req.user!.userId), { timeout: 15000 });
     return res.json(result);
-  } catch (error: any) {
+  } catch (error) {
     return handleRouteError(res, error, 'PUT /inventory/movements/:id', 'Gagal mengupdate gerakan stok.');
   }
 });
@@ -529,74 +129,9 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
   const id = req.params.id as string;
 
   try {
-    await prisma.$transaction(async (tx) => {
-      // A second concurrent cancel waits here, then sees isCancelled and stops.
-      await tx.$queryRaw`SELECT id FROM stock_movements WHERE id = ${id} FOR UPDATE`;
-      const movement = await tx.stockMovement.findUnique({ where: { id } });
-      if (!movement) throw new BusinessError('Gerakan stok tidak ditemukan.');
-      if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
-      const cancelLock = documentMovementLockMessage(movement, 'cancel');
-      if (cancelLock) throw new BusinessError(cancelLock, MOVEMENT_DOCUMENT_LOCKED);
-      // By date only, as on edit: the journal and auto-settle journals check their own year below.
-      await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
-
-      const isIn = movement.movementType === 'In' || movement.movementType === 'AdjustmentIn';
-      const isOut = movement.movementType === 'Out' || movement.movementType === 'AdjustmentOut';
-      const qty = Number(movement.quantity);
-
-      // Reversing an inbound row takes its quantity back out of its warehouse.
-      await lockInventoryRows(tx, {
-        itemIds: [movement.itemId],
-        pairs: movement.warehouseId ? [{ itemId: movement.itemId, warehouseId: movement.warehouseId }] : [],
-      });
-      if (isIn) {
-        await assertStockAvailable(tx, [{ itemId: movement.itemId, warehouseId: movement.warehouseId, quantity: qty }], {
-          context: 'inventory.movement.cancel', userId: req.user!.userId, reversal: true,
-        });
-      }
-
-      // Reverse stock (item-level total + per-warehouse)
-      const reverseDelta = isOut ? qty : -qty;
-      await tx.inventoryItem.update({
-        where: { id: movement.itemId },
-        data: { currentStock: { increment: reverseDelta } },
-      });
-      await adjustWarehouseStock(tx, movement.itemId, movement.warehouseId, reverseDelta);
-
-      // Cancel journal entry if exists
-      if (movement.journalEntryId) {
-        const je = await tx.journalEntry.findUnique({
-          where: { id: movement.journalEntryId },
-          include: { items: true },
-        });
-        if (je) await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'mutasi stok');
-        await tx.journalEntry.update({
-          where: { id: movement.journalEntryId },
-          data: { status: 'Cancelled', cancelledAt: new Date() },
-        });
-        await tx.accountingLedgerEntry.updateMany({
-          where: { referenceId: movement.journalEntryId },
-          data: { isCancelled: true },
-        });
-        // Recalculate affected account balances from JE sums
-        if (je) {
-          const affectedIds = [...new Set(je.items.map(ji => ji.accountId))];
-          await recalculateAccountBalances(tx, affectedIds);
-        }
-      }
-
-      await tx.stockMovement.update({
-        where: { id },
-        data: { isCancelled: true },
-      });
-      // Balik auto-settle COGS yang dipicu movement manual ini
-      await reverseCogsSettlementsByTrigger(tx, 'StockMovement', id);
-      // Cancelled movement no longer contributes: re-derive WAC by replay.
-      await recomputeAverageCostFromReplay(tx, movement.itemId);
-    }, { timeout: 15000 });
-
+    await prisma.$transaction((tx) => cancelManualMovementInTx(tx, id, req.user!.userId), { timeout: 15000 });
     return res.json({ message: 'Gerakan stok dibatalkan.' });
-  } catch (error: any) {
+  } catch (error) {
     return handleRouteError(res, error, 'PUT /inventory/movements/:id/cancel', 'Gagal membatalkan gerakan stok.');
   }
 });

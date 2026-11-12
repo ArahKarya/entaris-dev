@@ -48,6 +48,7 @@ const KIND_LABELS: Partial<Record<RestrictedKind, string>> = {
   INVENTORY_ITEM: 'Persediaan item',
   TAX_INPUT: 'PPN Masukan',
   TAX_OUTPUT: 'PPN Keluaran',
+  OPENING_EQUITY: 'Ekuitas Saldo Awal',
 };
 
 export interface PostableRule {
@@ -66,6 +67,13 @@ export interface PostableRule {
    * mapping wherever it sits. Default false.
    */
   allowGroupOrInactive?: boolean;
+  /**
+   * The account must not be the parent group of the account mapped to `role`, nor sit anywhere
+   * below it (1.4 for the INVENTORY account 1.4.0), so an unmapped sibling of the inventory
+   * accounts is refused too. Without a mapping or a mapped account that has a parent, no group can
+   * be named and the restriction does not apply. Refused with `code`.
+   */
+  outsideGroupOf?: { role: SystemAccountRole; code: string };
 }
 
 /** Control kinds a journal.control holder may post manually; the deposit roles are never among them. */
@@ -146,6 +154,23 @@ export const OPENING_ACCOUNT_RULE: PostableRule = {
   allowControl: false,
   alsoRestrict: [],
   controlHint: 'Saldo awal piutang, hutang, dan uang muka diisi lewat saldo awal pihak; persediaan lewat impor stok awal.',
+};
+
+/** Error code: the offset account of a manual stock movement sits in the inventory account group. */
+export const STOCK_OFFSET_INVENTORY = 'STOCK_OFFSET_INVENTORY';
+
+/**
+ * The offset account of a manual stock movement (E3-R4, owner decision #7), the account a person
+ * picks against inventory: a detail, active account that is no control account (receivable,
+ * payable, deposits, GRNI, inventory), not the opening balance equity (opening stock goes through
+ * the opening stock import), no tax account, and not inside the inventory account group.
+ */
+export const STOCK_OFFSET_RULE: PostableRule = {
+  label: 'Akun lawan mutasi stok',
+  allowControl: false,
+  alsoRestrict: ['OPENING_EQUITY', ...TAX_ACCOUNT_ROLES],
+  controlHint: 'Pilih akun lawan biasa; stok awal diisi lewat impor stok awal.',
+  outsideGroupOf: { role: 'INVENTORY', code: STOCK_OFFSET_INVENTORY },
 };
 
 /** System journals whose accounts are all chosen by code (year-end close, reclass target side). Not the cash book or payment requests. */
@@ -275,6 +300,41 @@ export interface AssertPostableOptions {
   lineRules?: ReadonlyMap<string, PostableRule>;
 }
 
+const MAX_TREE_DEPTH = 12;
+
+/** The parent group of the account mapped to `role`, or null when none can be named. */
+async function mappedGroupId(tx: Tx, role: SystemAccountRole): Promise<string | null> {
+  const mapping = await tx.systemAccountMapping.findFirst({
+    where: { role },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    select: { account: { select: { parentId: true } } },
+  });
+  return mapping?.account.parentId ?? null;
+}
+
+/** True when the account is `groupId` or sits anywhere below it in the chart. */
+async function isInSubtree(tx: Tx, accountId: string, groupId: string): Promise<boolean> {
+  let current: string | null = accountId;
+  for (let depth = 0; current && depth < MAX_TREE_DEPTH; depth++) {
+    if (current === groupId) return true;
+    const row: { parentId: string | null } | null = await tx.account.findUnique({ where: { id: current }, select: { parentId: true } });
+    current = row?.parentId ?? null;
+  }
+  return false;
+}
+
+async function assertOutsideGroup(tx: Tx, acc: AccountLite, rule: PostableRule): Promise<void> {
+  const outside = rule.outsideGroupOf;
+  if (!outside) return;
+  const groupId = await mappedGroupId(tx, outside.role);
+  if (groupId && (await isInSubtree(tx, acc.id, groupId))) {
+    throw new BusinessError(
+      `${rule.label}: akun ${acc.accountNumber} ${acc.name} berada di kelompok akun ${KIND_LABELS[outside.role] ?? outside.role}.`,
+      outside.code,
+    );
+  }
+}
+
 /** Loads the accounts and throws BusinessError (with an ACCOUNT_* code) on the first problem. */
 export async function assertPostableAccounts(
   tx: Tx,
@@ -298,6 +358,7 @@ export async function assertPostableAccounts(
   for (const id of unique) {
     const problem = postableAccountProblem(byId.get(id) ?? null, ruleOf(id), control.get(id) ?? null);
     if (problem) throw new BusinessError(problem.message, problem.code);
+    await assertOutsideGroup(tx, byId.get(id)!, ruleOf(id));
   }
   return byId;
 }

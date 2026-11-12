@@ -2,6 +2,8 @@
  * Write paths that used to leave UI cells empty: manual stock movement GL
  * lines without description, and stock opname without a header warehouse.
  * Also the closed fiscal year guard on movement edit/cancel and opname cancel.
+ * Manual movement journals go through postJournal (mocked here; the integration test
+ * manualMovementCost.integration.test.ts posts them for real).
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import express from 'express';
@@ -23,22 +25,43 @@ vi.mock('../../utils/accountBalance', () => ({
   updateAccountBalance: vi.fn(async () => undefined),
   recalculateAccountBalances: vi.fn(async () => undefined),
 }));
-vi.mock('../../services/ledger/cancelJournals', () => ({
+// The real cancelJournalsInTx (void in place, period guard per journal); the opname lookup is stubbed.
+vi.mock('../../services/ledger/cancelJournals', async (importActual) => ({
+  ...(await importActual<typeof import('../../services/ledger/cancelJournals')>()),
   findDocumentJournals: vi.fn(async () => []),
-  cancelJournalsInTx: vi.fn(async () => []),
 }));
+const ROLE_ACCOUNTS: Record<string, string> = { INVENTORY: 'acc-inv', OPENING_EQUITY: 'acc-3.1', INVENTORY_VARIANCE: 'acc-var' };
 vi.mock('../../services/systemAccounts', () => ({
-  systemAccounts: {
-    getAccount: vi.fn(async (role: string) => ({ id: { INVENTORY: 'acc-inv', OPENING_EQUITY: 'acc-3.1', INVENTORY_VARIANCE: 'acc-var' }[role] })),
-  },
+  systemAccounts: { getAccount: vi.fn(async (role: string) => ({ id: ROLE_ACCOUNTS[role] })) },
+  mappedAccount: vi.fn(async (_tx: unknown, role: string) => ({ id: ROLE_ACCOUNTS[role], accountNumber: role, name: role })),
+}));
+vi.mock('../../services/inventory/varianceAccount', () => ({
+  assertVarianceAccountUsable: vi.fn(async () => ({ id: 'acc-var', accountNumber: '6.38', name: 'Selisih Persediaan' })),
+}));
+vi.mock('../../services/ledger/postJournal', () => ({
+  postJournal: vi.fn(async (_tx: unknown, input: { date: Date }) => ({
+    journal: { id: 'je-1', ...input },
+    fiscalYear: input.date >= new Date('2026-12-31T17:00:00Z') ? { id: 'fy-2027' } : { id: 'fy-2026' },
+  })),
+}));
+vi.mock('../../services/ledger/accountGuard', async (importActual) => ({
+  ...(await importActual<typeof import('../../services/ledger/accountGuard')>()),
+  assertPostableAccounts: vi.fn(async () => new Map()),
 }));
 vi.mock('../../services/cogsBackfillService', () => ({ settleCogsBackfillForItem: vi.fn(async () => undefined) }));
 vi.mock('../../services/cogsBackfillReverse', () => ({ reverseCogsSettlementsByTrigger: vi.fn(async () => undefined) }));
-vi.mock('../../services/averageCostRecompute', () => ({ recomputeAverageCostFromReplay: vi.fn(async () => undefined) }));
+vi.mock('../../services/averageCostRecompute', () => ({
+  recomputeAverageCostFromReplay: vi.fn(async () => 9000),
+  replayAverageCost: vi.fn(async () => ({ averageCost: 9000, explained: true })),
+}));
 
 import movementsRouter from '../inventory/movements';
 import stockOpnameRouter from '../stockOpname';
 import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
+import { postJournal } from '../../services/ledger/postJournal';
+import { STOCK_OFFSET_RULE } from '../../services/ledger/accountGuard';
+import { generateDocumentNumber } from '../../utils/documentNumber';
+import { updateAccountBalance } from '../../utils/accountBalance';
 
 let server: Server;
 let base = '';
@@ -93,8 +116,12 @@ const journalHandlers = {
   ...fiscalYearHandlers(),
   ...lockHandlers(),
   'inventoryItem.findUnique': () => ITEM,
-  'journalEntry.create': ({ data }: any) => ({ id: 'je-1', ...data, items: data.items.create }),
+  'inventoryItem.findUniqueOrThrow': () => ITEM,
+  'warehouse.findUnique': () => ({ isActive: true }),
 };
+
+/** The input of the n-th postJournal call. */
+const posted = (n = 0) => vi.mocked(postJournal).mock.calls[n]![1];
 
 const OLD_MOVEMENT = {
   id: 'sm-1', itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: '10', isCancelled: false, date: new Date('2026-12-20'),
@@ -104,27 +131,25 @@ const OLD_MOVEMENT = {
 describe('manual stock movement GL descriptions', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('POST writes the narration on both journal lines and both ledger rows', async () => {
+  it('POST posts the narration on both journal lines through postJournal (SYSTEM_DOC, offset rule)', async () => {
     current = makeAutoTx(journalHandlers);
     const res = await send('POST', '/movements', {
       itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: 10, unitCost: 1000, date: '2026-10-10', notes: 'stok awal',
+      offsetAccountId: 'acc-offset',
     });
     expect(res.status).toBe(201);
     const narration = 'Stok Masuk: Beras 10 Kg - stok awal';
-    const je = current.fn('journalEntry.create').mock.calls[0]![0].data;
-    expect(je.narration).toBe(narration);
-    expect(je.items.create).toEqual([
-      { accountId: 'acc-inv', debit: 10000, credit: 0, description: narration },
-      { accountId: 'acc-3.1', debit: 0, credit: 10000, description: narration },
+    const input = posted();
+    expect(input).toMatchObject({ narration, sourceType: 'SYSTEM_DOC', partyRule: 'off', expectFiscalYearId: 'fy-2026' });
+    expect(input.lines).toEqual([
+      { accountId: 'acc-inv', debit: '10000', credit: 0, description: narration },
+      { accountId: 'acc-offset', debit: 0, credit: '10000', description: narration },
     ]);
-    const ledger = current.fn('accountingLedgerEntry.createMany').mock.calls[0]![0].data;
-    expect(ledger.map((l: any) => [l.accountId, l.debit, l.credit, l.description])).toEqual([
-      ['acc-inv', 10000, 0, narration],
-      ['acc-3.1', 0, 10000, narration],
-    ]);
+    expect(input.lineRules?.get('acc-offset')).toBe(STOCK_OFFSET_RULE);
+    expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({ journalEntryId: 'je-1', offsetAccountId: 'acc-offset' });
   });
 
-  it('PUT writes the "(Edit)" narration on the re-posted journal and ledger', async () => {
+  it('PUT writes the "(Edit)" narration and values an Out at the average, not the body cost', async () => {
     current = makeAutoTx({
       ...journalHandlers,
       'stockMovement.findUnique': () => OLD_MOVEMENT,
@@ -132,13 +157,31 @@ describe('manual stock movement GL descriptions', () => {
     const res = await send('PUT', '/movements/sm-1', { movementType: 'Out', quantity: 4, unitCost: 1000, date: '2026-10-10' });
     expect(res.status).toBe(200);
     const narration = 'Stok Keluar: Beras 4 Kg (Edit)';
-    const je = current.fn('journalEntry.create').mock.calls[0]![0].data;
-    expect(je.items.create).toEqual([
-      { accountId: 'acc-3.1', debit: 4000, credit: 0, description: narration },
-      { accountId: 'acc-inv', debit: 0, credit: 4000, description: narration },
+    expect(posted().lines).toEqual([
+      { accountId: 'acc-var', debit: '36000', credit: 0, description: narration },
+      { accountId: 'acc-inv', debit: 0, credit: '36000', description: narration },
     ]);
-    const ledger = current.fn('accountingLedgerEntry.createMany').mock.calls[0]![0].data;
-    expect(ledger.every((l: any) => l.description === narration)).toBe(true);
+    expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ unitCost: '9000', totalValue: '36000', offsetAccountId: 'acc-var' });
+  });
+
+  it('PUT takes the new JV number before voiding the old journal (number before account rows)', async () => {
+    current = makeAutoTx({
+      ...journalHandlers,
+      'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, journalEntryId: 'je-old' }),
+      'journalEntry.findUnique': () => ({
+        id: 'je-old', entryNumber: 'JV-OLD', fiscalYearId: 'fy-2026', date: new Date('2026-12-20'), status: 'Submitted', reversedById: null,
+        items: [{ accountId: 'acc-inv', debit: '10000', credit: '0' }, { accountId: 'acc-offset', debit: '0', credit: '10000' }],
+      }),
+      'journalEntry.updateMany': () => ({ count: 1 }),
+    });
+    const res = await send('PUT', '/movements/sm-1', { movementType: 'Out', quantity: 4, date: '2026-10-10', offsetAccountId: 'acc-offset' });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const jvCall = vi.mocked(generateDocumentNumber).mock.calls.findIndex((c) => c[1] === 'JV');
+    expect(jvCall).toBeGreaterThanOrEqual(0);
+    const jvOrder = vi.mocked(generateDocumentNumber).mock.invocationCallOrder[jvCall]!;
+    expect(vi.mocked(updateAccountBalance)).toHaveBeenCalledTimes(2);
+    for (const order of vi.mocked(updateAccountBalance).mock.invocationCallOrder) expect(jvOrder).toBeLessThan(order);
+    expect(posted().entryNumber).toBe('JV-202610-0001');
   });
 });
 
@@ -196,10 +239,12 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
 
   it('PUT moving a movement into the next year books the movement, journal and auto-settle in that year', async () => {
     current = movementTx([]);
-    const res = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 10, unitCost: 1000, date: '2027-01-05' });
+    const res = await send('PUT', '/movements/sm-1', {
+      movementType: 'In', quantity: 10, unitCost: 1000, date: '2027-01-05', offsetAccountId: 'acc-offset',
+    });
     expect(res.status).toBe(200);
     expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ fiscalYearId: 'fy-2027', date: new Date('2027-01-05') });
-    expect(current.fn('journalEntry.create').mock.calls[0]![0].data.fiscalYearId).toBe('fy-2027');
+    expect(posted()).toMatchObject({ date: new Date('2027-01-05'), expectFiscalYearId: 'fy-2027' });
     expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).toMatchObject({ settleDate: new Date('2027-01-05') });
     expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).not.toHaveProperty('fiscalYearId');
   });
@@ -226,12 +271,16 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
       ...fiscalYearHandlers(['fy-old']),
       'fiscalYear.findUnique': ({ where }: any) => [FY_2026, FY_2027, { id: 'fy-old', name: '2025', isClosed: true }].find((fy) => fy.id === where.id) ?? null,
       'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, journalEntryId: 'je-old' }),
-      'journalEntry.findUnique': () => ({ id: 'je-old', fiscalYearId: 'fy-old', items: [] }),
+      'journalEntry.findUnique': () => ({ id: 'je-old', entryNumber: 'JV-OLD', fiscalYearId: 'fy-old', date: new Date('2025-12-20'), status: 'Submitted', reversedById: null, items: [] }),
     });
-    const res = await send('PUT', '/movements/sm-1', { movementType: 'In', quantity: 10, unitCost: 1000, date: '2026-12-20' });
+    const res = await send('PUT', '/movements/sm-1', {
+      movementType: 'In', quantity: 10, unitCost: 1000, date: '2026-12-20', offsetAccountId: 'acc-offset',
+    });
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe('PERIOD_CLOSED');
     expect(current.fn('journalEntry.update')).not.toHaveBeenCalled();
+    expect(current.fn('journalEntry.updateMany')).not.toHaveBeenCalled();
+    expect(postJournal).not.toHaveBeenCalled();
   });
 
   it('cancel in a closed year is rejected with PERIOD_CLOSED', async () => {
@@ -264,8 +313,8 @@ describe('document movement lock and references (E3-R2)', () => {
   it('POST ignores referenceType/referenceId from the body and keeps the referenceNumber', async () => {
     current = makeAutoTx(journalHandlers);
     const res = await send('POST', '/movements', {
-      itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: 10, unitCost: 0, date: '2026-10-10',
-      referenceType: 'SalesReturn', referenceId: 'sr-fake', referenceNumber: 'NOTA-7',
+      itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: 10, unitCost: 500, date: '2026-10-10',
+      offsetAccountId: 'acc-offset', referenceType: 'SalesReturn', referenceId: 'sr-fake', referenceNumber: 'NOTA-7',
     });
     expect(res.status).toBe(201);
     expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({
@@ -292,7 +341,7 @@ describe('document movement lock and references (E3-R2)', () => {
   it('PUT never writes referenceType and clears the batch when the row becomes inbound', async () => {
     current = makeAutoTx({ ...journalHandlers, 'stockMovement.findUnique': () => ({ ...OLD_MOVEMENT, movementType: 'Out' }) });
     const res = await send('PUT', '/movements/sm-1', {
-      movementType: 'In', quantity: 4, unitCost: 0, date: '2026-10-10', referenceType: 'GoodsReceipt',
+      movementType: 'In', quantity: 4, unitCost: 500, date: '2026-10-10', offsetAccountId: 'acc-offset', referenceType: 'GoodsReceipt',
     });
     expect(res.status).toBe(200);
     const data = current.fn('stockMovement.update').mock.calls[0]![0].data;
@@ -337,5 +386,46 @@ describe('document movement lock and references (E3-R2)', () => {
     expect(res.status).toBe(200);
     expect(current.fn('inventoryItem.update').mock.calls.map((c) => c[0].data.currentStock.increment)).toEqual([-2]);
     expect(current.fn('stockMovement.update').mock.calls.map((c) => c[0].where.id)).toEqual(['m-live']);
+  });
+});
+
+describe('manual movement cost and offset (E3-R4)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const post = (body: object) => send('POST', '/movements', { itemId: ITEM_ID, warehouseId: WH, date: '2026-10-10', ...body });
+
+  it('an Out ignores the body cost, is valued at the locked average and defaults to Inventory Variance', async () => {
+    current = makeAutoTx(journalHandlers);
+    const res = await post({ movementType: 'Out', quantity: 5, unitCost: 1 });
+    expect(res.status).toBe(201);
+    expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({ unitCost: '9000', totalValue: '45000', offsetAccountId: 'acc-var' });
+    expect(posted().lines.map((l: any) => [l.accountId, l.debit, l.credit])).toEqual([['acc-var', '45000', 0], ['acc-inv', 0, '45000']]);
+  });
+
+  it.each([
+    ['without a cost', { unitCost: undefined }],
+    ['at cost 0', { unitCost: 0 }],
+  ])('an In %s is refused with MANUAL_IN_ZERO_COST before any stock moves', async (_label, extra) => {
+    current = makeAutoTx(journalHandlers);
+    const res = await post({ movementType: 'AdjustmentIn', quantity: 5, offsetAccountId: 'acc-offset', ...extra });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('MANUAL_IN_ZERO_COST');
+    expect(current.fn('inventoryStock.upsert')).not.toHaveBeenCalled();
+    expect(postJournal).not.toHaveBeenCalled();
+  });
+
+  it('an In without an offset is refused with OFFSET_REQUIRED before any stock moves', async () => {
+    current = makeAutoTx(journalHandlers);
+    const res = await post({ movementType: 'In', quantity: 5, unitCost: 1000 });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('OFFSET_REQUIRED');
+    expect(current.fn('inventoryStock.upsert')).not.toHaveBeenCalled();
+  });
+
+  it('an inactive warehouse is refused', async () => {
+    current = makeAutoTx({ ...journalHandlers, 'warehouse.findUnique': () => ({ isActive: false }) });
+    const res = await post({ movementType: 'In', quantity: 5, unitCost: 1000, offsetAccountId: 'acc-offset' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('Gudang tidak aktif.');
   });
 });

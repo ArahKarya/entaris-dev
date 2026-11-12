@@ -373,7 +373,9 @@ export const SYSTEM_ACCOUNT_ROLES = {
     description: 'Akun untuk pembulatan dan selisih kecil yang tidak material',
     multiAccount: false,
     required: false,
-    usage: 'belum' as RoleUsage,
+    // Manual journals only; the Inventory Variance guard (services/inventory/varianceAccount.ts)
+    // reads it just to refuse sharing an account with INVENTORY_VARIANCE (owner decision #2).
+    usage: 'manual' as RoleUsage,
     expectedRootType: 'EXPENSE' as const,
   },
 

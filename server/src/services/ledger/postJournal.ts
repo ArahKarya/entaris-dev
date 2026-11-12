@@ -40,8 +40,9 @@ export interface PostJournalInput {
   accountRule: PostableRule;
   /**
    * Rule per account id replacing accountRule for that account. Only the system account remap
-   * reclass (REMAP_SOURCE_RULE on the old account, services/systemAccountRemap.ts) and the opening
-   * balance (OPENING_ACCOUNT_RULE on the target, services/ledger/openingBalance.ts) pass it.
+   * reclass (REMAP_SOURCE_RULE on the old account, services/systemAccountRemap.ts), the opening
+   * balance (OPENING_ACCOUNT_RULE on the target, services/ledger/openingBalance.ts) and the manual
+   * stock movement (STOCK_OFFSET_RULE on the offset, services/inventory/manualMovement.ts) pass it.
    */
   lineRules?: ReadonlyMap<string, PostableRule>;
   partyRule: PartyRule;
