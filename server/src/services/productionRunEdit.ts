@@ -36,8 +36,6 @@ export async function editProductionRunInTx(
   if (!oldRun) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (oldRun.isCancelled) throw new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.');
 
-  // Old journals and auto-settle are voided and new ones posted on body.date: both periods must be
-  // open. Checked before anything is reversed, and again here when an approved edit is executed.
   // Back-filled prices the form sent back are dropped, so the new HPP refills them (E6-R8). Read
   // before the details are cleared; the run row is locked above.
   const oldLines = await tx.productionRunItem.findMany({
@@ -54,6 +52,8 @@ export async function editProductionRunInTx(
     ),
   };
 
+  // Old journals and auto-settle are voided and new ones posted on body.date: both periods must be
+  // open. Checked before anything is reversed, and again here when an approved edit is executed.
   const txDate = new Date(body.date);
   if (isNaN(txDate.getTime())) throw new BusinessError('Format tanggal tidak valid.');
   await assertPeriodsOpen(tx, [{ date: oldRun.date }, { fiscalYearId: oldRun.fiscalYearId, date: oldRun.date }], 'produksi');
