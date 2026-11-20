@@ -78,7 +78,7 @@ function body(w: ProductionWorld, over: Partial<SubmitProductionRunInput> = {}):
 }
 
 const outputLines = (tx: Tx, runId: string) =>
-  tx.productionRunItem.findMany({ where: { productionRunId: runId, lineType: { in: ['Output', 'ByProduct'] } }, orderBy: { createdAt: 'asc' } });
+  tx.productionRunItem.findMany({ where: { productionRunId: runId, lineType: { in: ['Output', 'ByProduct'] } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
 
 d('production price_is_manual (E6-R8)', () => {
   it('edit refills a back-filled price from the new HPP, with no 5.1 line', async () => {
@@ -172,6 +172,44 @@ d('production price_is_manual (E6-R8)', () => {
     });
   });
 
+  it('refills a back-filled price when the HPP override changes on edit', async () => {
+    await inWorld(async (tx, w) => {
+      await seedWorldStock(tx, w, 'gkp', 2000, 6000);
+      const run = (await submitProductionRunInTx(tx, body(w, { hppOverride: 10000 }), w.userId))!;
+      const [first] = await outputLines(tx, run.id);
+      expect(first!.priceIsManual).toBe(false);
+      await editProductionRunInTx(tx, run.id, body(w, {
+        hppOverride: 9000,
+        outputs: [{ itemId: w.items.beras.id, quantity: 600, unitPrice: Number(first!.unitPrice) }],
+      }), w.userId);
+      const [line] = await outputLines(tx, run.id);
+      expect(Number(line!.unitPrice)).toBe(9000);
+      const mv = (await movementsOf(tx, run.id, { activeOnly: true })).find((m) => m.itemId === w.items.beras.id)!;
+      expect(mv.unitCost).toBe(9000);
+    });
+  });
+
+  it('matches lines in the deterministic (createdAt, id) order the GET returns', async () => {
+    await inWorld(async (tx, w) => {
+      await seedWorldStock(tx, w, 'gkp', 2000, 6000);
+      const run = (await submitProductionRunInTx(tx, body(w, {
+        outputs: [
+          { itemId: w.items.beras.id, quantity: 200 },
+          { itemId: w.items.beras.id, quantity: 200, unitPrice: 15000 },
+          { itemId: w.items.beras.id, quantity: 200 },
+        ],
+      }), w.userId))!;
+      const lines = await outputLines(tx, run.id);
+      const sent = lines.map((l) => ({ itemId: l.itemId, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice) }));
+      await editProductionRunInTx(tx, run.id, body(w, {
+        inputs: [{ itemId: w.items.gkp.id, quantity: 1100 }],
+        outputs: sent,
+      }), w.userId);
+      const after = await outputLines(tx, run.id);
+      expect(after.filter((l) => l.priceIsManual).map((l) => Number(l.unitPrice))).toEqual([15000]);
+    });
+  });
+
   it('migration backfill marks typed main output prices only', async () => {
     await inWorld(async (tx, w) => {
       const migrationsDir = join(__dirname, '../../../prisma/migrations');
@@ -195,6 +233,7 @@ d('production price_is_manual (E6-R8)', () => {
       const byProduct = await mkLine(r1.id, { lineType: 'ByProduct', isByProduct: true, unitPrice: 20 });
       const noHpp = await mkLine(r2.id, { unitPrice: 5000 });
       const overridden = await mkLine(r3.id, { unitPrice: 10000 });
+      const overriddenTyped = await mkLine(r3.id, { unitPrice: 9000 });
 
       await tx.$executeRawUnsafe(update);
       const flag = async (id: string) => (await tx.productionRunItem.findUniqueOrThrow({ where: { id } })).priceIsManual;
@@ -203,7 +242,8 @@ d('production price_is_manual (E6-R8)', () => {
       expect(await flag(typed.id)).toBe(true);
       expect(await flag(byProduct.id)).toBe(false);
       expect(await flag(noHpp.id)).toBe(true);
-      expect(await flag(overridden.id)).toBe(true);
+      expect(await flag(overridden.id)).toBe(false);
+      expect(await flag(overriddenTyped.id)).toBe(true);
     });
   });
 });

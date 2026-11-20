@@ -9,8 +9,9 @@ ALTER TABLE "production_run_items" ADD COLUMN IF NOT EXISTS "price_is_manual" BO
 -- Main output lines only (line_type 'Output', not by-product); by-product lines stay false since
 -- their NRV is always typed and is not an HPP back-fill. A price counts as typed when it is set and
 -- the run has no computed HPP, differs from it by more than 0.005 (the stored price has 2 decimals,
--- the HPP 4, so the comparison tolerates rounding and survives a later widening of the scale), or
--- the run's HPP was overridden by hand.
+-- the HPP 4, so the comparison tolerates rounding and survives a later widening of the scale). A
+-- run with a hand-set HPP override is not special: its back-filled price equals the override, which
+-- is what the runtime rule (productionCosting.ts) also treats as back-filled.
 UPDATE "production_run_items" i
    SET "price_is_manual" = true
   FROM "production_runs" r
@@ -20,5 +21,4 @@ UPDATE "production_run_items" i
    AND i."unit_price" IS NOT NULL
    AND i."price_is_manual" = false
    AND (r."computed_hpp" IS NULL
-        OR r."hpp_manual_override"
         OR ABS(i."unit_price" - r."computed_hpp") > 0.005);

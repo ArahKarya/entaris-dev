@@ -40,7 +40,7 @@ export async function editProductionRunInTx(
   // before the details are cleared; the run row is locked above.
   const oldLines = await tx.productionRunItem.findMany({
     where: { productionRunId: runId, lineType: 'Output' },
-    orderBy: { createdAt: 'asc' },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { itemId: true, lineType: true, isByProduct: true, unitPrice: true, priceIsManual: true },
   });
   const body: SubmitProductionRunInput = {
