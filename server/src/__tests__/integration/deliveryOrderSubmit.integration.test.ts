@@ -69,7 +69,7 @@ d('submitDeliveryOrderInTx', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId, qty: 100, avg: 8_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 100, avg: 8_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const before = Date.now();
         const result = await submitDeliveryOrderInTx(
@@ -155,7 +155,7 @@ d('submitDeliveryOrderInTx', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId, qty: 5, avg: 1_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 5, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         await submitDeliveryOrderInTx(
           tx,
@@ -197,7 +197,7 @@ d('cancelDeliveryOrderInTx', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 1_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const result = await submitDeliveryOrderInTx(
           tx,
@@ -271,7 +271,7 @@ d('cancelDeliveryOrderInTx', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 1_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const doResult = await submitDeliveryOrderInTx(
           tx,

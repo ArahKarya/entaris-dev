@@ -70,7 +70,7 @@ d('editProductionRunInTx — single input / single output', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 200, avg: 10_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 200, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const outputItem = await tx.inventoryItem.create({
           data: {
@@ -169,7 +169,7 @@ d('editProductionRunInTx — single input / single output', () => {
         const inputItem = await tx.inventoryItem.create({
           data: { code: `TEST-CXL-EDIT-IN-${stamp}`, name: `X ${stamp}`, unit: 'kg', isActive: true },
         });
-        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 1000, date: new Date(), userId });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 1000, date: new Date().toISOString().slice(0, 10), userId });
         const outputItem = await tx.inventoryItem.create({
           data: { code: `TEST-CXL-EDIT-OUT-${stamp}`, name: `Y ${stamp}`, unit: 'kg', isActive: true },
         });

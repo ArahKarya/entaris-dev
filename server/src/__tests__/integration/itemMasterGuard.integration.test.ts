@@ -102,9 +102,13 @@ async function stockedItem(tx: Tx, accountId: string | null, stock: number, wh?:
   const item = await tx.inventoryItem.create({
     data: { code: `IT-IMG-${tag()}`, name: 'Bekatul (uji)', unit: 'Kg', accountId },
   });
-  if (stock !== 0) {
+  if (stock > 0) {
     const fy = await fiscalYear(tx);
     await seedStock(tx, { itemId: item.id, warehouseId: w.id, qty: stock, avg: 1000, date: `${Y}-01-02`, fiscalYearId: fy.id });
+  } else if (stock < 0) {
+    // Negative stock cannot come from an inbound posting; plant the drift directly (as the 0-stock warehouse case below does).
+    await tx.inventoryItem.update({ where: { id: item.id }, data: { currentStock: stock, averageCost: 1000 } });
+    await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId: w.id, currentStock: stock } });
   }
   return { item, wh: w };
 }

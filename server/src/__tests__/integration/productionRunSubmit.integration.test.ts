@@ -77,7 +77,7 @@ d('submitProductionRunInTx — single input / single output', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 10_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const outputItem = await tx.inventoryItem.create({
           data: {
@@ -164,7 +164,7 @@ d('submitProductionRunInTx — single input / single output', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 10, avg: 5_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 10, avg: 5_000, date: new Date().toISOString().slice(0, 10), userId });
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-OUT-LOW-${stamp}`,

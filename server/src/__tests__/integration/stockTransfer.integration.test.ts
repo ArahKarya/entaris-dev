@@ -80,7 +80,7 @@ d('submitStockTransferInTx', () => {
           },
         });
         // Seed all 100 at warehouse A so we can move some to B.
-        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 100, avg: 12_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 100, avg: 12_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const transfer = await submitStockTransferInTx(
           tx,
@@ -149,7 +149,7 @@ d('submitStockTransferInTx', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 10, avg: 0, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 10, avg: 0, date: new Date().toISOString().slice(0, 10), userId });
 
         await submitStockTransferInTx(
           tx,
@@ -197,7 +197,7 @@ d('cancelStockTransferInTx', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 50, avg: 1_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 50, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const transfer = await submitStockTransferInTx(
           tx,

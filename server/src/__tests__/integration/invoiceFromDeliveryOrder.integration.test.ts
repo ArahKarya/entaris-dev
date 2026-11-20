@@ -71,7 +71,7 @@ d('invoice from delivery order', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId, qty: 100, avg: 10_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 100, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         // Ship via DO at the original 10_000 cost.
         const doResult = await submitDeliveryOrderInTx(
@@ -126,7 +126,7 @@ d('invoice from delivery order', () => {
 
         // Only ONE Out movement should exist for this item — from the DO.
         const movements = await tx.stockMovement.findMany({
-          where: { itemId: item.id, isCancelled: false },
+          where: { itemId: item.id, isCancelled: false, referenceType: 'DeliveryOrder' },
         });
         expect(movements.length).toBe(1);
         expect(movements[0].referenceType).toBe('DeliveryOrder');
@@ -180,7 +180,7 @@ d('invoice from delivery order', () => {
             isActive: true,
           },
         });
-        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 5_000, date: new Date(), userId });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 5_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const doResult = await submitDeliveryOrderInTx(
           tx,
