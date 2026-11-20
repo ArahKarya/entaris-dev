@@ -16,15 +16,19 @@ import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
+import { mapProductionLeafAccounts } from '../helpers/productionFixture';
+import { systemAccounts } from '../../services/systemAccounts';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import { JOURNAL_ALREADY_REVERSED } from '../../services/ledger/cancelJournals';
 import { submitProductionRunInTx } from '../../services/productionRunSubmit';
-import { editProductionRunInTx, nextRevisionNumber } from '../../services/productionRunEdit';
+import { editProductionRunInTx } from '../../services/productionRunEdit';
+import { nextRevisionNumber } from '../../services/production/productionPosting';
 import productionRunsRouter from '../../routes/inventory/productionRuns';
 import stockOpnameRouter from '../../routes/stockOpname';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -61,9 +65,12 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
       try {
         ({ userId, role } = await createCapUser(tx, ['doc.cancel']));
         fy = await createFiscalYear(tx, { year: Y });
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
         await fn(tx);
       } finally {
         state.tx = null;
+        systemAccounts.invalidateCache();
       }
       throw new RollbackSentinel();
     }, { timeout: 60000 });
@@ -190,9 +197,9 @@ d('production run cancel scope', () => {
       const acc = await accounts(tx);
       const wh = await tx.warehouse.create({ data: { code: `IT-E6-${tag()}`, name: `Gudang uji ${tag()}` } });
       const item = await tx.inventoryItem.create({
-        data: { code: `IT-E6-${tag()}`, name: `Uji E6 ${tag()}`, unit: 'kg', currentStock: 90, averageCost: 1_000, isActive: true },
+        data: { code: `IT-E6-${tag()}`, name: `Uji E6 ${tag()}`, unit: 'kg', isActive: true },
       });
-      await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId: wh.id, currentStock: 90 } });
+      await seedStock(tx, { itemId: item.id, warehouseId: wh.id, qty: 90, avg: 1_000, date: DATE, fiscalYearId: fy.id, userId });
       const run = await productionRun(tx, `PR-${Y}01-2000`);
       // The run consumed 10 kg; cancelling it would put them back.
       const mov = await tx.stockMovement.create({
@@ -276,11 +283,11 @@ d('production run revision numbers', () => {
     await inRollback(async (tx) => {
       const wh = await tx.warehouse.create({ data: { code: `IT-E6-${tag()}`, name: `Gudang uji ${tag()}` } });
       const input = await tx.inventoryItem.create({
-        data: { code: `IT-E6-IN-${tag()}`, name: `Uji E6 input ${tag()}`, unit: 'kg', currentStock: 1_000, averageCost: 0, isActive: true },
+        data: { code: `IT-E6-IN-${tag()}`, name: `Uji E6 input ${tag()}`, unit: 'kg', isActive: true },
       });
-      await tx.inventoryStock.create({ data: { itemId: input.id, warehouseId: wh.id, currentStock: 1_000 } });
+      await seedStock(tx, { itemId: input.id, warehouseId: wh.id, qty: 1_000, avg: 0, date: DATE, fiscalYearId: fy.id, userId });
       const output = await tx.inventoryItem.create({
-        data: { code: `IT-E6-OUT-${tag()}`, name: `Uji E6 output ${tag()}`, unit: 'kg', currentStock: 0, averageCost: 0, isActive: true },
+        data: { code: `IT-E6-OUT-${tag()}`, name: `Uji E6 output ${tag()}`, unit: 'kg', isActive: true },
       });
       const date = `${Y}-03-10`;
       // Zero cost in and zero value out: nothing to post, so the run has no JV-<runNumber>.

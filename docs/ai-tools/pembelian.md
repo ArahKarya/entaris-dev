@@ -62,7 +62,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
 | PI dari STT | DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang |
 | Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> akun Selisih Harga Pembelian terpetakan (bawaan 5.11). Lawan selalu Hutang Usaha (akun AP terpetakan, bawaan 2.1.1) |
-| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik, STT dilepas (`invoiceId` dikosongkan) |
+| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
 | Batal refund uang muka (`vdep_refund_cancel`) | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pemasok pulih |
@@ -210,7 +210,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: STT legacy - batalkan PI-nya
 - 400: ada PI Paid / PI belum dibatalkan
 - 400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu
-- 400: stok tidak cukup untuk dibalikkan
+- 400 GR_CANCEL_INSUFFICIENT_STOCK: stok gudang penerimaan tidak cukup untuk dibalikkan (baris item yang sama dijumlah per gudang)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
@@ -302,6 +303,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: pemasok tidak aktif/bukan supplier
 - 400: PO sudah dibatalkan/belum dipesan/sudah ditutup
 - 400: item atau gudang tidak ditemukan/tidak aktif
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`gr_pending`](#gr_pending), [`pi_create`](#pi_create), [`gr_cancel`](#gr_cancel), [`po_get`](#po_get)
@@ -463,6 +465,8 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | Nama | Lokasi | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
 | `id` | path | `string` | ya | ID invoice pembelian (UUID). |
+| `allowNegativeStock` | body | `boolean` | tidak | true = tetap membatalkan walau stok yang dibuat invoice lama (tanpa STT) sudah keluar dari gudangnya (stok jadi minus); butuh capability inventory.negative_stock. |
+| `negativeStockReason` | body | `string` | tidak | Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true. |
 | `reason` | body | `string` | tidak | Alasan pembatalan opsional (maks. 500 karakter); disimpan bersama ID pembatal di jurnal invoice. |
 
 **Contoh pemanggilan**
@@ -504,6 +508,10 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Invoice sudah lunas
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
+- 400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
+- 400: alasan bypass stok minus wajib (min 10 karakter)
+- 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
@@ -607,6 +615,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 
 **Tool terkait:** [`gr_pending`](#gr_pending), [`pi_match_preview`](#pi_match_preview), [`pay_record`](kas-bank.md#pay_record), [`pi_cancel`](#pi_cancel)
 
@@ -828,6 +837,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan
+- 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 
 **Tool terkait:** [`pi_get`](#pi_get), [`pi_cancel`](#pi_cancel)
 

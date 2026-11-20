@@ -6,8 +6,21 @@ import {
   stockMovementOrderBy,
   summarizeStockMovements,
 } from '../stockMovementList';
+import { CreateStockMovementSchema, UpdateStockMovementSchema } from '../../utils/schemas';
 
 describe('buildStockMovementWhere', () => {
+  it('filters on the Revaluation type like any other movement type', () => {
+    const r = buildStockMovementWhere({ movementType: 'Revaluation' });
+    expect(r).toEqual({ ok: true, where: { movementType: 'Revaluation' } });
+  });
+
+  it('does not let a manual movement be a Revaluation (only the value ledger writes one)', () => {
+    const body = { itemId: 'i1', movementType: 'Revaluation', quantity: 1, date: '2026-10-01' };
+    expect(CreateStockMovementSchema.safeParse(body).success).toBe(false);
+    expect(UpdateStockMovementSchema.safeParse(body).success).toBe(false);
+    expect(CreateStockMovementSchema.safeParse({ ...body, movementType: 'AdjustmentIn' }).success).toBe(true);
+  });
+
   it('combines item, warehouse, type, status, local-day dates and search', () => {
     const r = buildStockMovementWhere({
       itemId: 'i1',
@@ -82,6 +95,30 @@ describe('summarizeStockMovements', () => {
       outCount: 4,
       outQty: 32.5,
       outValue: 325.25,
+      revaluationCount: 0,
+      revaluationValue: 0,
+    });
+  });
+
+  it('keeps Revaluation rows in their own value-only group, out of the inbound and outbound totals', () => {
+    expect(
+      summarizeStockMovements([
+        g('In', false, 1, '10', '100'),
+        g('Out', false, 1, '4', '40'),
+        g('Revaluation', false, 2, '0', '1234.565'),
+        g('Revaluation', true, 1, '0', '999'),
+      ]),
+    ).toEqual({
+      count: 5,
+      cancelledCount: 1,
+      inCount: 1,
+      inQty: 10,
+      inValue: 100,
+      outCount: 1,
+      outQty: 4,
+      outValue: 40,
+      revaluationCount: 2,
+      revaluationValue: 1234.57,
     });
   });
 });

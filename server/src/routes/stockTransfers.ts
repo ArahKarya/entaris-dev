@@ -181,6 +181,8 @@ router.patch('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, r
   try {
     const result = await prisma.$transaction(
       (tx) => cancelStockTransferInTx(tx, req.params.id as string, body),
+      // Longer than STOCK_LOCK_WAIT_MS, so a busy item answers STOCK_BUSY, not a closed transaction.
+      { timeout: 30000 },
     );
     return res.json(result);
   } catch (error) {

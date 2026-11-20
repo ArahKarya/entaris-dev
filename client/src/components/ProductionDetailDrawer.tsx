@@ -4,7 +4,7 @@ import { usePendingApproval } from '@/hooks/usePendingApproval';
 import { PendingApprovalBadge, PendingApprovalNotice } from './approvals/PendingApprovalNotice';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { LOCALE } from '@/lib/format';
+import { LOCALE, formatUnitCost } from '@/lib/format';
 import api from '../lib/api';
 import { cn } from '../lib/utils';
 import { formatRupiah, formatDate } from '../lib/formatters';
@@ -429,7 +429,7 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                         </div>
                         {line.unitPrice != null && Number(line.unitPrice) > 0 && (
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {t('productionDetailDrawer.outputs.hpp')} <span className="font-mono">{formatRupiah(Number(line.unitPrice))}/{line.item?.unit}</span>
+                            {t('productionDetailDrawer.outputs.hpp')} <span className="font-mono">{formatUnitCost(Number(line.unitPrice))}/{line.item?.unit}</span>
                             <span className="text-muted-foreground ml-2">
                               = {formatRupiah(Number(line.quantity) * Number(line.unitPrice))}
                             </span>
@@ -464,7 +464,7 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                         </div>
                         {line.unitPrice != null && Number(line.unitPrice) > 0 && (
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {t('productionDetailDrawer.outputs.hpp')} <span className="font-mono">{formatRupiah(Number(line.unitPrice))}/{line.item?.unit}</span>
+                            {t('productionDetailDrawer.outputs.hpp')} <span className="font-mono">{formatUnitCost(Number(line.unitPrice))}/{line.item?.unit}</span>
                           </div>
                         )}
                       </div>

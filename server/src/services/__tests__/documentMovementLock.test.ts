@@ -26,6 +26,12 @@ describe('documentMovementLockMessage', () => {
     }
   });
 
+  it('always locks the drift repair write-off (StockDriftRepair) and points to a stock adjustment', () => {
+    for (const action of ['edit', 'cancel'] as const) {
+      expect(documentMovementLockMessage(mov('StockDriftRepair', null, 'AdjustmentOut'), action)).toMatch(/selisih gudang .*Penyesuaian Stok/);
+    }
+  });
+
   it.each(['TransferIn', 'TransferOut'])('always locks %s, whatever its reference', (type) => {
     for (const ref of [mov(null, null, type), mov('StockTransfer', 'st-1', type), mov('JournalEntry', 'x', type)]) {
       expect(documentMovementLockMessage(ref, 'cancel')).toMatch(/transfer stok .*halaman Transfer Stok/);
@@ -42,6 +48,7 @@ describe('documentMovementLockMessage', () => {
     const messages = [
       ...DOCUMENT_TYPES.map((t) => mov(t, 'doc-1')),
       mov('OpeningBalance', null),
+      mov('StockDriftRepair', null, 'AdjustmentOut'),
       mov(null, null, 'TransferOut'),
     ].flatMap((m) => (['edit', 'cancel'] as const).map((a) => documentMovementLockMessage(m, a)!));
     for (const text of messages) {

@@ -21,6 +21,8 @@ export const STOCK_MOVEMENT_STATUS_FILTERS = ['active', 'cancelled'] as const;
 
 /** Inbound movement types (stock increases). */
 export const INBOUND_TYPES: readonly StockMovementType[] = ['In', 'AdjustmentIn', 'TransferIn'];
+/** Value-only movement (quantity 0): neither inbound nor outbound. */
+export const VALUE_ONLY_TYPES: readonly StockMovementType[] = ['Revaluation'];
 
 export type StockMovementWhereResult =
   | { ok: true; where: Prisma.StockMovementWhereInput }
@@ -96,6 +98,9 @@ export interface StockMovementSummary {
   outCount: number;
   outQty: number;
   outValue: number;
+  /** Non-cancelled Revaluation rows: value only, no quantity (total_value is unsigned until 6.4b1). */
+  revaluationCount: number;
+  revaluationValue: number;
 }
 
 const dec = (v: Prisma.Decimal | null | undefined) => new Prisma.Decimal(v ?? 0);
@@ -109,6 +114,8 @@ export function summarizeStockMovements(groups: readonly StockMovementTypeGroup[
   let outQty = new Prisma.Decimal(0);
   let inValue = new Prisma.Decimal(0);
   let outValue = new Prisma.Decimal(0);
+  let revaluationCount = 0;
+  let revaluationValue = new Prisma.Decimal(0);
 
   for (const g of groups) {
     const c = g._count._all;
@@ -117,7 +124,10 @@ export function summarizeStockMovements(groups: readonly StockMovementTypeGroup[
       cancelledCount += c;
       continue;
     }
-    if (INBOUND_TYPES.includes(g.movementType)) {
+    if (VALUE_ONLY_TYPES.includes(g.movementType)) {
+      revaluationCount += c;
+      revaluationValue = revaluationValue.plus(dec(g._sum.totalValue));
+    } else if (INBOUND_TYPES.includes(g.movementType)) {
       inCount += c;
       inQty = inQty.plus(dec(g._sum.quantity));
       inValue = inValue.plus(dec(g._sum.totalValue));
@@ -137,5 +147,7 @@ export function summarizeStockMovements(groups: readonly StockMovementTypeGroup[
     outCount,
     outQty: outQty.toDecimalPlaces(3).toNumber(),
     outValue: outValue.toDecimalPlaces(2).toNumber(),
+    revaluationCount,
+    revaluationValue: revaluationValue.toDecimalPlaces(2).toNumber(),
   };
 }

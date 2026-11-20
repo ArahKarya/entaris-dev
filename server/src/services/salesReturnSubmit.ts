@@ -8,6 +8,7 @@ import { systemAccounts } from './systemAccounts';
 import { cogsAccountFor, salesReturnAccount } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
+import { lockInventoryRows } from './inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -216,6 +217,14 @@ export async function submitSalesReturnInTx(
   const arReduceNum = arReduce.toNumber();
   const creditPortion = totalReturn.minus(arReduce).toDecimalPlaces(2);
   const creditPortionNum = creditPortion.toNumber();
+
+  // Lock the restocked items (and their rows at the return warehouses) before the RN number and
+  // the journal's account locks (lock order in services/inventory/stockLocks.ts).
+  const restocked = resolved.filter((r) => r.restock && r.inventoryItemId);
+  await lockInventoryRows(tx, {
+    itemIds: restocked.map((r) => r.inventoryItemId!),
+    pairs: restocked.flatMap((r) => (r.warehouseId ? [{ itemId: r.inventoryItemId!, warehouseId: r.warehouseId }] : [])),
+  });
 
   const returnNumber = await generateDocumentNumber(tx, 'RN', parsedDate, fiscalYear.id);
   const salesReturn = await tx.salesReturn.create({

@@ -76,6 +76,13 @@
       "title": "Cancel deposit allocation",
       "description": "Cancel this deposit allocation? The deposit balance is restored and the invoice outstanding goes back up.",
       "confirm": "Cancel allocation"
+    },
+    "forceCancel": {
+      "title": "Force cancel the invoice?",
+      "description": "{{message}} To force the cancellation (stock may go negative), enter a reason (min 10 characters).",
+      "confirm": "Force cancel",
+      "reasonLabel": "Reason for forced cancellation",
+      "reasonPlaceholder": "Enter a reason (min 10 characters)…"
     }
   },
   "invoiceDOPicker": {
@@ -741,6 +748,13 @@
       "description": "Stock and journal entries will be reversed. This cannot be undone.",
       "confirm": "Cancel return",
       "cancel": "Back"
+    },
+    "forceCancel": {
+      "title": "Force cancel return {{number}}?",
+      "description": "{{message}} To force the cancellation (stock may go negative), enter a reason (min 10 characters).",
+      "confirm": "Force cancel",
+      "reasonLabel": "Reason for forced cancellation",
+      "reasonPlaceholder": "Enter a reason (min 10 characters)…"
     }
   },
   "salesReturnModal": {

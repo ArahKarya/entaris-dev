@@ -11,6 +11,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
 import { cancelDeliveryOrderInTx } from '../../services/deliveryOrderCancel';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -65,14 +66,10 @@ d('submitDeliveryOrderInTx', () => {
             code: `TEST-DO-ITEM-${stamp}`,
             name: `DO Test Item ${stamp}`,
             unit: 'kg',
-            currentStock: 100,
-            averageCost: 8_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 100, avg: 8_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const before = Date.now();
         const result = await submitDeliveryOrderInTx(
@@ -155,14 +152,10 @@ d('submitDeliveryOrderInTx', () => {
             code: `TEST-DO-LOW-${stamp}`,
             name: 'Low stock item',
             unit: 'kg',
-            currentStock: 5,
-            averageCost: 1_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId, currentStock: 5 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 5, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         await submitDeliveryOrderInTx(
           tx,
@@ -201,14 +194,10 @@ d('cancelDeliveryOrderInTx', () => {
             code: `TEST-DO-CXL-${stamp}`,
             name: 'Cxl item',
             unit: 'kg',
-            currentStock: 50,
-            averageCost: 1_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId, currentStock: 50 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const result = await submitDeliveryOrderInTx(
           tx,
@@ -279,14 +268,10 @@ d('cancelDeliveryOrderInTx', () => {
             code: `TEST-DO-INV-${stamp}`,
             name: 'Inv item',
             unit: 'kg',
-            currentStock: 50,
-            averageCost: 1_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId, currentStock: 50 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 1_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const doResult = await submitDeliveryOrderInTx(
           tx,

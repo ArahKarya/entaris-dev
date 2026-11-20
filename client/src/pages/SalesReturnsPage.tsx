@@ -69,6 +69,12 @@ function errorMessage(err: unknown, fallback: string): string {
   return typeof data?.error === 'string' ? data.error : fallback;
 }
 
+function errorCode(err: unknown): unknown {
+  return (err as { response?: { data?: { code?: unknown } } })?.response?.data?.code;
+}
+
+type NegativeStockOverride = { allowNegativeStock: boolean; negativeStockReason: string };
+
 export default function SalesReturnsPage() {
   const { t } = useTranslation('sales');
   // Built per render so status labels follow language changes.
@@ -79,11 +85,16 @@ export default function SalesReturnsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<{ id: string; returnNumber: string } | null>(null);
+  // Set when the cancel failed for insufficient stock (the goods were sold again):
+  // inventory.negative_stock may force it with a reason.
+  const [forceTarget, setForceTarget] = useState<{ id: string; returnNumber: string; message: string } | null>(null);
 
   const canCreate = can('sales_return', 'edit');
   // Unchanged rule: only approvers may cancel a return (server also needs doc.cancel).
   const canCancel = cap('approval.decide') && canCreate;
   const canOpenInvoice = can('sales_invoice');
+  // The server refuses the forced cancel without this capability (Admin by default).
+  const canForceNegative = cap('inventory.negative_stock');
 
   const returnsQuery = useQuery({
     queryKey: ['sales-returns', 'list', list.params],
@@ -92,13 +103,24 @@ export default function SalesReturnsPage() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: async (id: string) => api.post(`${ENDPOINT}/${id}/cancel`),
+    mutationFn: async ({ id, override }: { id: string; returnNumber: string; override?: NegativeStockOverride }) =>
+      api.post(`${ENDPOINT}/${id}/cancel`, override ?? {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales-returns'] });
       queryClient.invalidateQueries({ queryKey: ['sales-invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
       toast.success(t('salesReturnsPage.toast.cancelled'));
     },
-    onError: (err: unknown) => toast.error(errorMessage(err, t('salesReturnsPage.toast.cancelFailed'))),
+    onError: (err: unknown, vars) => {
+      const message = errorMessage(err, t('salesReturnsPage.toast.cancelFailed'));
+      if (errorCode(err) === 'STOCK_INSUFFICIENT' && canForceNegative && !vars.override) {
+        setCancelTarget(null);
+        setForceTarget({ id: vars.id, returnNumber: vars.returnNumber, message });
+        return;
+      }
+      toast.error(message);
+    },
   });
 
   const { isPending: cancelling } = cancelMutation;
@@ -286,7 +308,31 @@ export default function SalesReturnsPage() {
         confirmLabel={t('salesReturnsPage.confirm.confirm')}
         cancelLabel={t('salesReturnsPage.confirm.cancel')}
         loading={cancelling}
-        onConfirm={() => (cancelTarget ? cancelMutation.mutateAsync(cancelTarget.id) : undefined)}
+        onConfirm={() => (cancelTarget ? cancelMutation.mutateAsync(cancelTarget) : undefined)}
+      />
+      <ConfirmDialog
+        open={forceTarget !== null}
+        onOpenChange={(open) => !open && setForceTarget(null)}
+        tone="danger"
+        title={t('salesReturnsPage.forceCancel.title', { number: forceTarget?.returnNumber ?? '' })}
+        description={t('salesReturnsPage.forceCancel.description', { message: forceTarget?.message ?? '' })}
+        confirmLabel={t('salesReturnsPage.forceCancel.confirm')}
+        cancelLabel={t('salesReturnsPage.confirm.cancel')}
+        loading={cancelling}
+        requireReason={{
+          label: t('salesReturnsPage.forceCancel.reasonLabel'),
+          minLength: 10,
+          placeholder: t('salesReturnsPage.forceCancel.reasonPlaceholder'),
+        }}
+        onConfirm={(reason) =>
+          forceTarget
+            ? cancelMutation.mutateAsync({
+                id: forceTarget.id,
+                returnNumber: forceTarget.returnNumber,
+                override: { allowNegativeStock: true, negativeStockReason: (reason ?? '').trim() },
+              })
+            : undefined
+        }
       />
       <InvoiceDetailDrawer type="sales" invoiceId={invoiceId} onClose={() => setInvoiceId(null)} />
     </div>

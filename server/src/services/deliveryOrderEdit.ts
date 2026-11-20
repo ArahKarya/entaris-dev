@@ -4,13 +4,16 @@ import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { businessYearMonth } from '../utils/businessDate';
 import { assertPeriodOpen } from '../utils/periodGuard';
-import { adjustWarehouseStock, resolveWarehouseId, getWarehouseStockMap } from '../utils/warehouseStock';
+import { adjustWarehouseStock, resolveWarehouseId } from '../utils/warehouseStock';
 import { recomputeDeliveredQtyInTx, relinkDoItemsToSOInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
+import { assertStockAvailable, lockInventoryRows, STOCK_INSUFFICIENT } from './inventory/stockLocks';
 import { resolveCogsAccountId } from './cogsAccount';
 import type { SubmitDeliveryOrderInput } from './deliveryOrderSubmit';
 
 type Tx = Prisma.TransactionClient;
+
+const formatQty = (d: Decimal) => d.toNumber().toLocaleString('id-ID', { maximumFractionDigits: 3 });
 
 /** Error code: an edit may not move a delivery note to another business month. */
 export const DELIVERY_ORDER_MONTH_CHANGE = 'DO_MONTH_CHANGE';
@@ -25,6 +28,10 @@ export async function editDeliveryOrderInTx(
   body: SubmitDeliveryOrderInput,
   userId: string,
 ) {
+  // Row lock before reading: an invoice submit that bills this note, or a cancel, holds the same
+  // lock, so the status and invoice link read below are the committed ones and cannot change
+  // before this edit commits.
+  await tx.$queryRaw`SELECT id FROM delivery_orders WHERE id = ${doId} FOR UPDATE`;
   const oldDo = await tx.deliveryOrder.findUnique({
     where: { id: doId },
     include: { items: true },
@@ -58,6 +65,39 @@ export async function editDeliveryOrderInTx(
   const oldMovements = await tx.stockMovement.findMany({
     where: { referenceType: 'DeliveryOrder', referenceId: doId, isCancelled: false },
   });
+
+  // Customer may change as long as the party is Customer/Both (same rule as submit).
+  const party = await tx.party.findUnique({ where: { id: body.partyId } });
+  if (!party) throw new BusinessError('Data customer tidak ditemukan.');
+  if (!party.isActive) throw new BusinessError('Customer sudah tidak aktif.');
+  if (party.partyType !== 'Customer' && party.partyType !== 'Both') {
+    throw new BusinessError('Surat jalan hanya bisa untuk Customer.');
+  }
+
+  // One lock for the old and the new items (and their rows at both sets of warehouses), before
+  // the reversal: the stock checked below after the reversal cannot change before commit.
+  const lineWarehouse = new Map<number, string>();
+  for (const [i, it] of body.items.entries()) {
+    if (!it.inventoryItemId) continue;
+    const whId = await resolveWarehouseId(tx, it.warehouseId);
+    if (!whId) throw new BusinessError(`Item '${it.itemName}' perlu pilih gudang sumber.`);
+    lineWarehouse.set(i, whId);
+  }
+  const stockLines = body.items.flatMap((it, i) =>
+    it.inventoryItemId ? [{ itemId: it.inventoryItemId, warehouseId: lineWarehouse.get(i)!, quantity: it.quantity }] : []);
+  const locked = await lockInventoryRows(tx, {
+    itemIds: [...oldMovements.map((m) => m.itemId), ...stockLines.map((l) => l.itemId)],
+    pairs: [
+      ...oldMovements.flatMap((m) => (m.warehouseId ? [{ itemId: m.itemId, warehouseId: m.warehouseId }] : [])),
+      ...stockLines.map((l) => ({ itemId: l.itemId, warehouseId: l.warehouseId })),
+    ],
+  });
+  for (const l of stockLines) {
+    const inv = locked.items.get(l.itemId);
+    if (!inv) throw new BusinessError('Item tidak ditemukan.');
+    if (!inv.isActive) throw new BusinessError(`Item '${inv.name}' tidak aktif.`);
+  }
+
   for (const mov of oldMovements) {
     const qty = Number(mov.quantity);
     await tx.inventoryItem.update({
@@ -74,73 +114,18 @@ export async function editDeliveryOrderInTx(
   // Header is reused (preserves doNumber).
   await tx.deliveryOrderItem.deleteMany({ where: { deliveryOrderId: doId } });
 
-  // Customer may change as long as the party is Customer/Both (same rule as submit).
-  const party = await tx.party.findUnique({ where: { id: body.partyId } });
-  if (!party) throw new BusinessError('Data customer tidak ditemukan.');
-  if (!party.isActive) throw new BusinessError('Customer sudah tidak aktif.');
-  if (party.partyType !== 'Customer' && party.partyType !== 'Both') {
-    throw new BusinessError('Surat jalan hanya bisa untuk Customer.');
-  }
-
-  // Check post-reversal stock per (item, warehouse) from inventory_stocks; currentStock is a
+  // Post-reversal stock per (item, warehouse), lines of one item summed; currentStock is a
   // cross-warehouse total and must not gate a per-warehouse shipment.
-  const qtyByItemWh = new Map<string, { itemId: string; warehouseId: string; qty: number }>();
-  for (const it of body.items) {
-    if (!it.inventoryItemId) continue;
-    const whId = await resolveWarehouseId(tx, it.warehouseId);
-    if (!whId) throw new BusinessError(`Item '${it.itemName}' perlu pilih gudang sumber.`);
-    const key = `${it.inventoryItemId}::${whId}`;
-    const prev = qtyByItemWh.get(key);
-    if (prev) prev.qty += it.quantity;
-    else qtyByItemWh.set(key, { itemId: it.inventoryItemId, warehouseId: whId, qty: it.quantity });
-  }
-  if (qtyByItemWh.size > 0) {
-    const entries = Array.from(qtyByItemWh.values());
-    const invItems = await tx.inventoryItem.findMany({
-      where: { id: { in: Array.from(new Set(entries.map((e) => e.itemId))) } },
-      select: { id: true, name: true, unit: true, isActive: true },
-    });
-    const itemById = new Map(invItems.map((i) => [i.id, i]));
-    const whIds = Array.from(new Set(entries.map((e) => e.warehouseId)));
-    const warehouses = await tx.warehouse.findMany({
-      where: { id: { in: whIds } },
-      select: { id: true, name: true },
-    });
-    const whById = new Map(warehouses.map((w) => [w.id, w]));
-    const stockMap = await getWarehouseStockMap(
-      tx,
-      entries.map((e) => ({ itemId: e.itemId, warehouseId: e.warehouseId })),
-    );
-
-    for (const e of entries) {
-      const inv = itemById.get(e.itemId);
-      if (!inv) throw new BusinessError('Item tidak ditemukan.');
-      if (!inv.isActive) throw new BusinessError(`Item '${inv.name}' tidak aktif.`);
-
-      const available = stockMap.get(`${e.itemId}::${e.warehouseId}`) ?? 0;
-      if (available < e.qty) {
-        const whName = whById.get(e.warehouseId)?.name ?? 'gudang';
-        if (!body.allowNegativeStock) {
-          throw new BusinessError(
-            `Stok '${inv.name}' di gudang ${whName} tidak cukup. Tersedia: ${available.toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${inv.unit}, dibutuhkan: ${e.qty.toLocaleString('id-ID', { maximumFractionDigits: 3 })} ${inv.unit}.`,
-          );
-        }
-        logger.warn(
-          {
-            itemId: inv.id,
-            itemName: inv.name,
-            warehouseId: e.warehouseId,
-            warehouseName: whName,
-            available,
-            needed: e.qty,
-            doId,
-            reason: body.negativeStockReason,
-          },
-          'DO edit submitted with negative stock bypass',
-        );
-      }
-    }
-  }
+  await assertStockAvailable(tx, stockLines, {
+    context: 'deliveryOrder.edit',
+    userId,
+    allowNegative: body.allowNegativeStock,
+    reason: body.negativeStockReason,
+    error: (s) => new BusinessError(
+      `Stok '${s.itemName}' di gudang ${s.warehouseName} tidak cukup. Tersedia: ${formatQty(s.available)} ${s.unit}, dibutuhkan: ${formatQty(s.needed)} ${s.unit}.`,
+      STOCK_INSUFFICIENT,
+    ),
+  });
 
   await tx.deliveryOrder.update({
     where: { id: doId },
@@ -158,29 +143,15 @@ export async function editDeliveryOrderInTx(
   // Counter account the invoice will post COGS against; stored on each Out movement.
   const cogsAccountId = await resolveCogsAccountId(tx);
 
-  for (const it of body.items) {
+  for (const [i, it] of body.items.entries()) {
     let stockMovementId: string | null = null;
     if (it.inventoryItemId) {
-      const inventoryItem = await tx.inventoryItem.findUnique({
-        where: { id: it.inventoryItemId },
-      });
-      if (!inventoryItem) throw new BusinessError(`Item '${it.itemName}' tidak ditemukan.`);
-
-      let warehouseId: string | null = it.warehouseId ?? null;
-      if (!warehouseId) {
-        const defaultWh = await tx.warehouse.findFirst({
-          where: { isDefault: true, isActive: true },
-        });
-        warehouseId = defaultWh?.id ?? null;
-      }
-      if (!warehouseId) {
-        throw new BusinessError(
-          `Item "${inventoryItem.name}" perlu dipilih gudang sumber.`,
-        );
-      }
+      const inventoryItem = locked.items.get(it.inventoryItemId)!;
+      const warehouseId = lineWarehouse.get(i)!;
 
       const qty = Number(it.quantity);
-      const unitCost = Number(inventoryItem.averageCost);
+      // Reversing the old Outs and posting new ones leaves the average unchanged: the locked value holds.
+      const unitCost = inventoryItem.averageCost.toNumber();
       const totalValue = new Decimal(qty).times(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
 
       await tx.inventoryItem.update({

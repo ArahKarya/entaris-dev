@@ -55,6 +55,11 @@ const InvoiceDetailDrawer: React.FC<Props> = ({ type, invoiceId, onClose, onEdit
   const [isApplyDepositOpen, setIsApplyDepositOpen] = useState(false);
   const [isApplyCustomerDepositOpen, setIsApplyCustomerDepositOpen] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // Purchase only: set when the cancel failed for insufficient stock (a legacy invoice whose own
+  // stock was used); inventory.negative_stock may force it with a reason.
+  const [forceCancelMessage, setForceCancelMessage] = useState<string | null>(null);
+  // The server refuses the forced cancel without this capability (Admin by default).
+  const canForceNegative = cap('inventory.negative_stock');
   const [cancelDepositAppId, setCancelDepositAppId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editNotes, setEditNotes] = useState('');
@@ -79,7 +84,8 @@ const InvoiceDetailDrawer: React.FC<Props> = ({ type, invoiceId, onClose, onEdit
   });
 
   const cancelMutation = useMutation({
-    mutationFn: () => api.post(`${endpoint}/${invoiceId}/cancel`),
+    mutationFn: (override?: { allowNegativeStock: boolean; negativeStockReason: string }) =>
+      api.post(`${endpoint}/${invoiceId}/cancel`, override ?? {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [isSales ? 'sales-invoices' : 'purchase-invoices'] });
       queryClient.invalidateQueries({ queryKey: [isSales ? 'sales-invoice-detail' : 'purchase-invoice-detail', invoiceId] });
@@ -103,7 +109,15 @@ const InvoiceDetailDrawer: React.FC<Props> = ({ type, invoiceId, onClose, onEdit
       queryClient.invalidateQueries({ queryKey: ['payments'] });
       toast.success(t('invoiceDetailDrawer.toast.cancelled'));
     },
-    onError: (err: any) => toast.error(err.response?.data?.error || t('invoiceDetailDrawer.toast.cancelFailed')),
+    onError: (err: any, override) => {
+      const msg = err.response?.data?.error || t('invoiceDetailDrawer.toast.cancelFailed');
+      if (!isSales && !override && err.response?.data?.code === 'STOCK_INSUFFICIENT' && canForceNegative) {
+        setConfirmCancel(false);
+        setForceCancelMessage(msg);
+        return;
+      }
+      toast.error(msg);
+    },
   });
 
   const cancelDepositAppMutation = useMutation({
@@ -612,7 +626,25 @@ const InvoiceDetailDrawer: React.FC<Props> = ({ type, invoiceId, onClose, onEdit
         description={t('invoiceDetailDrawer.confirmCancel.description')}
         confirmLabel={t('invoiceDetailDrawer.confirmCancel.confirm')}
         loading={cancelMutation.isPending}
-        onConfirm={() => cancelMutation.mutateAsync()}
+        onConfirm={() => cancelMutation.mutateAsync(undefined)}
+      />
+
+      <ConfirmDialog
+        open={forceCancelMessage !== null}
+        onOpenChange={(o) => !o && setForceCancelMessage(null)}
+        tone="danger"
+        title={t('invoiceDetailDrawer.forceCancel.title')}
+        description={t('invoiceDetailDrawer.forceCancel.description', { message: forceCancelMessage ?? '' })}
+        confirmLabel={t('invoiceDetailDrawer.forceCancel.confirm')}
+        loading={cancelMutation.isPending}
+        requireReason={{
+          label: t('invoiceDetailDrawer.forceCancel.reasonLabel'),
+          minLength: 10,
+          placeholder: t('invoiceDetailDrawer.forceCancel.reasonPlaceholder'),
+        }}
+        onConfirm={(reason) =>
+          cancelMutation.mutateAsync({ allowNegativeStock: true, negativeStockReason: (reason ?? '').trim() })
+        }
       />
 
       {/* Revisi Harga (purchase only) */}

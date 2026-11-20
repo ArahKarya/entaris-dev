@@ -1089,7 +1089,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Menghapus PERMANEN master item beserta seluruh baris pergerakan stok-nya yang sudah dibatalkan. Ditolak bila item punya mutasi stok aktif atau sudah dipakai di invoice penjualan/pembelian; gunakan inv_item_update isActive=false untuk menonaktifkan.",
+      "desc": "Menghapus PERMANEN master item beserta seluruh baris pergerakan stok-nya yang sudah dibatalkan. Ditolak bila item punya mutasi stok aktif, masih memiliki stok (termasuk negatif; ITEM_HAS_STOCK) atau sudah dipakai di invoice penjualan/pembelian; gunakan inv_item_update isActive=false untuk menonaktifkan.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -1122,6 +1122,7 @@
       "confirm_template": "HAPUS PERMANEN item {id}? Tindakan ini tidak dapat dibatalkan.",
       "errors": [
         "400: item punya mutasi stok aktif",
+        "400: ITEM_HAS_STOCK: item masih memiliki stok (termasuk negatif)",
         "400: item sudah dipakai di invoice",
         "404: item tidak ditemukan"
       ],
@@ -7716,7 +7717,7 @@
           "in": "query",
           "type": "string",
           "required": false,
-          "description": "Jenis: In, Out, AdjustmentIn, AdjustmentOut, TransferIn, TransferOut (sesuai enum StockMovementType)."
+          "description": "Jenis: In, Out, AdjustmentIn, AdjustmentOut, TransferIn, TransferOut, Revaluation (sesuai enum StockMovementType). Revaluation = koreksi nilai saja (qty 0, tanpa gudang), dibuat sistem."
         },
         {
           "name": "status",
@@ -7873,7 +7874,7 @@
           "in": "query",
           "type": "string",
           "required": false,
-          "description": "Jenis mutasi stok."
+          "description": "Jenis mutasi stok (enum StockMovementType, termasuk Revaluation)."
         },
         {
           "name": "status",
@@ -7911,7 +7912,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai).",
+      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar.",
       "handler": "GET /api/inventory/movements/summary",
       "permAction": "view",
       "enabled": true,
@@ -16080,6 +16081,7 @@
         "404: transfer tidak ditemukan",
         "400 TRANSFER_CANCEL_BATCH_USED: barang dari gudang tujuan sudah dipakai transaksi lain yang memilih batch transfer ini; batalkan transaksi itu dulu",
         "400 TRANSFER_CANCEL_INSUFFICIENT_STOCK: stok gudang tujuan kurang dari qty transfer; batalkan transaksi yang memakai barangnya dulu",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "409 TRANSFER_CANCEL_INCOMPLETE: sebagian gerakan stok transfer ini pernah dibatalkan per baris (data lama); transfer tidak dibalik, koreksi stok gudang lewat Penyesuaian Stok",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
@@ -16280,7 +16282,9 @@
         "400: gagal eksekusi dokumen (mis. stok tidak cukup, periode ditutup)",
         "400 PERIOD_CLOSED: eksekusi ditolak karena tahun buku tertutup; pengajuan tetap Pending",
         "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending",
-        "400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending"
+        "400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: eksekusi ProductionRun/ProductionRunEdit ditolak karena batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; minta pengaju memilih batch masuk aktif item yang sama, pengajuan tetap Pending",
+        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: eksekusi ProductionRun/ProductionRunEdit ditolak karena akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem, pengajuan tetap Pending"
       ],
       "related": [
         "appr_request_get",
@@ -17300,7 +17304,8 @@
         "Stok cukup di gudang sumber."
       ],
       "errors": [
-        "400: stok tidak cukup.",
+        "400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup (baris item yang sama dijumlah per gudang; pesan menyebut tersedia dan dibutuhkan)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: item perlu gudang sumber.",
         "400: pelanggan tidak aktif.",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
@@ -17352,7 +17357,8 @@
         "400: surat jalan sudah dibatalkan.",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya."
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "prerequisites": [
         "Tahun buku tanggal SJ masih terbuka."
@@ -21133,6 +21139,7 @@
         "400: pemasok tidak aktif/bukan supplier",
         "400: PO sudah dibatalkan/belum dipesan/sudah ditutup",
         "400: item atau gudang tidak ditemukan/tidak aktif",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
@@ -21213,7 +21220,8 @@
         "400: STT legacy - batalkan PI-nya",
         "400: ada PI Paid / PI belum dibatalkan",
         "400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu",
-        "400: stok tidak cukup untuk dibalikkan",
+        "400 GR_CANCEL_INSUFFICIENT_STOCK: stok gudang penerimaan tidak cukup untuk dibalikkan (baris item yang sama dijumlah per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
@@ -21640,7 +21648,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis bila biaya satuan > 0. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.",
+      "desc": "Mencatat pergerakan stok manual (In, Out, AdjustmentIn, AdjustmentOut) pada satu item di satu gudang aktif. Langsung mengubah stok gudang dan stok total, menghitung ulang WAC pada stok masuk, dan memposting jurnal otomatis. Stok masuk wajib harga satuan > 0 dan akun lawan; stok keluar selalu dinilai rata-rata (WAC) item (unitCost dari input diabaikan) dengan akun lawan default Selisih Persediaan. Gudang default dipakai bila warehouseId kosong. Referensi dokumen (referenceType/referenceId) diisi sistem: nilai dari input diabaikan dan disimpan kosong, hanya referenceNumber (teks bebas) yang disimpan. Mutasi milik dokumen dibatalkan dari dokumennya.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -21674,7 +21682,7 @@
           "in": "body",
           "type": "uuid",
           "required": false,
-          "description": "UUID gudang; kosong = gudang default aktif."
+          "description": "UUID gudang aktif; kosong = gudang default aktif."
         },
         {
           "name": "movementType",
@@ -21701,7 +21709,7 @@
           "in": "body",
           "type": "number",
           "required": false,
-          "description": "Biaya satuan; jika 0/kosong tidak ada jurnal dan WAC tidak berubah."
+          "description": "Harga satuan stok masuk (In/AdjustmentIn), wajib > 0. Diabaikan untuk stok keluar (Out/AdjustmentOut): sistem selalu menilai stok keluar dengan rata-rata (WAC) item saat disimpan."
         },
         {
           "name": "date",
@@ -21715,7 +21723,7 @@
           "in": "body",
           "type": "string",
           "required": false,
-          "description": "UUID akun lawan jurnal (default Ekuitas Saldo Awal 3.1)."
+          "description": "UUID akun lawan jurnal. Wajib untuk In/AdjustmentIn. Untuk Out/AdjustmentOut opsional: kosong = akun Selisih Persediaan (role INVENTORY_VARIANCE). Ditolak: Ekuitas Saldo Awal, akun kontrol, akun pajak, akun grup/nonaktif, akun di kelompok persediaan."
         },
         {
           "name": "referenceType",
@@ -21763,18 +21771,27 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn dengan unitCost > 0. GL (bila qty x unitCost > 0, status jurnal Submitted JV-...): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan / CR Persediaan. Akun lawan default Ekuitas Saldo Awal 3.1 bila offsetAccountId kosong atau sama dengan akun persediaan.",
-      "confirm_template": "Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost})? Stok dan jurnal akan langsung berubah.",
+      "postingEffect": "Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn. Nilai: masuk = qty x unitCost; keluar = qty x WAC item saat disimpan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.",
+      "confirm_template": "Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal akan langsung berubah.",
       "prerequisites": [
         "Tahun fiskal terbuka untuk tanggal transaksi.",
-        "Stok gudang cukup untuk Out/AdjustmentOut."
+        "Stok gudang cukup untuk Out/AdjustmentOut.",
+        "In/AdjustmentIn: unitCost > 0 dan offsetAccountId diisi.",
+        "Out/AdjustmentOut tanpa offsetAccountId: akun Selisih Persediaan dipetakan ke akun rinci tersendiri (bukan akun Pembulatan)."
       ],
       "errors": [
         "400: tidak ada tahun fiskal aktif untuk tanggal ini",
-        "400: stok di gudang tidak cukup",
-        "400: item tidak aktif / tidak ditemukan",
+        "400 STOCK_INSUFFICIENT: stok gudang tidak cukup untuk Stok Keluar / Penyesuaian Stok - (pesan menyebut tersedia dan dibutuhkan)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "400: item tidak aktif / tidak ditemukan, gudang tidak aktif",
         "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 MANUAL_IN_ZERO_COST: stok masuk / Penyesuaian Stok + tanpa unitCost > 0; isi harga satuan",
+        "400 OFFSET_REQUIRED: stok masuk / Penyesuaian Stok + tanpa offsetAccountId; pilih akun lawan",
+        "400 ACCOUNT_CONTROL / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun lawan adalah Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, atau akun nonaktif",
+        "400 STOCK_OFFSET_INVENTORY: akun lawan berada di kelompok akun persediaan",
+        "400 INVENTORY_VARIANCE_UNSAFE: stok keluar tanpa akun lawan sementara akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan; isi offsetAccountId atau minta akuntan memetakan akun Selisih Persediaan tersendiri",
+        "400 ACCOUNT_MAPPING_MISSING: stok keluar tanpa akun lawan sementara akun Selisih Persediaan belum dipetakan"
       ],
       "related": [
         "inv_mov_cancel",
@@ -22384,7 +22401,9 @@
         "400: stok input tidak cukup (draft tetap Draft, lastError terisi)",
         "404: draft tidak ditemukan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain"
+        "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem; tidak ada jatuhan ke akun lain",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama lewat prod_draft_update lalu posting ulang",
+        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem"
       ],
       "related": [
         "prod_draft_get",
@@ -25112,7 +25131,8 @@
         "400: potongan header tidak sama dengan jumlah potonganItem per baris (isi potongan di baris item)",
         "202: menunggu persetujuan (bukan error); amount pengajuan = grand total invoice (Σ harga akhir baris + biayaLain)",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both"
+        "400 PARTY_TYPE_MISMATCH: mitra bertipe Customer tidak punya sisi Hutang; Invoice pembelian hanya untuk Supplier atau Both",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "related": [
         "gr_pending",
@@ -25134,6 +25154,8 @@
       ],
       "input": {
         "id": "string",
+        "allowNegativeStock": "boolean",
+        "negativeStockReason": "string",
         "reason": "string"
       },
       "params": [
@@ -25143,6 +25165,20 @@
           "type": "string",
           "required": true,
           "description": "ID invoice pembelian (UUID)."
+        },
+        {
+          "name": "allowNegativeStock",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true = tetap membatalkan walau stok yang dibuat invoice lama (tanpa STT) sudah keluar dari gudangnya (stok jadi minus); butuh capability inventory.negative_stock."
+        },
+        {
+          "name": "negativeStockReason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true."
         },
         {
           "name": "reason",
@@ -25171,6 +25207,10 @@
         "400: Invoice sudah lunas",
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
+        "400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
@@ -25262,7 +25302,8 @@
         "400 PERIOD_CLOSED: tahun buku tanggal revisi (hari ini) sudah ditutup",
         "400 FISCAL_YEAR_MISSING: tahun buku untuk tanggal revisi belum dibuat",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan"
+        "400 ACCOUNT_MAPPING_MISSING: akun sistem Hutang Usaha (AP) atau Selisih Harga Pembelian (PURCHASE_PRICE_VARIANCE) belum dipetakan",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "related": [
         "pi_get",
@@ -26353,7 +26394,8 @@
       ],
       "errors": [
         "403: bypass stok minus butuh capability.",
-        "400: stok tidak cukup.",
+        "400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup (baris item yang sama dijumlah per gudang; pesan menyebut tersedia dan dibutuhkan)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: SO bukan Submitted/PartiallyDelivered."
       ],
       "related": [
@@ -26510,6 +26552,7 @@
       "errors": [
         "400: qty retur melebihi sisa yang bisa diretur.",
         "400: invoice sudah dibatalkan.",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)"
@@ -26532,6 +26575,8 @@
       ],
       "input": {
         "id": "string",
+        "allowNegativeStock": "boolean",
+        "negativeStockReason": "string",
         "reason": "string"
       },
       "params": [
@@ -26541,6 +26586,20 @@
           "type": "string",
           "required": true,
           "description": "ID retur."
+        },
+        {
+          "name": "allowNegativeStock",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true = tetap membatalkan walau barang retur sudah keluar lagi dari gudangnya (stok jadi minus); butuh capability inventory.negative_stock."
+        },
+        {
+          "name": "negativeStockReason",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Alasan bypass stok minus; wajib minimal 10 karakter bila allowNegativeStock=true."
         },
         {
           "name": "reason",
@@ -26566,6 +26625,10 @@
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
+        "400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "400: alasan bypass stok minus wajib (min 10 karakter)",
+        "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
@@ -26816,7 +26879,8 @@
       "errors": [
         "400: pelanggan tidak ditemukan/tidak aktif.",
         "400: stok tidak cukup.",
-        "400: baris SJ sudah dibatalkan atau sudah masuk invoice lain.",
+        "400: baris SJ sudah dibatalkan, sudah masuk invoice lain, atau sudah diganti edit SJ (dicek saat SJ dikunci; dua invoice atas satu SJ: yang kedua ditolak)",
+        "409 STOCK_BUSY: surat jalan yang ditagih sedang dikunci transaksi lain (batal/edit SJ atau invoice lain) dan terjadi deadlock; coba lagi sebentar lagi",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 ACCOUNT_MAPPING_MISSING: peran COGS belum dipetakan di Akun Sistem (juga untuk invoice tanpa HPP); akun 1.5.4 hilang bila pphPct>0 juga ditolak",
         "400 PARTY_TYPE_MISMATCH: mitra bertipe Supplier tidak punya sisi Piutang; Invoice penjualan hanya untuk Customer atau Both"
@@ -26879,7 +26943,8 @@
         "400 INVOICE_HAS_ACTIVE_RETURNS: Invoice masih punya retur yang belum dibatalkan (termasuk Invoice yang diretur penuh, yang berstatus Paid). Batalkan returnya dulu (sret_cancel), lalu ulangi si_cancel",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
-        "400: alasan pembatalan maksimal 500 karakter"
+        "400: alasan pembatalan maksimal 500 karakter",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -27060,6 +27125,7 @@
       "errors": [
         "400: tidak ada tahun fiskal aktif",
         "400: masih ada stok opname Draft",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: stok aktual tidak boleh negatif",
         "400: item tidak ditemukan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
@@ -27195,7 +27261,8 @@
       ],
       "errors": [
         "400: gudang asal dan tujuan tidak boleh sama",
-        "400: stok item di gudang asal tidak cukup",
+        "400 STOCK_INSUFFICIENT: stok item di gudang asal tidak cukup (baris item yang sama dijumlah)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: gudang tidak aktif",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
@@ -28329,6 +28396,8 @@
         "400: SJ sudah masuk invoice — batalkan invoice dulu.",
         "400: SJ sudah dibatalkan.",
         "403: bypass stok minus butuh capability.",
+        "400 STOCK_INSUFFICIENT: setelah stok SJ lama dikembalikan, stok gudang sumber tidak cukup untuk baris baru (dijumlah per item per gudang)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
         "400 ACCOUNT_MAPPING_MISSING: peran COGS, atau PRODUCTION_CONVERSION saat nilai output melebihi input, belum dipetakan di Akun Sistem",
@@ -29994,7 +30063,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif (ITEM_ACCOUNT_HAS_STOCK).",
+      "desc": "Mengubah master item (kode, nama, satuan, kategori, deskripsi, minimum stok, akun persediaan, status aktif). Tidak mengubah stok maupun WAC dan tidak menjurnal ulang. accountId harus akun ASSET detail aktif yang bukan akun kontrol selain Persediaan (ACCOUNT_GROUP, ACCOUNT_ROOT_TYPE, ACCOUNT_INACTIVE, ACCOUNT_CONTROL); accountId juga harus berada di kelompok akun Persediaan (ITEM_ACCOUNT_NOT_INVENTORY). Mengganti accountId ditolak selama item punya stok di item atau gudang mana pun, termasuk stok negatif, atau masih ada di Surat Jalan yang belum ditagih (ITEM_ACCOUNT_HAS_STOCK). Mengganti satuan ditolak bila item sudah punya mutasi stok aktif atau stok (ITEM_UNIT_IN_USE). Menonaktifkan item ditolak selama item punya stok atau ada di Surat Jalan yang belum ditagih (ITEM_HAS_STOCK).",
       "risk": "write",
       "roles": [
         "Admin",
@@ -30073,7 +30142,7 @@
           "in": "body",
           "type": "boolean",
           "required": false,
-          "description": "false = nonaktifkan item (tidak bisa dipakai transaksi baru)."
+          "description": "false = nonaktifkan item (tidak bisa dipakai transaksi baru); ditolak bila item masih punya stok (ITEM_HAS_STOCK)."
         }
       ],
       "output": {
@@ -30091,7 +30160,10 @@
       "errors": [
         "404: item tidak ditemukan",
         "400: ACCOUNT_GROUP / ACCOUNT_ROOT_TYPE / ACCOUNT_INACTIVE / ACCOUNT_CONTROL: akun persediaan tidak valid",
-        "400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok"
+        "400: ITEM_ACCOUNT_NOT_INVENTORY: akun bukan bagian dari kelompok akun Persediaan",
+        "400: ITEM_ACCOUNT_HAS_STOCK: akun tidak dapat diganti selama item masih punya stok atau Surat Jalan belum ditagih",
+        "400: ITEM_UNIT_IN_USE: satuan tidak dapat diganti setelah item punya mutasi stok atau stok",
+        "400: ITEM_HAS_STOCK: item tidak dapat dinonaktifkan selama masih punya stok atau Surat Jalan belum ditagih"
       ],
       "related": [
         "inv_items_list"
@@ -30189,7 +30261,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
+      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30238,7 +30310,8 @@
           "name": "unitCost",
           "in": "body",
           "type": "number",
-          "required": false
+          "required": false,
+          "description": "Harga satuan stok masuk (In/AdjustmentIn), wajib > 0. Diabaikan untuk stok keluar (Out/AdjustmentOut): sistem selalu menilai stok keluar dengan rata-rata (WAC) item saat disimpan."
         },
         {
           "name": "date",
@@ -30251,7 +30324,8 @@
           "name": "offsetAccountId",
           "in": "body",
           "type": "string",
-          "required": false
+          "required": false,
+          "description": "UUID akun lawan jurnal. Wajib untuk In/AdjustmentIn. Untuk Out/AdjustmentOut opsional: kosong = akun Selisih Persediaan (role INVENTORY_VARIANCE). Ditolak: Ekuitas Saldo Awal, akun kontrol, akun pajak, akun grup/nonaktif, akun di kelompok persediaan."
         },
         {
           "name": "referenceType",
@@ -30286,8 +30360,8 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik stok & jurnal lama (jurnal lama berstatus Cancelled), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create), reverse+settle ulang COGS backfill, recompute WAC item dari replay.",
-      "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} biaya satuan {unitCost} tanggal {date}? Stok dan jurnal lama dibalik lalu dibuat ulang.",
+      "postingEffect": "Membalik stok & jurnal lama (jurnal lama berstatus Cancelled, saldo akun dikurangi per baris), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar pada WAC sesudah pembalikan), reverse+settle ulang COGS backfill, recompute WAC item dari replay.",
+      "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang.",
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
         "Bukan mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama), bukan saldo awal, dan bukan TransferIn/TransferOut.",
@@ -30297,10 +30371,17 @@
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
-        "400: pembalikan stok lama membuat stok negatif",
+        "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "400 MANUAL_IN_ZERO_COST: stok masuk / Penyesuaian Stok + tanpa unitCost > 0; isi harga satuan",
+        "400 OFFSET_REQUIRED: stok masuk / Penyesuaian Stok + tanpa offsetAccountId; pilih akun lawan",
+        "400 ACCOUNT_CONTROL / ACCOUNT_GROUP / ACCOUNT_INACTIVE: akun lawan adalah Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, atau akun nonaktif",
+        "400 STOCK_OFFSET_INVENTORY: akun lawan berada di kelompok akun persediaan",
+        "400 INVENTORY_VARIANCE_UNSAFE: stok keluar tanpa akun lawan sementara akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan; isi offsetAccountId atau minta akuntan memetakan akun Selisih Persediaan tersendiri",
+        "400 ACCOUNT_MAPPING_MISSING: stok keluar tanpa akun lawan sementara akun Selisih Persediaan belum dipetakan",
         "403: tanpa capability doc.cancel"
       ],
       "related": [
@@ -30313,7 +30394,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dihitung ulang). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.",
+      "desc": "Membatalkan pergerakan stok manual: stok gudang dan total dibalik, jurnal terkait dibatalkan (ledger ikut batal, saldo akun dikurangi per baris jurnal). Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dibatalkan dari dokumennya; saldo awal dikoreksi lewat Penyesuaian Stok.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30342,7 +30423,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dihitung ulang; WAC dan COGS backfill disesuaikan.",
+      "postingEffect": "Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; WAC dan COGS backfill disesuaikan.",
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -30353,7 +30434,8 @@
       "errors": [
         "400: gerakan sudah dibatalkan",
         "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok",
-        "400: stok tidak mencukupi untuk pembalikan",
+        "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
@@ -30951,7 +31033,9 @@
         "400 PERIOD_CLOSED: tanggal lama atau baru di tahun buku tertutup; ditolak saat diajukan dan saat disetujui (pengajuan tetap Pending)",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
-        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)"
+        "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)",
+        "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama (juga saat disetujui; pengajuan tetap Pending)",
+        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal revisi tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem (juga saat disetujui; pengajuan tetap Pending)"
       ],
       "related": [
         "prod_run_get",
@@ -34001,7 +34085,9 @@
       ],
       "errors": [
         "400: stok opname sudah dibatalkan",
-        "400: stok item tidak mencukupi untuk pembalikan",
+        "400 STOCK_INSUFFICIENT: stok gudang opname tidak cukup untuk membalik surplus (dijumlah per item per gudang)",
+        "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan opname ini lebih dulu; tidak ada yang dibalik dua kali",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan",
         "400 JOURNAL_ALREADY_REVERSED: jurnal opname sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
@@ -34393,7 +34479,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "warehouse",
-      "desc": "Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama.",
+      "desc": "Mengubah data gudang (kode, nama, lokasi, deskripsi, aktif, default, urutan). Menjadikan default akan melepas default lama. Menonaktifkan gudang ditolak bila masih ada stok (termasuk negatif) di gudang itu (WAREHOUSE_HAS_STOCK) atau bila gudang itu default (WAREHOUSE_IS_DEFAULT). Gudang default tidak bisa dilepas lewat isDefault=false; jadikan gudang lain default (WAREHOUSE_IS_DEFAULT). Gudang default harus aktif: menjadikan gudang nonaktif sebagai default juga ditolak (WAREHOUSE_IS_DEFAULT). Bila gudang sedang dipakai transaksi stok, hasilnya WAREHOUSE_BUSY; coba lagi.",
       "risk": "write",
       "roles": [
         "Admin",
@@ -34449,7 +34535,7 @@
           "in": "body",
           "type": "boolean",
           "required": false,
-          "description": "false = nonaktifkan (disarankan ketimbang menghapus gudang berriwayat)."
+          "description": "false = nonaktifkan (disarankan ketimbang menghapus gudang berriwayat); ditolak bila gudang masih bersaldo atau default."
         },
         {
           "name": "isDefault",
@@ -34477,7 +34563,10 @@
       "postingEffect": "Tidak ada efek GL/stok.",
       "confirm_template": "Ubah gudang {id}?",
       "errors": [
-        "400: gudang tidak ditemukan"
+        "400: gudang tidak ditemukan",
+        "400: WAREHOUSE_HAS_STOCK: gudang masih punya stok",
+        "400: WAREHOUSE_IS_DEFAULT: gudang default tidak bisa dinonaktifkan atau dilepas dari status default",
+        "400: WAREHOUSE_BUSY: gudang sedang dipakai transaksi stok, coba lagi"
       ]
     },
     {

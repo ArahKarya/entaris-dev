@@ -20,7 +20,7 @@ import {
 import { ComboboxField } from '@/components/overlays/ComboboxField';
 import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField';
 import { useTranslation } from 'react-i18next';
-import { formatNumber } from '@/lib/format';
+import { UNIT_COST_DP, formatNumber } from '@/lib/format';
 import { todayLocal } from '@/lib/date';
 import { isProductionLinkedMovement } from '@/components/inventory/inventory-rows';
 
@@ -75,6 +75,16 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
     }
   }, [isOpen, editMovement]);
 
+  // A stored offset an edit would refuse (a legacy row posted against 3.1 Ekuitas Saldo Awal) is
+  // treated as empty and named in the hint, instead of failing the save with ACCOUNT_CONTROL.
+  const { data: editDetail } = useQuery({
+    queryKey: ['stock-movement', editMovement?.id],
+    queryFn: () => api.get(`/inventory/movements/${editMovement?.id}`).then(r => r.data),
+    enabled: isOpen && isEdit,
+  });
+  const staleOffset = isEdit && editDetail?.offsetAllowed === false ? editDetail.offsetAccount : null;
+  const offsetAccountId = staleOffset && form.offsetAccountId === staleOffset.id ? '' : form.offsetAccountId;
+
   // Sertakan warehouseId supaya currentStock tiap item = stok di gudang yang
   // dipilih (bukan total). Tanpa gudang terpilih → tampil total seperti biasa.
   const { data: itemsRaw } = useQuery({
@@ -106,12 +116,17 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
     [nonGroupAccounts],
   );
 
+  // A stock out is valued at the system average on the server (E3-R4); the cost typed in is
+  // only sent for a stock in, which needs a cost above 0 and an offset account.
+  const inbound = form.movementType === 'In' || form.movementType === 'AdjustmentIn';
   const qty = Number(form.quantity) || 0;
   const unitCost = Number(form.unitCost) || 0;
-  const totalValue = qty * unitCost;
+  const averageCost = Number(selectedItem?.averageCost ?? 0);
+  const totalValue = qty * (inbound ? unitCost : averageCost);
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+    queryClient.invalidateQueries({ queryKey: ['stock-movement'] });
     queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
     queryClient.invalidateQueries({ queryKey: ['inventory-items-active'] });
     queryClient.invalidateQueries({ queryKey: ['coa'] });
@@ -152,7 +167,7 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
     e.preventDefault();
     setError('');
     // Same constraints the native `required` / `min` attributes enforced before.
-    if (!form.date || !(Number(form.quantity) >= 0.001)) {
+    if (!form.date || !(Number(form.quantity) >= 0.001) || (inbound && (unitCost <= 0 || !offsetAccountId))) {
       setShowErrors(true);
       return;
     }
@@ -161,8 +176,8 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
       date: form.date,
       movementType: form.movementType,
       quantity: Number(form.quantity),
-      unitCost: unitCost,
-      offsetAccountId: form.offsetAccountId || undefined,
+      ...(inbound ? { unitCost } : {}),
+      offsetAccountId: offsetAccountId || undefined,
       referenceNumber: form.referenceNumber || undefined,
       notes: form.notes || undefined,
     };
@@ -180,7 +195,8 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
   const stockItem = selectedItem || editMovement?.item;
   const dateError = showErrors && !form.date ? t('stockMovementModal.errors.dateRequired') : undefined;
   const qtyError = showErrors && !(Number(form.quantity) >= 0.001) ? t('stockMovementModal.errors.quantityMin') : undefined;
-  const offsetMissing = totalValue > 0 && !form.offsetAccountId;
+  const unitCostError = showErrors && inbound && unitCost <= 0 ? t('stockMovementModal.errors.unitCostRequired') : undefined;
+  const offsetError = showErrors && inbound && !offsetAccountId ? t('stockMovementModal.errors.offsetRequired') : undefined;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !pending && onClose()}>
@@ -283,17 +299,27 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
                   className="h-10 text-right tabular-nums"
                 />
               </Field>
-              <Field label={t('stockMovementModal.fields.unitCost')}>
-                <NumberInput
-                  min={0}
-                  step="any"
-                  value={form.unitCost}
-                  onChange={e => setForm(f => ({ ...f, unitCost: e.target.value }))}
-                  disabled={isProductionLinked}
-                  placeholder="0"
-                  className="h-10 text-right tabular-nums"
-                />
-              </Field>
+              {inbound ? (
+                <Field label={t('stockMovementModal.fields.unitCost')} required error={unitCostError}>
+                  <NumberInput
+                    min={0}
+                    step="any"
+                    value={form.unitCost}
+                    onChange={e => setForm(f => ({ ...f, unitCost: e.target.value }))}
+                    disabled={isProductionLinked}
+                    placeholder="0"
+                    className="h-10 text-right tabular-nums"
+                  />
+                </Field>
+              ) : (
+                <Field label={t('stockMovementModal.fields.unitCostAverage')} hint={t('stockMovementModal.hints.averageCost')}>
+                  <Input
+                    readOnly
+                    value={selectedItem ? formatNumber(averageCost, { maxDecimals: UNIT_COST_DP }) : '—'}
+                    className="bg-muted text-right tabular-nums"
+                  />
+                </Field>
+              )}
             </div>
 
             <Field label={t('stockMovementModal.fields.totalValue')}>
@@ -305,17 +331,18 @@ export function StockMovementModal({ isOpen, onClose, editMovement }: StockMovem
             </Field>
 
             <ComboboxField
-              label={totalValue > 0 ? t('stockMovementModal.fields.offsetAccount') : t('stockMovementModal.fields.offsetAccountOptional')}
-              required={totalValue > 0}
+              label={inbound ? t('stockMovementModal.fields.offsetAccount') : t('stockMovementModal.fields.offsetAccountVariance')}
+              required={inbound}
               options={accountOptions}
-              value={form.offsetAccountId}
+              value={offsetAccountId}
               onChange={(v) => setForm(f => ({ ...f, offsetAccountId: v }))}
               placeholder={t('stockMovementModal.placeholders.offsetAccount')}
               disabled={isProductionLinked}
+              error={offsetError}
               hint={
-                offsetMissing
-                  ? t('stockMovementModal.hints.offsetMissing')
-                  : t('stockMovementModal.hints.offsetPurpose')
+                staleOffset && !offsetAccountId
+                  ? t('stockMovementModal.hints.offsetNoLongerAllowed', { account: `${staleOffset.accountNumber} · ${staleOffset.name}` })
+                  : inbound ? t('stockMovementModal.hints.offsetRequired') : t('stockMovementModal.hints.offsetVariance')
               }
             />
 

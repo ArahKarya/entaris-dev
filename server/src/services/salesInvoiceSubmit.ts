@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
@@ -165,6 +165,33 @@ export async function submitSalesInvoiceInTx(
     );
   }
 
+  // Lock every delivery note the lines bill, in id order, before the invoice number and the first
+  // account lock: a cancel or edit of one of them holds the same row lock, so the status and
+  // invoice link read in the loop below are the committed ones, and a second invoice billing the
+  // same note waits here and then sees it billed. The notes are checked here, before any account
+  // is locked, so a refusal never waits behind an invoice cancel that holds the AR row.
+  const billedDoItemIds = resolvedItems.flatMap((it) => (it.deliveryOrderItemId ? [it.deliveryOrderItemId] : []));
+  if (billedDoItemIds.length > 0) {
+    await tx.$queryRaw`
+      SELECT id FROM delivery_orders
+      WHERE id IN (SELECT delivery_order_id FROM delivery_order_items WHERE id IN (${Prisma.join(billedDoItemIds)}))
+      ORDER BY id FOR UPDATE`;
+    // Read after the lock: an edit that replaced a note's lines while this waited removed them.
+    const billedLines = await tx.deliveryOrderItem.findMany({
+      where: { id: { in: billedDoItemIds } },
+      select: { id: true, deliveryOrder: { select: { doNumber: true, status: true, invoiceId: true } } },
+    });
+    const billedById = new Map(billedLines.map((l) => [l.id, l.deliveryOrder]));
+    for (const lineId of billedDoItemIds) {
+      const note = billedById.get(lineId);
+      if (!note) throw new BusinessError(`Baris dari Surat Jalan tidak ditemukan (id=${lineId}).`);
+      if (note.status === 'Cancelled') {
+        throw new BusinessError(`Surat Jalan ${note.doNumber} sudah dibatalkan dan tidak bisa di-invoice.`);
+      }
+      if (note.invoiceId) throw new BusinessError(`Surat Jalan ${note.doNumber} sudah ada di invoice lain.`);
+    }
+  }
+
   const subtotal = resolvedItems.reduce((sum, item) => sum.plus(new Decimal(item.amount)), new Decimal(0));
   const taxAmount = resolvedItems.reduce(
     (sum, item) => sum.plus(new Decimal(item.amount).mul(new Decimal(item.taxPct).div(100))),
@@ -321,21 +348,12 @@ export async function submitSalesInvoiceInTx(
     if (item.deliveryOrderItemId) {
       const doItem = await tx.deliveryOrderItem.findUnique({
         where: { id: item.deliveryOrderItemId },
-        include: { stockMovement: true, deliveryOrder: true },
+        include: { stockMovement: true },
       });
       if (!doItem) {
         throw new BusinessError(`Baris dari Surat Jalan tidak ditemukan (id=${item.deliveryOrderItemId}).`);
       }
-      if (doItem.deliveryOrder.status === 'Cancelled') {
-        throw new BusinessError(
-          `Surat Jalan ${doItem.deliveryOrder.doNumber} sudah dibatalkan dan tidak bisa di-invoice.`,
-        );
-      }
-      if (doItem.deliveryOrder.invoiceId && doItem.deliveryOrder.invoiceId !== invoice.id) {
-        throw new BusinessError(
-          `Surat Jalan ${doItem.deliveryOrder.doNumber} sudah ada di invoice lain.`,
-        );
-      }
+      // Status and invoice link were checked under the row lock before the journals.
       // averageCost is only a defensive fallback when the DO line has no stock movement.
       const cogsUnitCost = doItem.stockMovement
         ? Number(doItem.stockMovement.unitCost)
@@ -367,12 +385,17 @@ export async function submitSalesInvoiceInTx(
     );
   }
 
-  // Mark every touched DO as Invoiced (link back to this invoice).
+  // Mark every touched DO as Invoiced (link back to this invoice). Only a Submitted note that no
+  // invoice bills yet is linked; under the row locks taken above the count always matches, so a
+  // mismatch means the lock was bypassed and nothing is posted.
   if (linkedDOIds.size > 0) {
-    await tx.deliveryOrder.updateMany({
-      where: { id: { in: Array.from(linkedDOIds) } },
+    const linked = await tx.deliveryOrder.updateMany({
+      where: { id: { in: Array.from(linkedDOIds) }, invoiceId: null, status: 'Submitted' },
       data: { invoiceId: invoice.id, invoicedAt: new Date() },
     });
+    if (linked.count !== linkedDOIds.size) {
+      throw new BusinessError('Surat Jalan sudah dibatalkan atau sudah ada di invoice lain. Muat ulang lalu pilih Surat Jalan yang belum ditagih.');
+    }
   }
 
   const totalCogsNum = totalCogs.toDecimalPlaces(2).toNumber();

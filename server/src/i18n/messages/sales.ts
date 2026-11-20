@@ -175,6 +175,8 @@ export const SALES_MESSAGES: MessageDictionary = {
   "Baris dari Surat Jalan tidak ditemukan (id={0}).": "Delivery Order line not found (id={0}).",
   "Surat Jalan {0} sudah dibatalkan dan tidak bisa di-invoice.": "Delivery Order {0} is cancelled and cannot be invoiced.",
   "Surat Jalan {0} sudah ada di invoice lain.": "Delivery Order {0} is already on another invoice.",
+  // stock locks (E3-R3): the invoice links only Submitted, unbilled delivery notes (services/salesInvoiceSubmit.ts)
+  "Surat Jalan sudah dibatalkan atau sudah ada di invoice lain. Muat ulang lalu pilih Surat Jalan yang belum ditagih.": "A Delivery Order is cancelled or already on another invoice. Reload and pick Delivery Orders that are not invoiced yet.",
   "Item \"{0}\" harus di-kirim via Surat Jalan terlebih dahulu. Direct-sale dari invoice sudah ditutup.": "Item \"{0}\" must be shipped through a Delivery Order first. Direct sales from invoices are closed.",
   "Status pesanan tidak dikenal.": "Unknown order status.",
   "Retur sudah dibatalkan.": "Return is already cancelled.",

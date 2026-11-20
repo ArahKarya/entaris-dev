@@ -6,16 +6,14 @@ import { BusinessError } from '../utils/errors';
 import { calcWeightedAverage } from '../utils/weightedAverage';
 import { adjustWarehouseStock, resolveWarehouseId } from '../utils/warehouseStock';
 import { systemAccounts } from './systemAccounts';
+import { lockInventoryRows } from './inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
 
+/** The imported item; its stock, average and account are read again under the row lock. */
 export interface OpeningStockItem {
   id: string;
   code: string;
-  name: string;
-  accountId: string | null;
-  currentStock: Prisma.Decimal | number;
-  averageCost: Prisma.Decimal | number;
 }
 
 export interface OpeningStockInput {
@@ -49,10 +47,18 @@ async function resolveImportWarehouseId(tx: Tx, warehouseCode?: string): Promise
  * and journal stored) and the per-warehouse stock, like other inbound paths.
  */
 export async function postOpeningStockInTx(tx: Tx, input: OpeningStockInput) {
-  const { item, quantity, unitCost, totalValue, userId } = input;
+  const { quantity, unitCost, totalValue, userId } = input;
   const now = input.now ?? new Date();
   const fiscalYear = await getOpenFiscalYear(tx, now);
   const warehouseId = await resolveImportWarehouseId(tx, input.warehouseCode);
+
+  // Lock the item and its row at the warehouse before the JV/SM numbers and the account locks
+  // (lock order in services/inventory/stockLocks.ts). The route upserted the item outside this
+  // transaction, so its stock, average and account are taken from the locked row, not that read.
+  const locked = await lockInventoryRows(tx, { itemIds: [input.item.id], pairs: [{ itemId: input.item.id, warehouseId }] });
+  const lockedItem = locked.items.get(input.item.id);
+  if (!lockedItem) throw new BusinessError('Item stok tidak ditemukan.');
+  const item = { ...lockedItem, code: input.item.code };
 
   // GL: DR Inventory / CR Ekuitas Saldo Awal
   const invAccount = item.accountId

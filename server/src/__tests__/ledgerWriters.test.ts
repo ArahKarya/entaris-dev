@@ -20,7 +20,6 @@ type Counts = Record<string, number>;
 const ALLOWLIST: Record<string, Counts> = {
   'routes/customerDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
   'routes/fixedAssets.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
-  'routes/inventory/movements.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2, 'accountingLedgerEntry.updateMany': 2, 'journalEntry.update': 2 },
   'routes/journals.ts': { 'accountingLedgerEntry.updateMany': 1 },
   'routes/projectGuarantees.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'routes/settings/dummyData.ts': { 'accountingLedgerEntry.deleteMany': 1, 'journalItem.deleteMany': 1, 'journalEntry.deleteMany': 1 },
@@ -43,8 +42,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/ledger/sttCancelLegacy.ts': { 'journalEntry.updateMany': 1, 'accountingLedgerEntry.updateMany': 1 },
   'services/openingStockImport.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/paymentSubmit.ts': { 'journalEntry.create': 4, 'accountingLedgerEntry.createMany': 4 },
-  'services/productionRunEdit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
-  'services/productionRunSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/purchaseInvoiceRevise.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'services/salesInvoiceSubmit.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },

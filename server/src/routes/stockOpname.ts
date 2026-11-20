@@ -9,13 +9,15 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { recalculateAccountBalances } from '../utils/accountBalance';
-import { cancelTrail } from '../utils/cancelClaim';
+import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { cancelJournalsInTx, findDocumentJournals } from '../services/ledger/cancelJournals';
 import { systemAccounts } from '../services/systemAccounts';
 import { logger } from '../lib/logger';
 import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStock';
+import { assertStockAvailable, lockInventoryRows, stockKey } from '../services/inventory/stockLocks';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
 import { INBOUND_TYPES } from '../services/stockMovementList';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 import {
   buildStockOpnameWhere,
   DEFAULT_STOCK_OPNAME_SORT,
@@ -149,32 +151,32 @@ router.post('/', async (req: AuthRequest, res) => {
 
       const opnameNumber = await generateDocumentNumber(tx, 'SO', txDate, fiscalYear.id);
 
-      // Fetch all items for averageCost + name. systemStock source depends
-      // on whether the user picked a warehouse — when set, compare against
-      // the per-warehouse balance from inventory_stocks so opname only
-      // affects that warehouse. When not set, fall back to the global total.
-      const allItemIds = body.items.map((i: any) => i.itemId);
-      const allItems = await tx.inventoryItem.findMany({
-        where: { id: { in: allItemIds } },
-        select: { id: true, name: true, currentStock: true, averageCost: true, accountId: true },
+      // Stock opname applies to one warehouse per session. Prefer the
+      // explicit pick from the UI; fall back to the default warehouse. The
+      // header and every line keep it so the list shows Gudang even when
+      // the count had no difference.
+      const opnameWarehouseId = await resolveWarehouseId(tx, body.warehouseId);
+
+      // Lock every counted item (and its row at the opname warehouse) before reading the system
+      // stock, so a movement committing meanwhile cannot make the difference stale. systemStock is
+      // the per-warehouse balance when the user picked a warehouse, else the item total. The form
+      // sends every item: only existing rows are locked, so a count without a difference adds no
+      // empty row to the warehouse (adjustWarehouseStock creates one for a difference).
+      const allItemIds: string[] = body.items.map((i: any) => i.itemId);
+      const locked = await lockInventoryRows(tx, {
+        itemIds: allItemIds,
+        pairs: opnameWarehouseId ? allItemIds.map((itemId) => ({ itemId, warehouseId: opnameWarehouseId })) : [],
+        createMissing: false,
       });
-      const itemMap = new Map(allItems.map((i) => [i.id, i]));
+      const itemMap = locked.items;
 
       for (const input of body.items) {
         if (!itemMap.has(input.itemId)) {
           throw new BusinessError(`Item dengan ID ${input.itemId} tidak ditemukan.`);
         }
       }
-
-      // Pre-fetch per-warehouse stock when scoped to a specific warehouse.
-      const perWarehouseStock = new Map<string, number>();
-      if (body.warehouseId) {
-        const rows = await tx.inventoryStock.findMany({
-          where: { warehouseId: body.warehouseId, itemId: { in: allItemIds } },
-          select: { itemId: true, currentStock: true },
-        });
-        for (const r of rows) perWarehouseStock.set(r.itemId, Number(r.currentStock));
-      }
+      const warehouseStockOf = (itemId: string) =>
+        Number(locked.stocks.get(stockKey(itemId, body.warehouseId!))?.currentStock ?? 0);
 
       // Revaluasi: item yang nilai satuannya diubah manual lewat form opname.
       const revaluations: { itemId: string; oldCost: number; newCost: number }[] = [];
@@ -182,9 +184,7 @@ router.post('/', async (req: AuthRequest, res) => {
       // Build opname items with difference calculation
       const opnameItems = body.items.map((input: any) => {
         const item = itemMap.get(input.itemId)!;
-        const systemStock = body.warehouseId
-          ? (perWarehouseStock.get(input.itemId) ?? 0)
-          : Number(item.currentStock);
+        const systemStock = body.warehouseId ? warehouseStockOf(input.itemId) : item.currentStock.toNumber();
         const actualStock = input.actualStock;
         // Reject negatives only when the user changed this count: the form sends every item,
         // so untouched items that are already negative historically must not block submit.
@@ -193,10 +193,10 @@ router.post('/', async (req: AuthRequest, res) => {
           throw new BusinessError(`Stok aktual "${item.name}" tidak boleh negatif.`);
         }
         const diff = diffFromSystem;
-        const oldCost = Number(item.averageCost);
+        const oldCost = item.averageCost.toNumber();
         const hasManualCost = input.unitCost !== undefined && input.unitCost !== null;
         const unitCost = hasManualCost
-          ? new Decimal(input.unitCost).toDecimalPlaces(2).toNumber()
+          ? new Decimal(input.unitCost).toDecimalPlaces(UNIT_COST_DP).toNumber()
           : oldCost;
         if (hasManualCost && unitCost !== oldCost) {
           revaluations.push({ itemId: input.itemId, oldCost, newCost: unitCost });
@@ -218,12 +218,6 @@ router.post('/', async (req: AuthRequest, res) => {
       const itemsWithDiff = opnameItems.filter((i: any) => i.difference !== 0);
       // Opname perlu diproses kalau ada selisih qty ATAU ada revaluasi nilai.
       const needsProcessing = itemsWithDiff.length > 0 || revaluations.length > 0;
-
-      // Stock opname applies to one warehouse per session. Prefer the
-      // explicit pick from the UI; fall back to the default warehouse. The
-      // header and every line keep it so the list shows Gudang even when
-      // the count had no difference.
-      const opnameWarehouseId = await resolveWarehouseId(tx, body.warehouseId);
 
       // Create the StockOpname record
       const so = await tx.stockOpname.create({
@@ -261,7 +255,7 @@ router.post('/', async (req: AuthRequest, res) => {
         // on the item's whole stock at pre-adjustment qty; the qty variance below uses the new cost.
         for (const rev of revaluations) {
           const item = itemMap.get(rev.itemId)!;
-          const qtyBefore = new Decimal(Number(item.currentStock));
+          const qtyBefore = item.currentStock;
           const delta = qtyBefore
             .mul(new Decimal(rev.newCost).minus(new Decimal(rev.oldCost)))
             .toDecimalPlaces(2)
@@ -412,43 +406,51 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
     await prisma.$transaction(async (tx) => {
       const so = await tx.stockOpname.findUnique({
         where: { id },
-        include: { items: { include: { item: true } } },
+        include: { items: true },
       }) as any;
       if (!so) throw new BusinessError('Stok opname tidak ditemukan.');
       if (so.status === 'Cancelled') throw new BusinessError('Stok opname sudah dibatalkan.');
       if (so.status === 'Draft') throw new BusinessError('Stok opname Draft tidak perlu dibatalkan.');
+      // First write: a second concurrent cancel gets STALE_STATUS here instead of reversing the
+      // stock a second time. Any later rejection rolls the claim back.
+      await claimCancel(tx.stockOpname, id, { status: 'Cancelled', cancelledAt: new Date() });
       await assertPeriodsOpen(tx, [{ date: so.date }, { fiscalYearId: so.fiscalYearId, date: so.date }], 'stok opname');
 
       // Reverse stock movements. A movement that is gone or was already cancelled per row (possible
       // before E3-R2) has moved its stock back already, so its line is skipped, not reversed twice.
       // The amount comes from the movement itself, not opItem.difference: before E3-R2 the per-row
       // edit could change an opname movement's type or quantity in place.
-      const itemsWithMovement = so.items.filter((i: any) => i.movementId);
-      for (const opItem of itemsWithMovement) {
-        const mov = await tx.stockMovement.findUnique({
-          where: { id: opItem.movementId },
-          select: { warehouseId: true, isCancelled: true, movementType: true, quantity: true },
-        });
-        if (!mov || mov.isCancelled) continue;
+      const movementIds: string[] = so.items.filter((i: any) => i.movementId).map((i: any) => i.movementId);
+      const movements = await tx.stockMovement.findMany({
+        where: { id: { in: movementIds }, isCancelled: false },
+        select: { id: true, itemId: true, warehouseId: true, movementType: true, quantity: true },
+      });
+      // Lock all items first, then check what the reversal takes out (surplus lines) per warehouse.
+      await lockInventoryRows(tx, {
+        itemIds: movements.map((m) => m.itemId),
+        pairs: movements.flatMap((m) => (m.warehouseId ? [{ itemId: m.itemId, warehouseId: m.warehouseId }] : [])),
+      });
+      await assertStockAvailable(
+        tx,
+        movements
+          .filter((m) => INBOUND_TYPES.includes(m.movementType))
+          .map((m) => ({ itemId: m.itemId, warehouseId: m.warehouseId, quantity: m.quantity.toString() })),
+        { context: 'stockOpname.cancel', userId: req.user!.userId, reversal: true },
+      );
+
+      for (const mov of movements) {
         const qty = Number(mov.quantity);
         const reverse = INBOUND_TYPES.includes(mov.movementType) ? -qty : qty;
         if (reverse === 0) continue;
 
-        // Check stock sufficiency when the reversal reduces stock
-        if (reverse < 0 && Number(opItem.item.currentStock) < -reverse) {
-          throw new BusinessError(
-            `Tidak dapat membatalkan: stok '${opItem.item.name}' tidak mencukupi untuk pembalikan.`
-          );
-        }
-
         // Reverse stock (item-level total + per-warehouse from the original movement)
         await tx.inventoryItem.update({
-          where: { id: opItem.itemId },
+          where: { id: mov.itemId },
           data: { currentStock: { increment: reverse } },
         });
-        await adjustWarehouseStock(tx, opItem.itemId, mov.warehouseId ?? null, reverse);
+        await adjustWarehouseStock(tx, mov.itemId, mov.warehouseId ?? null, reverse);
         await tx.stockMovement.update({
-          where: { id: opItem.movementId },
+          where: { id: mov.id },
           data: { isCancelled: true },
         });
       }
@@ -459,10 +461,6 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
         trail: cancelTrail(req.user!.userId),
       });
 
-      await tx.stockOpname.update({
-        where: { id },
-        data: { status: 'Cancelled' as any, cancelledAt: new Date() },
-      });
     }, { timeout: 15000 });
 
     return res.json({ message: 'Stok opname dibatalkan.' });

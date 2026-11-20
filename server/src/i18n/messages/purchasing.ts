@@ -50,7 +50,7 @@ export const PURCHASING_MESSAGES: MessageDictionary = {
   "STT {0} terkait invoice {1} (Submitted, belum dibayar). Batalkan invoice tersebut dulu.": "Goods receipt {0} is linked to invoice {1} (Submitted, unpaid). Cancel that invoice first.",
   "STT {0} masih ditagih di invoice pembelian {1} ({2}). Batalkan invoice tersebut dulu.": "Goods receipt {0} is still billed on purchase invoice {1} ({2}). Cancel that invoice first.",
   "Tidak dapat membatalkan STT {0}: barang dari penerimaan ini sudah dipakai di transaksi lain ({1}). Batalkan transaksi tersebut terlebih dahulu.": "Cannot cancel goods receipt {0}: items from this receipt are already used in other transactions ({1}). Cancel those transactions first.",
-  "Tidak dapat membatalkan STT {0}: stok '{1}' tidak mencukupi untuk pembalikan (tersedia {2}, perlu {3}). Barang sudah keluar (terjual/produksi). Batalkan transaksi tersebut dulu.": "Cannot cancel goods receipt {0}: not enough stock of '{1}' to reverse (available {2}, needed {3}). The goods have already left (sold or used in production). Cancel those transactions first.",
+  "Tidak dapat membatalkan STT {0}: stok '{1}' di {2} tidak mencukupi untuk pembalikan (tersedia {3}, perlu {4}). Barang sudah keluar (terjual/produksi). Batalkan transaksi tersebut dulu.": "Cannot cancel goods receipt {0}: not enough stock of '{1}' in {2} to reverse (available {3}, needed {4}). The goods have already left (sold or used in production). Cancel those transactions first.",
   "Status STT tidak dikenal.": "Unknown goods receipt status.",
   "Supplier tidak ditemukan.": "Supplier not found.",
   "Supplier '{0}' tidak aktif.": "Supplier '{0}' is inactive.",

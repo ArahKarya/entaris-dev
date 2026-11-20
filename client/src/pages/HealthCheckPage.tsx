@@ -53,6 +53,7 @@ type CheckKey =
   | 'orphanAle'
   | 'stockMismatch'
   | 'warehouseDrift'
+  | 'inventoryVarianceAccount'
   | 'arSubledger'
   | 'customerDepositSubledger'
   | 'apSubledger'
@@ -70,6 +71,7 @@ const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
   'Orphan ALE Entries': { key: 'orphanAle' },
   'Stock vs Movement Mismatch': { key: 'stockMismatch' },
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
+  'Inventory Variance Account': { key: 'inventoryVarianceAccount' },
   'AR vs Subledger': { key: 'arSubledger' },
   'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
   'AP vs Subledger': { key: 'apSubledger' },

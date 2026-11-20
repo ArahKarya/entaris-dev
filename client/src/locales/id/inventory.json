@@ -212,6 +212,7 @@
       },
       "editFromDocument": "Gerakan dari {{doc}} hanya bisa diubah atau dibatalkan lewat halaman {{page}}.",
       "openingBalance": "Gerakan saldo awal tidak bisa diubah per baris. Koreksi stok awal lewat Penyesuaian Stok.",
+      "stockDriftRepair": "Gerakan perbaikan selisih gudang tidak bisa diubah per baris. Koreksi lewat Penyesuaian Stok.",
       "page": {
         "GoodsReceipt": "STT",
         "DeliveryOrder": "Surat Jalan",
@@ -228,6 +229,7 @@
       "AdjustmentOut": "Penyesuaian −",
       "In": "Masuk",
       "Out": "Keluar",
+      "Revaluation": "Revaluasi Nilai",
       "TransferIn": "Transfer Masuk",
       "TransferOut": "Transfer Keluar"
     },
@@ -239,6 +241,7 @@
       "PurchaseInvoice": "Invoice Pembelian",
       "SalesInvoice": "Invoice Penjualan",
       "SalesReturn": "Retur Penjualan",
+      "StockDriftRepair": "Perbaikan Selisih Gudang",
       "StockOpname": "Stok Opname",
       "StockTransfer": "Transfer Stok"
     }
@@ -414,7 +417,9 @@
     "description": "Pergerakan stok masuk, keluar, atau penyesuaian beserta posting ke COA.",
     "errors": {
       "dateRequired": "Tanggal wajib diisi.",
-      "quantityMin": "Kuantitas minimal 0,001."
+      "offsetRequired": "Akun lawan wajib dipilih untuk stok masuk.",
+      "quantityMin": "Kuantitas minimal 0,001.",
+      "unitCostRequired": "Stok masuk wajib memakai harga satuan lebih dari 0."
     },
     "fields": {
       "date": "Tanggal",
@@ -422,16 +427,19 @@
       "movementType": "Tipe Gerakan",
       "notes": "Catatan",
       "offsetAccount": "Akun Lawan",
-      "offsetAccountOptional": "Akun Lawan (opsional)",
+      "offsetAccountVariance": "Akun Lawan (kosong = Selisih Persediaan)",
       "quantity": "Kuantitas",
       "referenceNumber": "Nomor Referensi",
       "totalValue": "Total Nilai",
       "unitCost": "Harga Satuan",
+      "unitCostAverage": "Harga Satuan (rata-rata sistem)",
       "warehouse": "Gudang"
     },
     "hints": {
-      "offsetMissing": "Pilih akun lawan agar nilai stok tercatat di COA.",
-      "offsetPurpose": "Untuk posting ke COA.",
+      "averageCost": "Stok keluar selalu dinilai rata-rata sistem saat disimpan; nilai di sini perkiraan.",
+      "offsetRequired": "Wajib untuk stok masuk. Ekuitas Saldo Awal, akun kontrol, akun pajak, dan akun persediaan tidak bisa dipakai.",
+      "offsetNoLongerAllowed": "Akun lawan tersimpan {{account}} tidak bisa dipakai lagi untuk mutasi stok (misalnya Ekuitas Saldo Awal). Pilih akun lain.",
+      "offsetVariance": "Kosongkan untuk membukukan ke akun Selisih Persediaan.",
       "stockCurrent": "Stok saat ini: {{qty}} {{unit}}",
       "stockInWarehouse": "Stok di gudang ini: {{qty}} {{unit}}",
       "warehouseLocked": "Gudang tidak dapat dipindah lewat edit."

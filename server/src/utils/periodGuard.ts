@@ -115,7 +115,7 @@ export function fiscalYearOn(db: Tx, date: Date): Promise<FiscalYear | null> {
  * Postgres lock_not_available (55P03), raised when a lock wait outlasts lock_timeout. Through the
  * pg driver adapter a raw query fails with P2010 and the SQLSTATE in meta.driverAdapterError.
  */
-function isLockTimeout(err: unknown): boolean {
+export function isLockTimeout(err: unknown): boolean {
   const e = err as { meta?: { code?: unknown; driverAdapterError?: { cause?: { code?: unknown } } } } | null;
   return e?.meta?.driverAdapterError?.cause?.code === '55P03' || e?.meta?.code === '55P03';
 }

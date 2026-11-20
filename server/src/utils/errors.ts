@@ -4,10 +4,13 @@ import { logger } from '../lib/logger';
 export class BusinessError extends Error {
   /** Stable machine-readable code for clients; the message may be translated. */
   readonly code?: string;
-  constructor(message: string, code?: string) {
+  /** HTTP status handleRouteError answers with: 400 by default, 409 for a retryable conflict. */
+  readonly status: 400 | 409;
+  constructor(message: string, code?: string, status: 400 | 409 = 400) {
     super(message);
     this.name = 'BusinessError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -27,17 +30,42 @@ export function isLedgerUnbalanced(error: unknown): boolean {
   return /unbalanced|fiscal year split/i.test(text);
 }
 
+/** Error code (409): another posting held the stock rows too long or deadlocked with this one; retry. */
+export const STOCK_BUSY = 'STOCK_BUSY';
+export const STOCK_BUSY_MESSAGE = 'Stok barang ini sedang diproses transaksi lain. Coba lagi beberapa saat lagi.';
+
+/**
+ * True for a Postgres deadlock_detected (40P01). Until every stock writer follows the lock order
+ * in services/inventory/stockLocks.ts, a writer that still takes item rows and the 'SM' number
+ * lock in another order can deadlock with one that follows it; Postgres aborts one of them, and
+ * retrying is safe. The SQLSTATE sits on meta.driverAdapterError for a raw query and on the error,
+ * meta or cause otherwise, so all are read.
+ */
+export function isDeadlock(error: unknown): boolean {
+  const e = error as {
+    code?: unknown;
+    meta?: { code?: unknown; driverAdapterError?: { cause?: { code?: unknown } } };
+    cause?: { code?: unknown; cause?: { code?: unknown } };
+  } | null | undefined;
+  if (!e) return false;
+  return [e.code, e.meta?.code, e.meta?.driverAdapterError?.cause?.code, e.cause?.code, e.cause?.cause?.code].includes('40P01');
+}
+
 /**
  * Standardized error handler for route catch blocks.
  * Handles BusinessError, Prisma errors, and transaction timeouts consistently.
  */
 export function handleRouteError(res: Response, error: any, context: string, fallbackMsg: string) {
   if (error instanceof BusinessError) {
-    return res.status(400).json(error.code ? { error: error.message, code: error.code } : { error: error.message });
+    return res.status(error.status).json(error.code ? { error: error.message, code: error.code } : { error: error.message });
   }
   if (isLedgerUnbalanced(error)) {
     logger.error({ error }, `Ledger balance trigger rejected the transaction: ${context}`);
     return res.status(409).json({ error: 'Jurnal tidak seimbang di buku besar; transaksi dibatalkan.', code: 'LEDGER_UNBALANCED' });
+  }
+  if (isDeadlock(error)) {
+    logger.warn({ error }, `Deadlock, transaction aborted: ${context}`);
+    return res.status(409).json({ error: STOCK_BUSY_MESSAGE, code: STOCK_BUSY });
   }
   if (error?.code === 'P2025') {
     return res.status(400).json({ error: 'Data terkait tidak ditemukan. Periksa referensi yang dipilih.' });

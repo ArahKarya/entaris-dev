@@ -5,7 +5,9 @@ import { updateAccountBalance } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
 import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
+import { lockInventoryRows } from './inventory/stockLocks';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 
 type Tx = Prisma.TransactionClient;
 
@@ -54,6 +56,9 @@ export async function settleCogsBackfillForItem(
     orderBy: { createdAt: 'asc' },
   });
   if (pendings.length === 0) return null;
+  // The caller already holds the item lock (its stock-in locked it); taking it again is free and
+  // keeps the average read below behind it if a caller ever does not.
+  await lockInventoryRows(tx, { itemIds: [itemId] });
 
   let remaining = new Decimal(qtyAvailable);
   let totalDifferential = new Decimal(0);
@@ -138,7 +143,7 @@ export async function settleCogsBackfillForItem(
       const oldAvg = new Decimal(fresh.averageCost.toString());
       const oldGlValue = stockDec.mul(oldAvg);
       const newGlValue = oldGlValue.minus(totalDifferential);
-      const newAvg = newGlValue.div(stockDec).toDecimalPlaces(2);
+      const newAvg = newGlValue.div(stockDec).toDecimalPlaces(UNIT_COST_DP);
       await tx.inventoryItem.update({
         where: { id: itemId },
         data: { averageCost: newAvg.toNumber() < 0 ? 0 : newAvg.toNumber() },

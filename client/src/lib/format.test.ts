@@ -7,6 +7,7 @@ import {
   formatNumber,
   formatPercent,
   formatRupiah,
+  formatUnitCost,
   NUM_CLASS,
   parseDate,
 } from './format';
@@ -53,6 +54,21 @@ describe('formatRupiah', () => {
 
   it('never rounds -0 into "-Rp 0"', () => {
     expect(plain(formatRupiah(-0.2))).toBe('Rp 0');
+  });
+});
+
+describe('formatUnitCost', () => {
+  it('shows up to 6 decimals and drops trailing zeros', () => {
+    expect(plain(formatUnitCost(5000.666667))).toBe('Rp 5.000,666667');
+    expect(plain(formatUnitCost('10166.670000'))).toBe('Rp 10.166,67');
+    expect(plain(formatUnitCost(5000))).toBe('Rp 5.000');
+    expect(formatUnitCost(1234.5, { symbol: false })).toBe('1.234,5');
+  });
+
+  it('handles negatives, tiny residues and empty input', () => {
+    expect(plain(formatUnitCost(-12.25))).toBe('-Rp 12,25');
+    expect(plain(formatUnitCost(-0.0000001))).toBe('Rp 0');
+    expect(formatUnitCost(null)).toBe(EMPTY_VALUE);
   });
 });
 

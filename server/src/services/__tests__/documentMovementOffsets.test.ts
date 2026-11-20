@@ -76,7 +76,8 @@ describe('goods receipt movements', () => {
 describe('delivery order movements', () => {
   const doHandlers = () => ({
     'party.findUnique': () => ({ id: 'cust', name: 'Cust', isActive: true, partyType: 'Customer' }),
-    'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true }],
+    // lockInventoryRows reads the items back after locking them; the average comes from here.
+    'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '9000' }],
     'inventoryItem.findUnique': () => ({ id: 'i1', name: 'Beras', unit: 'Kg', averageCost: '9000' }),
     'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
     'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '100' }],
@@ -131,7 +132,10 @@ describe('delivery order movements', () => {
 
   it('no counter account for a zero-value line', async () => {
     const h = doHandlers();
-    const { tx, fn } = makeAutoTx({ ...h, 'inventoryItem.findUnique': () => ({ id: 'i1', name: 'Beras', unit: 'Kg', averageCost: '0' }) });
+    const { tx, fn } = makeAutoTx({
+      ...h,
+      'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '0' }],
+    });
     await submitDeliveryOrderInTx(tx, body, 'u1');
     expect(movementData(fn)[0]?.offsetAccountId).toBeNull();
   });

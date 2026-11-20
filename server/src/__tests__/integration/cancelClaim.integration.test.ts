@@ -60,6 +60,7 @@ import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { STALE_STATUS } from '../../utils/cancelClaim';
 import { invalidatePermissionCache } from '../../services/permissionService';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -242,10 +243,8 @@ async function seedStt() {
   const fy = await createFiscalYear(prisma as unknown as Tx, { year: 2088 });
   const supplier = await prisma.party.create({ data: { name: `IT-E1R4-Supplier-${tag()}`, partyType: 'Supplier', isActive: true } });
   const item = await prisma.inventoryItem.create({
-    data: { code: `IT-E1R4-${tag()}`, name: `Uji STT ganda ${tag()}`, unit: 'kg', currentStock: 10_000, averageCost: 9_000, isActive: true },
+    data: { code: `IT-E1R4-${tag()}`, name: `Uji STT ganda ${tag()}`, unit: 'kg', isActive: true },
   });
-  // State right after a 10 t STT against a PO line (no journal: the cancel then posts none).
-  await prisma.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: 10_000 } });
   const po = await prisma.purchaseOrder.create({
     data: {
       poNumber: `PO-E1R4-${tag()}`, date: new Date('2088-04-01'), partyId: supplier.id, fiscalYearId: fy.id, createdBy: userId,
@@ -253,12 +252,11 @@ async function seedStt() {
     },
     include: { items: true },
   });
-  const movement = await prisma.stockMovement.create({
-    data: {
-      movementNumber: `SM-E1R4-${tag()}`, date: new Date('2088-04-02'), itemId: item.id, movementType: 'In', quantity: 10_000,
-      unitCost: 9_000, warehouseId, fiscalYearId: fy.id, createdById: userId, referenceType: 'GoodsReceipt',
-    },
+  // State right after a 10 t STT against a PO line (no journal: the cancel then posts none).
+  const { movementId } = await seedStock(prisma as unknown as Tx, {
+    itemId: item.id, warehouseId, qty: 10_000, avg: 9_000, date: '2088-04-02', fiscalYearId: fy.id, userId,
   });
+  const movement = await prisma.stockMovement.update({ where: { id: movementId }, data: { referenceType: 'GoodsReceipt' } });
   const stt = await prisma.goodsReceipt.create({
     data: {
       sttNumber: `STT-E1R4-${tag()}`, date: new Date('2088-04-02'), partyId: supplier.id, fiscalYearId: fy.id, createdBy: userId,

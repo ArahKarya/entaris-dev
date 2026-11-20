@@ -15,6 +15,8 @@ import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
+import { mapProductionLeafAccounts } from '../helpers/productionFixture';
+import { systemAccounts } from '../../services/systemAccounts';
 import { BusinessError } from '../../utils/errors';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 
@@ -35,6 +37,7 @@ import { queueEditApproval } from '../../services/approvalEditRequests';
 import { decideApproval } from '../../services/approvalDecision';
 import movementsRouter from '../../routes/inventory/movements';
 import stockOpnameRouter from '../../routes/stockOpname';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -45,6 +48,8 @@ let pool: Pool;
 let userId: string;
 let role: string;
 let warehouseId: string;
+/** Offset account of the manual movements (an inbound one requires it), created in each rollback transaction. */
+let offsetAccountId: string;
 
 beforeAll(async () => {
   if (!hasDb) return;
@@ -71,9 +76,15 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
       try {
         // Movement edits and cancels and opname cancels require doc.cancel.
         ({ userId, role } = await createCapUser(tx, ['doc.cancel']));
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
+        offsetAccountId = (await tx.account.create({
+          data: { name: 'IT-E1R2 Lawan mutasi', accountNumber: `IT-E1R2-${tag()}`, accountType: 'EXPENSE', rootType: 'EXPENSE' },
+        })).id;
         await fn(tx);
       } finally {
         state.tx = null;
+        systemAccounts.invalidateCache();
       }
       throw new RollbackSentinel();
     }, { timeout: 60000 });
@@ -119,9 +130,9 @@ const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 /** An active inventory item with `stock` on hand in the test warehouse. */
 async function stockItem(tx: Tx, stock: number, averageCost: number) {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-E1R2-${tag()}`, name: `Uji tutup buku ${tag()}`, unit: 'kg', currentStock: stock, averageCost, isActive: true },
+    data: { code: `IT-E1R2-${tag()}`, name: `Uji tutup buku ${tag()}`, unit: 'kg', isActive: true },
   });
-  await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: stock } });
+  if (stock > 0) await seedStock(tx, { itemId: item.id, warehouseId, qty: stock, avg: averageCost, date: `${Y}-01-02`, userId });
   return item;
 }
 
@@ -179,7 +190,7 @@ async function journalIdsOf(tx: Tx, documentNumber: string): Promise<string[]> {
 
 /** POST /inventory/movements; returns the created movement. */
 async function postMovement(tx: Tx, body: Record<string, unknown>) {
-  const r = await callRoute(movementsRouter, 'post', '/', { body: { warehouseId, ...body }, userId, role });
+  const r = await callRoute(movementsRouter, 'post', '/', { body: { warehouseId, offsetAccountId, ...body }, userId, role });
   expect(r.status, JSON.stringify(r.body)).toBe(201);
   return tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } });
 }
@@ -210,18 +221,19 @@ d('closed fiscal year: stock movements', () => {
       const before = await snapshot(tx, [item.id], [mov.journalEntryId!]);
       expectPeriodClosed(await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: mov.id },
-        body: { movementType: 'AdjustmentOut', quantity: 5_000, unitCost: 10_000, date: `${Y + 1}-01-05` },
+        body: { movementType: 'AdjustmentOut', quantity: 5_000, unitCost: 10_000, date: `${Y + 1}-01-05`, offsetAccountId },
         userId, role,
       }));
       expect(await snapshot(tx, [item.id], [mov.journalEntryId!])).toEqual(before);
     });
   });
 
-  it('rejects moving an open-year movement into a closed year, also without a journal (unit cost 0)', async () => {
+  it('rejects moving an open-year movement into a closed year, also without a journal (average cost 0)', async () => {
     await inRollback(async (tx) => {
       const { old, next } = await years(tx);
+      // A manual inbound row needs a cost now; an outbound row of an item without a cost posts no journal.
       const item = await stockItem(tx, 100, 0);
-      const mov = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentIn', quantity: 10, unitCost: 0, date: `${Y + 1}-01-10` });
+      const mov = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentOut', quantity: 10, date: `${Y + 1}-01-10` });
       expect(mov.journalEntryId).toBeNull();
       expect(mov.fiscalYearId).toBe(next.id);
       await close(tx, old);
@@ -229,7 +241,7 @@ d('closed fiscal year: stock movements', () => {
       const before = await snapshot(tx, [item.id], []);
       expectPeriodClosed(await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: mov.id },
-        body: { movementType: 'AdjustmentIn', quantity: 10, unitCost: 0, date: `${Y}-12-20` },
+        body: { movementType: 'AdjustmentOut', quantity: 10, date: `${Y}-12-20` },
         userId, role,
       }));
       expect(await snapshot(tx, [item.id], [])).toEqual(before);
@@ -245,7 +257,7 @@ d('closed fiscal year: stock movements', () => {
 
       const r = await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: mov.id },
-        body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-05` },
+        body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-05`, offsetAccountId },
         userId, role,
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
@@ -269,7 +281,7 @@ d('closed fiscal year: stock movements', () => {
 
       const r = await callRoute(movementsRouter, 'put', '/:id', {
         params: { id: edited.id },
-        body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-10` },
+        body: { movementType: 'AdjustmentIn', quantity: 12, unitCost: 1_000, date: `${Y + 1}-01-10`, offsetAccountId },
         userId, role,
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);

@@ -8,12 +8,15 @@
  *   - final item totals reflect the edited (not original) numbers
  *   - account balances recalculated from JE sums (no drift)
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { submitProductionRunInTx } from '../../services/productionRunSubmit';
+import { systemAccounts } from '../../services/systemAccounts';
+import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { editProductionRunInTx } from '../../services/productionRunEdit';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -38,6 +41,9 @@ beforeAll(async () => {
   warehouseId = wh.id;
 });
 
+// The leaf mapping rolls back with each test; drop the cached copy too.
+afterEach(() => systemAccounts.invalidateCache());
+
 afterAll(async () => {
   if (prisma) await prisma.$disconnect();
   if (pool) await pool.end();
@@ -53,28 +59,24 @@ d('editProductionRunInTx — single input / single output', () => {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
         // Ensure a default warehouse for resolveWarehouseId in submit/edit.
         const inputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-EDIT-IN-${stamp}`,
             name: `Edit Input ${stamp}`,
             unit: 'kg',
-            currentStock: 200,
-            averageCost: 10_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: inputItem.id, warehouseId, currentStock: 200 },
-        });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 200, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-EDIT-OUT-${stamp}`,
             name: `Edit Output ${stamp}`,
             unit: 'kg',
-            currentStock: 0,
-            averageCost: 0,
             isActive: true,
           },
         });
@@ -162,12 +164,12 @@ d('editProductionRunInTx — single input / single output', () => {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
         const inputItem = await tx.inventoryItem.create({
-          data: { code: `TEST-CXL-EDIT-IN-${stamp}`, name: `X ${stamp}`, unit: 'kg', currentStock: 100, averageCost: 1000, isActive: true },
+          data: { code: `TEST-CXL-EDIT-IN-${stamp}`, name: `X ${stamp}`, unit: 'kg', isActive: true },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: inputItem.id, warehouseId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 1000, date: new Date().toISOString().slice(0, 10), userId });
         const outputItem = await tx.inventoryItem.create({
           data: { code: `TEST-CXL-EDIT-OUT-${stamp}`, name: `Y ${stamp}`, unit: 'kg', isActive: true },
         });

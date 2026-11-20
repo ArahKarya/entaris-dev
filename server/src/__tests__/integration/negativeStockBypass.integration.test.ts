@@ -18,6 +18,8 @@ import { Pool } from 'pg';
 import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
+import { mapProductionLeafAccounts } from '../helpers/productionFixture';
+import { systemAccounts } from '../../services/systemAccounts';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -29,6 +31,7 @@ import goodsReceiptsRouter from '../../routes/goodsReceipts';
 import productionRunsRouter from '../../routes/inventory/productionRuns';
 import movementsRouter from '../../routes/inventory/movements';
 import approvalsRouter from '../../routes/approvals';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -57,10 +60,13 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
       state.tx = tx;
       invalidatePermissionCache();
       try {
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
         await fn(tx);
       } finally {
         state.tx = null;
         invalidatePermissionCache();
+        systemAccounts.invalidateCache();
       }
       throw new RollbackSentinel();
     }, { timeout: 60000 });
@@ -89,16 +95,22 @@ async function setup(tx: Tx) {
 
 async function stockItem(tx: Tx, warehouseId: string, stock: number, averageCost: number) {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-E3R1-${tag()}`, name: `Uji stok minus ${tag()}`, unit: 'kg', currentStock: stock, averageCost, isActive: true },
+    data: { code: `IT-E3R1-${tag()}`, name: `Uji stok minus ${tag()}`, unit: 'kg', isActive: true },
   });
-  await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: stock } });
+  if (stock > 0) await seedStock(tx, { itemId: item.id, warehouseId, qty: stock, avg: averageCost, date: `${Y}-01-02` });
+  else await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: 0 } }); // an empty row to read back
   return item;
 }
 
-/** A manual "Penyesuaian Stok -" through the movements route: no sourceMovementId. */
+/**
+ * A manual "Penyesuaian Stok -" through the movements route: no sourceMovementId. It is valued at
+ * the average; its own expense offset keeps the test off the INVENTORY_VARIANCE mapping.
+ */
 async function adjustOut(tx: Tx, who: Actor, warehouseId: string, itemId: string, quantity: number, unitCost: number) {
+  const code = `IT-E3R1-${tag()}`;
+  const offset = await tx.account.create({ data: { name: `Lawan ${code}`, accountNumber: code, accountType: 'EXPENSE', rootType: 'EXPENSE' } });
   const r = await callRoute(movementsRouter, 'post', '/', {
-    body: { warehouseId, itemId, movementType: 'AdjustmentOut', quantity, unitCost, date: `${Y}-03-12` },
+    body: { warehouseId, itemId, movementType: 'AdjustmentOut', quantity, unitCost, date: `${Y}-03-12`, offsetAccountId: offset.id },
     userId: who.userId,
     role: who.role,
   });

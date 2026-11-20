@@ -73,9 +73,9 @@ export function toItemExportRows(items: readonly InventoryItemRow[]): Record<str
 
 // Stock movements
 
-export type MovementType = 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut' | 'TransferIn' | 'TransferOut';
+export type MovementType = 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut' | 'TransferIn' | 'TransferOut' | 'Revaluation';
 
-export const MOVEMENT_TYPES: readonly MovementType[] = ['In', 'Out', 'AdjustmentIn', 'AdjustmentOut', 'TransferIn', 'TransferOut'];
+export const MOVEMENT_TYPES: readonly MovementType[] = ['In', 'Out', 'AdjustmentIn', 'AdjustmentOut', 'TransferIn', 'TransferOut', 'Revaluation'];
 
 const isMovementType = (type: string): type is MovementType => (MOVEMENT_TYPES as readonly string[]).includes(type);
 
@@ -96,6 +96,9 @@ const INBOUND = new Set<string>(['In', 'AdjustmentIn', 'TransferIn']);
 
 export const isInbound = (type: string): boolean => INBOUND.has(type);
 
+/** A Revaluation moves value only (quantity 0): it is neither inbound nor outbound. */
+export const isValueOnly = (type: string): boolean => type === 'Revaluation';
+
 /** Source documents of system-generated movements (label key: inventoryRows.referenceType.<type>). */
 const REFERENCE_TYPES = [
   'GoodsReceipt',
@@ -107,6 +110,7 @@ const REFERENCE_TYPES = [
   'StockOpname',
   'StockTransfer',
   'OpeningBalance',
+  'StockDriftRepair',
 ] as const;
 type ReferenceType = (typeof REFERENCE_TYPES)[number];
 const isReferenceType = (type: string): type is ReferenceType => (REFERENCE_TYPES as readonly string[]).includes(type);
@@ -147,6 +151,9 @@ export interface StockMovementSummary {
   outCount: number;
   outQty: number;
   outValue: number;
+  /** Value-only Revaluation rows, outside the in/out totals. */
+  revaluationCount: number;
+  revaluationValue: number;
 }
 
 /** Documents that write their own movements (server: services/documentMovementLock.ts). */
@@ -161,11 +168,13 @@ type LockableRow = Pick<StockMovementRow, 'referenceType' | 'referenceId' | 'mov
 /**
  * Mirrors the server's document lock so the menu never offers an action that is always rejected:
  * a movement of a document that names it (referenceId set) is changed through that document,
- * OpeningBalance is corrected with a stock adjustment, and transfer rows only through the transfer.
+ * OpeningBalance and the drift repair write-off (StockDriftRepair) are corrected with a stock
+ * adjustment, and transfer rows only through the transfer.
  */
 function documentBlock(m: LockableRow, action: 'edit' | 'cancel'): string | null {
   if (m.isCancelled) return i18n.t('inventoryRows.block.cancelled', { ns: 'inventory' });
   if (m.referenceType === 'OpeningBalance') return i18n.t('inventoryRows.block.openingBalance', { ns: 'inventory' });
+  if (m.referenceType === 'StockDriftRepair') return i18n.t('inventoryRows.block.stockDriftRepair', { ns: 'inventory' });
   const isTransfer = m.movementType === 'TransferIn' || m.movementType === 'TransferOut';
   const doc: LockingDocument | null = isTransfer
     ? 'StockTransfer'

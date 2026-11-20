@@ -29,10 +29,21 @@ function makeTx(initial: Record<string, any> = {}) {
     drafts,
     inventoryItem: {
       findMany: vi.fn().mockResolvedValue([
-        { id: 'gkp', name: 'GKP', unit: 'kg', currentStock: 400 },
-        { id: 'brs', name: 'Beras', unit: 'kg', currentStock: 0 },
-        { id: 'sek', name: 'Sekam', unit: 'kg', currentStock: 0 },
+        { id: 'gkp', name: 'GKP', unit: 'kg' },
+        { id: 'brs', name: 'Beras', unit: 'kg' },
+        { id: 'sek', name: 'Sekam', unit: 'kg' },
       ]),
+    },
+    // GKP: 400 kg at the default warehouse A, 5.000 kg at B (stock elsewhere does not count).
+    warehouse: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'wh-a' }),
+      findUnique: vi.fn(async ({ where }: any) => ({ name: where.id === 'wh-a' ? 'Gudang A' : 'Gudang B' })),
+    },
+    inventoryStock: {
+      findMany: vi.fn(async ({ where }: any) => [
+        { itemId: 'gkp', warehouseId: 'wh-a', currentStock: 400 },
+        { itemId: 'gkp', warehouseId: 'wh-b', currentStock: 5000 },
+      ].filter((r) => where.OR.some((p: any) => p.itemId === r.itemId && p.warehouseId === r.warehouseId))),
     },
     approvalRequest: { create: vi.fn().mockResolvedValue({ id: 'req-1' }) },
     productionRunDraft: {
@@ -64,12 +75,13 @@ describe('pure helpers', () => {
     const w = buildStockWarnings(
       [{ itemId: 'gkp', quantity: 300 }, { itemId: 'gkp', quantity: 300 }],
       new Map([['gkp', { name: 'GKP', unit: 'kg', currentStock: 400 }]]),
+      'Gudang A',
     );
     expect(w).toHaveLength(1);
-    expect(w[0]).toContain("'GKP'");
+    expect(w[0]).toContain("'GKP' di gudang Gudang A");
   });
   it('no warning when enough stock', () => {
-    expect(buildStockWarnings([{ itemId: 'gkp', quantity: 10 }], new Map([['gkp', { name: 'GKP', unit: 'kg', currentStock: 400 }]]))).toEqual([]);
+    expect(buildStockWarnings([{ itemId: 'gkp', quantity: 10 }], new Map([['gkp', { name: 'GKP', unit: 'kg', currentStock: 400 }]]), 'Gudang A')).toEqual([]);
   });
 });
 
@@ -82,6 +94,12 @@ describe('create / update / discard', () => {
     expect(r.draft.payload).toEqual({ raw: true });
     expect(r.warnings).toHaveLength(1);
     expect(submitRun).not.toHaveBeenCalled();
+  });
+  it('warns against the payload warehouse, not stock held elsewhere', async () => {
+    const atB = await createDraft(makeTx(), { ...BODY, warehouseId: 'wh-b' }, BODY, 'u1');
+    expect(atB.warnings).toEqual([]);
+    const atA = await createDraft(makeTx(), { ...BODY, warehouseId: 'wh-a', inputs: [{ itemId: 'gkp', quantity: 300 }, { itemId: 'gkp', quantity: 300 }] }, BODY, 'u1');
+    expect(atA.warnings).toEqual(["Stok 'GKP' di gudang Gudang A saat ini 400 kg, dibutuhkan 600 kg. Dicek ulang saat posting."]);
   });
   it('skips warnings when allowNegativeStock', async () => {
     const r = await createDraft(makeTx(), { ...BODY, allowNegativeStock: true }, BODY, 'u1');

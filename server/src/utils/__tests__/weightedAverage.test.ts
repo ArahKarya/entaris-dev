@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calcWeightedAverage } from '../weightedAverage';
+import { calcAverageAfterRemoval, calcWeightedAverage } from '../weightedAverage';
 
 describe('calcWeightedAverage', () => {
   it('calculates WAC for first stock-in (empty stock)', () => {
@@ -10,9 +10,9 @@ describe('calcWeightedAverage', () => {
   it('calculates WAC when adding to existing stock', () => {
     // 100 kg @ 5000 = 500,000
     // + 50 kg @ 6000 = 300,000
-    // total = 800,000 / 150 = 5333.33
+    // total = 800,000 / 150 = 5333.333333 (UNIT_COST_DP = 6)
     const result = calcWeightedAverage(100, 5000, 50, 6000);
-    expect(result).toBe(5333.33);
+    expect(result).toBe(5333.333333);
   });
 
   it('anchors to the incoming unit cost when current stock is zero (no meaningful prior average)', () => {
@@ -24,14 +24,14 @@ describe('calcWeightedAverage', () => {
   it('handles large production values (rice mill scale)', () => {
     // 50,000 kg @ 8,500/kg = 425M
     // + 10,000 kg @ 9,200/kg = 92M
-    // total = 517M / 60,000 = 8,616.67
+    // total = 517M / 60,000 = 8,616.666667
     const result = calcWeightedAverage(50000, 8500, 10000, 9200);
-    expect(result).toBe(8616.67);
+    expect(result).toBe(8616.666667);
   });
 
   it('handles Decimal-like inputs (string coercion)', () => {
     const result = calcWeightedAverage(100, 5000, 50, 6000);
-    expect(result).toBe(5333.33);
+    expect(result).toBe(5333.333333);
   });
 
   it('preserves existing cost when adding zero quantity', () => {
@@ -46,6 +46,41 @@ describe('calcWeightedAverage', () => {
     // + 567.123 kg @ 8,100/kg
     const result = calcWeightedAverage(1234.567, 7890, 567.123, 8100);
     const expected = (1234.567 * 7890 + 567.123 * 8100) / (1234.567 + 567.123);
-    expect(result).toBeCloseTo(expected, 2);
+    expect(result).toBeCloseTo(expected, 6);
+  });
+});
+
+describe('calcWeightedAverage at UNIT_COST_DP', () => {
+  it('keeps 6 decimals, so 30.000 @ 5.000 + 60.000 @ 5.001 values exactly', () => {
+    // PRD E3 acceptance: (150.000.000 + 300.060.000) / 90.000 = 5.000,666667; 90.000 x avg = 450.060.000,03,
+    // within the 0,5e-6 per unit tolerance (a 2 dp average, 5.000,67, would be 450.060.300).
+    const avg = calcWeightedAverage(30_000, 5_000, 60_000, 5_001);
+    expect(avg).toBe(5_000.666667);
+    expect(Math.abs(90_000 * avg - 450_060_000)).toBeLessThan(0.05);
+  });
+
+  it('rounds half up at the sixth decimal', () => {
+    // (1 x 1 + 2 x 2) / 3 = 1,6666666... -> 1,666667
+    expect(calcWeightedAverage(1, 1, 2, 2)).toBe(1.666667);
+    expect(calcWeightedAverage(0, 0, 10, 1234.5678915)).toBe(1234.567892);
+  });
+});
+
+describe('calcAverageAfterRemoval', () => {
+  it('takes a stock-in back out at its own cost', () => {
+    // 11.000 kg @ 6.545,454545 (10.000 @ 6.000 + 1.000 @ 12.000); removing the 1.000 @ 12.000 leaves 6.000.
+    expect(calcAverageAfterRemoval(11_000, 6_545.454545, 1_000, 12_000)).toBe(6_000);
+    expect(calcAverageAfterRemoval(200, 6_000, 100, 7_000)).toBe(5_000);
+  });
+
+  it('is the inverse of calcWeightedAverage', () => {
+    const avg = calcWeightedAverage(100, 5_000, 50, 6_000);
+    expect(calcAverageAfterRemoval(150, avg, 50, 6_000)).toBe(5_000);
+  });
+
+  it('keeps the current average when nothing would be left or the value left is negative', () => {
+    expect(calcAverageAfterRemoval(100, 6_000, 100, 7_000)).toBe(6_000);
+    expect(calcAverageAfterRemoval(100, 6_000, 150, 7_000)).toBe(6_000);
+    expect(calcAverageAfterRemoval(200, 1_000, 100, 7_000)).toBe(1_000);
   });
 });

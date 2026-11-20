@@ -5,6 +5,7 @@ import Decimal from 'decimal.js';
 import { prisma } from '../lib/prisma';
 import { systemAccounts } from '../services/systemAccounts';
 import { updateAccountBalance } from '../utils/accountBalance';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 
 async function main() {
   const invoices = await prisma.purchaseInvoice.findMany({
@@ -102,7 +103,7 @@ async function main() {
 
           // Update stock movement totalValue/unitCost for audit accuracy
           const newTotal = alloc.originalAmount.plus(alloc.share);
-          const newUnit = newTotal.div(alloc.qty).toDecimalPlaces(2);
+          const newUnit = newTotal.div(alloc.qty).toDecimalPlaces(UNIT_COST_DP);
           await tx.stockMovement.updateMany({
             where: {
               referenceType: 'PurchaseInvoice',

@@ -4,7 +4,9 @@ import { recalcPartyOutstanding } from '../utils/accountBalance';
 import { voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
-import { setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
+import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
+import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
+import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
 type Tx = Prisma.TransactionClient;
 
@@ -13,7 +15,8 @@ type Tx = Prisma.TransactionClient;
  * invoiceCancellation):
  *   - flip JV-RN (and JV-COGS-RN) to Cancelled, mark ALE rows cancelled,
  *     reverse account balances
- *   - cancel the StockMovement(s) it created and decrement stock back
+ *   - cancel the StockMovement(s) it created and decrement stock back; rejected with
+ *     STOCK_INSUFFICIENT when the return's warehouse no longer holds it (opts bypass)
  *   - restore the original invoice's outstanding by arReducedAmount
  *   - cancel the linked CustomerDeposit Payment (blocked if already applied)
  *   - recompute party outstanding
@@ -24,7 +27,14 @@ export async function cancelSalesReturnInTx(
   tx: Tx,
   returnId: string,
   trail?: CancelTrail,
+  opts: NegativeStockBypass = {},
 ): Promise<{ id: string; status: 'Cancelled' }> {
+  // AR row and invoice first, the order return submit and invoice cancel take (lock order in
+  // services/inventory/stockLocks.ts): the journal voids below lock AR while this holds item rows.
+  // The return's invoice never changes, so the plain read is safe.
+  const head = await tx.salesReturn.findUnique({ where: { id: returnId }, select: { salesInvoiceId: true } });
+  if (!head) throw new BusinessError('Retur tidak ditemukan.');
+  await lockArThenSalesInvoiceInTx(tx, head.salesInvoiceId);
   // Row lock: a second concurrent cancel waits here, then sees status Cancelled.
   await tx.$queryRaw`SELECT id FROM sales_returns WHERE id = ${returnId} FOR UPDATE`;
   const ret = await tx.salesReturn.findUnique({
@@ -49,6 +59,29 @@ export async function cancelSalesReturnInTx(
     }
   }
 
+  // Lock the restocked items before the journals lock their accounts (lock order in
+  // services/inventory/stockLocks.ts), then check that the return's warehouse still holds what it
+  // received: goods already sold or used again cannot be taken back out. allowNegativeStock (the
+  // route checked inventory.negative_stock) logs the shortage instead.
+  const movements = await tx.stockMovement.findMany({
+    where: { referenceType: 'SalesReturn', referenceId: ret.id, isCancelled: false },
+  });
+  await lockInventoryRows(tx, {
+    itemIds: movements.map((sm) => sm.itemId),
+    pairs: movements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
+  });
+  await assertStockAvailable(
+    tx,
+    movements.map((sm) => ({ itemId: sm.itemId, warehouseId: sm.warehouseId, quantity: sm.quantity.toString() })),
+    {
+      context: 'salesReturn.cancel',
+      userId: trail?.cancelledById,
+      allowNegative: opts.allowNegativeStock,
+      reason: opts.negativeStockReason,
+      reversal: true,
+    },
+  );
+
   // Reverse main + COGS journals.
   for (const jvNumber of [`JV-${ret.returnNumber}`, `JV-COGS-${ret.returnNumber}`]) {
     const journal = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber }, include: { items: true } });
@@ -56,10 +89,7 @@ export async function cancelSalesReturnInTx(
     await voidJournalInTx(tx, journal, 'retur', trail);
   }
 
-  // Cancel stock movements created by this return + decrement stock back.
-  const movements = await tx.stockMovement.findMany({
-    where: { referenceType: 'SalesReturn', referenceId: ret.id, isCancelled: false },
-  });
+  // Cancel the stock movements created by this return and take the stock back out.
   for (const sm of movements) {
     await tx.inventoryItem.update({
       where: { id: sm.itemId },

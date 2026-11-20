@@ -14,11 +14,14 @@
  *
  * Rolls back the outer tx so dev DB stays clean.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { submitProductionRunInTx } from '../../services/productionRunSubmit';
+import { systemAccounts } from '../../services/systemAccounts';
+import { mapProductionLeafAccounts } from '../helpers/productionFixture';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -45,6 +48,9 @@ beforeAll(async () => {
   warehouseId = wh.id;
 });
 
+// The leaf mapping rolls back with each test; drop the cached copy too.
+afterEach(() => systemAccounts.invalidateCache());
+
 afterAll(async () => {
   if (prisma) await prisma.$disconnect();
   if (pool) await pool.end();
@@ -60,28 +66,24 @@ d('submitProductionRunInTx — single input / single output', () => {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // This database may map COGS to a group account, which production posting refuses.
+        await mapProductionLeafAccounts(tx);
         // Setup: create input item with stock + cost, output item starts at 0.
         const inputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-IN-${stamp}`,
             name: `Test Input ${stamp}`,
             unit: 'kg',
-            currentStock: 100,
-            averageCost: 10_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: inputItem.id, warehouseId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-OUT-${stamp}`,
             name: `Test Output ${stamp}`,
             unit: 'kg',
-            currentStock: 0,
-            averageCost: 0,
             isActive: true,
           },
         });
@@ -159,11 +161,10 @@ d('submitProductionRunInTx — single input / single output', () => {
             code: `TEST-IN-LOW-${stamp}`,
             name: `Test Input Low ${stamp}`,
             unit: 'kg',
-            currentStock: 10,
-            averageCost: 5_000,
             isActive: true,
           },
         });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 10, avg: 5_000, date: new Date().toISOString().slice(0, 10), userId });
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-OUT-LOW-${stamp}`,
