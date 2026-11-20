@@ -44,6 +44,9 @@ router.get('/', async (req, res) => {
         where,
         include: {
           items: {
+            // Same key as GET /:id: the Edit action sends the list row back, and the run edit
+            // matches back-filled prices by this order.
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             include: {
               item: { select: { id: true, name: true, unit: true, code: true } },
             },

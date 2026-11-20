@@ -9,7 +9,9 @@ import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { txPrismaProxy, type Tx } from '../helpers/routeHarness';
+import { txPrismaProxy, callRoute, type Tx } from '../helpers/routeHarness';
+import { createCapUser } from '../helpers/rbacFixture';
+import productionRunsRouter from '../../routes/inventory/productionRuns';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -207,6 +209,25 @@ d('production price_is_manual (E6-R8)', () => {
       }), w.userId);
       const after = await outputLines(tx, run.id);
       expect(after.filter((l) => l.priceIsManual).map((l) => Number(l.unitPrice))).toEqual([15000]);
+    });
+  });
+
+  it('GET / lists the lines in the same (createdAt, id) order as the edit match', async () => {
+    await inWorld(async (tx, w) => {
+      await seedWorldStock(tx, w, 'gkp', 2000, 6000);
+      const run = (await submitProductionRunInTx(tx, body(w, {
+        outputs: [
+          { itemId: w.items.beras.id, quantity: 100 },
+          { itemId: w.items.beras.id, quantity: 100 },
+          { itemId: w.items.beras.id, quantity: 100 },
+        ],
+      }), w.userId))!;
+      const user = await createCapUser(tx, [], { perms: { inventory: 'view' } });
+      const res = await callRoute(productionRunsRouter, 'get', '/', { ...user, query: { search: run.runNumber } });
+      const listed = res.body.data.find((r: { id: string }) => r.id === run.id);
+      const expected = (await outputLines(tx, run.id)).map((l) => l.id);
+      expect(listed.items.filter((l: { lineType: string; isByProduct: boolean }) => l.lineType === 'Output' && !l.isByProduct)
+        .map((l: { id: string }) => l.id)).toEqual(expected);
     });
   });
 
