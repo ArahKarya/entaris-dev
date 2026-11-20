@@ -1655,6 +1655,9 @@ model ProductionRunItem {
   unitPrice        Decimal?       @map("unit_price") @db.Decimal(15, 2)
   yieldPct         Decimal?       @map("yield_pct") @db.Decimal(5, 2)
   isByProduct      Boolean        @default(false) @map("is_by_product")
+  // Main output only: unit_price was typed by the user, not back-filled with the loaded HPP.
+  // An edit refills a back-filled price from the new HPP.
+  priceIsManual    Boolean        @default(false) @map("price_is_manual")
   // Batch tracking (input side): link to the inbound StockMovement (batch)
   // that the staff picked. batchUnitCost is captured at pick time so the
   // production cost is locked even if WAC changes later.

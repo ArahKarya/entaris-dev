@@ -5,6 +5,7 @@ import { assertPeriodOpen, assertPeriodsOpen } from '../utils/periodGuard';
 import { resolveWarehouseId } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
 import type { SubmitProductionRunInput } from './productionRunSubmit';
+import { dropBackfilledOutputPrices } from './productionRunLines';
 import { computeProductionCosting } from './production/productionCosting';
 import { loadProductionCostContext } from './production/productionCostContext';
 import {
@@ -25,7 +26,7 @@ type Tx = Prisma.TransactionClient;
 export async function editProductionRunInTx(
   tx: Tx,
   runId: string,
-  body: SubmitProductionRunInput,
+  submitted: SubmitProductionRunInput,
   userId: string,
 ) {
   // Lock order (productionPosting.ts): the run row first, so a concurrent cancel or edit of the
@@ -34,6 +35,22 @@ export async function editProductionRunInTx(
   const oldRun = await tx.productionRun.findUnique({ where: { id: runId } });
   if (!oldRun) throw new BusinessError('Data proses produksi tidak ditemukan.');
   if (oldRun.isCancelled) throw new BusinessError('Proses produksi yang sudah dibatalkan tidak bisa diedit.');
+
+  // Back-filled prices the form sent back are dropped, so the new HPP refills them (E6-R8). Read
+  // before the details are cleared; the run row is locked above.
+  const oldLines = await tx.productionRunItem.findMany({
+    where: { productionRunId: runId, lineType: 'Output' },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { itemId: true, lineType: true, isByProduct: true, unitPrice: true, priceIsManual: true },
+  });
+  const body: SubmitProductionRunInput = {
+    ...submitted,
+    outputs: dropBackfilledOutputPrices(
+      submitted.outputs,
+      oldLines.map((l) => ({ ...l, unitPrice: l.unitPrice == null ? null : Number(l.unitPrice) })),
+      oldRun.computedHpp == null ? null : Number(oldRun.computedHpp),
+    ),
+  };
 
   // Old journals and auto-settle are voided and new ones posted on body.date: both periods must be
   // open. Checked before anything is reversed, and again here when an approved edit is executed.

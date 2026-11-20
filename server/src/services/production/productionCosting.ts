@@ -57,6 +57,8 @@ export interface CostedOutputLine {
   unitCostLoaded: number | null;
   /** production_run_items.unit_price: the resolved price, null when nothing priced the line. */
   persistedUnitPrice: number | null;
+  /** Main output: the price was typed (> 0), not back-filled with the loaded HPP. Always false for by-products. */
+  priceIsManual: boolean;
   /** Main output qty over total input qty, in percent; null for by-products. */
   yieldPct: number | null;
 }
@@ -154,6 +156,7 @@ function costOutput(o: CostingOutputLine, computedHpp: Decimal | null, totalInpu
       totalValue: lineValue(o.quantity, unitCost),
       unitCostLoaded: unitCost,
       persistedUnitPrice: explicitPrice ?? null,
+      priceIsManual: false,
       yieldPct: null,
     };
   }
@@ -166,6 +169,7 @@ function costOutput(o: CostingOutputLine, computedHpp: Decimal | null, totalInpu
     totalValue: lineValue(o.quantity, unitCost),
     unitCostLoaded: computedHpp ? hppNum : null,
     persistedUnitPrice: typed ? explicitPrice : (hppNum > 0 ? hppNum : null),
+    priceIsManual: typed,
     yieldPct: totalInputQty > 0 ? (o.quantity / totalInputQty) * 100 : null,
   };
 }

@@ -167,7 +167,10 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
           ? outputItems.map((o: any) => ({
               itemId: o.itemId ?? o.item?.id ?? '',
               quantity: String(Number(o.quantity)),
-              unitPrice: o.unitPrice != null && Number(o.unitPrice) > 0 ? String(Number(o.unitPrice)) : '',
+              // By-product NRV is always typed; a main output price only when the user typed it,
+              // so a back-filled HPP is refilled by the edit instead of frozen.
+              unitPrice: (o.isByProduct || o.lineType === 'ByProduct' || o.priceIsManual) && o.unitPrice != null && Number(o.unitPrice) > 0
+                ? String(Number(o.unitPrice)) : '',
               isByProduct: o.isByProduct || o.lineType === 'ByProduct',
             }))
           : [{ itemId: '', quantity: '', unitPrice: '', isByProduct: false }]

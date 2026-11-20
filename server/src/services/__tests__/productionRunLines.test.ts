@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildProductionRunLineItems } from '../productionRunLines';
+import { buildProductionRunLineItems, dropBackfilledOutputPrices, type OldOutputLine } from '../productionRunLines';
 
 describe('buildProductionRunLineItems', () => {
   const base = {
@@ -12,8 +12,8 @@ describe('buildProductionRunLineItems', () => {
     ],
     batchSnapshots: [{ sourceMovementId: 'sm-batch', batchUnitCost: 6000 }],
     outputCosting: [
-      { persistedUnitPrice: 9500, yieldPct: 60 },
-      { persistedUnitPrice: 1500, yieldPct: null },
+      { persistedUnitPrice: 9500, priceIsManual: true, yieldPct: 60 },
+      { persistedUnitPrice: 1500, priceIsManual: false, yieldPct: null },
     ],
   };
 
@@ -34,5 +34,58 @@ describe('buildProductionRunLineItems', () => {
   it('falls back to an empty batch snapshot for unpicked inputs', () => {
     const [input] = buildProductionRunLineItems({ ...base, batchSnapshots: [] });
     expect(input).toMatchObject({ sourceMovementId: null, batchUnitCost: null });
+  });
+});
+
+describe('buildProductionRunLineItems price_is_manual', () => {
+  it('flags typed main output prices only, never by-products', () => {
+    const lines = buildProductionRunLineItems({
+      runId: 'r', warehouseId: 'w', inputs: [], batchSnapshots: [],
+      outputs: [{ itemId: 'a', quantity: 1 }, { itemId: 'b', quantity: 1 }, { itemId: 'c', quantity: 1, isByProduct: true }],
+      outputCosting: [
+        { persistedUnitPrice: 5, priceIsManual: true, yieldPct: 10 },
+        { persistedUnitPrice: 7, priceIsManual: false, yieldPct: 10 },
+        { persistedUnitPrice: 20, priceIsManual: true, yieldPct: null },
+      ],
+    });
+    expect(lines.map((l) => (l as { priceIsManual: boolean }).priceIsManual)).toEqual([true, false, false]);
+  });
+});
+
+describe('dropBackfilledOutputPrices', () => {
+  const old = (itemId: string, unitPrice: number | null, priceIsManual = false): OldOutputLine =>
+    ({ itemId, lineType: 'Output', isByProduct: false, unitPrice, priceIsManual });
+
+  it('drops a price equal to the old HPP on a non-manual line (within 0.005)', () => {
+    const out = dropBackfilledOutputPrices([{ itemId: 'a', unitPrice: 10166.67 }], [old('a', 10166.67)], 10166.6667);
+    expect(out[0]!.unitPrice).toBeNull();
+  });
+
+  it('drops a price sitting exactly a half cent from the old HPP (no float drift)', () => {
+    expect(dropBackfilledOutputPrices([{ itemId: 'a', unitPrice: 11000.01 }], [old('a', 11000.01)], 11000.005)[0]!.unitPrice).toBeNull();
+    expect(dropBackfilledOutputPrices([{ itemId: 'a', unitPrice: 6000.13 }], [old('a', 6000.13)], 6000.125)[0]!.unitPrice).toBeNull();
+  });
+
+  it('keeps a typed line, a different price and a by-product', () => {
+    const out = dropBackfilledOutputPrices(
+      [{ itemId: 'a', unitPrice: 10166.67 }, { itemId: 'b', unitPrice: 9000 }, { itemId: 'c', unitPrice: 10166.67, isByProduct: true }],
+      [old('a', 10166.67, true), old('b', 10166.67)],
+      10166.6667,
+    );
+    expect(out.map((o) => o.unitPrice)).toEqual([10166.67, 9000, 10166.67]);
+  });
+
+  it('matches several main outputs of one item by order', () => {
+    const out = dropBackfilledOutputPrices(
+      [{ itemId: 'a', unitPrice: 100 }, { itemId: 'a', unitPrice: 100 }],
+      [old('a', 100, false), old('a', 100, true)],
+      100,
+    );
+    expect(out.map((o) => o.unitPrice)).toEqual([null, 100]);
+  });
+
+  it('does nothing without an old HPP or a matching old line', () => {
+    expect(dropBackfilledOutputPrices([{ itemId: 'a', unitPrice: 5 }], [old('a', 5)], null)[0]!.unitPrice).toBe(5);
+    expect(dropBackfilledOutputPrices([{ itemId: 'z', unitPrice: 5 }], [old('a', 5)], 5)[0]!.unitPrice).toBe(5);
   });
 });

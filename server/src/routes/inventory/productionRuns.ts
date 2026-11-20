@@ -44,6 +44,9 @@ router.get('/', async (req, res) => {
         where,
         include: {
           items: {
+            // Same key as GET /:id: the Edit action sends the list row back, and the run edit
+            // matches back-filled prices by this order.
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             include: {
               item: { select: { id: true, name: true, unit: true, code: true } },
             },
@@ -107,6 +110,9 @@ router.get('/:id', async (req, res) => {
       where: { id: req.params.id as string },
       include: {
         items: {
+          // Same key as the run edit's read of the old lines (productionRunEdit.ts): its
+          // by-order match of back-filled prices relies on both seeing one order.
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           include: {
             item: { select: { id: true, name: true, unit: true, code: true, averageCost: true } },
             warehouse: { select: { id: true, code: true, name: true } },

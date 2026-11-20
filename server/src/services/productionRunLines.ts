@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js';
+
 /**
  * Build the production_run_items rows persisted for a posted run (submit and
  * edit share it). Every line carries the production warehouse the run's
@@ -13,6 +15,8 @@ export interface RunLineBatchSnapshot {
 export interface RunLineOutputCosting {
   /** Resolved price (typed or back-filled from the loaded HPP), null when unpriced. */
   persistedUnitPrice: number | null;
+  /** The main output price was typed, not back-filled. */
+  priceIsManual?: boolean;
   yieldPct: number | null;
 }
 
@@ -57,7 +61,49 @@ export function buildProductionRunLineItems(args: BuildRunLinesArgs) {
       unitPrice: costing?.persistedUnitPrice ?? null,
       yieldPct: costing?.yieldPct ?? null,
       isByProduct: o.isByProduct ?? false,
+      priceIsManual: !o.isByProduct && (costing?.priceIsManual ?? false),
     };
   });
   return [...inputLines, ...outputLines];
+}
+
+/** The old main output lines an edit compares the incoming prices against. */
+export interface OldOutputLine {
+  itemId: string;
+  lineType: string;
+  isByProduct: boolean;
+  unitPrice: number | null;
+  priceIsManual: boolean;
+}
+
+/** Tolerance of the back-fill comparison: the stored price has 2 decimals, the HPP 4. */
+export const BACKFILL_PRICE_TOLERANCE = 0.005;
+
+/**
+ * An edit form that was prefilled from the stored lines sends the back-filled HPP back as if it
+ * were typed, which would freeze it. A main output price equal (within the tolerance) to the old
+ * run's computed HPP, on a matching old line that was not typed, is dropped so the new HPP
+ * refills it. Old and new lines match per item, then by order among that item's main outputs.
+ * By-product lines and lines without a match are untouched.
+ */
+export function dropBackfilledOutputPrices<T extends { itemId: string; unitPrice?: number | null; isByProduct?: boolean }>(
+  outputs: ReadonlyArray<T>,
+  oldLines: ReadonlyArray<OldOutputLine>,
+  oldComputedHpp: number | null,
+): T[] {
+  if (oldComputedHpp == null) return [...outputs];
+  const oldByItem = new Map<string, OldOutputLine[]>();
+  for (const l of oldLines) {
+    if (l.lineType !== 'Output' || l.isByProduct) continue;
+    oldByItem.set(l.itemId, [...(oldByItem.get(l.itemId) ?? []), l]);
+  }
+  const seen = new Map<string, number>();
+  return outputs.map((o) => {
+    if (o.isByProduct) return o;
+    const nth = seen.get(o.itemId) ?? 0;
+    seen.set(o.itemId, nth + 1);
+    const old = oldByItem.get(o.itemId)?.[nth];
+    if (!old || old.priceIsManual || o.unitPrice == null) return o;
+    return new Decimal(o.unitPrice).minus(oldComputedHpp).abs().lte(BACKFILL_PRICE_TOLERANCE) ? { ...o, unitPrice: null } : o;
+  });
 }
