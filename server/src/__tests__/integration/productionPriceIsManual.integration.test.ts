@@ -237,7 +237,7 @@ d('production price_is_manual (E6-R8)', () => {
       const folder = readdirSync(migrationsDir).find((n) => n.endsWith('_production_item_price_is_manual'));
       if (!folder) throw new Error('migration folder *_production_item_price_is_manual not found');
       const sql = readFileSync(join(migrationsDir, folder, 'migration.sql'), 'utf8');
-      const update = sql.slice(sql.indexOf('UPDATE "production_run_items"'));
+      const update = sql.slice(sql.indexOf('DO $$'));
       const fy = await tx.fiscalYear.findFirstOrThrow({ where: { startDate: new Date(`${YEAR}-01-01`) } });
       const mkRun = (n: string, hpp: number | null, override = false) => tx.productionRun.create({
         data: { runNumber: `IT-6.11B-${n}-${Date.now()}`, date: new Date(`${YEAR}-03-05`), fiscalYear: { connect: { id: fy.id } }, createdBy: { connect: { id: w.userId } }, computedHpp: hpp, hppManualOverride: override },
