@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { loadProductionCostContext, type ProductionCostContextInput } from '../productionCostContext';
+import { STOCK_INSUFFICIENT } from '../../inventory/stockLocks';
 
 type Item = { id: string; name: string; unit: string; isActive: boolean; currentStock: number; averageCost: number };
 type Batch = { id: string; itemId: string; isCancelled: boolean; movementType: string; unitCost: number };
@@ -12,9 +13,24 @@ const items: Item[] = [
 ];
 const batches: Batch[] = [{ id: 'sm-batch', itemId: 'gkp', isCancelled: false, movementType: 'In', unitCost: 5800 }];
 
+/** Stock per warehouse: GKP holds 1.000 at A and 5.000 at B; the run takes from A. */
+const stocks = [
+  { itemId: 'gkp', warehouseId: 'wh-a', currentStock: 1000 },
+  { itemId: 'gkp', warehouseId: 'wh-b', currentStock: 5000 },
+];
+
 function txWith(list: Item[] = items) {
+  type Where = { id?: { in: string[] } | string; OR?: { itemId: string; warehouseId: string }[] };
   return {
-    inventoryItem: { findMany: async ({ where }: { where: { id: { in: string[] } } }) => list.filter((i) => where.id.in.includes(i.id)) },
+    inventoryItem: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => list.filter((i) => where.id.in.includes(i.id)),
+      findUnique: async ({ where }: { where: { id: string } }) => list.find((i) => i.id === where.id) ?? null,
+    },
+    inventoryStock: {
+      findMany: async ({ where }: { where: Where }) =>
+        stocks.filter((r) => where.OR!.some((p) => p.itemId === r.itemId && p.warehouseId === r.warehouseId)),
+    },
+    warehouse: { findUnique: async ({ where }: { where: { id: string } }) => ({ name: where.id === 'wh-a' ? 'A' : 'B' }) },
     stockMovement: { findUnique: async ({ where }: { where: { id: string } }) => batches.find((b) => b.id === where.id) ?? null },
   } as unknown as Prisma.TransactionClient;
 }
@@ -24,7 +40,7 @@ const body = (over: Partial<ProductionCostContextInput> = {}): ProductionCostCon
   outputs: [{ itemId: 'beras', quantity: 600 }, { itemId: 'bekatul', quantity: 100, unitPrice: 2000, isByProduct: true }],
   ...over,
 });
-const opts = { bypassLog: 'bypass' };
+const opts = { warehouseId: 'wh-a', context: 'test' };
 
 describe('loadProductionCostContext', () => {
   it('costs an unpicked input at WAC and a picked one at the client snapshot, else the batch cost', async () => {
@@ -49,10 +65,15 @@ describe('loadProductionCostContext', () => {
     expect(ctx.inputs[0]!.unitCost).toBe(0);
   });
 
-  it('rejects short stock unless bypassed', async () => {
-    const short = body({ inputs: [{ itemId: 'gkp', quantity: 1500 }] });
-    await expect(loadProductionCostContext(txWith(), short, opts)).rejects.toThrow(/Stok 'GKP' tidak cukup/);
+  it('rejects short stock at the production warehouse, lines of one item summed, unless bypassed', async () => {
+    const short = body({ inputs: [{ itemId: 'gkp', quantity: 700 }, { itemId: 'gkp', quantity: 500 }] });
+    await expect(loadProductionCostContext(txWith(), short, opts)).rejects.toMatchObject({
+      code: STOCK_INSUFFICIENT,
+      message: "Stok 'GKP' di gudang A tidak cukup. Tersedia: 1.000 Kg, dibutuhkan: 1.200 Kg. Buat penerimaan/transfer dulu.",
+    });
     await expect(loadProductionCostContext(txWith(), { ...short, allowNegativeStock: true }, opts)).resolves.toBeDefined();
+    // The 5.000 at B do not cover a run at A; the same run at B passes.
+    await expect(loadProductionCostContext(txWith(), short, { ...opts, warehouseId: 'wh-b' })).resolves.toBeDefined();
   });
 
   it('rejects missing or inactive items and a by-product without NRV', async () => {

@@ -14,7 +14,8 @@ import path from 'node:path';
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
  * it writes, unless it is in LOCK_EXEMPT (wipe, seed, the helpers themselves) or still in
  * PENDING_LOCK with the PR that locks it. PENDING_LOCK may only shrink too: PR-6.2c locked the
- * sales, purchase and import writers, and PR-6.2b empties it with production.
+ * sales, purchase and import writers and PR-6.2b production, which left it empty. A new writer
+ * locks from the start.
  */
 const SRC = path.resolve(__dirname, '..');
 
@@ -61,10 +62,8 @@ const LOCK_EXEMPT: Record<string, string> = {
   'scripts/fixPotonganAllocation.ts': 'one-off legacy repair script, deleted in PR-6.4e',
 };
 
-/** Writers that do not lock yet, with the PR that locks them. May only shrink; empty after PR-6.2b. */
-const PENDING_LOCK: Record<string, string> = {
-  'services/production/productionPosting.ts': 'PR-6.2b: lock old and new items before the reversal, run claim first (the production writers now live here)',
-};
+/** Writers that do not lock yet, with the PR that locks them. Empty since PR-6.2b; keep it so. */
+const PENDING_LOCK: Record<string, string> = {};
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
