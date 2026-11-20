@@ -87,8 +87,8 @@ describe('replayWeightedAverage - basics', () => {
 
   it('outbound changes the stock base, not the average', () => {
     const ms = [mv('In', 100, 10), mv('Out', 90, 10), mv('In', 100, 20)];
-    // stock before 2nd In = 10 -> (10*10 + 100*20)/110 = 19.09, NOT 15
-    expect(replayWeightedAverage(ms, { fallbackAverageCost: 0 }).averageCost).toBe(19.09);
+    // stock before 2nd In = 10 -> (10*10 + 100*20)/110 = 19.090909 (6 dp, UNIT_COST_DP), NOT 15
+    expect(replayWeightedAverage(ms, { fallbackAverageCost: 0 }).averageCost).toBe(19.090909);
   });
 
   it('negative-stock window anchors to the incoming cost', () => {
@@ -154,7 +154,7 @@ describe('replayWeightedAverage - property: replay == incremental', () => {
       const r = replayWeightedAverage(shuffled, { fallbackAverageCost: 0 });
       expect(r.stock).toBeCloseTo(expected.stock, 6);
       // Incremental path rounds avg to 2dp at every step; replay rounds identically.
-      expect(r.averageCost).toBeCloseTo(expected.avg, 2);
+      expect(r.averageCost).toBeCloseTo(expected.avg, 6);
     }
   });
 
@@ -175,11 +175,11 @@ describe('replayWeightedAverage - property: replay == incremental', () => {
       const full = ms.map((m, i) => (i === victimIdx ? { ...m, isCancelled: true } : m));
       const whole = replayWeightedAverage(full, { fallbackAverageCost: 0 });
       expect(whole.stock).toBeCloseTo(cont.stock, 6);
-      expect(whole.averageCost).toBeCloseTo(cont.avg, 2);
+      expect(whole.averageCost).toBeCloseTo(cont.avg, 6);
 
       // And equals incremental apply of the sequence without the victim.
       const without = live(ms.filter((_, i) => i !== victimIdx));
-      expect(whole.averageCost).toBeCloseTo(without.avg, 2);
+      expect(whole.averageCost).toBeCloseTo(without.avg, 6);
     }
   });
 
@@ -216,8 +216,8 @@ describe('fixture: dev DB "Beras Premium" (production cancel jumped 2330.15 -> 1
       history.map((m) => (runs.includes(m) ? { ...m, isCancelled: true } : m)),
       { fallbackAverageCost: 2330.15, ...opening },
     );
-    // Out first: 6726-3381 = 3345 @2330.15, then +850 @11500 -> 4188.16 (the AdjustmentIn is real data)
-    expect(afterCancel.averageCost).toBe(4188.16);
+    // Out first: 6726-3381 = 3345 @2330.15, then +850 @11500 -> 4188.164899 (the AdjustmentIn is real data)
+    expect(afterCancel.averageCost).toBe(4188.164899);
     expect(afterCancel.stock).toBe(4195);
     // runs add 222 kg @6135.03 on top: avg moves only slightly, and cancel restores the pre-run value
     expect(before.averageCost).toBeGreaterThan(afterCancel.averageCost);

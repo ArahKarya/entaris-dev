@@ -126,9 +126,9 @@ d('production journals through postJournal', () => {
       const base = `JV-${run.runNumber}`;
       expect(await journal(tx, base)).toEqual({ status: 'Submitted', sourceType: 'SYSTEM_DOC', sourceKey: null });
       await assertBalancesMatchAle(tx, w);
-      // Balances moved by exactly the journal: inventory +300.000,02, conversion credit 300.000, COGS credit 0,02.
+      // Balances moved by exactly the journal: inventory +300.000, conversion credit 300.000 (6 dp HPP: no COGS rest).
       const afterSubmit = await balances(tx, w);
-      expect(afterSubmit.inventory! - seeded.inventory!).toBeCloseTo(300_000.02, 2);
+      expect(afterSubmit.inventory! - seeded.inventory!).toBeCloseTo(300_000, 2);
 
       await editProductionRunInTx(tx, run.id, r1Body(w, {
         inputs: [{ itemId: w.items.gkp.id, quantity: 800 }],
@@ -161,7 +161,7 @@ d('production journals through postJournal', () => {
       await editProductionRunInTx(tx, run.id, r1Body(w), w.userId);
 
       // Same body: the revision equals the voided original, so no balance moves.
-      expect((await journalLinesByRole(tx, w, `JV-${run.runNumber}-R1`)).lines.inventory).toEqual({ debit: 6_300_000.02, credit: 6_000_000 });
+      expect((await journalLinesByRole(tx, w, `JV-${run.runNumber}-R1`)).lines.inventory).toEqual({ debit: 6_300_000, credit: 6_000_000 });
       expect(await balances(tx, w)).toEqual(before);
     });
   });

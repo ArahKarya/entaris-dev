@@ -7,11 +7,18 @@
 import Decimal from 'decimal.js';
 import { StockMovementType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 
 const IN_TYPES: StockMovementType[] = [
   StockMovementType.In,
   StockMovementType.AdjustmentIn,
   StockMovementType.TransferIn,
+];
+// Listed, not "not inbound": a Revaluation row moves value only and stays out of the qty walk.
+const OUT_TYPES: StockMovementType[] = [
+  StockMovementType.Out,
+  StockMovementType.AdjustmentOut,
+  StockMovementType.TransferOut,
 ];
 
 export interface SnapshotItem {
@@ -95,7 +102,7 @@ export async function buildStockSnapshot(
     }),
     prisma.stockMovement.groupBy({
       by: ['warehouseId', 'itemId'],
-      where: { ...afterFilter, movementType: { notIn: IN_TYPES } },
+      where: { ...afterFilter, movementType: { in: OUT_TYPES } },
       _sum: { quantity: true },
     }),
   ]);
@@ -148,7 +155,7 @@ export async function buildStockSnapshot(
         unit: meta.unit,
         category: meta.category,
         qty,
-        averageCost: avg.toDecimalPlaces(2).toNumber(),
+        averageCost: avg.toDecimalPlaces(UNIT_COST_DP).toNumber(),
         value: qtyDec.mul(avg).toDecimalPlaces(2).toNumber(),
       });
     }

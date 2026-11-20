@@ -12,6 +12,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 
 type Tx = Prisma.TransactionClient;
 
@@ -146,7 +147,7 @@ export async function revisePurchaseInvoiceInTx(
       const stock = new Decimal(item.inventoryItem.currentStock.toString());
       if (stock.gt(0)) {
         const oldAvg = new Decimal(item.inventoryItem.averageCost.toString());
-        const newAvg = stock.mul(oldAvg).plus(deltaInStock).div(stock).toDecimalPlaces(2);
+        const newAvg = stock.mul(oldAvg).plus(deltaInStock).div(stock).toDecimalPlaces(UNIT_COST_DP);
         await tx.inventoryItem.update({
           where: { id: invItemId },
           data: { averageCost: Decimal.max(newAvg, new Decimal(0)).toNumber() },

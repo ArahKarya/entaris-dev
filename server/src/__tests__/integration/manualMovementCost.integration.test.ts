@@ -261,9 +261,9 @@ d('edit and cancel of a manual movement', () => {
   it('an edited Out is re-valued at the average after the reversal; the old journal is voided', async () => {
     await inRollback(async (tx) => {
       const s = await setup(tx);
-      // In 1.000 @ 12.000: the average becomes (10.000 x 6.000 + 1.000 x 12.000) / 11.000 = 6.545,45.
+      // In 1.000 @ 12.000: the average becomes (10.000 x 6.000 + 1.000 x 12.000) / 11.000 = 6.545,454545.
       const inbound = expectCreated(await post(s, { movementType: 'In', quantity: 1_000, unitCost: 12_000, offsetAccountId: s.offsetId }));
-      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } })).averageCost)).toBe(6_545.45);
+      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } })).averageCost)).toBe(6_545.454545);
 
       // Turning that In into an Out of 100 reverses the In first: valued at 6.000, not 6.545,45 or 12.000.
       const r = await edit(s, inbound.id, { movementType: 'Out', quantity: 100, unitCost: 12_000, offsetAccountId: s.offsetId });
@@ -293,9 +293,9 @@ d('edit and cancel of a manual movement', () => {
     await inRollback(async (tx) => {
       const s = await setup(tx);
       await addStockWithoutMovement(tx, s);
-      // In 1.000 @ 12.000 on 20.000 kg @ 6.000: the average becomes 132.000.000 / 21.000 = 6.285,71.
+      // In 1.000 @ 12.000 on 20.000 kg @ 6.000: the average becomes 132.000.000 / 21.000 = 6.285,714286.
       const inbound = expectCreated(await post(s, { movementType: 'In', quantity: 1_000, unitCost: 12_000, offsetAccountId: s.offsetId }));
-      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } })).averageCost)).toBe(6_285.71);
+      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } })).averageCost)).toBe(6_285.714286);
 
       // The replay is skipped (residual 10.000), so the In is taken out of the average at its own cost: 6.000, not 6.285,71.
       const r = await edit(s, inbound.id, { movementType: 'Out', quantity: 100, offsetAccountId: s.offsetId });
@@ -316,10 +316,10 @@ d('edit and cancel of a manual movement', () => {
       const inbound = expectCreated(await post(s, { movementType: 'In', quantity: 1_000, unitCost: 12_000, offsetAccountId: s.offsetId }));
       const r = await edit(s, inbound.id, { movementType: 'In', quantity: 1_000, unitCost: 9_000, offsetAccountId: s.offsetId });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      // (20.000 x 6.000 + 1.000 x 9.000) / 21.000 = 6.142,86; the old 12.000 is gone from the average.
+      // (20.000 x 6.000 + 1.000 x 9.000) / 21.000 = 6.142,857143; the old 12.000 is gone from the average.
       const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } });
       expect(Number(item.currentStock)).toBe(21_000);
-      expect(Number(item.averageCost)).toBe(6_142.86);
+      expect(Number(item.averageCost)).toBe(6_142.857143);
       const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } });
       expect(await ledgerOf(tx, mov.journalEntryId!)).toEqual([[s.inventoryAccountId, 9_000_000, 0], [s.offsetId, 0, 9_000_000]]);
       await expectBalancesMatchLedger(tx, [s.offsetId, s.inventoryAccountId]);

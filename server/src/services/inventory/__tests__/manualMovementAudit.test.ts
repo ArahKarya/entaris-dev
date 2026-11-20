@@ -16,7 +16,7 @@ describe('manual movement cost audit, list a', () => {
   it('reports a manual Out priced by the client, with the value it over-credited', () => {
     const rows = [row('In', 10_000, 6_000), row('Out', 1_000, 5_000)];
     expect(outboundCostFindings(rows)).toMatchObject([
-      { list: 'a', id: rows[1].id, replayedAverage: '6000.00', difference: '-1000000.00', note: 'unit cost differs from the replayed average' },
+      { list: 'a', id: rows[1].id, replayedAverage: '6000.000000', difference: '-1000000.00', note: 'unit cost differs from the replayed average' },
     ]);
   });
 
@@ -34,7 +34,7 @@ describe('manual movement cost audit, list a', () => {
     ];
     const findings = outboundCostFindings(rows);
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ id: rows[0].id, replayedAverage: '0.00', difference: '500.00', note: 'no costed inbound before the row (stock may predate its movements)' });
+    expect(findings[0]).toMatchObject({ id: rows[0].id, replayedAverage: '0.000000', difference: '500.00', note: 'no costed inbound before the row (stock may predate its movements)' });
   });
 
   it('accepts a cost within half a cent of the average', () => {

@@ -887,7 +887,7 @@ Aturan wajib:
 |---|---|---|---|---|
 | `itemId` | query | `uuid` | tidak | UUID item. |
 | `warehouseId` | query | `uuid` | tidak | UUID gudang. |
-| `movementType` | query | `string` | tidak | Jenis: In, Out, AdjustmentIn, AdjustmentOut, TransferIn, TransferOut (sesuai enum StockMovementType). |
+| `movementType` | query | `string` | tidak | Jenis: In, Out, AdjustmentIn, AdjustmentOut, TransferIn, TransferOut, Revaluation (sesuai enum StockMovementType). Revaluation = koreksi nilai saja (qty 0, tanpa gudang), dibuat sistem. |
 | `status` | query | enum: `active`, `cancelled` | tidak | active = hanya yang berlaku, cancelled = hanya yang dibatalkan. |
 | `startDate` | query | `date` | tidak | Awal rentang (YYYY-MM-DD). |
 | `endDate` | query | `date` | tidak | Akhir rentang (YYYY-MM-DD). |
@@ -941,7 +941,7 @@ Aturan wajib:
 |---|---|---|---|---|
 | `itemId` | query | `uuid` | tidak |  |
 | `warehouseId` | query | `uuid` | tidak | ID gudang. |
-| `movementType` | query | `string` | tidak | Jenis mutasi stok. |
+| `movementType` | query | `string` | tidak | Jenis mutasi stok (enum StockMovementType, termasuk Revaluation). |
 | `status` | query | enum: `active`, `cancelled` | tidak | Filter status dokumen. |
 | `startDate` | query | `date` | tidak | Tanggal awal (YYYY-MM-DD). |
 | `endDate` | query | `date` | tidak | Tanggal akhir (YYYY-MM-DD). |
@@ -965,11 +965,11 @@ Aturan wajib:
 {
   "ok": true,
   "kind": "read",
-  "data": "<Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai).>"
+  "data": "<Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/>"
 }
 ```
 
-**Isi hasil:** Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai).
+**Isi hasil:** Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar.
 
 **Tool terkait:** [`inv_mov_list`](#inv_mov_list)
 

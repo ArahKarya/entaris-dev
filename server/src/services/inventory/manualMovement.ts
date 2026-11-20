@@ -19,6 +19,7 @@
 import type { Prisma, StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../utils/errors';
+import { UNIT_COST_DP } from '../../utils/costPrecision';
 import { MOVEMENT_DOCUMENT_LOCKED, STOCK_DRIFT_REFERENCE, documentMovementLockMessage } from '../documentMovementLock';
 import { assertBatchSource } from './batchSource';
 import { generateDocumentNumber } from '../../utils/documentNumber';
@@ -76,14 +77,20 @@ const ITEM_SUMMARY = { item: { select: { id: true, name: true, code: true, unit:
 
 export const isInbound = (type: string): boolean => type === 'In' || type === 'AdjustmentIn';
 
-/** Unit cost and value of a row: the body's cost for inbound (> 0), the locked average for outbound. */
+/**
+ * Unit cost and value of a row: the body's cost for inbound (> 0), the locked average for outbound.
+ * The body's cost is rounded to UNIT_COST_DP first, so the value and the average come from the cost
+ * the column stores.
+ */
 export function manualMovementValue(
   type: ManualMovementType,
   quantity: Decimal.Value,
   bodyUnitCost: number | undefined,
   averageCost: Decimal.Value,
 ): { unitCost: Decimal; totalValue: Decimal } {
-  const unitCost = new Decimal(isInbound(type) ? bodyUnitCost ?? 0 : averageCost);
+  const unitCost = isInbound(type)
+    ? new Decimal(bodyUnitCost ?? 0).toDecimalPlaces(UNIT_COST_DP)
+    : new Decimal(averageCost);
   if (isInbound(type) && unitCost.lte(0)) {
     throw new BusinessError('Stok masuk manual wajib memakai harga satuan lebih dari 0.', MANUAL_IN_ZERO_COST);
   }

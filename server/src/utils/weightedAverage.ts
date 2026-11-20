@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { UNIT_COST_DP } from './costPrecision';
 
 /**
  * Recalculate weighted average cost after a stock-in movement.
@@ -10,7 +11,7 @@ import Decimal from 'decimal.js';
  * @param currentAvgCost - Current weighted average cost per unit
  * @param inQty - Quantity being added
  * @param inUnitCost - Unit cost of the incoming stock
- * @returns New weighted average cost (rounded to 2 decimals)
+ * @returns New weighted average cost (rounded to UNIT_COST_DP decimals)
  */
 export function calcWeightedAverage(
   currentQty: number | Decimal,
@@ -26,18 +27,18 @@ export function calcWeightedAverage(
   // With zero or negative stock the WAC formula gives absurd values that corrupt COGS,
   // so anchor the average to the incoming unit cost.
   if (cQty.lte(0)) {
-    return iCost.toDecimalPlaces(2).toNumber();
+    return iCost.toDecimalPlaces(UNIT_COST_DP).toNumber();
   }
 
   const totalQty = cQty.plus(iQty);
   if (totalQty.lte(0)) {
     // Pathological: incoming qty smaller than (negative of) current. Anchor
     // to inCost as well — there's no meaningful weighted value.
-    return iCost.toDecimalPlaces(2).toNumber();
+    return iCost.toDecimalPlaces(UNIT_COST_DP).toNumber();
   }
 
   const totalValue = cQty.times(cCost).plus(iQty.times(iCost));
-  return totalValue.div(totalQty).toDecimalPlaces(2).toNumber();
+  return totalValue.div(totalQty).toDecimalPlaces(UNIT_COST_DP).toNumber();
 }
 
 /**
@@ -49,7 +50,7 @@ export function calcWeightedAverage(
  * current average when nothing would be left or the value left would be negative: there is no
  * meaningful average then, and the stored one is all that is known.
  *
- * @returns Average cost after the removal (rounded to 2 decimals)
+ * @returns Average cost after the removal (rounded to UNIT_COST_DP decimals)
  */
 export function calcAverageAfterRemoval(
   currentQty: number | Decimal,
@@ -61,6 +62,6 @@ export function calcAverageAfterRemoval(
   const cCost = new Decimal(currentAvgCost.toString());
   const leftQty = cQty.minus(outQty.toString());
   const leftValue = cQty.times(cCost).minus(new Decimal(outQty.toString()).times(outUnitCost.toString()));
-  if (leftQty.lte(0) || leftValue.lt(0)) return cCost.toDecimalPlaces(2).toNumber();
-  return leftValue.div(leftQty).toDecimalPlaces(2).toNumber();
+  if (leftQty.lte(0) || leftValue.lt(0)) return cCost.toDecimalPlaces(UNIT_COST_DP).toNumber();
+  return leftValue.div(leftQty).toDecimalPlaces(UNIT_COST_DP).toNumber();
 }

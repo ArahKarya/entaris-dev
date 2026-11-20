@@ -10,6 +10,7 @@ import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 import { resolvePurchaseLineType, resolvePurchaseOrderIdFromReceipts } from './purchaseInvoiceLinks';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
+import { UNIT_COST_DP } from '../utils/costPrecision';
 
 type Tx = Prisma.TransactionClient;
 
@@ -423,7 +424,7 @@ export async function submitPurchaseInvoiceInTx(
 
     // Effective unit_cost = effectiveAmount / qty
     const newUnitCost = adj.qty.gt(0)
-      ? adj.effectiveAmount.div(adj.qty).toDecimalPlaces(4).toNumber()
+      ? adj.effectiveAmount.div(adj.qty).toDecimalPlaces(UNIT_COST_DP).toNumber()
       : 0;
 
     await tx.stockMovement.update({
@@ -445,7 +446,7 @@ export async function submitPurchaseInvoiceInTx(
       if (fresh && Number(fresh.currentStock) > 0) {
         const stock = new Decimal(fresh.currentStock.toString());
         const oldAvg = new Decimal(fresh.averageCost.toString());
-        const newAvg = stock.times(oldAvg).plus(adj.delta).div(stock).toDecimalPlaces(2);
+        const newAvg = stock.times(oldAvg).plus(adj.delta).div(stock).toDecimalPlaces(UNIT_COST_DP);
         await tx.inventoryItem.update({
           where: { id: adj.invItem.inventoryItemId },
           data: { averageCost: newAvg.toNumber() },

@@ -11,16 +11,19 @@ interface RecentMovement {
   id: string;
   date: string;
   item: { name: string; unit: string; code: string };
-  movementType: 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut';
+  movementType: 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut' | 'Revaluation';
   quantity: number;
   totalValue: number | null;
 }
 
-const MOVEMENT: Record<string, { labelKey: 'widgetsShared.in' | 'widgetsShared.out' | 'recentMovements.adjIn' | 'recentMovements.adjOut'; variant: BadgeProps['variant'] }> = {
+type MovementLabelKey = 'widgetsShared.in' | 'widgetsShared.out' | 'recentMovements.adjIn' | 'recentMovements.adjOut' | 'recentMovements.revaluation';
+
+const MOVEMENT: Record<string, { labelKey: MovementLabelKey; variant: BadgeProps['variant'] }> = {
   In: { labelKey: 'widgetsShared.in', variant: 'success' },
   Out: { labelKey: 'widgetsShared.out', variant: 'danger' },
   AdjustmentIn: { labelKey: 'recentMovements.adjIn', variant: 'info' },
   AdjustmentOut: { labelKey: 'recentMovements.adjOut', variant: 'warning' },
+  Revaluation: { labelKey: 'recentMovements.revaluation', variant: 'neutral' },
 };
 
 export default function RecentMovements() {
@@ -66,7 +69,7 @@ export default function RecentMovements() {
             case 'type':
               return <Badge variant={mv.variant}>{mv.label}</Badge>;
             case 'qty':
-              return formatNumber(r.quantity);
+              return r.movementType === 'Revaluation' ? '—' : formatNumber(r.quantity);
             default:
               return <span className="text-muted-foreground">{r.totalValue != null ? formatRupiah(Number(r.totalValue)) : '—'}</span>;
           }

@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { splitProductionDiff } from '../ledger/systemRoleAccounts';
+import { UNIT_COST_DP } from '../../utils/costPrecision';
 
 /**
  * Production costing (E6-R1): the one home of the run's cost arithmetic. Pure, no database:
@@ -98,7 +99,7 @@ export interface ProductionCosting {
   totalCostInputSide: Decimal;
   totalCostOutputSide: Decimal;
   totalByproductValue: Decimal;
-  /** Loaded HPP per unit of main output (4 dp); null when not overridden and no main output qty. */
+  /** Loaded HPP per unit of main output (UNIT_COST_DP); null when not overridden and no main output qty. */
   computedHpp: Decimal | null;
   hppOverridden: boolean;
   /** By-product NRV exceeded the total cost, so the HPP was clamped to 0 (the caller logs it). */
@@ -143,7 +144,7 @@ function loadedHpp(hppOverride: number | null | undefined, numerator: Decimal, m
   }
   if (!mainOutputQty.gt(0)) return { computedHpp: null, hppOverridden: false, clampedNegativeNumerator: false };
   if (numerator.lt(0)) return { computedHpp: ZERO, hppOverridden: false, clampedNegativeNumerator: true };
-  return { computedHpp: numerator.div(mainOutputQty).toDecimalPlaces(4), hppOverridden: false, clampedNegativeNumerator: false };
+  return { computedHpp: numerator.div(mainOutputQty).toDecimalPlaces(UNIT_COST_DP), hppOverridden: false, clampedNegativeNumerator: false };
 }
 
 function costOutput(o: CostingOutputLine, computedHpp: Decimal | null, totalInputQty: number): CostedOutputLine {

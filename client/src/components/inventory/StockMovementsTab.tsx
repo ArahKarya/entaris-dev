@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { ColumnDef } from '@tanstack/react-table';
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Ban, Eye, Pencil, XCircle } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Ban, Eye, Pencil, Scale, XCircle } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDate, formatNumber, formatRupiah } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -33,6 +33,7 @@ import {
   MOVEMENT_TYPES,
   formatQty,
   isInbound,
+  isValueOnly,
   movementCancelBlock,
   movementEditBlock,
   movementTypeLabel,
@@ -54,6 +55,8 @@ interface StockMovementsTabProps {
 
 function QtyCell({ m }: { m: StockMovementRow }) {
   const { t } = useTranslation('inventory');
+  // A Revaluation moves value only: no quantity, no direction.
+  if (isValueOnly(m.movementType)) return <span className="text-muted-foreground">—</span>;
   const inbound = isInbound(m.movementType);
   const Icon = inbound ? ArrowDownLeft : ArrowUpRight;
   return (
@@ -160,7 +163,7 @@ export function StockMovementsTab({ canEdit, canCancel, onCreate, onEdit, onCanc
         meta: { hideBelow: 'md', cellClassName: 'whitespace-nowrap' },
         cell: ({ row }) => {
           const type = row.original.movementType;
-          const Icon = type.startsWith('Transfer') ? ArrowLeftRight : isInbound(type) ? ArrowDownLeft : ArrowUpRight;
+          const Icon = isValueOnly(type) ? Scale : type.startsWith('Transfer') ? ArrowLeftRight : isInbound(type) ? ArrowDownLeft : ArrowUpRight;
           return (
             <span className="inline-flex items-center gap-1.5 text-foreground">
               <Icon className="size-3.5 text-muted-foreground" aria-hidden />

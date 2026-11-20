@@ -622,7 +622,7 @@ model SalesInvoiceItem {
   // unitCostLoaded is the loaded HPP captured at submit (loaded-margin reports).
   sourceMovementId    String?             @map("source_movement_id")
   sourceMovement      StockMovement?      @relation("SalesBatchSource", fields: [sourceMovementId], references: [id])
-  unitCostLoaded      Decimal?            @map("unit_cost_loaded") @db.Decimal(20, 4)
+  unitCostLoaded      Decimal?            @map("unit_cost_loaded") @db.Decimal(20, 6)
 
   @@index([salesInvoiceId])
   @@index([sourceMovementId])
@@ -1209,6 +1209,8 @@ enum StockMovementType {
   AdjustmentOut
   TransferOut
   TransferIn
+  // Value-only row (qty 0, no warehouse): written by the value ledger from 6.4b1 on.
+  Revaluation
 }
 
 // Storage location. Stock is tracked per (item, warehouse) in InventoryStock; averageCost
@@ -1270,7 +1272,7 @@ model InventoryItem {
   category             String?
   description          String?
   currentStock         Decimal                  @default(0) @map("current_stock") @db.Decimal(15, 3)
-  averageCost          Decimal                  @default(0) @map("average_cost") @db.Decimal(20, 2)
+  averageCost          Decimal                  @default(0) @map("average_cost") @db.Decimal(20, 6)
   minimumStock         Decimal                  @default(0) @map("minimum_stock") @db.Decimal(15, 3)
   isActive             Boolean                  @default(true) @map("is_active")
   isDummy              Boolean                  @default(false) @map("is_dummy")
@@ -1368,7 +1370,7 @@ model StockMovement {
   warehouse                 Warehouse?          @relation(fields: [warehouseId], references: [id])
   movementType              StockMovementType   @map("movement_type")
   quantity                  Decimal             @db.Decimal(20, 3)
-  unitCost                  Decimal             @default(0) @map("unit_cost") @db.Decimal(20, 2)
+  unitCost                  Decimal             @default(0) @map("unit_cost") @db.Decimal(20, 6)
   totalValue                Decimal             @default(0) @map("total_value") @db.Decimal(20, 2)
   notes                     String?
   referenceType             String?             @map("reference_type")
@@ -1387,7 +1389,7 @@ model StockMovement {
   // cost components (listrik, buruh, etc.) less by-product NRV. Material-only
   // unit_cost is still used for GL/WAC. unitCostLoaded is informational and
   // drives "loaded margin" reports.
-  unitCostLoaded            Decimal?            @map("unit_cost_loaded") @db.Decimal(20, 4)
+  unitCostLoaded            Decimal?            @map("unit_cost_loaded") @db.Decimal(20, 6)
   // Batch tracking. For outbound movements (Out /
   // AdjustmentOut) this links to the inbound StockMovement (batch) the qty
   // was consumed from. The /items/:id/batches endpoint sums these to compute
@@ -1539,7 +1541,7 @@ model ProductionRun {
   totalCostInputSide  Decimal?               @map("total_cost_input_side") @db.Decimal(20, 4)
   totalCostOutputSide Decimal?               @map("total_cost_output_side") @db.Decimal(20, 4)
   totalByproductValue Decimal?               @map("total_byproduct_value") @db.Decimal(20, 4)
-  computedHpp         Decimal?               @map("computed_hpp") @db.Decimal(20, 4)
+  computedHpp         Decimal?               @map("computed_hpp") @db.Decimal(20, 6)
   hppManualOverride   Boolean                @default(false) @map("hpp_manual_override")
   // OEE tracking (Overall Equipment Effectiveness)
   // Semua opsional: run lama / tanpa data OEE tetap valid.
@@ -1652,7 +1654,7 @@ model ProductionRunItem {
   warehouse        Warehouse?     @relation("ProductionLineWarehouse", fields: [warehouseId], references: [id])
   lineType         String         @map("line_type")
   quantity         Decimal        @db.Decimal(15, 3)
-  unitPrice        Decimal?       @map("unit_price") @db.Decimal(15, 2)
+  unitPrice        Decimal?       @map("unit_price") @db.Decimal(20, 6)
   yieldPct         Decimal?       @map("yield_pct") @db.Decimal(5, 2)
   isByProduct      Boolean        @default(false) @map("is_by_product")
   // Main output only: unit_price was typed by the user, not back-filled with the loaded HPP.
@@ -1663,11 +1665,11 @@ model ProductionRunItem {
   // production cost is locked even if WAC changes later.
   sourceMovementId String?        @map("source_movement_id")
   sourceMovement   StockMovement? @relation("ProductionInputBatch", fields: [sourceMovementId], references: [id])
-  batchUnitCost    Decimal?       @map("batch_unit_cost") @db.Decimal(20, 4)
+  batchUnitCost    Decimal?       @map("batch_unit_cost") @db.Decimal(20, 6)
   // NRV per Kg for by-product output. Used as unit_cost for the inbound
   // stock movement of that by-product and to compute the loaded HPP of the
   // main output.
-  nrvUnitValue     Decimal?       @map("nrv_unit_value") @db.Decimal(20, 4)
+  nrvUnitValue     Decimal?       @map("nrv_unit_value") @db.Decimal(20, 6)
   createdAt        DateTime       @default(now()) @map("created_at")
 
   @@index([productionRunId])
@@ -1814,7 +1816,7 @@ model StockOpnameItem {
   systemStock   Decimal       @map("system_stock") @db.Decimal(15, 3)
   actualStock   Decimal       @map("actual_stock") @db.Decimal(15, 3)
   difference    Decimal       @db.Decimal(15, 3)
-  unitCost      Decimal       @default(0) @map("unit_cost") @db.Decimal(20, 2)
+  unitCost      Decimal       @default(0) @map("unit_cost") @db.Decimal(20, 6)
   totalValue    Decimal       @default(0) @map("total_value") @db.Decimal(20, 2)
   movementId    String?       @map("movement_id")
   notes         String?
@@ -2097,7 +2099,7 @@ model CogsBackfillQueue {
   inventoryItem      InventoryItem            @relation("CogsBackfillItem", fields: [inventoryItemId], references: [id])
   qtyPending         Decimal                  @map("qty_pending") @db.Decimal(15, 3)
   qtyOriginal        Decimal                  @map("qty_original") @db.Decimal(15, 3)
-  costAtSale         Decimal                  @map("cost_at_sale") @db.Decimal(20, 2)
+  costAtSale         Decimal                  @map("cost_at_sale") @db.Decimal(20, 6)
   status             String                   @default("Pending") // Pending / PartiallySettled / Settled
   fiscalYearId       String                   @map("fiscal_year_id")
   fiscalYear         FiscalYear               @relation("CogsBackfillFY", fields: [fiscalYearId], references: [id])
@@ -2117,7 +2119,7 @@ model CogsBackfillSettlement {
   queueId        String            @map("queue_id")
   queue          CogsBackfillQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
   qtySettled     Decimal           @map("qty_settled") @db.Decimal(15, 3)
-  costAtSettle   Decimal           @map("cost_at_settle") @db.Decimal(20, 2)
+  costAtSettle   Decimal           @map("cost_at_settle") @db.Decimal(20, 6)
   differential   Decimal           @db.Decimal(20, 2)
   journalEntryId String?           @map("journal_entry_id")
   journalEntry   JournalEntry?     @relation("CogsBackfillJE", fields: [journalEntryId], references: [id])
@@ -2270,7 +2272,7 @@ model GoodsReceiptItem {
   // Harga kontrak/estimasi saat barang diterima. Locked ke movement supaya
   // average cost & COGS proper. PI nanti bisa kasih harga berbeda → variance
   // posted ke akun yang dipetakan pada role PURCHASE_PRICE_VARIANCE (bawaan 5.11).
-  lockedUnitCost      Decimal              @default(0) @map("locked_unit_cost") @db.Decimal(20, 2)
+  lockedUnitCost      Decimal              @default(0) @map("locked_unit_cost") @db.Decimal(20, 6)
   description         String?
   // Optional link ke baris PO yang dipenuhi.
   purchaseOrderItemId String?              @map("purchase_order_item_id")
@@ -2351,7 +2353,7 @@ model SalesReturnItem {
   // true = barang masuk stok kembali (layak jual) + balik HPP; false = rusak.
   restock            Boolean          @default(true)
   // Cost HPP asli (dari DO stockMovement / unitCostLoaded / averageCost).
-  unitCostLoaded     Decimal?         @map("unit_cost_loaded") @db.Decimal(20, 4)
+  unitCostLoaded     Decimal?         @map("unit_cost_loaded") @db.Decimal(20, 6)
   // StockMovement In yang dibuat bila restock. Plain scalar.
   stockMovementId    String?          @map("stock_movement_id")
 

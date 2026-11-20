@@ -99,6 +99,23 @@ export function formatRupiah(value: NumericInput, options: RupiahOptions = {}): 
   return negative === 'parens' ? `(${withSymbol})` : `-${withSymbol}`;
 }
 
+/** Decimal places of a stored unit or average cost (server: utils/costPrecision.ts UNIT_COST_DP). */
+export const UNIT_COST_DP = 6;
+
+/**
+ * A unit or average cost: Rupiah with up to UNIT_COST_DP decimals, trailing zeros dropped
+ * ("Rp 5.000,666667", "Rp 5.000"). Totals keep formatRupiah.
+ */
+export function formatUnitCost(value: NumericInput, options: Pick<RupiahOptions, 'symbol'> = {}): string {
+  const { symbol = true } = options;
+  const raw = toNumber(value);
+  if (raw === null) return EMPTY_VALUE;
+  const n = normalizeZero(raw, UNIT_COST_DP);
+  const body = nf({ minimumFractionDigits: 0, maximumFractionDigits: UNIT_COST_DP }).format(Math.abs(n));
+  const withSymbol = symbol ? `Rp${NBSP}${body}` : body;
+  return n < 0 ? `-${withSymbol}` : withSymbol;
+}
+
 export interface NumberOptions {
   /** Fixed fraction digits. */
   decimals?: number;

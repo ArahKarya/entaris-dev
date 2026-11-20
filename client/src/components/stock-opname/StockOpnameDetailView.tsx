@@ -4,7 +4,7 @@ import { XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import api from '@/lib/api';
-import { formatDate, formatNumber, formatRupiah, toNumber } from '@/lib/format';
+import { formatDate, formatNumber, formatRupiah, formatUnitCost, toNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingState, PageHeader, StatCard, StatusBadge } from '@/components/shared';
@@ -217,7 +217,7 @@ export function StockOpnameDetailView({ id, breadcrumb, canCancel, onCancel }: P
                         {qty(diff)}
                       </td>
                       <td className="num hidden px-3 py-2 text-right lg:table-cell">
-                        {formatRupiah(i.unitCost, { symbol: false })}
+                        {formatUnitCost(i.unitCost, { symbol: false })}
                       </td>
                       <td className="num px-3 py-2 text-right whitespace-nowrap">
                         {formatRupiah(i.totalValue, { symbol: false })}
