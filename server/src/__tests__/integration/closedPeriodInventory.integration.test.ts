@@ -37,6 +37,7 @@ import { queueEditApproval } from '../../services/approvalEditRequests';
 import { decideApproval } from '../../services/approvalDecision';
 import movementsRouter from '../../routes/inventory/movements';
 import stockOpnameRouter from '../../routes/stockOpname';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -129,9 +130,9 @@ const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 /** An active inventory item with `stock` on hand in the test warehouse. */
 async function stockItem(tx: Tx, stock: number, averageCost: number) {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-E1R2-${tag()}`, name: `Uji tutup buku ${tag()}`, unit: 'kg', currentStock: stock, averageCost, isActive: true },
+    data: { code: `IT-E1R2-${tag()}`, name: `Uji tutup buku ${tag()}`, unit: 'kg', isActive: true },
   });
-  await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: stock } });
+  if (stock > 0) await seedStock(tx, { itemId: item.id, warehouseId, qty: stock, avg: averageCost, date: `${Y}-01-02`, userId });
   return item;
 }
 

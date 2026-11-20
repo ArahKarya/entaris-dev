@@ -21,6 +21,7 @@ import { Pool } from 'pg';
 import { submitProductionRunInTx } from '../../services/productionRunSubmit';
 import { systemAccounts } from '../../services/systemAccounts';
 import { mapProductionLeafAccounts } from '../helpers/productionFixture';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -73,22 +74,16 @@ d('submitProductionRunInTx — single input / single output', () => {
             code: `TEST-IN-${stamp}`,
             name: `Test Input ${stamp}`,
             unit: 'kg',
-            currentStock: 100,
-            averageCost: 10_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: inputItem.id, warehouseId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 10_000, date: new Date(), userId });
 
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-OUT-${stamp}`,
             name: `Test Output ${stamp}`,
             unit: 'kg',
-            currentStock: 0,
-            averageCost: 0,
             isActive: true,
           },
         });
@@ -166,11 +161,10 @@ d('submitProductionRunInTx — single input / single output', () => {
             code: `TEST-IN-LOW-${stamp}`,
             name: `Test Input Low ${stamp}`,
             unit: 'kg',
-            currentStock: 10,
-            averageCost: 5_000,
             isActive: true,
           },
         });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 10, avg: 5_000, date: new Date(), userId });
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-OUT-LOW-${stamp}`,

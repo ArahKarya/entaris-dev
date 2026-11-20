@@ -14,6 +14,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { submitStockTransferInTx, cancelStockTransferInTx } from '../../services/stockTransfer';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -75,15 +76,11 @@ d('submitStockTransferInTx', () => {
             code: `TEST-XFER-${stamp}`,
             name: `Test Transfer ${stamp}`,
             unit: 'kg',
-            currentStock: 100, // total across warehouses
-            averageCost: 12_000,
             isActive: true,
           },
         });
         // Seed all 100 at warehouse A so we can move some to B.
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId: warehouseAId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 100, avg: 12_000, date: new Date(), userId });
 
         const transfer = await submitStockTransferInTx(
           tx,
@@ -149,14 +146,10 @@ d('submitStockTransferInTx', () => {
             code: `TEST-XFER-LOW-${stamp}`,
             name: `Test Transfer Low ${stamp}`,
             unit: 'kg',
-            currentStock: 10,
-            averageCost: 0,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId: warehouseAId, currentStock: 10 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 10, avg: 0, date: new Date(), userId });
 
         await submitStockTransferInTx(
           tx,
@@ -201,14 +194,10 @@ d('cancelStockTransferInTx', () => {
             code: `TEST-XFER-CXL-${stamp}`,
             name: `Test Transfer Cancel ${stamp}`,
             unit: 'kg',
-            currentStock: 50,
-            averageCost: 1_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId: warehouseAId, currentStock: 50 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId: warehouseAId, qty: 50, avg: 1_000, date: new Date(), userId });
 
         const transfer = await submitStockTransferInTx(
           tx,

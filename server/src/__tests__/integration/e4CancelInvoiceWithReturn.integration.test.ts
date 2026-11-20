@@ -37,6 +37,7 @@ import { findArSubledgerDiffs } from '../../services/ledger/arSubledgerCheck';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 import { translateMessage } from '../../i18n/translateMessage';
 import salesRouter from '../../routes/sales';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -100,9 +101,9 @@ interface Sale { customerId: string; invoiceId: string; invoiceNumber: string; l
 /** 1,000 kg × 10,000 + PPN 11% from a fresh stock item costing 8,000/kg. */
 async function sale(tx: Tx): Promise<Sale> {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-E4C-${tag()}`, name: `IT-E4C barang ${tag()}`, unit: 'kg', currentStock: 1_000, averageCost: 8_000, isActive: true },
+    data: { code: `IT-E4C-${tag()}`, name: `IT-E4C barang ${tag()}`, unit: 'kg', isActive: true },
   });
-  await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: 1_000 } });
+  await seedStock(tx, { itemId: item.id, warehouseId, qty: 1_000, avg: 8_000, date: `${Y}-01-02`, userId: actor.userId });
   const customer = await tx.party.create({ data: { name: `IT-E4C Customer ${tag()}`, partyType: 'Customer' } });
   // Stock leaves through the delivery order; the invoice bills its line.
   const deliveryOrder = await submitDeliveryOrderInTx(

@@ -26,6 +26,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import itemsRouter from '../../routes/inventory/items';
 import serviceItemsRouter from '../../routes/serviceItems';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -95,9 +96,11 @@ async function itemWithStock(tx: Tx, accountId: string, stock: number) {
     }));
   const owner = await createCapUser(tx, []);
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-ITEM-${tag()}`, name: 'Gabah (uji)', unit: 'kg', accountId, currentStock: stock, averageCost: 10_000 },
+    data: { code: `IT-ITEM-${tag()}`, name: 'Gabah (uji)', unit: 'kg', accountId },
   });
   if (stock > 0) {
+    const wh = await tx.warehouse.create({ data: { code: `IT-WH-${tag()}`, name: 'Gudang uji' } });
+    await seedStock(tx, { itemId: item.id, warehouseId: wh.id, qty: stock, avg: 10_000, date: `${Y}-03-01`, fiscalYearId: fy.id, userId: owner.userId });
     const je = await tx.journalEntry.create({
       data: { entryNumber: `IT-ITEM-${tag()}`, date: new Date(`${Y}-03-01`), narration: 'IT-ITEM stock', status: 'Submitted', fiscalYearId: fy.id, createdBy: owner.userId, submittedAt: new Date() },
     });

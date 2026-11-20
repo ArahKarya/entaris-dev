@@ -47,6 +47,7 @@ import { invalidatePermissionCache } from '../../services/permissionService';
 import stockTransfersRouter from '../../routes/stockTransfers';
 import customerDepositsRouter from '../../routes/customerDeposits';
 import vendorDepositsRouter from '../../routes/vendorDeposits';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -122,9 +123,9 @@ const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 async function stockItem(tx: Tx, stock: number) {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-E1R3-${tag()}`, name: `Uji batal ${tag()}`, unit: 'kg', currentStock: stock, averageCost: 9_000, isActive: true },
+    data: { code: `IT-E1R3-${tag()}`, name: `Uji batal ${tag()}`, unit: 'kg', isActive: true },
   });
-  await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: stock } });
+  await seedStock(tx, { itemId: item.id, warehouseId, qty: stock, avg: 9_000, date: `${Y}-01-02`, userId });
   return item;
 }
 
@@ -224,12 +225,11 @@ d('stock transfer cancel run twice at once', () => {
     const actor = await createCapUser(prisma as unknown as Tx, []);
     const [a, b] = await Promise.all([warehouse(prisma as unknown as Tx), warehouse(prisma as unknown as Tx)]);
     const item = await prisma.inventoryItem.create({
-      data: { code: `IT-E1R3-${tag()}`, name: `Uji batal ganda ${tag()}`, unit: 'kg', currentStock: 1_000, averageCost: 9_000, isActive: true },
+      data: { code: `IT-E1R3-${tag()}`, name: `Uji batal ganda ${tag()}`, unit: 'kg', isActive: true },
     });
-    // State right after a 1,000 kg transfer A -> B.
-    await prisma.inventoryStock.createMany({
-      data: [{ itemId: item.id, warehouseId: a.id, currentStock: 0 }, { itemId: item.id, warehouseId: b.id, currentStock: 1_000 }],
-    });
+    // State right after a 1,000 kg transfer A -> B: B holds the stock, A keeps an empty row.
+    await seedStock(prisma as unknown as Tx, { itemId: item.id, warehouseId: b.id, qty: 1_000, avg: 9_000, date: '2089-01-02', fiscalYearId: fy.id, userId: actor.userId });
+    await prisma.inventoryStock.create({ data: { itemId: item.id, warehouseId: a.id, currentStock: 0 } });
     const transfer = await prisma.stockTransfer.create({
       data: {
         transferNumber: `ST-E1R3-${tag()}`, date: new Date('2089-03-10'), fromWarehouseId: a.id, toWarehouseId: b.id,
@@ -274,7 +274,7 @@ d('stock transfer cancel run twice at once', () => {
       expect(at(b.id)).toBe(0);
       expect((await prisma.stockTransfer.findUniqueOrThrow({ where: { id: transfer.id } })).status).toBe('Cancelled');
     } finally {
-      await prisma.stockMovement.deleteMany({ where: { referenceId: transfer.id } });
+      await prisma.stockMovement.deleteMany({ where: { OR: [{ referenceId: transfer.id }, { itemId: item.id }] } });
       await prisma.stockTransfer.delete({ where: { id: transfer.id } });
       await prisma.inventoryStock.deleteMany({ where: { itemId: item.id } });
       await prisma.inventoryItem.delete({ where: { id: item.id } });

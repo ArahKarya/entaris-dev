@@ -28,6 +28,7 @@ import { editProductionRunInTx } from '../../services/productionRunEdit';
 import { nextRevisionNumber } from '../../services/production/productionPosting';
 import productionRunsRouter from '../../routes/inventory/productionRuns';
 import stockOpnameRouter from '../../routes/stockOpname';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -196,9 +197,9 @@ d('production run cancel scope', () => {
       const acc = await accounts(tx);
       const wh = await tx.warehouse.create({ data: { code: `IT-E6-${tag()}`, name: `Gudang uji ${tag()}` } });
       const item = await tx.inventoryItem.create({
-        data: { code: `IT-E6-${tag()}`, name: `Uji E6 ${tag()}`, unit: 'kg', currentStock: 90, averageCost: 1_000, isActive: true },
+        data: { code: `IT-E6-${tag()}`, name: `Uji E6 ${tag()}`, unit: 'kg', isActive: true },
       });
-      await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId: wh.id, currentStock: 90 } });
+      await seedStock(tx, { itemId: item.id, warehouseId: wh.id, qty: 90, avg: 1_000, date: DATE, fiscalYearId: fy.id, userId });
       const run = await productionRun(tx, `PR-${Y}01-2000`);
       // The run consumed 10 kg; cancelling it would put them back.
       const mov = await tx.stockMovement.create({
@@ -282,11 +283,11 @@ d('production run revision numbers', () => {
     await inRollback(async (tx) => {
       const wh = await tx.warehouse.create({ data: { code: `IT-E6-${tag()}`, name: `Gudang uji ${tag()}` } });
       const input = await tx.inventoryItem.create({
-        data: { code: `IT-E6-IN-${tag()}`, name: `Uji E6 input ${tag()}`, unit: 'kg', currentStock: 1_000, averageCost: 0, isActive: true },
+        data: { code: `IT-E6-IN-${tag()}`, name: `Uji E6 input ${tag()}`, unit: 'kg', isActive: true },
       });
-      await tx.inventoryStock.create({ data: { itemId: input.id, warehouseId: wh.id, currentStock: 1_000 } });
+      await seedStock(tx, { itemId: input.id, warehouseId: wh.id, qty: 1_000, avg: 0, date: DATE, fiscalYearId: fy.id, userId });
       const output = await tx.inventoryItem.create({
-        data: { code: `IT-E6-OUT-${tag()}`, name: `Uji E6 output ${tag()}`, unit: 'kg', currentStock: 0, averageCost: 0, isActive: true },
+        data: { code: `IT-E6-OUT-${tag()}`, name: `Uji E6 output ${tag()}`, unit: 'kg', isActive: true },
       });
       const date = `${Y}-03-10`;
       // Zero cost in and zero value out: nothing to post, so the run has no JV-<runNumber>.
