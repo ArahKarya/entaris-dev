@@ -26,6 +26,7 @@ import { findMovementReferenceIssues } from '../../services/inventory/movementRe
 import movementsRouter from '../../routes/inventory/movements';
 import stockTransfersRouter from '../../routes/stockTransfers';
 import stockOpnameRouter from '../../routes/stockOpname';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -83,9 +84,9 @@ function warehouse(tx: Tx, name: string) {
 /** An item holding `stock` kg, all of it in `warehouseId`. */
 async function item(tx: Tx, name: string, warehouseId: string, stock: number) {
   const it = await tx.inventoryItem.create({
-    data: { code: `IT-E3R2-${tag()}`, name: `${name} ${tag()}`, unit: 'Kg', currentStock: stock, averageCost: 0 },
+    data: { code: `IT-E3R2-${tag()}`, name: `${name} ${tag()}`, unit: 'Kg' },
   });
-  await tx.inventoryStock.create({ data: { itemId: it.id, warehouseId, currentStock: stock } });
+  await seedStock(tx, { itemId: it.id, warehouseId, qty: stock, avg: 0, date: DATE, fiscalYearId: fy.id, userId: actor.userId });
   return it;
 }
 
@@ -417,9 +418,7 @@ d('e3-movement-reference-audit', () => {
       const beras = await item(tx, 'Beras', a.id, 5000);
       const jagung = await item(tx, 'Jagung', a.id, 5000);
       const gabah = await item(tx, 'Gabah', a.id, 500);
-      // Opening rows so each warehouse's stock matches its movements before the old damage.
-      for (const it of [beras, jagung]) await movement(tx, { itemId: it.id, warehouseId: a.id, movementType: 'In', quantity: 5000 });
-      await movement(tx, { itemId: gabah.id, warehouseId: a.id, movementType: 'In', quantity: 500 });
+      // The seeded stock already has its opening In rows, so each warehouse matches its movements before the old damage.
 
       // (e) opname line +100 whose movement the old edit rewrote to 30 kg; a matching line is not listed.
       const so = await tx.stockOpname.create({

@@ -31,6 +31,7 @@ import { submitProductionRunInTx } from '../../services/productionRunSubmit';
 import { ACCOUNT_MAPPING_MISSING } from '../../types/systemAccounts';
 import { ACCOUNT_GROUP, ACCOUNT_INACTIVE } from '../../services/ledger/accountGuard';
 import { BusinessError } from '../../utils/errors';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -101,9 +102,9 @@ async function warehouse(tx: Tx) {
 
 async function stockedItem(tx: Tx, warehouseId: string, stock: number, cost: number, label: string) {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-413A-${label}-${tag()}`, name: `IT-4.13a ${label}`, unit: 'kg', currentStock: stock, averageCost: cost, isActive: true },
+    data: { code: `IT-413A-${label}-${tag()}`, name: `IT-4.13a ${label}`, unit: 'kg', isActive: true },
   });
-  if (stock > 0) await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: stock } });
+  if (stock > 0) await seedStock(tx, { itemId: item.id, warehouseId, qty: stock, avg: cost, date: `${Y}-01-02` });
   return item;
 }
 

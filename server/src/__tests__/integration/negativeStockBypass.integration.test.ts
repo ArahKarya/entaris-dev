@@ -31,6 +31,7 @@ import goodsReceiptsRouter from '../../routes/goodsReceipts';
 import productionRunsRouter from '../../routes/inventory/productionRuns';
 import movementsRouter from '../../routes/inventory/movements';
 import approvalsRouter from '../../routes/approvals';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -94,9 +95,10 @@ async function setup(tx: Tx) {
 
 async function stockItem(tx: Tx, warehouseId: string, stock: number, averageCost: number) {
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-E3R1-${tag()}`, name: `Uji stok minus ${tag()}`, unit: 'kg', currentStock: stock, averageCost, isActive: true },
+    data: { code: `IT-E3R1-${tag()}`, name: `Uji stok minus ${tag()}`, unit: 'kg', isActive: true },
   });
-  await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: stock } });
+  if (stock > 0) await seedStock(tx, { itemId: item.id, warehouseId, qty: stock, avg: averageCost, date: `${Y}-01-02` });
+  else await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId, currentStock: 0 } }); // an empty row to read back
   return item;
 }
 

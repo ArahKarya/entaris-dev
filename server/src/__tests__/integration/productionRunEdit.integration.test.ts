@@ -16,6 +16,7 @@ import { submitProductionRunInTx } from '../../services/productionRunSubmit';
 import { systemAccounts } from '../../services/systemAccounts';
 import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { editProductionRunInTx } from '../../services/productionRunEdit';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -66,22 +67,16 @@ d('editProductionRunInTx — single input / single output', () => {
             code: `TEST-EDIT-IN-${stamp}`,
             name: `Edit Input ${stamp}`,
             unit: 'kg',
-            currentStock: 200,
-            averageCost: 10_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: inputItem.id, warehouseId, currentStock: 200 },
-        });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 200, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const outputItem = await tx.inventoryItem.create({
           data: {
             code: `TEST-EDIT-OUT-${stamp}`,
             name: `Edit Output ${stamp}`,
             unit: 'kg',
-            currentStock: 0,
-            averageCost: 0,
             isActive: true,
           },
         });
@@ -172,11 +167,9 @@ d('editProductionRunInTx — single input / single output', () => {
         // This database may map COGS to a group account, which production posting refuses.
         await mapProductionLeafAccounts(tx);
         const inputItem = await tx.inventoryItem.create({
-          data: { code: `TEST-CXL-EDIT-IN-${stamp}`, name: `X ${stamp}`, unit: 'kg', currentStock: 100, averageCost: 1000, isActive: true },
+          data: { code: `TEST-CXL-EDIT-IN-${stamp}`, name: `X ${stamp}`, unit: 'kg', isActive: true },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: inputItem.id, warehouseId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: inputItem.id, warehouseId, qty: 100, avg: 1000, date: new Date().toISOString().slice(0, 10), userId });
         const outputItem = await tx.inventoryItem.create({
           data: { code: `TEST-CXL-EDIT-OUT-${stamp}`, name: `Y ${stamp}`, unit: 'kg', isActive: true },
         });

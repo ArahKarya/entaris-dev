@@ -16,6 +16,7 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { BusinessError } from '../../utils/errors';
 import { FISCAL_YEAR_MISSING, PERIOD_CLOSED, PERIOD_LOCKED } from '../../utils/periodGuard';
 import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -227,19 +228,16 @@ d('purchase invoice revision: current behaviour owned by E5 (characterisation)',
       const { invoice } = await serviceInvoice(tx, y1.id);
       const stamp = tag();
       const item = await tx.inventoryItem.create({
-        data: { code: `IT-REVFY-${stamp}`, name: `Barang uji ${stamp}`, unit: 'kg', currentStock: 10, averageCost: 1_000_000, isActive: true },
+        data: { code: `IT-REVFY-${stamp}`, name: `Barang uji ${stamp}`, unit: 'kg', isActive: true },
       });
       const warehouse = await tx.warehouse.create({ data: { code: `IT-REVFY-${stamp}`, name: `Gudang uji ${stamp}` } });
-      const movement = await tx.stockMovement.create({
-        data: {
-          movementNumber: `IT-REVFY-SM-${stamp}`, date: new Date('2171-06-10'), itemId: item.id, warehouseId: warehouse.id,
-          movementType: 'In', quantity: 10, unitCost: 1_000_000, totalValue: 10_000_000, fiscalYearId: y1.id, createdById: adminId,
-        },
+      const { movementId } = await seedStock(tx, {
+        itemId: item.id, warehouseId: warehouse.id, qty: 10, avg: 1_000_000, date: '2171-06-10', fiscalYearId: y1.id, userId: adminId,
       });
       const receipt = await tx.goodsReceipt.create({
         data: {
           sttNumber: `IT-REVFY-STT-${stamp}`, date: new Date('2171-06-10'), partyId: invoice.partyId, fiscalYearId: y1.id, createdBy: adminId,
-          items: { create: [{ inventoryItemId: item.id, warehouseId: warehouse.id, itemName: item.name, quantity: 10, unit: 'kg', lockedUnitCost: 1_000_000, stockMovementId: movement.id }] },
+          items: { create: [{ inventoryItemId: item.id, warehouseId: warehouse.id, itemName: item.name, quantity: 10, unit: 'kg', lockedUnitCost: 1_000_000, stockMovementId: movementId }] },
         },
         include: { items: true },
       });
@@ -252,7 +250,7 @@ d('purchase invoice revision: current behaviour owned by E5 (characterisation)',
 
       await revise(tx, invoice.id, piLine.id, 1_300_000);
 
-      const sm = await tx.stockMovement.findUniqueOrThrow({ where: { id: movement.id } });
+      const sm = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
       expect(Number(sm.unitCost)).toBe(1_300_000);
       expect(Number(sm.totalValue)).toBe(13_000_000);
       expect(sm.fiscalYearId).toBe(y1.id);

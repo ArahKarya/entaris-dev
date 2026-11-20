@@ -17,6 +17,7 @@ import { Pool } from 'pg';
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { cancelSalesInvoiceInTx } from '../../services/invoiceCancellation';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -67,14 +68,10 @@ d('invoice from delivery order', () => {
             code: `TEST-FROM-DO-${stamp}`,
             name: `From-DO Item ${stamp}`,
             unit: 'kg',
-            currentStock: 100,
-            averageCost: 10_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId, currentStock: 100 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 100, avg: 10_000, date: new Date().toISOString().slice(0, 10), userId });
 
         // Ship via DO at the original 10_000 cost.
         const doResult = await submitDeliveryOrderInTx(
@@ -129,7 +126,7 @@ d('invoice from delivery order', () => {
 
         // Only ONE Out movement should exist for this item — from the DO.
         const movements = await tx.stockMovement.findMany({
-          where: { itemId: item.id, isCancelled: false },
+          where: { itemId: item.id, isCancelled: false, referenceType: 'DeliveryOrder' },
         });
         expect(movements.length).toBe(1);
         expect(movements[0].referenceType).toBe('DeliveryOrder');
@@ -180,14 +177,10 @@ d('invoice from delivery order', () => {
             code: `TEST-INV-CXL-${stamp}`,
             name: 'Cancel item',
             unit: 'kg',
-            currentStock: 50,
-            averageCost: 5_000,
             isActive: true,
           },
         });
-        await tx.inventoryStock.create({
-          data: { itemId: item.id, warehouseId, currentStock: 50 },
-        });
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 5_000, date: new Date().toISOString().slice(0, 10), userId });
 
         const doResult = await submitDeliveryOrderInTx(
           tx,

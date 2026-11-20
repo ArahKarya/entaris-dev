@@ -26,6 +26,7 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 import itemsRouter from '../../routes/inventory/items';
 import warehousesRouter from '../../routes/warehouses';
 import { findInactiveMasterWithStock } from '../../services/inventory/itemMasterGuard';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -99,9 +100,16 @@ async function warehouse(tx: Tx, extra: { isDefault?: boolean } = {}) {
 async function stockedItem(tx: Tx, accountId: string | null, stock: number, wh?: { id: string }) {
   const w = wh ?? (await warehouse(tx));
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-IMG-${tag()}`, name: 'Bekatul (uji)', unit: 'Kg', accountId, currentStock: stock, averageCost: 1000 },
+    data: { code: `IT-IMG-${tag()}`, name: 'Bekatul (uji)', unit: 'Kg', accountId },
   });
-  if (stock !== 0) await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId: w.id, currentStock: stock } });
+  if (stock > 0) {
+    const fy = await fiscalYear(tx);
+    await seedStock(tx, { itemId: item.id, warehouseId: w.id, qty: stock, avg: 1000, date: `${Y}-01-02`, fiscalYearId: fy.id });
+  } else if (stock < 0) {
+    // Negative stock cannot come from an inbound posting; plant the drift directly (as the 0-stock warehouse case below does).
+    await tx.inventoryItem.update({ where: { id: item.id }, data: { currentStock: stock, averageCost: 1000 } });
+    await tx.inventoryStock.create({ data: { itemId: item.id, warehouseId: w.id, currentStock: stock } });
+  }
   return { item, wh: w };
 }
 
@@ -321,6 +329,8 @@ d('item master while it carries stock (E3-R5)', () => {
       const sub = await inventorySubtree(tx);
       const own = await sub.child();
       const { item } = await stockedItem(tx, own.id, 120);
+      // Legacy stock: the seeded opening movement is cancelled, so none is active behind the 120 kg.
+      await tx.stockMovement.updateMany({ where: { itemId: item.id }, data: { isCancelled: true } });
       const refused = await deleteItem(item.id);
       expect(refused.status).toBe(400);
       expect(refused.body.code).toBe('ITEM_HAS_STOCK');

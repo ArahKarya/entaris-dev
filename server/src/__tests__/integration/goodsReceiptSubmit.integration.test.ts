@@ -14,6 +14,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
+import { seedStock } from '../helpers/inventoryFixture';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -147,11 +148,11 @@ d('submitGoodsReceiptInTx', () => {
             code: `TEST-STT-AVG-${stamp}`,
             name: `STT AvgCost ${stamp}`,
             unit: 'kg',
-            currentStock: 50,
-            averageCost: 7_500, // existing avg cost → should be used as provisional
             isActive: true,
           },
         });
+        // Existing 50 kg at 7_500 → the average is used as the provisional cost.
+        await seedStock(tx, { itemId: item.id, warehouseId, qty: 50, avg: 7_500, date: new Date().toISOString().slice(0, 10), userId });
 
         const stt = await submitGoodsReceiptInTx(
           tx,

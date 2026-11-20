@@ -57,6 +57,7 @@ import approvalsRouter from '../../routes/approvals';
 import { decideApproval, type DecideApprovalResult } from '../../services/approvalDecision';
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { PERIOD_LOCKED } from '../../utils/periodGuard';
+import { seedStock } from '../helpers/inventoryFixture';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -152,11 +153,13 @@ async function purgeYear(fy: FiscalYear) {
 /** GKP 10.000 kg @ 6.000 in stock, an empty Beras item, and a production draft queued for approval. */
 async function seedProductionRequest(base: Awaited<ReturnType<typeof seedBase>>) {
   const gkp = await prisma.inventoryItem.create({
-    data: { code: `IT-E7R1-GKP-${tag()}`, name: `Uji GKP ${tag()}`, unit: 'kg', currentStock: 10_000, averageCost: 6_000, isActive: true },
+    data: { code: `IT-E7R1-GKP-${tag()}`, name: `Uji GKP ${tag()}`, unit: 'kg', isActive: true },
   });
-  await prisma.inventoryStock.create({ data: { itemId: gkp.id, warehouseId, currentStock: 10_000 } });
+  await seedStock(prisma as unknown as Tx, {
+    itemId: gkp.id, warehouseId, qty: 10_000, avg: 6_000, date: `${Y}-01-02`, fiscalYearId: base.fy.id, userId: base.requester.userId,
+  });
   const beras = await prisma.inventoryItem.create({
-    data: { code: `IT-E7R1-BRS-${tag()}`, name: `Uji Beras ${tag()}`, unit: 'kg', currentStock: 0, averageCost: 0, isActive: true },
+    data: { code: `IT-E7R1-BRS-${tag()}`, name: `Uji Beras ${tag()}`, unit: 'kg', isActive: true },
   });
   const payload = {
     date: DAY,
