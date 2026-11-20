@@ -8,7 +8,8 @@ type Db = Pick<Prisma.TransactionClient, '$queryRaw'>;
  * per row (a TransferOut with the wrong sign), and link any movement as a batch. Nothing here
  * writes; corrections are stock adjustments decided by the accountant.
  *
- *  a. referenceType without referenceId (other than OpeningBalance): a manual row typed by a client.
+ *  a. referenceType without referenceId (other than OpeningBalance and the drift repair's
+ *     StockDriftRepair): a manual row typed by a client.
  *  b. cancelled movement of a document that is still active. `certain` for transfers and opnames
  *     (they never cancel their own rows while active); `review` for the rest, whose edit paths
  *     also cancel replaced rows.
@@ -72,7 +73,7 @@ export async function findMovementReferenceIssues(db: Db): Promise<MovementAudit
 
   push('a', await db.$queryRaw<Raw[]>`
     SELECT ${COLUMNS} FROM stock_movements m
-    WHERE m.reference_type IS NOT NULL AND m.reference_id IS NULL AND m.reference_type <> 'OpeningBalance'
+    WHERE m.reference_type IS NOT NULL AND m.reference_id IS NULL AND m.reference_type NOT IN ('OpeningBalance', 'StockDriftRepair')
     ORDER BY m.date, m.movement_number`, () => 'reference type set by a client, no document');
 
   for (const [type, active] of Object.entries(ACTIVE_DOCUMENT)) {

@@ -3,6 +3,8 @@
  * editing or cancelling them per row would desync stock, GL and the document. Change the document instead.
  */
 export const MOVEMENT_DOCUMENT_LOCKED = 'MOVEMENT_DOCUMENT_LOCKED';
+/** referenceType of the Adjustment − rows written by the item vs warehouse drift repair (PR-6.3d). */
+export const STOCK_DRIFT_REFERENCE = 'StockDriftRepair';
 
 /** Document types that write their own movements; `page` is where the document is changed. */
 const DOCUMENT_LABELS: Record<string, { label: string; page: string }> = {
@@ -27,9 +29,16 @@ export interface LockableMovement {
  *  • a movement of a system document (above) that names its document (referenceId set). A manual
  *    movement whose referenceType was typed by a client (no referenceId) stays correctable;
  *  • OpeningBalance, which has no document: correct opening stock with a stock adjustment;
+ *  • StockDriftRepair, the write-off of the item vs warehouse drift repair (e3-stock-drift): undoing
+ *    it per row would bring the drift back; correct it with a stock adjustment;
  *  • TransferIn / TransferOut whatever their reference: only the transfer reverses both sides.
  */
 export function documentMovementLockMessage(mov: LockableMovement, action: 'edit' | 'cancel'): string | null {
+  if (mov.referenceType === STOCK_DRIFT_REFERENCE) {
+    return action === 'edit'
+      ? 'Gerakan stok perbaikan selisih gudang tidak dapat diedit per baris. Koreksi lewat Penyesuaian Stok.'
+      : 'Gerakan stok perbaikan selisih gudang tidak dapat dibatalkan per baris. Koreksi lewat Penyesuaian Stok.';
+  }
   if (mov.referenceType === 'OpeningBalance') {
     return action === 'edit'
       ? 'Gerakan stok saldo awal tidak dapat diedit per baris. Koreksi stok awal lewat Penyesuaian Stok.'

@@ -70,3 +70,33 @@ export async function seedStock(db: Tx, input: SeedStockInput): Promise<{ moveme
   });
   return { movementId: movement.id };
 }
+
+/**
+ * Item vs warehouse drift the way legacy paths left it (PR-6.3d): `qty` at `avg` on the item total
+ * and average with a valued `In` movement that has no warehouse, and no warehouse row. The item
+ * then holds stock that no warehouse holds. No journal is written.
+ */
+export async function seedUnplacedStock(db: Tx, input: Omit<SeedStockInput, 'warehouseId'>): Promise<{ movementId: string }> {
+  const qty = new Decimal(input.qty);
+  const avg = new Decimal(input.avg);
+  const day = typeof input.date === 'string' ? new Date(`${input.date}T00:00:00.000Z`) : input.date;
+  const fiscalYearId = input.fiscalYearId
+    ?? (await db.fiscalYear.findFirstOrThrow({ where: { startDate: { lte: day }, endDate: { gte: day } } })).id;
+  const userId = input.userId
+    ?? (await db.user.findFirstOrThrow({ where: { role: 'Admin', isActive: true } })).id;
+  const item = await db.inventoryItem.findUniqueOrThrow({ where: { id: input.itemId }, select: { currentStock: true, averageCost: true } });
+  const before = new Decimal(item.currentStock.toString());
+  const blended = before.lte(0) ? avg : before.times(item.averageCost.toString()).plus(qty.times(avg)).div(before.plus(qty));
+  await db.inventoryItem.update({
+    where: { id: input.itemId },
+    data: { currentStock: { increment: qty.toNumber() }, averageCost: blended.toDecimalPlaces(2).toNumber() },
+  });
+  const movement = await db.stockMovement.create({
+    data: {
+      movementNumber: `IT-LOOSE-${tag()}`, date: day, itemId: input.itemId, warehouseId: null, movementType: 'In',
+      quantity: qty.toNumber(), unitCost: avg.toNumber(), totalValue: qty.times(avg).toDecimalPlaces(2).toNumber(),
+      notes: 'Fixture stok tanpa gudang', fiscalYearId, createdById: userId,
+    },
+  });
+  return { movementId: movement.id };
+}

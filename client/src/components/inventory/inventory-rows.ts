@@ -107,6 +107,7 @@ const REFERENCE_TYPES = [
   'StockOpname',
   'StockTransfer',
   'OpeningBalance',
+  'StockDriftRepair',
 ] as const;
 type ReferenceType = (typeof REFERENCE_TYPES)[number];
 const isReferenceType = (type: string): type is ReferenceType => (REFERENCE_TYPES as readonly string[]).includes(type);
@@ -161,11 +162,13 @@ type LockableRow = Pick<StockMovementRow, 'referenceType' | 'referenceId' | 'mov
 /**
  * Mirrors the server's document lock so the menu never offers an action that is always rejected:
  * a movement of a document that names it (referenceId set) is changed through that document,
- * OpeningBalance is corrected with a stock adjustment, and transfer rows only through the transfer.
+ * OpeningBalance and the drift repair write-off (StockDriftRepair) are corrected with a stock
+ * adjustment, and transfer rows only through the transfer.
  */
 function documentBlock(m: LockableRow, action: 'edit' | 'cancel'): string | null {
   if (m.isCancelled) return i18n.t('inventoryRows.block.cancelled', { ns: 'inventory' });
   if (m.referenceType === 'OpeningBalance') return i18n.t('inventoryRows.block.openingBalance', { ns: 'inventory' });
+  if (m.referenceType === 'StockDriftRepair') return i18n.t('inventoryRows.block.stockDriftRepair', { ns: 'inventory' });
   const isTransfer = m.movementType === 'TransferIn' || m.movementType === 'TransferOut';
   const doc: LockingDocument | null = isTransfer
     ? 'StockTransfer'
