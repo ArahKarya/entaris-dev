@@ -80,6 +80,20 @@ describe('revaluationSplit', () => {
     expect(revaluationSplit(10, 30_000, 5_000)).toEqual({ toInventory: new Decimal(5_000), toCogs: new Decimal(0) });
     expect(revaluationSplit(10, 30_000, -30_000)).toEqual({ toInventory: new Decimal(-30_000), toCogs: new Decimal(0) });
   });
+
+  it('refuses a negative value with stock on hand, like outboundValue: a decrease would raise it', () => {
+    let caught: unknown;
+    try {
+      revaluationSplit(10, -200_000, -50_000);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(BusinessError);
+    expect((caught as BusinessError).code).toBe(INVENTORY_VALUE_NEGATIVE);
+    expect(() => revaluationSplit(10, -200_000, 50_000)).toThrow(BusinessError);
+    // No stock: a negative value is the negative-stock window, not a broken book.
+    expect(str(revaluationSplit(-3, '-15000.00', -100).toCogs)).toBe('-100.00');
+  });
 });
 
 describe('averageAfter', () => {

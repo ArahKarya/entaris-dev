@@ -43,6 +43,14 @@ async function consumedQtyOfBatch(tx: Tx, inboundMovementId: string): Promise<De
   return new Decimal((agg._sum?.quantity ?? 0).toString());
 }
 
+/**
+ * Narration of a price revision journal. The journal names no invoice line, so the value-ledger
+ * migration (20261112200000_inventory_value_ledger, step 3) finds a revised invoice by this prefix:
+ * keep 'Revisi harga <invoice number> (' unchanged.
+ */
+export const reviseJournalNarration = (invoiceNumber: string, supplierName: string, reason: string): string =>
+  `Revisi harga ${invoiceNumber} (${supplierName}): ${reason}`;
+
 export async function revisePurchaseInvoiceInTx(
   tx: Tx,
   input: RevisePurchaseInvoiceInput,
@@ -229,7 +237,7 @@ export async function revisePurchaseInvoiceInTx(
     data: {
       entryNumber,
       date: now,
-      narration: `Revisi harga ${invoice.invoiceNumber} (${invoice.supplier.name}): ${input.reason.trim()}`,
+      narration: reviseJournalNarration(invoice.invoiceNumber, invoice.supplier.name, input.reason.trim()),
       status: 'Submitted',
       submittedAt: now,
       fiscalYearId: journalFy.id,

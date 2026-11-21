@@ -4,11 +4,14 @@
  * value-ledger-data markers) and run inside a rollback transaction on fixtures made here:
  * - an STT receipt overwritten by a live purchase invoice is backfilled at the locked cost, and the
  *   invoice delta becomes one Revaluation adjusting it; no baseline row;
- * - after the invoice is cancelled: no Revaluation, the leftover delta goes into the baseline;
+ * - after the invoice is cancelled, or once it has a price revision: no Revaluation, the delta goes
+ *   into the baseline (a revised invoice is listed);
  * - In / Out / Adjustment / transfer / cancelled rows get their signed values;
  * - the baseline is dated at the start of the earliest open fiscal year, or the later cut-over date;
  * - drift, no active user, no open fiscal year: RAISE;
- * - run twice: numbers do not collide, an unchanged database gets no new row;
+ * - run twice: numbers do not collide, an unchanged database gets no new row, also for an item the
+ *   ledger took through a negative-stock window after its baseline;
+ * - an item whose baseline is dated before older movements is listed (decision #19);
  * - afterwards stock_value = Σ active value_delta (the self-check).
  * Fiscal year 2109; every other year is closed inside the transaction so the baseline day is known.
  */
@@ -23,7 +26,9 @@ import { seedStock, seedUnplacedStock } from '../helpers/inventoryFixture';
 import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { cancelPurchaseInvoiceInTx } from '../../services/invoiceCancellation';
+import { reviseJournalNarration } from '../../services/purchaseInvoiceRevise';
 import {
+  findValueBaselineNotes,
   readValueBaselineSql,
   runValueBaselineData,
   valueLedgerMigrationPath,
@@ -199,6 +204,43 @@ d('value-ledger migration data part (E3-R6)', () => {
     });
   });
 
+  it('gives a revised invoice no Revaluation: its delta goes into the baseline and the invoice is listed', async () => {
+    await inWorld(async (tx, w) => {
+      const item = await createItem(tx, w, 'PIR');
+      const { movementId, pi } = await sttWithInvoice(tx, w, item.id);
+      // The revision journal as purchaseInvoiceRevise.ts writes it (its lines name no invoice line).
+      await tx.journalEntry.create({
+        data: {
+          entryNumber: `IT-VB-JV-${w.stamp}`, date: new Date(`${DAY}T00:00:00.000Z`), status: 'Submitted', fiscalYearId: w.fyId,
+          createdBy: w.userId, narration: reviseJournalNarration(pi.invoiceNumber, 'VB Supplier', 'harga dikoreksi Supplier'),
+        },
+      });
+
+      const report = await runValueBaselineData(tx);
+
+      expect(await valueOf(tx, movementId)).toBe(1_000_000);
+      const rows = report.newRows.filter((r) => r.itemId === item.id);
+      expect(rows.map((r) => [r.referenceType, r.valueDelta.toFixed(2)])).toEqual([['ValuationBaseline', '100000.00']]);
+      const notes = await findValueBaselineNotes(tx);
+      expect(notes.revisedInvoices.filter((r) => r.itemCode === item.code).map((r) => [r.invoiceNumber, r.delta.toFixed(2)]))
+        .toEqual([[pi.invoiceNumber, '100000.00']]);
+      await assertSelfCheck(tx, [item.id]);
+    });
+  });
+
+  it('lists an item whose baseline is dated before movements that existed when it was written', async () => {
+    await inWorld(async (tx, w) => {
+      const item = await createItem(tx, w, 'LATE');
+      await seedStock(tx, { itemId: item.id, warehouseId: w.warehouseId, qty: 100, avg: 5_000, date: DAY });
+      await tx.inventoryItem.update({ where: { id: item.id }, data: { averageCost: 6_000 } });
+
+      const [row] = (await runValueBaselineData(tx)).newRows.filter((r) => r.itemId === item.id);
+      expect(row!.date.toISOString().slice(0, 10)).toBe(`${YEAR}-01-01`);
+      const listed = (await findValueBaselineNotes(tx)).movementsAfterBaseline.filter((r) => r.itemCode === item.code);
+      expect(listed.map((r) => [r.baselineNumber, r.movements])).toEqual([[row!.movementNumber, 1]]);
+    });
+  });
+
   it('backfills signed values per movement type and needs no baseline when movements explain the value', async () => {
     await inWorld(async (tx, w) => {
       const item = await createItem(tx, w, 'MIX');
@@ -264,6 +306,38 @@ d('value-ledger migration data part (E3-R6)', () => {
       const second = (await runValueBaselineData(tx)).newRows.filter((r) => r.itemId === item.id);
       expect(second.map((r) => [r.movementNumber, r.valueDelta.toFixed(2)])).toEqual([[`SM-VB-${item.code}-2`, '-50000.00']]);
       expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).stockValue)).toBe(550_000);
+      await assertSelfCheck(tx, [item.id]);
+    });
+  });
+
+  it('adds nothing on a re-run for an item the ledger took through a negative-stock window after its baseline', async () => {
+    await inWorld(async (tx, w) => {
+      const item = await createItem(tx, w, 'NEG');
+      await seedStock(tx, { itemId: item.id, warehouseId: w.warehouseId, qty: 100, avg: 10_000, date: DAY });
+      await tx.inventoryItem.update({ where: { id: item.id }, data: { averageCost: 11_000 } });
+      const first = (await runValueBaselineData(tx)).newRows.filter((r) => r.itemId === item.id);
+      expect(first.map((r) => r.valueDelta.toFixed(2))).toEqual(['100000.00']);
+
+      // As the ledger posts it (inventoryValueMath): out 150 = 1.100.000 + 50 x 11.000; stock −50,
+      // value −550.000. In 30 at 12.000 (+360.000): stock −20, value −190.000, average stays 11.000,
+      // so stock x average (−220.000) differs from the value: normal in the window.
+      const at = (n: string, movementType: 'In' | 'Out', quantity: number, valueDelta: number) => tx.stockMovement.create({
+        data: {
+          movementNumber: `IT-VB-${n}-${w.stamp}`, date: new Date(`${YEAR}-03-01T00:00:00.000Z`), itemId: item.id, warehouseId: w.warehouseId,
+          movementType, quantity, unitCost: Math.abs(valueDelta) / quantity, totalValue: Math.abs(valueDelta), valueDelta,
+          fiscalYearId: w.fyId, createdById: w.userId,
+        },
+      });
+      await at('NOUT', 'Out', 150, -1_650_000);
+      await at('NIN', 'In', 30, 360_000);
+      await tx.inventoryItem.update({ where: { id: item.id }, data: { currentStock: -20, stockValue: -190_000, averageCost: 11_000 } });
+      await tx.inventoryStock.update({ where: { itemId_warehouseId: { itemId: item.id, warehouseId: w.warehouseId } }, data: { currentStock: -20 } });
+
+      const again = await runValueBaselineData(tx);
+
+      expect(again.newRows.filter((r) => r.itemId === item.id)).toHaveLength(0);
+      expect(again.stockValueChanges.filter((c) => c.itemId === item.id)).toHaveLength(0);
+      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).stockValue)).toBe(-190_000);
       await assertSelfCheck(tx, [item.id]);
     });
   });

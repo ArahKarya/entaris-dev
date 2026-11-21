@@ -9,6 +9,7 @@ import {
   movementCancelBlock,
   movementEditBlock,
   movementTypeLabel,
+  movementValueText,
   referenceTypeLabel,
   splitRunLines,
   toItemExportRows,
@@ -52,6 +53,22 @@ describe('movement rules', () => {
     expect(movementEditBlock(row('StockDriftRepair', null, 'AdjustmentOut'))).toMatch(/selisih gudang/);
     expect(movementCancelBlock(row(null, null, 'TransferOut'))).toMatch(/Transfer Stok/);
     expect(movementEditBlock(row('StockTransfer', 'st-1', 'TransferIn'))).toMatch(/transfer stok/);
+  });
+
+  it('always blocks a Revaluation without a document (valuation baseline); one of a document points to it', () => {
+    expect(movementCancelBlock(row('ValuationBaseline', null, 'Revaluation'))).toMatch(/revaluasi nilai/);
+    expect(movementEditBlock(row(null, null, 'Revaluation'))).toMatch(/buku nilai/);
+    expect(movementCancelBlock(row('PurchaseInvoice', 'pi-1', 'Revaluation'))).toMatch(/invoice pembelian/);
+    expect(referenceTypeLabel('ValuationBaseline')).toBe('Nilai Awal Buku Nilai');
+  });
+
+  it('shows a Revaluation value with its sign and a quantity row at its total value', () => {
+    const NBSP = '\u00a0';
+    expect(movementValueText({ movementType: 'Revaluation', totalValue: '60000.00', valueDelta: '-60000.00' }, { symbol: false })).toBe('-60.000');
+    expect(movementValueText({ movementType: 'Revaluation', totalValue: '100000.00', valueDelta: '100000.00' })).toBe(`+Rp${NBSP}100.000`);
+    expect(movementValueText({ movementType: 'Revaluation', totalValue: 500 }, { symbol: false })).toBe('500');
+    expect(movementValueText({ movementType: 'Out', totalValue: '200000.00', valueDelta: '-200000.00' }, { symbol: false })).toBe('200.000');
+    expect(movementValueText({ movementType: 'In', totalValue: null })).toBe('—');
   });
 
   it('leaves manual rows, also those with a typed reference and no document id, open', () => {

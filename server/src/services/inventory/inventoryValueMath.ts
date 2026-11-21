@@ -26,7 +26,21 @@ export const VALUE_DP = 2;
 /** Error code (400): an item with stock on hand carries a negative stock_value; nothing is valued out of it. */
 export const INVENTORY_VALUE_NEGATIVE = 'INVENTORY_VALUE_NEGATIVE';
 
+/** reference_type of the Revaluation rows the value-ledger migration writes per item, with no journal. */
+export const VALUATION_BASELINE_REFERENCE = 'ValuationBaseline';
+
 const round = (v: Decimal) => v.toDecimalPlaces(VALUE_DP);
+
+/** The health check of a posting: stock on hand with a negative stock_value is a broken book. */
+function assertValueHealthy(s: Decimal, v: Decimal, posting: 'outbound' | 'revaluation'): void {
+  if (!(s.gt(0) && v.lt(0))) return;
+  throw new BusinessError(
+    posting === 'outbound'
+      ? `Nilai persediaan negatif (${v.toFixed(VALUE_DP)}) padahal stok masih ${s.toString()}. Barang tidak bisa dikeluarkan sampai nilainya diperbaiki.`
+      : `Nilai persediaan negatif (${v.toFixed(VALUE_DP)}) padahal stok masih ${s.toString()}. Nilainya tidak bisa disesuaikan sampai diperbaiki.`,
+    INVENTORY_VALUE_NEGATIVE,
+  );
+}
 
 /**
  * Value that leaves stock when `qty` (> 0) goes out; positive, 2 dp. The ledger decides it, never
@@ -41,12 +55,7 @@ export function outboundValue(stock: Decimal.Value, stockValue: Decimal.Value, a
   const s = new Decimal(stock);
   const v = new Decimal(stockValue);
   const q = new Decimal(qty);
-  if (s.gt(0) && v.lt(0)) {
-    throw new BusinessError(
-      `Nilai persediaan negatif (${v.toFixed(VALUE_DP)}) padahal stok masih ${s.toString()}. Barang tidak bisa dikeluarkan sampai nilainya diperbaiki.`,
-      INVENTORY_VALUE_NEGATIVE,
-    );
-  }
+  assertValueHealthy(s, v, 'outbound');
   if (s.lte(0)) return round(new Decimal(avg).times(q));
   if (q.gte(s)) return v.plus(round(new Decimal(avg).times(q.minus(s))));
   return round(v.times(q).div(s));
@@ -58,11 +67,14 @@ export function outboundValue(stock: Decimal.Value, stockValue: Decimal.Value, a
  * - stock <= 0: the goods are gone, everything to COGS;
  * - a decrease larger than stock_value: inventory down to 0, the rest to COGS (never clamped away);
  * - otherwise: everything to inventory.
+ * A negative stock_value with stock on hand is refused as in outboundValue: a decrease would raise it.
  */
 export function revaluationSplit(stock: Decimal.Value, stockValue: Decimal.Value, delta: Decimal.Value): { toInventory: Decimal; toCogs: Decimal } {
+  const s = new Decimal(stock);
   const d = new Decimal(delta);
   const v = new Decimal(stockValue);
-  if (new Decimal(stock).lte(0)) return { toInventory: new Decimal(0), toCogs: d };
+  assertValueHealthy(s, v, 'revaluation');
+  if (s.lte(0)) return { toInventory: new Decimal(0), toCogs: d };
   if (d.lt(0) && d.abs().gt(v)) return { toInventory: v.negated(), toCogs: d.plus(v) };
   return { toInventory: d, toCogs: new Decimal(0) };
 }

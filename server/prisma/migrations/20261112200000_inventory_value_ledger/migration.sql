@@ -74,8 +74,11 @@ BEGIN
   -- Cancelled) and moved its value away from the locked cost: value = total_value − locked value,
   -- adjusting the STT movement, dated and numbered after the invoice. A cancelled invoice unlinks its
   -- lines (invoiceCancellation.ts), so its leftover delta gets no row and lands in the baseline (5).
-  -- Landed cost and a later price revision both overwrite total_value, so one row per receipt carries
-  -- their net, referenced to the invoice (reference_type 'PurchaseInvoice').
+  -- The row carries the invoice's landed cost (all of it went to inventory), referenced to the invoice
+  -- (reference_type 'PurchaseInvoice'). A price revision (purchaseInvoiceRevise.ts) also overwrites
+  -- total_value, but sends only the in-stock share to inventory and the consumed share to 5.11, and
+  -- its journal names no line: the net cannot be split back, so a revised invoice gets no row here
+  -- and its whole delta lands in the baseline (5); e3-value-baseline lists those invoices.
   IF has_stt THEN
     INSERT INTO "stock_movements" (
       "id", "movement_number", "date", "item_id", "warehouse_id", "movement_type", "quantity", "unit_cost",
@@ -84,11 +87,13 @@ BEGIN
     SELECT gen_random_uuid()::text, 'SM-RV-' || sm."movement_number", pi."date", sm."item_id", NULL, 'Revaluation'::"StockMovementType", 0, 0,
            ABS(d.delta), d.delta,
            'Selisih harga Invoice pembelian ' || pi."invoice_number" || ' atas ' || sm."movement_number" || ' (awal buku nilai)',
-           'PurchaseInvoice', pi."id", pi."invoice_number", pi."fiscal_year_id", pi."created_by", false, sm."id", now(), now()
+           'PurchaseInvoice', pi."id", pi."invoice_number", pi."fiscal_year_id", pi."created_by", false, sm."id", clock_timestamp(), clock_timestamp()
       FROM "stock_movements" sm
       JOIN "goods_receipt_items" gri ON gri."stock_movement_id" = sm."id"
       JOIN "purchase_invoice_items" pii ON pii."goods_receipt_item_id" = gri."id"
       JOIN "purchase_invoices" pi ON pi."id" = pii."purchase_invoice_id" AND pi."status" NOT IN ('Draft', 'Cancelled')
+       AND NOT EXISTS (SELECT 1 FROM "journal_entries" je
+                        WHERE starts_with(je."narration", 'Revisi harga ' || pi."invoice_number" || ' ('))
       CROSS JOIN LATERAL (SELECT sm."total_value" - ROUND(gri."locked_unit_cost" * sm."quantity", 2) AS delta) d
      WHERE sm."movement_type" = 'In' AND NOT sm."is_cancelled" AND d.delta <> 0
        AND NOT EXISTS (SELECT 1 FROM "stock_movements" r WHERE r."adjusts_movement_id" = sm."id");
@@ -96,10 +101,15 @@ BEGIN
 
   -- (4) stock_value = stock x average, where it is not already within invariant (b)'s tolerance
   -- (inventoryValueMath.invariantTolerance), so a re-run leaves a value the ledger keeps alone.
-  UPDATE "inventory_items"
-     SET "stock_value" = ROUND("current_stock" * "average_cost", 2)
-   WHERE ABS("stock_value" - ROUND("current_stock" * "average_cost", 2))
-         > GREATEST(0.01, ABS("current_stock") * 0.0000005);
+  -- Invariant (b) only holds with stock > 0: in a negative-stock window the ledger keeps the previous
+  -- average while inbound value comes in at its own cost, so an item that already has a baseline and
+  -- no stock is left as the ledger keeps it (a re-run must not book that gap as a new baseline).
+  UPDATE "inventory_items" i
+     SET "stock_value" = ROUND(i."current_stock" * i."average_cost", 2)
+   WHERE ABS(i."stock_value" - ROUND(i."current_stock" * i."average_cost", 2))
+         > GREATEST(0.01, ABS(i."current_stock") * 0.0000005)
+     AND (i."current_stock" > 0 OR NOT EXISTS (
+           SELECT 1 FROM "stock_movements" b WHERE b."item_id" = i."id" AND b."reference_type" = 'ValuationBaseline'));
 
   -- (5) Baseline: one Revaluation 'ValuationBaseline' per item whose stock_value differs from the sum
   -- of its active movements, with no journal (decision #15: the old gap to the GL stays visible in
@@ -141,7 +151,7 @@ BEGIN
                 AND substr(m."movement_number", length('SM-VB-' || i."code" || '-') + 1) ~ '^[0-9]{1,9}$'), 0) + 1),
            baseline_day, i."id", NULL, 'Revaluation'::"StockMovementType", 0, 0, ABS(g.gap), g.gap,
            'Nilai awal buku nilai: stok x rata-rata per ' || to_char(baseline_day, 'YYYY-MM-DD') || ' (tanpa jurnal)',
-           'ValuationBaseline', baseline_fy, creator, false, now(), now()
+           'ValuationBaseline', baseline_fy, creator, false, clock_timestamp(), clock_timestamp()
       FROM "inventory_items" i
       CROSS JOIN LATERAL (SELECT i."stock_value" - COALESCE((SELECT SUM(m."value_delta") FROM "stock_movements" m
                                                              WHERE m."item_id" = i."id" AND NOT m."is_cancelled"), 0) AS gap) g

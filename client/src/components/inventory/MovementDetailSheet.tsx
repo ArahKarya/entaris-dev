@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import { Factory, Pencil, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { formatDate, formatDateTime, formatRupiah, formatUnitCost } from '@/lib/format';
+import { formatDate, formatDateTime, formatUnitCost } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { StatusBadge } from '@/components/shared';
@@ -14,6 +14,7 @@ import {
   formatQty,
   isInbound,
   isValueOnly,
+  movementValueText,
   movementCancelBlock,
   movementEditBlock,
   movementTypeLabel,
@@ -85,7 +86,7 @@ export function MovementDetailSheet({ movement: m, onClose, onEdit, onCancel, on
                   <span className="num">{formatUnitCost(m.unitCost ?? 0)}</span>
                 </Detail>
                 <Detail label={t('movementDetailSheet.fields.value')}>
-                  <span className="num font-medium">{m.totalValue != null ? formatRupiah(m.totalValue) : '—'}</span>
+                  <span className="num font-medium">{movementValueText(m)}</span>
                 </Detail>
                 <Detail label={t('movementDetailSheet.fields.offsetAccount')}>
                   {m.offsetAccount ? `${m.offsetAccount.accountNumber} · ${m.offsetAccount.name}` : '—'}

@@ -39,6 +39,14 @@ describe('documentMovementLockMessage', () => {
     }
   });
 
+  it('always locks a Revaluation without a document (ValuationBaseline); one of a document points to it', () => {
+    for (const action of ['edit', 'cancel'] as const) {
+      expect(documentMovementLockMessage(mov('ValuationBaseline', null, 'Revaluation'), action)).toMatch(/revaluasi nilai .*buku nilai/);
+      expect(documentMovementLockMessage(mov(null, null, 'Revaluation'), action)).toMatch(/revaluasi nilai/);
+      expect(documentMovementLockMessage(mov('PurchaseInvoice', 'pi-1', 'Revaluation'), action)).toMatch(/invoice pembelian .*halaman Invoice/);
+    }
+  });
+
   it('leaves manual and other movements editable', () => {
     expect(documentMovementLockMessage(mov(null, null), 'edit')).toBeNull();
     expect(documentMovementLockMessage(mov('JournalEntry', 'je-1', 'Out'), 'cancel')).toBeNull();
@@ -50,6 +58,7 @@ describe('documentMovementLockMessage', () => {
       mov('OpeningBalance', null),
       mov('StockDriftRepair', null, 'AdjustmentOut'),
       mov(null, null, 'TransferOut'),
+      mov('ValuationBaseline', null, 'Revaluation'),
     ].flatMap((m) => (['edit', 'cancel'] as const).map((a) => documentMovementLockMessage(m, a)!));
     for (const text of messages) {
       const en = translateMessage(text, 'en');

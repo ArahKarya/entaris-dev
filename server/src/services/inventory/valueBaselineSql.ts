@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { VALUATION_BASELINE_REFERENCE } from './inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 
@@ -120,6 +121,70 @@ export async function runValueBaselineData(tx: Tx, sql: string = readValueBaseli
     })),
     backfilled,
     stockValueChanges,
+  };
+}
+
+/** A live purchase invoice with a price revision whose STT delta the baseline absorbed (no Revaluation row). */
+export interface RevisedInvoiceDelta {
+  invoiceNumber: string;
+  movementNumber: string;
+  itemCode: string;
+  delta: Decimal;
+}
+
+/**
+ * An item whose last baseline is dated before movements that already existed when it was written:
+ * the baseline amount comes from the state at the run, so a replay from the baseline (6.5a) would
+ * re-value those movements. Expected empty when the train is deployed right after the year close
+ * (decision #19); checked on the dump rehearsal (§8 7c).
+ */
+export interface MovementsAfterBaseline {
+  itemCode: string;
+  baselineNumber: string;
+  baselineDate: Date;
+  movements: number;
+}
+
+export interface ValueBaselineNotes {
+  revisedInvoices: RevisedInvoiceDelta[];
+  movementsAfterBaseline: MovementsAfterBaseline[];
+}
+
+/** What the reviewer of a run must see beside its rows; read-only. */
+export async function findValueBaselineNotes(tx: Tx): Promise<ValueBaselineNotes> {
+  const [stt] = await tx.$queryRaw<{ ok: boolean }[]>`
+    SELECT COUNT(*) = 2 AS ok FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND ((table_name = 'goods_receipt_items' AND column_name = 'stock_movement_id')
+         OR (table_name = 'purchase_invoice_items' AND column_name = 'goods_receipt_item_id'))`;
+  const revised = stt?.ok
+    ? await tx.$queryRaw<{ invoiceNumber: string; movementNumber: string; itemCode: string; delta: string }[]>`
+        SELECT pi.invoice_number AS "invoiceNumber", sm.movement_number AS "movementNumber", i.code AS "itemCode",
+               (sm.total_value - ROUND(gri.locked_unit_cost * sm.quantity, 2))::text AS delta
+          FROM stock_movements sm
+          JOIN inventory_items i ON i.id = sm.item_id
+          JOIN goods_receipt_items gri ON gri.stock_movement_id = sm.id
+          JOIN purchase_invoice_items pii ON pii.goods_receipt_item_id = gri.id
+          JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id AND pi.status::text NOT IN ('Draft', 'Cancelled')
+         WHERE sm.movement_type::text = 'In' AND NOT sm.is_cancelled
+           AND sm.total_value <> ROUND(gri.locked_unit_cost * sm.quantity, 2)
+           AND NOT EXISTS (SELECT 1 FROM stock_movements r WHERE r.adjusts_movement_id = sm.id)
+           AND EXISTS (SELECT 1 FROM journal_entries je WHERE starts_with(je.narration, 'Revisi harga ' || pi.invoice_number || ' ('))
+         ORDER BY pi.invoice_number, sm.movement_number`
+    : [];
+  const after = await tx.$queryRaw<{ itemCode: string; baselineNumber: string; baselineDate: Date; movements: number }[]>`
+    SELECT i.code AS "itemCode", b.movement_number AS "baselineNumber", b.date AS "baselineDate", COUNT(m.id)::int AS movements
+      FROM (SELECT DISTINCT ON (item_id) * FROM stock_movements
+             WHERE reference_type = ${VALUATION_BASELINE_REFERENCE} AND NOT is_cancelled
+             ORDER BY item_id, date DESC, created_at DESC) b
+      JOIN inventory_items i ON i.id = b.item_id
+      JOIN stock_movements m ON m.item_id = b.item_id AND NOT m.is_cancelled AND m.movement_type::text <> 'Revaluation'
+                            AND m.date > b.date AND m.created_at < b.created_at
+     GROUP BY i.code, b.movement_number, b.date
+     ORDER BY i.code`;
+  return {
+    revisedInvoices: revised.map((r) => ({ ...r, delta: new Decimal(r.delta) })),
+    movementsAfterBaseline: after,
   };
 }
 
