@@ -166,7 +166,7 @@
   },
   "src/routes/stockOpname.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 10
+      "count": 7
     }
   },
   "src/routes/telegram.ts": {

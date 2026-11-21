@@ -217,6 +217,7 @@ describe('stock opname header warehouse', () => {
       ...lockHandlers(),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: '10' }],
       'warehouse.findFirst': () => ({ id: 'wh-default' }),
+      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
     });
     const res = await send('POST', '/stock-opname', { date: '2026-10-10', items: [{ itemId: ITEM_ID, actualStock: 12 }] });
@@ -369,28 +370,31 @@ describe('document movement lock and references (E3-R2)', () => {
     expect(current.fn('stockMovement.updateMany')).not.toHaveBeenCalled();
   });
 
-  it('opname cancel skips a line whose movement was already cancelled', async () => {
+  it('opname cancel reverses only the count\'s active rows, through the value ledger', async () => {
+    const live = {
+      id: 'm-live', movementNumber: 'SM-1', itemId: ITEM_ID, warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn',
+      quantity: '2', valueDelta: '18000', referenceType: 'StockOpname', referenceId: 'so-1', createdAt: new Date('2026-10-10'),
+      adjustsMovementId: null, adjustsMovement: null,
+    };
+    const dead = { ...live, id: 'm-dead', isCancelled: true, movementType: 'AdjustmentOut', quantity: '3', valueDelta: '-27000' };
     current = makeAutoTx({
       ...fiscalYearHandlers(),
       ...lockHandlers(),
       'stockOpname.updateMany': () => ({ count: 1 }),
       'stockMovement.findMany': ({ where }: any) =>
-        [
-          { id: 'm-live', itemId: ITEM_ID, warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn', quantity: '2' },
-          { id: 'm-dead', itemId: ITEM_ID, warehouseId: WH, isCancelled: true, movementType: 'AdjustmentOut', quantity: '3' },
-        ].filter((m) => (where.id.in as string[]).includes(m.id) && m.isCancelled === where.isCancelled),
+        [live, dead].filter((m) => m.referenceType === where.referenceType && m.referenceId === where.referenceId && m.isCancelled === where.isCancelled),
+      'stockMovement.findUnique': ({ where }: any) => [live, dead].find((m) => m.id === where.id) ?? null,
+      'stockMovement.findUniqueOrThrow': ({ where }: any) => [live, dead].find((m) => m.id === where.id),
+      'stockMovement.updateMany': () => ({ count: 1 }),
       'stockOpname.findUnique': () => ({
         id: 'so-1', opnameNumber: 'SO-1', status: 'Submitted', date: new Date('2026-10-10'), fiscalYearId: 'fy-2026',
-        items: [
-          { itemId: ITEM_ID, difference: '2', movementId: 'm-live', item: ITEM },
-          { itemId: ITEM_ID, difference: '-3', movementId: 'm-dead', item: ITEM },
-        ],
       }),
     });
     const res = await send('PUT', '/stock-opname/so-1/cancel', {});
     expect(res.status).toBe(200);
-    expect(current.fn('inventoryItem.update').mock.calls.map((c) => c[0].data.currentStock.increment)).toEqual([-2]);
-    expect(current.fn('stockMovement.update').mock.calls.map((c) => c[0].where.id)).toEqual(['m-live']);
+    expect(current.fn('stockMovement.updateMany').mock.calls.map((c) => c[0].where.id)).toEqual(['m-live']);
+    expect(current.fn('inventoryStock.update').mock.calls.map((c) => c[0].data.currentStock.increment)).toEqual(['-2']);
+    expect(current.fn('inventoryItem.update').mock.calls.map((c) => [c[0].data.currentStock, c[0].data.stockValue])).toEqual([['48', '432000']]);
   });
 });
 

@@ -11,7 +11,8 @@ import path from 'node:path';
  * ledger PRs move every writer behind services/inventory/inventoryLedger.ts, the one entry that was
  * added (PR-6.4b2) and the only one left after PR-6.4e besides wipe and seed (PR-6.4d moved the
  * delivery order, invoice cancellation and transfer writers behind it, PR-6.4c1 the goods receipt,
- * opening stock import and manual movement writers; the drift repair's warehouse placement is left). Write stock fields
+ * opening stock import and manual movement writers, PR-6.4c2 the stock count and sales return
+ * writers; the drift repair's warehouse placement is left). Write stock fields
  * inline in the call (not through a data variable built earlier) so the guard sees them.
  *
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
@@ -32,7 +33,6 @@ const LOCK_CALL = /\blockInventoryRows\s*\(/;
 type Counts = Record<string, number>;
 
 const ALLOWLIST: Record<string, Counts> = {
-  'routes/stockOpname.ts': { 'stockMovement.create': 1, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 2 },
   'scripts/fixLandedCost.ts': { 'stockMovement.updateMany': 1 },
   'scripts/fixPotonganAllocation.ts': { 'stockMovement.update': 1 },
   'services/averageCostRecompute.ts': { 'inventoryItem.update(stock)': 1 },
