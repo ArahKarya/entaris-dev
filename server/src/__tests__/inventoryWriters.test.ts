@@ -9,7 +9,8 @@ import path from 'node:path';
  * tables, under server/src (scripts included), is counted per file and compared with ALLOWLIST.
  * The list is the state of the code when the guard was added and may only SHRINK: the value
  * ledger PRs move every writer behind services/inventory/inventoryLedger.ts, the one entry that was
- * added (PR-6.4b2) and the only one left after PR-6.4e besides wipe and seed. Write stock fields
+ * added (PR-6.4b2) and the only one left after PR-6.4e besides wipe and seed (PR-6.4d moved the
+ * delivery order, invoice cancellation and transfer writers behind it). Write stock fields
  * inline in the call (not through a data variable built earlier) so the guard sees them.
  *
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
@@ -35,23 +36,18 @@ const ALLOWLIST: Record<string, Counts> = {
   'scripts/fixPotonganAllocation.ts': { 'stockMovement.update': 1 },
   'services/averageCostRecompute.ts': { 'inventoryItem.update(stock)': 1 },
   'services/cogsBackfillService.ts': { 'inventoryItem.update(stock)': 1 },
-  'services/deliveryOrderCancel.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
-  'services/deliveryOrderEdit.ts': { 'stockMovement.create': 1, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 2, adjustWarehouseStock: 2 },
-  'services/deliveryOrderSubmit.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
   'services/demoData/wipe.ts': { 'sql:UPDATE inventory_items': 1 },
   'services/goodsReceiptCancel.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
   'services/goodsReceiptSubmit.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
-  'services/inventory/inventoryLedger.ts': { 'inventoryStock.update': 1, 'inventoryItem.update(stock)': 2, 'stockMovement.create': 2, 'stockMovement.updateMany': 2 },
+  'services/inventory/inventoryLedger.ts': { 'inventoryStock.update': 1, 'inventoryItem.update(stock)': 2, 'stockMovement.create': 1, 'stockMovement.updateMany': 2 },
   'services/inventory/manualMovement.ts': { 'inventoryStock.upsert': 1, 'stockMovement.create': 1, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 2 },
   'services/inventory/stockLocks.ts': { 'inventoryStock.createMany': 1 },
-  'services/invoiceCancellation.ts': { 'inventoryStock.update': 2, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 2 },
   'services/openingStockImport.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
   'services/production/productionPosting.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
   'services/purchaseInvoiceRevise.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/salesReturnCancel.ts': { 'inventoryStock.update': 1, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/salesReturnSubmit.ts': { 'inventoryStock.upsert': 1, 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1 },
-  'services/stockTransfer.ts': { 'inventoryStock.upsert': 3, 'stockMovement.create': 2, 'stockMovement.updateMany': 1 },
   'utils/warehouseStock.ts': { 'inventoryStock.upsert': 1 },
 };
 

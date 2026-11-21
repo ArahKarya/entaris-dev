@@ -1,13 +1,13 @@
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
-import { generateDocumentNumber } from '../utils/documentNumber';
 import { businessYearMonth } from '../utils/businessDate';
 import { assertPeriodOpen } from '../utils/periodGuard';
-import { adjustWarehouseStock, resolveWarehouseId } from '../utils/warehouseStock';
+import { resolveWarehouseId } from '../utils/warehouseStock';
 import { recomputeDeliveredQtyInTx, relinkDoItemsToSOInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
 import { assertStockAvailable, lockInventoryRows, STOCK_INSUFFICIENT } from './inventory/stockLocks';
+import { postOutbound, reverseDocumentMovements } from './inventory/inventoryLedger';
 import { resolveCogsAccountId } from './cogsAccount';
 import type { SubmitDeliveryOrderInput } from './deliveryOrderSubmit';
 
@@ -19,8 +19,9 @@ const formatQty = (d: Decimal) => d.toNumber().toLocaleString('id-ID', { maximum
 export const DELIVERY_ORDER_MONTH_CHANGE = 'DO_MONTH_CHANGE';
 
 /**
- * Edit a Submitted, not-yet-invoiced DO: reverse its movements, then re-apply the new lines with
- * unitCost locked at the averageCost at edit time. doNumber is kept so printouts stay valid.
+ * Edit a Submitted, not-yet-invoiced DO: reverse its movements exactly through the value ledger,
+ * then post the new lines as Outs valued from the book at edit time (keeping the original cost of
+ * unchanged lines is PR-6.5b). doNumber is kept so printouts stay valid.
  */
 export async function editDeliveryOrderInTx(
   tx: Tx,
@@ -98,18 +99,8 @@ export async function editDeliveryOrderInTx(
     if (!inv.isActive) throw new BusinessError(`Item '${inv.name}' tidak aktif.`);
   }
 
-  for (const mov of oldMovements) {
-    const qty = Number(mov.quantity);
-    await tx.inventoryItem.update({
-      where: { id: mov.itemId },
-      data: { currentStock: { increment: qty } },
-    });
-    await adjustWarehouseStock(tx, mov.itemId, mov.warehouseId, qty);
-    await tx.stockMovement.update({
-      where: { id: mov.id },
-      data: { isCancelled: true },
-    });
-  }
+  // An Out reversal puts stock back and needs no stock check.
+  await reverseDocumentMovements(tx, { referenceType: 'DeliveryOrder', referenceId: doId }, { userId });
 
   // Header is reused (preserves doNumber).
   await tx.deliveryOrderItem.deleteMany({ where: { deliveryOrderId: doId } });
@@ -140,7 +131,7 @@ export async function editDeliveryOrderInTx(
     },
   });
 
-  // Counter account the invoice will post COGS against; stored on each Out movement.
+  // Counter account the invoice will post COGS against; stored on each Out movement that carries value.
   const cogsAccountId = await resolveCogsAccountId(tx);
 
   for (const [i, it] of body.items.entries()) {
@@ -150,35 +141,20 @@ export async function editDeliveryOrderInTx(
       const warehouseId = lineWarehouse.get(i)!;
 
       const qty = Number(it.quantity);
-      // Reversing the old Outs and posting new ones leaves the average unchanged: the locked value holds.
-      const unitCost = inventoryItem.averageCost.toNumber();
-      const totalValue = new Decimal(qty).times(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
 
-      await tx.inventoryItem.update({
-        where: { id: inventoryItem.id },
-        data: { currentStock: { decrement: qty } },
-      });
-      await adjustWarehouseStock(tx, inventoryItem.id, warehouseId, -qty);
-
-      const movementNumber = await generateDocumentNumber(tx, 'SM', txDate, fiscalYear.id);
-      const movement = await tx.stockMovement.create({
-        data: {
-          movementNumber,
-          date: txDate,
-          itemId: inventoryItem.id,
-          warehouseId,
-          movementType: 'Out',
-          quantity: qty,
-          unitCost,
-          totalValue,
-          notes: `Auto dari ${oldDo.doNumber} (edited)`,
-          referenceType: 'DeliveryOrder',
-          referenceId: doId,
-          referenceNumber: oldDo.doNumber,
-          offsetAccountId: totalValue > 0 ? cogsAccountId : null,
-          fiscalYearId: fiscalYear.id,
-          createdById: userId,
-        },
+      const { movement } = await postOutbound(tx, {
+        movementType: 'Out',
+        itemId: inventoryItem.id,
+        warehouseId,
+        quantity: qty,
+        date: txDate,
+        fiscalYearId: fiscalYear.id,
+        createdById: userId,
+        notes: `Auto dari ${oldDo.doNumber} (edited)`,
+        referenceType: 'DeliveryOrder',
+        referenceId: doId,
+        referenceNumber: oldDo.doNumber,
+        offsetAccountId: cogsAccountId,
       });
       stockMovementId = movement.id;
 

@@ -243,7 +243,7 @@ router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
 router.post('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   try {
     const result = await prisma.$transaction(
-      (tx) => cancelDeliveryOrderInTx(tx, req.params.id as string),
+      (tx) => cancelDeliveryOrderInTx(tx, req.params.id as string, req.user!.userId),
       { timeout: 15000 },
     );
     logger.info({ doId: req.params.id, userId: req.user!.userId }, 'Delivery order cancelled');

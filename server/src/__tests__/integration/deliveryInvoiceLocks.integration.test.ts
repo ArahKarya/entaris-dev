@@ -19,7 +19,8 @@
  * - a delivery note with two lines of one item, 60 + 60, from 100 -> 400 STOCK_INSUFFICIENT;
  * - sales return cancel whose returned goods were sold again -> 400 STOCK_INSUFFICIENT; the
  *   bypass needs inventory.negative_stock and a reason, then the stock goes negative;
- * - purchase invoice cancel of a legacy PI-owned stock movement already used -> 400 likewise.
+ * - purchase invoice cancel of a legacy PI-owned stock movement already used -> 400 likewise; with
+ *   the bypass the value ledger refuses it (409 REVERSAL_NEEDS_TRUE_UP, PR-6.4d) until PR-6.5a.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -87,6 +88,7 @@ import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise'
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
+import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
 import { NEGATIVE_STOCK_FORBIDDEN } from '../../utils/negativeStockGate';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -580,10 +582,14 @@ d('stock checks of delivery notes and legacy reversals', () => {
       expect(refused.body.error).toContain('tersedia 20 kg, dibutuhkan 100 kg');
       expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
 
+      // The bypass passes the stock check, but the value ledger (PR-6.4d) refuses to take a receipt's
+      // value back after goods of the item went out (train guard until the value true-up, PR-6.5a).
       const admin = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']);
-      const ok = await cancel(admin, { allowNegativeStock: true, negativeStockReason: 'faktur lama salah, stok sudah dikirim' });
-      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-      expect(await stockOf(tx, gkp.id, s.whA)).toEqual({ item: 420, warehouse: -80 });
+      const forced = await cancel(admin, { allowNegativeStock: true, negativeStockReason: 'faktur lama salah, stok sudah dikirim' });
+      expect(forced.status, JSON.stringify(forced.body)).toBe(409);
+      expect(forced.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await stockOf(tx, gkp.id, s.whA)).toEqual({ item: 520, warehouse: 20 });
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
     });
   });
 });

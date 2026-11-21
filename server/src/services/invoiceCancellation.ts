@@ -8,16 +8,24 @@ import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
+import { reverseDocumentMovements } from './inventory/inventoryLedger';
 import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
 type Tx = Prisma.TransactionClient;
+
+/**
+ * reference_type of the rows a purchase invoice owns: its legacy receipts and the Revaluation rows of
+ * its landed-cost delta ('PurchaseInvoice') and of its price revisions ('PurchaseRevision', PR-6.4c3).
+ */
+const PURCHASE_INVOICE_ROW_TYPES = ['PurchaseInvoice', 'PurchaseRevision'] as const;
 
 /** Error code: a sales invoice with a return that is not cancelled cannot be cancelled. */
 export const INVOICE_HAS_ACTIVE_RETURNS = 'INVOICE_HAS_ACTIVE_RETURNS';
 
 /**
  * Cancel a sales invoice: cancel its JE, COGS JE and their -suffixed satellites (balances reversed per JE item account, so
- * per-item COGS sub-accounts are restored), reverse its own stock movements, recompute party
+ * per-item COGS sub-accounts are restored), reverse its own stock movements through the value
+ * ledger (quantity and value exactly; delivery-order movements stay with the note), recompute party
  * outstanding. Rejected with PERIOD_CLOSED when the invoice's fiscal year, or that of any journal
  * it voids, is closed, and then with INVOICE_HAS_ACTIVE_RETURNS while a return is not cancelled.
  * `trail` (who and why) is stored on the voided journals. Caller owns the transaction.
@@ -98,22 +106,8 @@ export async function cancelSalesInvoiceInTx(
   // auto-settle JVs, otherwise later stock-ins keep moving inventory value into HPP.
   await closeCogsBackfillForSalesInvoice(tx, invoice.id, trail);
 
-  for (const sm of stockMovements) {
-    await tx.inventoryItem.update({
-      where: { id: sm.itemId },
-      data: { currentStock: { increment: Number(sm.quantity) } },
-    });
-    if (sm.warehouseId) {
-      await tx.inventoryStock.update({
-        where: { itemId_warehouseId: { itemId: sm.itemId, warehouseId: sm.warehouseId } },
-        data: { currentStock: { increment: Number(sm.quantity) } },
-      });
-    }
-    await tx.stockMovement.update({
-      where: { id: sm.id },
-      data: { isCancelled: true },
-    });
-  }
+  // The voided COGS journal credited inventory with the value these rows took out of the book.
+  await reverseDocumentMovements(tx, { referenceType: 'SalesInvoice', referenceId: invoice.id }, { userId: trail?.cancelledById ?? invoice.createdBy });
 
   // Release linked Delivery Orders back to Submitted state so they can be
   // billed by another invoice. Their stock movements remain valid.
@@ -135,9 +129,13 @@ export async function cancelSalesInvoiceInTx(
 }
 
 /**
- * Mirror of cancelSalesInvoiceInTx for purchase invoices. Inventory deltas
- * flip direction (decrement instead of increment), so a legacy PI-owned movement whose warehouse
- * no longer holds the goods is rejected with STOCK_INSUFFICIENT unless opts allows negative stock.
+ * Mirror of cancelSalesInvoiceInTx for purchase invoices. The invoice's own rows are reversed through
+ * the value ledger: a legacy PI-owned receipt (quantity and value back out; a warehouse that no
+ * longer holds the goods is rejected with STOCK_INSUFFICIENT unless opts allows negative stock), and
+ * a Revaluation row that carries the invoice's price delta on an STT receipt (the value-ledger
+ * backfill; PR-6.4c3 posts them), taken back by its value_delta while the voided journal reverses
+ * the same amount in inventory. Either is refused with REVERSAL_NEEDS_TRUE_UP when goods of the
+ * item went out since (value true-up, PR-6.5a).
  */
 export async function cancelPurchaseInvoiceInTx(
   tx: Tx,
@@ -171,20 +169,23 @@ export async function cancelPurchaseInvoiceInTx(
     throw new BusinessError('Invoice memiliki alokasi uang muka aktif. Batalkan alokasi terlebih dahulu.');
   }
 
-  // Only PI-owned movements (standalone/legacy lines) are reversed; STT-linked stock belongs to the STT.
+  // Only PI-owned rows (standalone/legacy lines, price-delta Revaluations) are reversed; STT-linked
+  // stock belongs to the STT.
   // Lock their items before the journals lock accounts, then check that each warehouse still holds
   // what the invoice brought in. allowNegativeStock (the route checked inventory.negative_stock)
   // logs the shortage instead.
   const stockMovements = await tx.stockMovement.findMany({
-    where: { referenceType: 'PurchaseInvoice', referenceId: invoice.id, isCancelled: false },
+    where: { referenceType: { in: [...PURCHASE_INVOICE_ROW_TYPES] }, referenceId: invoice.id, isCancelled: false },
   });
   await lockInventoryRows(tx, {
     itemIds: stockMovements.map((sm) => sm.itemId),
     pairs: stockMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
   });
+  // A Revaluation row moves no quantity.
+  const receipts = stockMovements.filter((sm) => sm.movementType !== 'Revaluation');
   await assertStockAvailable(
     tx,
-    stockMovements.map((sm) => ({ itemId: sm.itemId, warehouseId: sm.warehouseId, quantity: sm.quantity.toString() })),
+    receipts.map((sm) => ({ itemId: sm.itemId, warehouseId: sm.warehouseId, quantity: sm.quantity.toString() })),
     {
       context: 'purchaseInvoice.cancel',
       userId: trail?.cancelledById,
@@ -208,21 +209,8 @@ export async function cancelPurchaseInvoiceInTx(
 
   await recalcPartyOutstanding(tx, invoice.partyId);
 
-  for (const sm of stockMovements) {
-    await tx.inventoryItem.update({
-      where: { id: sm.itemId },
-      data: { currentStock: { decrement: Number(sm.quantity) } },
-    });
-    if (sm.warehouseId) {
-      await tx.inventoryStock.update({
-        where: { itemId_warehouseId: { itemId: sm.itemId, warehouseId: sm.warehouseId } },
-        data: { currentStock: { decrement: Number(sm.quantity) } },
-      });
-    }
-    await tx.stockMovement.update({
-      where: { id: sm.id },
-      data: { isCancelled: true },
-    });
+  for (const referenceType of PURCHASE_INVOICE_ROW_TYPES) {
+    await reverseDocumentMovements(tx, { referenceType, referenceId: invoice.id }, { userId: trail?.cancelledById ?? invoice.createdBy });
   }
 
   await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', invoice.id, trail);
