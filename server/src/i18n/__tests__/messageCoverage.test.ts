@@ -29,6 +29,7 @@ const IGNORED = new Set<string>([
   'postOutbound: {0} is not an outbound type',
   'postInbound: value must be 0 or more',
   'reverseMovement: {0} rows are not reversed by this function',
+  'linkMovementJournal: movement {0} is missing, cancelled or already linked',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
   // Programming errors of the sourceKey builders (services/ledger/journalSource.ts sourceKeys), never reach a client.

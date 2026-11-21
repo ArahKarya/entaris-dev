@@ -17,7 +17,11 @@
  *
  * Rows it writes: value_delta (signed, 2 dp), total_value = |value_delta|, unit_cost =
  * |value_delta| / quantity (6 dp). A row is never rewritten after it is posted, except is_cancelled
- * when it is reversed.
+ * when it is reversed and an empty journal_entry_id filled once by linkMovementJournal.
+ *
+ * Journal link: an inbound caller knows its journal first and passes journalEntryId. An outbound
+ * caller only learns the amount from postOutbound, so it posts the journal of −valueDelta after it
+ * and links it with linkMovementJournal; no path writes stock_movements outside this module.
  */
 import { Prisma, type PrismaClient, type StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
@@ -33,7 +37,8 @@ type Tx = Prisma.TransactionClient;
 
 /**
  * Error code (409): reversing this row would leave the book wrong without a value true-up (PR-6.5a):
- * an inbound reversal that takes stock_value below 0, or leaves stock on hand with no value, or a
+ * an inbound reversal with value after goods of the item went out (unless the stock reaches 0 and
+ * is swept), one that takes stock_value below 0 or leaves stock on hand with no value, or a
  * reversal that leaves value at zero stock without sweepAtZero.
  */
 export const REVERSAL_NEEDS_TRUE_UP = 'REVERSAL_NEEDS_TRUE_UP';
@@ -199,6 +204,34 @@ export async function postOutbound(tx: Tx, i: OutboundInput): Promise<PostedMove
   return writePosting(tx, i, { quantity, valueDelta: value.negated(), item });
 }
 
+/**
+ * Links the journal the caller posted for a ledger row (the outbound pattern in the header). Only an
+ * empty journal_entry_id is filled; a row that is cancelled or already linked is refused.
+ */
+export async function linkMovementJournal(tx: Tx, movementId: string, journalEntryId: string): Promise<void> {
+  const { count } = await tx.stockMovement.updateMany({
+    where: { id: movementId, journalEntryId: null, isCancelled: false },
+    data: { journalEntryId },
+  });
+  if (count !== 1) throw new Error(`linkMovementJournal: movement ${movementId} is missing, cancelled or already linked`);
+}
+
+/**
+ * True when an active Out / AdjustmentOut of the item was posted at or after the row (createdAt; a
+ * tie counts, so the check errs towards refusing). Those rows were valued at an average that
+ * included this row, so taking its value back exactly leaves an average no cost explains.
+ */
+async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
+  const later = await tx.stockMovement.findFirst({
+    where: {
+      itemId: movement.itemId, isCancelled: false, movementType: { in: ['Out', 'AdjustmentOut'] },
+      id: { not: movement.id }, createdAt: { gte: movement.createdAt },
+    },
+    select: { id: true },
+  });
+  return later !== null;
+}
+
 function needsTrueUp(itemName: string, next: ItemState): BusinessError {
   return new BusinessError(
     `Pembatalan ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
@@ -210,32 +243,54 @@ function needsTrueUp(itemName: string, next: ItemState): BusinessError {
 
 /**
  * The value to sweep after a reversal, or a refusal (train guard until PR-6.5a):
+ * - an inbound reversal that moves value after goods went out (soldSince), except when the stock
+ *   reaches 0 and is swept: then the sweep makes the total COGS exact;
  * - an inbound reversal that moves value and leaves stock_value < 0, or stock > 0 with value <= 0;
  * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise.
- * A row that carries no value moves none, so it never trips the first rule.
+ * A row that carries no value moves none, so it never trips the first two rules.
  */
-function reversalSweep(movement: StockMovement, itemName: string, next: ItemState, valueDelta: Decimal, sweepAtZero: boolean): Decimal {
-  const inbound = INBOUND_TYPES.has(movement.movementType);
-  if (inbound && !valueDelta.isZero() && (next.value.lt(0) || (next.stock.gt(0) && next.value.lte(0)))) {
+async function reversalSweep(
+  tx: Tx,
+  movement: StockMovement,
+  itemName: string,
+  next: ItemState,
+  valueDelta: Decimal,
+  sweepAtZero: boolean,
+): Promise<Decimal> {
+  const inboundWithValue = INBOUND_TYPES.has(movement.movementType) && !valueDelta.isZero();
+  if (inboundWithValue && (next.value.lt(0) || (next.stock.gt(0) && next.value.lte(0)))) {
     throw needsTrueUp(itemName, next);
   }
+  const sweptToZero = next.stock.isZero() && sweepAtZero;
+  if (inboundWithValue && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next);
   if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
   if (!sweepAtZero) throw needsTrueUp(itemName, next);
   return next.value;
 }
 
-/** The Revaluation row that takes `residue` out of the book at zero stock, owned by the reversed row's document. */
-async function writeSweepRow(tx: Tx, movement: StockMovement, residue: Decimal, opts: ReverseOptions): Promise<StockMovement> {
+interface SweepPeriod {
+  date: Date;
+  fiscalYearId: string;
+}
+
+/** The day and open fiscal year of the sweep row, checked before the reversal writes anything. */
+async function sweepPeriod(tx: Tx, opts: ReverseOptions): Promise<SweepPeriod> {
   const date = new Date(opts.journalDay ?? businessToday());
   const fiscalYear = await assertPeriodOpen(tx, { date }, 'mutasi stok');
-  const movementNumber = await generateDocumentNumber(tx, 'SM', date, fiscalYear.id);
+  return { date, fiscalYearId: fiscalYear.id };
+}
+
+/** The Revaluation row that takes `residue` out of the book at zero stock, owned by the reversed row's document. */
+async function writeSweepRow(tx: Tx, movement: StockMovement, residue: Decimal, period: SweepPeriod, userId: string): Promise<StockMovement> {
+  const { date, fiscalYearId } = period;
+  const movementNumber = await generateDocumentNumber(tx, 'SM', date, fiscalYearId);
   return tx.stockMovement.create({
     data: {
       movementNumber, date, itemId: movement.itemId, warehouseId: null, movementType: 'Revaluation',
       quantity: 0, unitCost: 0, totalValue: residue.abs().toString(), valueDelta: residue.negated().toString(),
       adjustsMovementId: movement.id, referenceType: movement.referenceType, referenceId: movement.referenceId,
       referenceNumber: movement.referenceNumber, notes: `Sisa nilai saat stok 0 (pembatalan ${movement.movementNumber})`,
-      fiscalYearId: fiscalYear.id, createdById: opts.userId,
+      fiscalYearId, createdById: userId,
     },
   });
 }
@@ -268,10 +323,12 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const qtyDelta = inbound ? quantity.negated() : quantity;
   const valueDelta = dec(movement.valueDelta).negated();
   const reversed = stateAfter(item, qtyDelta, valueDelta);
-  const residue = reversalSweep(movement, item.name, reversed, valueDelta, opts.sweepAtZero === true);
+  const residue = await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts.sweepAtZero === true);
+  // Every guard runs before the first write: a caller that catches a refusal keeps a whole book.
+  const period = residue.isZero() ? null : await sweepPeriod(tx, opts);
 
   await claimReversal(tx, movement.id);
-  const sweep = residue.isZero() ? null : await writeSweepRow(tx, movement, residue, opts);
+  const sweep = period ? await writeSweepRow(tx, movement, residue, period, opts.userId) : null;
   const next = sweep ? { ...reversed, value: reversed.value.minus(residue) } : reversed;
   await writeStock(tx, movement.itemId, movement.warehouseId, qtyDelta, next);
   if (valueDelta.isZero() && !quantity.isZero()) {

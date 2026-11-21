@@ -6,8 +6,11 @@
  * - a reversal takes the row's quantity and value_delta back exactly (outbound and inbound);
  * - reversing a row that carries no value (as the backfill left a legacy zero-cost row): the
  *   quantity comes back, the value does not move, and it is logged;
- * - reversing an inbound row after the goods were sold: REVERSAL_NEEDS_TRUE_UP, nothing changes;
- * - stock that reaches 0 with value left: refused without sweepAtZero, swept to toCogs with it;
+ * - reversing an inbound row after the goods were sold: REVERSAL_NEEDS_TRUE_UP, nothing changes,
+ *   also when stock and value both stay positive;
+ * - stock that reaches 0 with value left: refused without sweepAtZero, swept to toCogs with it; a
+ *   closed sweep period refuses before the row is claimed;
+ * - linkMovementJournal fills an empty journal link once;
  * - refreshAverageCost and the invariant report.
  * Every scenario ends with assertLedgerInvariant. Fiscal year 2108.
  */
@@ -22,6 +25,7 @@ import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 import {
   REVERSAL_NEEDS_TRUE_UP,
   assertLedgerInvariant as findLedgerDrifts,
+  linkMovementJournal,
   postInbound,
   postOutbound,
   refreshAverageCost,
@@ -192,6 +196,23 @@ d('inventoryLedger (PR-6.4b2)', () => {
     });
   });
 
+  it('refuses an inbound reversal after a partial sale even when stock and value stay positive', async () => {
+    await inWorld(async (tx, w) => {
+      const a = await stockIn(tx, w, 100, 1_000_000);
+      await stockIn(tx, w, 100, 2_000_000);
+      await stockOut(tx, w, 50); // 50 x 15.000 = 750.000; 150 left at 2.250.000
+      const before = await itemState(tx, w);
+
+      // Taken back exactly it would leave 50 at 1.250.000 (average 25.000, above any cost paid).
+      const err = await refusal(() => reverseMovement(tx, a.movement.id, { userId: w.userId, sweepAtZero: true }));
+
+      expect(err).toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP, status: 409 });
+      expect(await itemState(tx, w)).toEqual(before);
+      expect(before).toEqual({ stock: '150.000', value: '2250000.00', average: '15000.000000', warehouse: '150.000' });
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: a.movement.id } })).isCancelled).toBe(false);
+    });
+  });
+
   it('at zero stock with value left: refused without sweepAtZero, swept to COGS with it', async () => {
     await inWorld(async (tx, w) => {
       const a = await stockIn(tx, w, 100, 1_000_000);
@@ -212,6 +233,39 @@ d('inventoryLedger (PR-6.4b2)', () => {
       expect(back.sweep!.quantity.toFixed(3)).toBe('0.000');
       expect(back.sweep!.valueDelta.toFixed(2)).toBe('-100000.00');
       expect(await itemState(tx, w)).toEqual({ stock: '0.000', value: '0.00', average: '11000.000000', warehouse: '0.000' });
+    });
+  });
+
+  it('checks the sweep period before it claims the row', async () => {
+    await inWorld(async (tx, w) => {
+      const a = await stockIn(tx, w, 100, 1_000_000);
+      await stockIn(tx, w, 100, 1_200_000);
+      await stockOut(tx, w, 100);
+      const before = await itemState(tx, w);
+      await tx.fiscalYear.update({ where: { id: w.fyId }, data: { isClosed: true } });
+
+      const err = await refusal(() => reverseMovement(tx, a.movement.id, { userId: w.userId, sweepAtZero: true, journalDay: CANCEL_DAY }));
+
+      expect(err).toMatchObject({ code: 'PERIOD_CLOSED' });
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: a.movement.id } })).isCancelled).toBe(false);
+      expect(await itemState(tx, w)).toEqual(before);
+      await tx.fiscalYear.update({ where: { id: w.fyId }, data: { isClosed: false } });
+    });
+  });
+
+  it('links the journal of an outbound row once', async () => {
+    await inWorld(async (tx, w) => {
+      await stockIn(tx, w, 10, 100_000);
+      const out = await stockOut(tx, w, 4);
+      expect(out.movement.journalEntryId).toBeNull();
+      const je = await tx.journalEntry.create({
+        data: { entryNumber: `IL-JV-${w.itemId.slice(0, 8)}`, date: new Date(DAY), fiscalYearId: w.fyId, createdBy: w.userId },
+      });
+
+      await linkMovementJournal(tx, out.movement.id, je.id);
+
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: out.movement.id } })).journalEntryId).toBe(je.id);
+      await expect(linkMovementJournal(tx, out.movement.id, je.id)).rejects.toThrow(/already linked/);
     });
   });
 
