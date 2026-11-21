@@ -3,13 +3,13 @@ import type { Prisma } from '@prisma/client';
 import { loadProductionCostContext, type ProductionCostContextInput } from '../productionCostContext';
 import { STOCK_INSUFFICIENT } from '../../inventory/stockLocks';
 
-type Item = { id: string; name: string; unit: string; isActive: boolean; currentStock: number; averageCost: number };
+type Item = { id: string; name: string; unit: string; isActive: boolean; currentStock: number; averageCost: number; stockValue: number };
 type Batch = { id: string; itemId: string; isCancelled: boolean; movementType: string; unitCost: number };
 
 const items: Item[] = [
-  { id: 'gkp', name: 'GKP', unit: 'Kg', isActive: true, currentStock: 1000, averageCost: 6000 },
-  { id: 'beras', name: 'Beras', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0 },
-  { id: 'bekatul', name: 'Bekatul', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0 },
+  { id: 'gkp', name: 'GKP', unit: 'Kg', isActive: true, currentStock: 1000, averageCost: 6000, stockValue: 6000000 },
+  { id: 'beras', name: 'Beras', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0, stockValue: 0 },
+  { id: 'bekatul', name: 'Bekatul', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0, stockValue: 0 },
 ];
 const batches: Batch[] = [{ id: 'sm-batch', itemId: 'gkp', isCancelled: false, movementType: 'In', unitCost: 5800 }];
 

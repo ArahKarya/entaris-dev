@@ -88,7 +88,7 @@ const send = (method: string, path: string, body: unknown) =>
   fetch(`${base}${path}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 const ITEM_ID = '0b8a3f0e-0000-4000-8000-0000000000a1';
-const ITEM = { id: ITEM_ID, name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '50', averageCost: '9000' };
+const ITEM = { id: ITEM_ID, name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '50', averageCost: '9000', stockValue: '450000' };
 const WH = '0b8a3f0e-0000-4000-8000-000000000001';
 
 const FY_2026 = { id: 'fy-2026', name: '2026', isClosed: false };
