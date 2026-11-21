@@ -64,6 +64,10 @@ const IGNORED = new Set<string>([
   'Unknown warehouse_code: {0}. Nothing was applied.',
   'The plan is stale; nothing was applied. {0}',
   'Drift left after the repair on {0}; nothing was applied.',
+  // Reader of the value-ledger migration's data part (services/inventory/valueBaselineSql.ts, run by
+  // scripts/repair/e3-value-baseline.ts), CLI and tests only.
+  'Value-ledger data markers not found in {0}',
+  'Value-ledger data part of {0} is not a single DO block',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */
