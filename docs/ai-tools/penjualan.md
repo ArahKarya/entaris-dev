@@ -44,7 +44,7 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 | `do_from_invoice` | Tidak ada (stok sudah dipotong invoice) | Tidak ada |
 | `si_create` | Keluar untuk baris inventori (kecuali baris dari DO: HPP-nya seluruh nilai mutasi Keluar SJ) | DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran; lalu JV-COGS: DR 5.1 HPP (fallback 5) / CR Persediaan |
 | `si_cancel` | Stok dikembalikan | Semua jurnal invoice + HPP dibalik |
-| `sret_create` | Masuk lagi untuk baris `restock=true` | JV-RN: DR 4.3 Retur Penjualan (+ PPN Keluaran) / CR 1.2.1 Piutang (sebesar yang mengurangi outstanding) dan CR 2.1.2 Uang Muka Pelanggan (kelebihan, jadi kredit pelanggan); JV-COGS-RN: DR Persediaan / CR HPP pada biaya asli |
+| `sret_create` | Masuk lagi untuk baris `restock=true` | JV-RN: DR 4.3 Retur Penjualan (+ PPN Keluaran) / CR 1.2.1 Piutang (sebesar yang mengurangi outstanding) dan CR 2.1.2 Uang Muka Pelanggan (kelebihan, jadi kredit pelanggan); JV-COGS-RN: DR Persediaan / CR HPP sebesar nilai masuk stok: porsi nilai mutasi Surat Jalan asal (qty retur / qty SJ; total retur satu baris tidak melebihi nilai itu, retur terakhir mengambil sisanya); stok retur ikut rata-rata |
 | `cdep_apply` | Tidak ada | DR 2.1.2 Uang Muka Pelanggan / CR 1.2.1 Piutang Usaha |
 | `cdep_refund` | Tidak ada | Offset: DR 2.1.2 / CR 1.2.1 (FIFO ke faktur terlama); refund kas: DR 2.1.2 / CR Kas/Bank (1.1.x) |
 | `cdep_cancel`, `cdep_apply_cancel` | Tidak ada | Jurnal asal dibalik (soft-cancel ledger, bukan jurnal pembalik) |
@@ -82,7 +82,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Retur -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi, aplikasi uang muka aktif, atau retur aktif (`INVOICE_HAS_ACTIVE_RETURNS`; batalkan returnya dulu dengan `sret_cancel`); `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
 4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.
 5. **Status invoice mengikuti sisa tagihan**: Paid bila sisa <= Rp 0,01, Submitted bila belum ada yang dilunasi, selain itu PartiallyPaid. Invoice yang diretur penuh berstatus Paid dan tidak menerima alokasi pembayaran. Status `Overdue` tidak pernah disimpan; jatuh tempo dibaca dari `dueDate`.
-6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak. `sret_cancel` juga ditolak (`STOCK_INSUFFICIENT`) bila barang retur sudah keluar lagi dari gudang retur; membatalkan juga butuh `allowNegativeStock` + `negativeStockReason` dan capability `inventory.negative_stock` (stok jadi minus).
+6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak. `sret_cancel` juga ditolak (`STOCK_INSUFFICIENT`) bila barang retur sudah keluar lagi dari gudang retur; dengan `allowNegativeStock` + `negativeStockReason` dan capability `inventory.negative_stock` pembatalan tetap ditolak `REVERSAL_NEEDS_TRUE_UP` (409) karena barang item itu sudah keluar sejak retur; nilai persediaannya perlu dikoreksi akuntan.
 7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan HPP-nya seluruh nilai mutasi Keluar SJ; DO yang sudah Cancelled atau sudah di invoice lain ditolak. `si_create`, `do_update` dan `do_cancel` atas DO yang sama berjalan berurutan: yang menunggu melihat hasil yang lain (dua invoice atas satu DO: yang kedua ditolak; DO yang sudah diedit: baris lamanya "tidak ditemukan", ambil ulang barisnya). `do_create`/`do_update` menjumlah baris item yang sama per gudang dan menjawab `STOCK_INSUFFICIENT`; `STOCK_BUSY` (409) berarti stok sedang diproses transaksi lain, ulangi sebentar lagi.
 8. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
 9. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
@@ -4673,7 +4673,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.
+**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak retur diterima.
 
 **Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?
 
@@ -4686,6 +4686,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.
 - 400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)
+- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak retur diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
@@ -4751,7 +4752,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** 201: SalesReturn terposting. 202: { pendingApproval, request } bila perlu persetujuan.
 
-**Efek pembukuan/stok:** Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).
+**Efek pembukuan/stok:** Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk lewat buku nilai persediaan dan ikut rata-rata, bernilai porsi nilai yang dikeluarkan Surat Jalan asal (qty retur / qty SJ x nilai mutasi SJ; total retur satu baris tidak pernah melebihi nilai itu, retur terakhir mengambil sisanya) + JV-COGS-RN sebesar nilai yang sama: DR Persediaan (akun item atau INVENTORY) / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).
 
 **Teks konfirmasi:** Buat Retur Penjualan untuk invoice {salesInvoiceId} tanggal {date}?
 
@@ -4765,6 +4766,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 400: qty retur melebihi sisa yang bisa diretur.
 - 400: invoice sudah dibatalkan.
+- 400: gudang retur wajib dipilih untuk baris restock (bila baris Invoice dan Surat Jalan asal juga tanpa gudang).
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
