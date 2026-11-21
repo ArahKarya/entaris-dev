@@ -18,7 +18,8 @@
  * Stock checks (rollback transaction, same year):
  * - a delivery note with two lines of one item, 60 + 60, from 100 -> 400 STOCK_INSUFFICIENT;
  * - sales return cancel whose returned goods were sold again -> 400 STOCK_INSUFFICIENT; the
- *   bypass needs inventory.negative_stock and a reason, then the stock goes negative;
+ *   bypass needs inventory.negative_stock and a reason, then the value ledger refuses it (409
+ *   REVERSAL_NEEDS_TRUE_UP, PR-6.4c2) until PR-6.5a;
  * - purchase invoice cancel of a legacy PI-owned stock movement already used -> 400 likewise; with
  *   the bypass the value ledger refuses it (409 REVERSAL_NEEDS_TRUE_UP, PR-6.4d) until PR-6.5a.
  */
@@ -548,10 +549,14 @@ d('stock checks of delivery notes and legacy reversals', () => {
       const noReason = await cancel(s.actor, { allowNegativeStock: true });
       expect(noReason.status).toBe(400);
 
+      // The bypass passes the stock check, but the value ledger (PR-6.4c2) refuses to take the
+      // return's value back after goods of the item went out (train guard until PR-6.5a).
       const admin = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']);
-      const ok = await cancel(admin, bypass);
-      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: -30, warehouse: -30 });
+      const forced = await cancel(admin, bypass);
+      expect(forced.status, JSON.stringify(forced.body)).toBe(409);
+      expect(forced.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: 10, warehouse: 10 });
+      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Submitted');
     });
   });
 

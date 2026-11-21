@@ -44,8 +44,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/production/productionPosting.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
   'services/purchaseInvoiceRevise.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
-  'services/salesReturnCancel.ts': { 'inventoryStock.update': 1, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
-  'services/salesReturnSubmit.ts': { 'inventoryStock.upsert': 1, 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1 },
   'utils/warehouseStock.ts': { 'inventoryStock.upsert': 1 },
 };
 

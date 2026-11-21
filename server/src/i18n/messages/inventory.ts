@@ -226,4 +226,5 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Gerakan stok tanpa gudang tidak dapat diedit. Batalkan lalu catat ulang.": "A stock movement without a warehouse cannot be edited. Cancel it and record it again.",
   // value ledger (E3-R6), stock count and sales return: routes/stockOpname.ts, services/salesReturnSubmit.ts
   "Stok opname {0} berisi revaluasi nilai dari sebelum buku nilai persediaan, jadi tidak dapat dibatalkan otomatis. Minta akuntan membuat jurnal koreksi.": "Stock count {0} holds a value revaluation from before the inventory value ledger, so it cannot be cancelled automatically. Ask the accountant to post a correcting journal.",
+  "Gudang retur untuk '{0}' wajib dipilih.": "Choose the return warehouse for '{0}'.",
 };
