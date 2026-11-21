@@ -12,11 +12,10 @@ import { UNIT_COST_DP } from '../services/inventory/inventoryValueMath';
  *
  * Rules:
  *  - cancelled movements are skipped;
- *  - In / AdjustmentIn with unitCost > 0 -> WAC blend, then stock += qty;
- *  - In / AdjustmentIn with unitCost <= 0 -> stock += qty, avg untouched
- *    (customer-owned goods, zero-cost inbound never dilute the avg);
- *  - In from SalesReturn and AdjustmentIn from StockOpname are stock-only:
- *    the live paths restock at the original/current cost WITHOUT touching avg;
+ *  - In / AdjustmentIn -> WAC blend at its unit cost, then stock += qty. Every inbound blends,
+ *    a zero-cost one (customer-owned goods, an output at NRV 0), a sales return and an opname
+ *    gain included, as on the value ledger (E3-R7): an inbound row adds its value to the book.
+ *    The replay is a diagnosis; the book of an item is its stock_value (inventoryLedger.ts);
  *  - Out / AdjustmentOut -> stock -= qty, avg untouched;
  *  - TransferIn / TransferOut -> stock only (item-level they net to zero);
  *  - Revaluation (qty 0, value only) -> nothing: the value-ledger migration (6.4b1) writes
@@ -55,17 +54,13 @@ export interface ReplayResult {
   hasCostedInbound: boolean;
 }
 
-/** Inbound types that blend into the average (subject to the ref rules below). */
+/** Inbound types that blend into the average. */
 const COSTED_IN_TYPES = new Set<ReplayMovementType>(['In', 'AdjustmentIn']);
 const STOCK_IN_TYPES = new Set<ReplayMovementType>(['In', 'AdjustmentIn', 'TransferIn']);
 
-/** True when this movement blends into the average on the live (incremental) path. */
-export function movementBlendsAverage(m: Pick<ReplayMovement, 'movementType' | 'unitCost' | 'referenceType'>): boolean {
-  if (!COSTED_IN_TYPES.has(m.movementType)) return false;
-  if (new Decimal(m.unitCost.toString()).lte(0)) return false;
-  if (m.movementType === 'In' && m.referenceType === 'SalesReturn') return false;
-  if (m.movementType === 'AdjustmentIn' && m.referenceType === 'StockOpname') return false;
-  return true;
+/** True when this movement blends into the average: every In / AdjustmentIn (value ledger, E3-R7). */
+export function movementBlendsAverage(m: Pick<ReplayMovement, 'movementType'>): boolean {
+  return COSTED_IN_TYPES.has(m.movementType);
 }
 
 const toMillis = (v: Date | string | number): number =>
@@ -86,6 +81,11 @@ export interface ReplayOptions {
   /** Stock/avg base before the first movement (default 0 / 0). */
   openingStock?: number | string | Decimal;
   openingAverageCost?: number | string | Decimal;
+  /**
+   * Which rows blend into the average (default movementBlendsAverage). A read-only audit of rows
+   * the old live code valued passes the rule that code had (manualMovementAudit.ts).
+   */
+  blends?: (m: ReplayMovement) => boolean;
 }
 
 export function replayWeightedAverage(
@@ -95,11 +95,12 @@ export function replayWeightedAverage(
   let stock = new Decimal((options.openingStock ?? 0).toString());
   let avg = new Decimal((options.openingAverageCost ?? 0).toString());
   let hasCostedInbound = false;
+  const blends = options.blends ?? movementBlendsAverage;
 
   for (const m of sortMovementsForReplay(movements)) {
     if (m.isCancelled) continue;
     const qty = new Decimal(m.quantity.toString());
-    if (movementBlendsAverage(m)) {
+    if (blends(m)) {
       avg = new Decimal(calcWeightedAverage(stock, avg, qty, new Decimal(m.unitCost.toString())));
       hasCostedInbound = true;
     }

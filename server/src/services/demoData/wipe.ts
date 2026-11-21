@@ -58,7 +58,8 @@ export async function resetDerivedBalances(tx: Prisma.TransactionClient): Promis
   await tx.$executeRawUnsafe(
     `UPDATE "parties" SET ${OPENING_ONLY_SIDES_SET_SQL}, "deposit_balance" = 0, "customer_deposit_balance" = 0`,
   );
-  await tx.$executeRawUnsafe('UPDATE "inventory_items" SET "current_stock" = 0');
+  // Stock, book value and average together (value ledger, E3-R6): the movements are gone.
+  await tx.$executeRawUnsafe('UPDATE "inventory_items" SET "current_stock" = 0, "stock_value" = 0, "average_cost" = 0');
   // The demo's opening balances are gone with its journals, so the cut-over date they fixed goes too
   // (E2-R11); company_settings itself is kept (KEEP_TABLES).
   await tx.$executeRawUnsafe('UPDATE "company_settings" SET "cutover_date" = NULL');

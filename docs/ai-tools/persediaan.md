@@ -68,9 +68,9 @@ Aturan wajib:
 ### Jebakan umum
 
 1. **Stok total vs per gudang**. `inv_items_list` tanpa `warehouseId` menampilkan total semua gudang; dengan `warehouseId` menampilkan saldo gudang itu (0 bila tak ada baris). Jangan menjumlah ulang sendiri.
-2. **Harga stok masuk dan keluar**. Stok masuk manual (`In`, `AdjustmentIn`, termasuk "barang ditemukan") wajib `unitCost` > 0 (`MANUAL_IN_ZERO_COST`). Stok keluar (`Out`, `AdjustmentOut`) selalu dinilai WAC item saat disimpan; `unitCost` yang dikirim diabaikan, jadi jangan menjanjikan nilai lain kepada user. Stok awal diisi lewat impor stok awal.
+2. **Harga stok masuk dan keluar**. Stok masuk manual (`In`, `AdjustmentIn`, termasuk "barang ditemukan") wajib `unitCost` > 0 (`MANUAL_IN_ZERO_COST`). Stok keluar (`Out`, `AdjustmentOut`) selalu dinilai dari nilai persediaan item saat disimpan (bagian nilai sebanding qty, sisa penuh bila stok habis); `unitCost` yang dikirim diabaikan, jadi jangan menjanjikan nilai lain kepada user. Stok awal diisi lewat impor stok awal dan dijurnal sebesar nilai yang sama.
 3. **Akun lawan**. Stok masuk wajib `offsetAccountId` (`OFFSET_REQUIRED`); tidak ada lagi default Ekuitas Saldo Awal 3.1. Stok keluar tanpa akun lawan dibukukan ke akun Selisih Persediaan (role `INVENTORY_VARIANCE`); selama role itu dipetakan ke akun grup atau ke akun yang sama dengan akun Pembulatan, sistem menolak (`INVENTORY_VARIANCE_UNSAFE`) dan Pemeriksaan Sistem memberi peringatan "Akun Selisih Persediaan tersendiri". Akun lawan yang ditolak: 3.1 Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, akun nonaktif, dan akun di kelompok persediaan (`STOCK_OFFSET_INVENTORY`).
-4. **Edit = batal + buat ulang**. `inv_mov_update` bukan edit draft; nomor SM berubah dan jurnal lama berstatus Cancelled.
+4. **Edit = batal + buat ulang**. `inv_mov_update` bukan edit draft; pergerakan lama dibatalkan, pergerakan baru bernomor SM baru (id baru di respons), dan jurnal lama berstatus Cancelled. Edit atau batal stok masuk (juga `gr_cancel`) ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila barang item itu sudah keluar sesudahnya: nilai persediaan perlu dikoreksi akuntan, koreksi otomatis belum tersedia.
 5. **Transfer langsung berlaku**. `stf_create` tidak punya draft; kesalahan harus diperbaiki dengan `stf_cancel` lalu buat ulang. `stf_update` hanya mengubah metadata cetak (mobil, supir, penerima, catatan).
 6. **Opname langsung final**. `opn_create` memposting penyesuaian dan jurnal saat itu juga. Kirim semua item yang dihitung (termasuk yang tidak berselisih) agar jejak audit lengkap; angka aktual negatif ditolak kecuali sama dengan stok sistem minus historis.
 7. **Revaluasi tak sengaja**. Mengisi `unitCost` pada baris opname yang berbeda dari WAC akan MENGUBAH `averageCost` item dan menjurnal selisih nilai. Isi hanya bila memang revaluasi.
@@ -722,7 +722,7 @@ Aturan wajib:
 
 **Isi hasil:** Pesan sukses pembatalan.
 
-**Efek pembukuan/stok:** Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; WAC dan COGS backfill disesuaikan.
+**Efek pembukuan/stok:** Stok dan nilainya dibalik persis (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; COGS backfill dibalik. Pembatalan stok masuk ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sesudahnya.
 
 **Teks konfirmasi:** Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.
 
@@ -736,8 +736,10 @@ Aturan wajib:
 **Error umum**
 
 - 400: gerakan sudah dibatalkan
-- 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok
+- 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok
+- 400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu
 - 400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)
+- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 403: tanpa capability doc.cancel
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
@@ -800,7 +802,7 @@ Aturan wajib:
 
 **Isi hasil:** Pergerakan stok yang dibuat (201) dengan nomor SM dan journalEntryId bila ada jurnal.
 
-**Efek pembukuan/stok:** Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn. Nilai: masuk = qty x unitCost; keluar = qty x WAC item saat disimpan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.
+**Efek pembukuan/stok:** Stok: +/- qty di gudang & total item; nilai persediaan item ikut bergerak dan rata-rata dihitung dari nilai itu. Nilai: masuk = qty x unitCost; keluar = bagian nilai persediaan item (nilai x qty / stok; sisa penuh bila stok habis), unitCost dari klien diabaikan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.
 
 **Teks konfirmasi:** Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal akan langsung berubah.
 
@@ -1025,7 +1027,7 @@ Aturan wajib:
 
 **Isi hasil:** Pergerakan stok hasil edit (pergerakan baru).
 
-**Efek pembukuan/stok:** Membalik stok & jurnal lama (jurnal lama berstatus Cancelled, saldo akun dikurangi per baris), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar pada WAC sesudah pembalikan), reverse+settle ulang COGS backfill, recompute WAC item dari replay.
+**Efek pembukuan/stok:** Pergerakan lama dibatalkan: stok dan nilainya kembali persis, jurnal lama berstatus Cancelled (saldo akun dikurangi per baris). Pergerakan baru (nomor SM baru) dan jurnal baru diposting sesuai isian (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar dinilai dari nilai persediaan sesudah pembalikan); reverse+settle ulang COGS backfill. Edit stok masuk ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sesudahnya.
 
 **Teks konfirmasi:** Ubah pergerakan stok {id} menjadi {movementType} {quantity} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang.
 
@@ -1039,8 +1041,11 @@ Aturan wajib:
 **Error umum**
 
 - 400: gerakan sudah dibatalkan
+- 400: pergerakan lama tanpa gudang tidak dapat diedit; batalkan lalu catat ulang
 - 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok
+- 400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu
 - 400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)
+- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku

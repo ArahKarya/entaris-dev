@@ -37,6 +37,17 @@ describe('manual movement cost audit, list a', () => {
     expect(findings[0]).toMatchObject({ id: rows[0].id, replayedAverage: '0.000000', difference: '500.00', note: 'no costed inbound before the row (stock may predate its movements)' });
   });
 
+  it('replays with the old live rule: a sales return, an opname gain and a zero-cost In left the average', () => {
+    const rows = [
+      row('In', 1_000, 12_000),
+      row('In', 100, 10_000, { manual: false, referenceType: 'SalesReturn' }),
+      row('AdjustmentIn', 50, 8_000, { manual: false, referenceType: 'StockOpname' }),
+      row('In', 200, 0, { manual: false, referenceType: 'GoodsReceipt' }),
+      row('Out', 50, 12_000),
+    ];
+    expect(outboundCostFindings(rows)).toEqual([]);
+  });
+
   it('accepts a cost within half a cent of the average', () => {
     const rows = [row('In', 3, 10), row('In', 3, 11), row('Out', 1, 10.5)];
     expect(outboundCostFindings(rows)).toEqual([]);

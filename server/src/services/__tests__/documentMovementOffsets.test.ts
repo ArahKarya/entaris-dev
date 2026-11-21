@@ -47,8 +47,12 @@ describe('goods receipt movements', () => {
   const grTx = (averageCost: string) =>
     makeAutoTx({
       'party.findUnique': () => ({ id: 'sup', name: 'Supplier', isActive: true, partyType: 'Supplier' }),
-      'inventoryItem.findUnique': () => ({ id: 'i1', name: 'GKP', isActive: true, accountId: null, averageCost, currentStock: '0' }),
+      // lockInventoryRows reads the item and its warehouse row back after locking them.
+      'inventoryItem.findMany': () => [{ id: 'i1', name: 'GKP', unit: 'Kg', isActive: true, accountId: null, averageCost, currentStock: '0', stockValue: '0' }],
+      'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
+      'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '0' }],
       'warehouse.findUnique': () => ({ id: 'wh-1' }),
+      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
     });
   const body = (extra: object = {}) => ({
     date: '2026-10-10',
@@ -60,7 +64,7 @@ describe('goods receipt movements', () => {
   it('stores Hutang Belum Tagih as the counter account', async () => {
     const { tx, fn } = grTx('0');
     await submitGoodsReceiptInTx(tx, body(), 'u1');
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'GoodsReceipt', offsetAccountId: 'acc-2.1.5', totalValue: 50000 });
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'GoodsReceipt', offsetAccountId: 'acc-2.1.5', totalValue: '50000' });
     const je = fn('journalEntry.create').mock.calls[0]![0].data.items.create;
     expect(je.find((l: any) => l.credit > 0).accountId).toBe('acc-2.1.5');
   });
@@ -68,7 +72,7 @@ describe('goods receipt movements', () => {
   it('leaves it empty for customer-owned goods (no journal)', async () => {
     const { tx, fn } = grTx('0');
     await submitGoodsReceiptInTx(tx, body({ isCustomerOwned: true }), 'u1');
-    expect(movementData(fn)[0]).toMatchObject({ totalValue: 0, offsetAccountId: null });
+    expect(movementData(fn)[0]).toMatchObject({ totalValue: '0', offsetAccountId: null });
     expect(fn('journalEntry.create')).not.toHaveBeenCalled();
   });
 });

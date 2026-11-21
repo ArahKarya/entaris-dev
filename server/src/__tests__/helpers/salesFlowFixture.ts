@@ -1,12 +1,10 @@
 import Decimal from 'decimal.js';
 import type { Prisma } from '@prisma/client';
 import { systemAccounts } from '../../services/systemAccounts';
-import { postJournal } from '../../services/ledger/postJournal';
-import { DOCUMENT_RULE } from '../../services/ledger/accountGuard';
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
+import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { createFiscalYear } from './periodFixture';
-import { seedStock } from './inventoryFixture';
 
 type Tx = Prisma.TransactionClient;
 
@@ -19,8 +17,9 @@ export interface SalesFlowWorld {
   warehouseA: { id: string };
   warehouseB: { id: string };
   customer: { id: string };
-  /** Leaf accounts: the item's inventory account, COGS (mapped to the role inside the tx), and the
-   *  counter account of the receipt journal (a stand-in for Hutang Belum Ditagih). */
+  supplier: { id: string };
+  /** Leaf accounts: the item's inventory account, COGS (mapped to the role inside the tx), and a
+   *  counter account for the journals a test writes by hand (a stand-in for Hutang Belum Ditagih). */
   accounts: { inventory: { id: string }; cogs: { id: string }; receiptOffset: { id: string } };
   item: { id: string; name: string };
 }
@@ -33,7 +32,7 @@ async function leaf(tx: Tx, label: string, type: 'ASSET' | 'EXPENSE' | 'LIABILIT
 
 /**
  * Self-contained sales-flow fixture, built inside a rollback transaction: a fiscal year, two
- * warehouses, a customer, an item on its own leaf inventory account, and a leaf COGS account mapped
+ * warehouses, a customer, a Supplier, an item on its own leaf inventory account, and a leaf COGS account mapped
  * to the COGS role (a database may map COGS to a group account, which posting refuses). Invalidate
  * the system-account cache again once the transaction has rolled back.
  */
@@ -48,44 +47,36 @@ export async function createSalesFlowWorld(tx: Tx, year: number): Promise<SalesF
   const warehouseA = await tx.warehouse.create({ data: { code: `SF-A-${t}`, name: `SF A ${t}` } });
   const warehouseB = await tx.warehouse.create({ data: { code: `SF-B-${t}`, name: `SF B ${t}` } });
   const customer = await tx.party.create({ data: { name: `IT-SF Customer ${t}`, partyType: 'Customer', isActive: true } });
+  const supplier = await tx.party.create({ data: { name: `IT-SF Supplier ${t}`, partyType: 'Supplier', isActive: true } });
   const item = await tx.inventoryItem.create({
     data: { code: `SF-${t}`, name: `Beras SF ${t}`, unit: 'kg', isActive: true, accountId: inventory.id },
   });
   return {
-    year, fyId: fy.id, userId: user.id, warehouseA, warehouseB, customer,
+    year, fyId: fy.id, userId: user.id, warehouseA, warehouseB, customer, supplier,
     accounts: { inventory, cogs, receiptOffset }, item: { id: item.id, name: item.name },
   };
 }
 
 /**
- * Goods received the way the STT posts them on the value ledger: `qty` at `avg` into the warehouse
- * (seedStock: an In row with value_delta = round(qty x avg, 2)) and a balanced journal of the same
- * amount, DR the item's inventory account / CR the receipt counter account. STT submit itself moves
- * onto the ledger in PR-6.4c1; this stands in for it until then.
+ * Goods received through the real STT service (submitGoodsReceiptInTx, value ledger since PR-6.4c1):
+ * `qty` at `avg` into the warehouse, an In row with value_delta = round(qty x avg, 2) and the STT
+ * journal of the same amount, DR the item's inventory account / CR Hutang Belum Tagih.
  */
 export async function receiveStock(
   tx: Tx,
   w: SalesFlowWorld,
   input: { warehouseId: string; qty: Decimal.Value; avg: Decimal.Value; day: string },
-): Promise<{ movementId: string; value: Decimal }> {
-  const { movementId } = await seedStock(tx, {
-    itemId: w.item.id, warehouseId: input.warehouseId, qty: input.qty, avg: input.avg, date: input.day, fiscalYearId: w.fyId, userId: w.userId,
-  });
-  const value = new Decimal(input.qty).times(input.avg).toDecimalPlaces(2);
-  const narration = `IT-SF penerimaan ${tag()}`;
-  await postJournal(tx, {
-    date: new Date(`${input.day}T00:00:00.000Z`),
-    narration,
-    lines: [
-      { accountId: w.accounts.inventory.id, debit: value.toString(), credit: 0, description: narration },
-      { accountId: w.accounts.receiptOffset.id, debit: 0, credit: value.toString(), description: narration },
-    ],
-    sourceType: 'SYSTEM_DOC',
-    createdBy: w.userId,
-    accountRule: DOCUMENT_RULE,
-    partyRule: 'off',
-  });
-  return { movementId, value };
+): Promise<{ movementId: string; value: Decimal; goodsReceiptId: string }> {
+  const stt = await submitGoodsReceiptInTx(tx, {
+    date: input.day,
+    partyId: w.supplier.id,
+    items: [{
+      inventoryItemId: w.item.id, warehouseId: input.warehouseId, itemName: w.item.name,
+      quantity: Number(input.qty), unit: 'kg', lockedUnitCost: Number(input.avg),
+    }],
+  }, w.userId);
+  const line = await tx.goodsReceiptItem.findFirstOrThrow({ where: { goodsReceiptId: stt.id }, include: { stockMovement: true } });
+  return { movementId: line.stockMovementId!, value: new Decimal(line.stockMovement!.valueDelta.toString()), goodsReceiptId: stt.id };
 }
 
 /** A delivery order of the world's item through the real service, one line per quantity. */
