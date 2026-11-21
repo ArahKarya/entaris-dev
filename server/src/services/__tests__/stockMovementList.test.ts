@@ -70,11 +70,11 @@ describe('stockMovementOrderBy', () => {
 });
 
 describe('summarizeStockMovements', () => {
-  const g = (movementType: any, isCancelled: boolean, count: number, qty: string, value: string) => ({
+  const g = (movementType: any, isCancelled: boolean, count: number, qty: string, value: string, delta: string = value) => ({
     movementType,
     isCancelled,
     _count: { _all: count },
-    _sum: { quantity: new Prisma.Decimal(qty), totalValue: new Prisma.Decimal(value) },
+    _sum: { quantity: new Prisma.Decimal(qty), totalValue: new Prisma.Decimal(value), valueDelta: new Prisma.Decimal(delta) },
   });
 
   it('splits inbound / outbound and excludes cancelled from totals', () => {
@@ -100,13 +100,14 @@ describe('summarizeStockMovements', () => {
     });
   });
 
-  it('keeps Revaluation rows in their own value-only group, out of the inbound and outbound totals', () => {
+  it('keeps Revaluation rows in their own value-only group with their signed net value, out of the in/out totals', () => {
     expect(
       summarizeStockMovements([
         g('In', false, 1, '10', '100'),
         g('Out', false, 1, '4', '40'),
-        g('Revaluation', false, 2, '0', '1234.565'),
-        g('Revaluation', true, 1, '0', '999'),
+        // +1.000 and −234,565: total_value sums to 1.234,565, the signed net is 765,435.
+        g('Revaluation', false, 2, '0', '1234.565', '765.435'),
+        g('Revaluation', true, 1, '0', '999', '-999'),
       ]),
     ).toEqual({
       count: 5,
@@ -118,7 +119,7 @@ describe('summarizeStockMovements', () => {
       outQty: 4,
       outValue: 40,
       revaluationCount: 2,
-      revaluationValue: 1234.57,
+      revaluationValue: 765.44,
     });
   });
 });

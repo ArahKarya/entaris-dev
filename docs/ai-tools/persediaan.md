@@ -969,7 +969,7 @@ Aturan wajib:
 }
 ```
 
-**Isi hasil:** Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar.
+**Isi hasil:** Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar; revaluationValue = jumlah bertanda (positif menaikkan, negatif menurunkan nilai persediaan).
 
 **Tool terkait:** [`inv_mov_list`](#inv_mov_list)
 

@@ -7912,7 +7912,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar.",
+      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar; revaluationValue = jumlah bertanda (positif menaikkan, negatif menurunkan nilai persediaan).",
       "handler": "GET /api/inventory/movements/summary",
       "permAction": "view",
       "enabled": true,
