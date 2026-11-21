@@ -261,7 +261,9 @@ d('closed fiscal year: stock movements', () => {
         userId, role,
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      const edited = await tx.stockMovement.findUniqueOrThrow({ where: { id: mov.id } });
+      // The edit cancels the row and posts a new one (a value-ledger row is never rewritten).
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: mov.id } })).isCancelled).toBe(true);
+      const edited = await tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } });
       expect(edited.fiscalYearId).toBe(next.id);
       const newJe = await tx.journalEntry.findUniqueOrThrow({ where: { id: edited.journalEntryId! } });
       expect(newJe.fiscalYearId).toBe(next.id);
@@ -273,8 +275,9 @@ d('closed fiscal year: stock movements', () => {
     await inRollback(async (tx) => {
       const { old, next } = await years(tx);
       const item = await stockItem(tx, 100, 1_000);
-      const edited = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentIn', quantity: 10, unitCost: 1_000, date: `${Y + 1}-01-05` });
+      // The Out goes first: an inbound edited after goods went out needs a value true-up (PR-6.5a).
       const cancelled = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentOut', quantity: 5, unitCost: 1_000, date: `${Y + 1}-01-05` });
+      const edited = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentIn', quantity: 10, unitCost: 1_000, date: `${Y + 1}-01-05` });
       // Older edits moved the date across the year end but kept the earlier fiscal year.
       await tx.stockMovement.updateMany({ where: { id: { in: [edited.id, cancelled.id] } }, data: { fiscalYearId: old.id } });
       await close(tx, old);
@@ -285,7 +288,7 @@ d('closed fiscal year: stock movements', () => {
         userId, role,
       });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: edited.id } })).fiscalYearId).toBe(next.id);
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } })).fiscalYearId).toBe(next.id);
 
       const c = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: cancelled.id }, userId, role });
       expect(c.status, JSON.stringify(c.body)).toBe(200);

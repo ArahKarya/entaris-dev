@@ -5,8 +5,9 @@
  *   role shares its account with the rounding account (INVENTORY_VARIANCE_UNSAFE);
  * - Stock In needs a unit cost above 0 and an offset; the offset may not be the opening balance
  *   equity, a group, an inactive account or an account in the inventory group;
- * - an edited Out is re-valued at the average after the reversal, also when the item holds stock
- *   without a movement behind it (the replay is skipped); cancel voids the journal;
+ * - an edit cancels the row and posts a new one through the value ledger: an Out is re-valued from
+ *   the book after the reversal, an In takes its own value back and books the new cost; cancel voids
+ *   the journal;
  * - the journal is a SYSTEM_DOC journal through postJournal, and stored balances follow the ledger.
  *
  * Fixtures are created here (fiscal year 2106, own warehouse, item, accounts and the
@@ -268,7 +269,8 @@ d('edit and cancel of a manual movement', () => {
       // Turning that In into an Out of 100 reverses the In first: valued at 6.000, not 6.545,45 or 12.000.
       const r = await edit(s, inbound.id, { movementType: 'Out', quantity: 100, unitCost: 12_000, offsetAccountId: s.offsetId });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } });
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } })).isCancelled).toBe(true);
+      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } });
       expect(Number(mov.unitCost)).toBe(6_000);
       expect(Number(mov.totalValue)).toBe(600_000);
       expect(await ledgerOf(tx, mov.journalEntryId!)).toEqual([[s.offsetId, 600_000, 0], [s.inventoryAccountId, 0, 600_000]]);
@@ -280,47 +282,18 @@ d('edit and cancel of a manual movement', () => {
     });
   });
 
-  /** 10.000 kg more at the same average with no movement behind it (legacy opening stock): the replay cannot explain the stock. */
-  async function addStockWithoutMovement(tx: Tx, s: Setup) {
-    await tx.inventoryItem.update({ where: { id: s.gkp.id }, data: { currentStock: { increment: 10_000 } } });
-    await tx.inventoryStock.update({
-      where: { itemId_warehouseId: { itemId: s.gkp.id, warehouseId: s.warehouseId } },
-      data: { currentStock: { increment: 10_000 } },
-    });
-  }
-
-  it('an In edited to an Out on stock without a movement behind it is valued at the average after the reversal', async () => {
+  it('an In whose cost is edited takes its own value back and is re-weighted at the new cost', async () => {
     await inRollback(async (tx) => {
       const s = await setup(tx);
-      await addStockWithoutMovement(tx, s);
-      // In 1.000 @ 12.000 on 20.000 kg @ 6.000: the average becomes 132.000.000 / 21.000 = 6.285,714286.
-      const inbound = expectCreated(await post(s, { movementType: 'In', quantity: 1_000, unitCost: 12_000, offsetAccountId: s.offsetId }));
-      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } })).averageCost)).toBe(6_285.714286);
-
-      // The replay is skipped (residual 10.000), so the In is taken out of the average at its own cost: 6.000, not 6.285,71.
-      const r = await edit(s, inbound.id, { movementType: 'Out', quantity: 100, offsetAccountId: s.offsetId });
-      expect(r.status, JSON.stringify(r.body)).toBe(200);
-      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } });
-      expect(Number(mov.unitCost)).toBe(6_000);
-      expect(await ledgerOf(tx, mov.journalEntryId!)).toEqual([[s.offsetId, 600_000, 0], [s.inventoryAccountId, 0, 600_000]]);
-      const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } });
-      expect(Number(item.currentStock)).toBe(19_900);
-      expect(Number(item.averageCost)).toBe(6_000);
-    });
-  });
-
-  it('an In whose cost is edited on stock without a movement behind it is re-weighted at the new cost', async () => {
-    await inRollback(async (tx) => {
-      const s = await setup(tx);
-      await addStockWithoutMovement(tx, s);
       const inbound = expectCreated(await post(s, { movementType: 'In', quantity: 1_000, unitCost: 12_000, offsetAccountId: s.offsetId }));
       const r = await edit(s, inbound.id, { movementType: 'In', quantity: 1_000, unitCost: 9_000, offsetAccountId: s.offsetId });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      // (20.000 x 6.000 + 1.000 x 9.000) / 21.000 = 6.142,857143; the old 12.000 is gone from the average.
+      // (60.000.000 + 9.000.000) / 11.000 = 6.272,727273; the old 12.000.000 is out of the book.
       const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: s.gkp.id } });
-      expect(Number(item.currentStock)).toBe(21_000);
-      expect(Number(item.averageCost)).toBe(6_142.857143);
-      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } });
+      expect(Number(item.currentStock)).toBe(11_000);
+      expect(Number(item.stockValue)).toBe(69_000_000);
+      expect(Number(item.averageCost)).toBe(6_272.727273);
+      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } });
       expect(await ledgerOf(tx, mov.journalEntryId!)).toEqual([[s.inventoryAccountId, 9_000_000, 0], [s.offsetId, 0, 9_000_000]]);
       await expectBalancesMatchLedger(tx, [s.offsetId, s.inventoryAccountId]);
     });
@@ -332,7 +305,7 @@ d('edit and cancel of a manual movement', () => {
       const out = expectCreated(await post(s, { movementType: 'Out', quantity: 100, offsetAccountId: s.offsetId }));
       const r = await edit(s, out.id, { movementType: 'AdjustmentOut', quantity: 250, unitCost: 1 });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: out.id } });
+      const mov = await tx.stockMovement.findUniqueOrThrow({ where: { id: r.body.id } });
       expect(Number(mov.totalValue)).toBe(1_500_000);
       expect(mov.offsetAccountId).toBe(s.varianceId);
       expect(await ledgerOf(tx, mov.journalEntryId!)).toEqual([[s.varianceId, 1_500_000, 0], [s.inventoryAccountId, 0, 1_500_000]]);

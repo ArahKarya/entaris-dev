@@ -44,7 +44,7 @@ type Tx = Prisma.TransactionClient;
  */
 export const REVERSAL_NEEDS_TRUE_UP = 'REVERSAL_NEEDS_TRUE_UP';
 
-/** Fields of a new movement row; a new movement always names its warehouse. */
+/** Fields of a new movement row; a new movement names its warehouse (OutboundInput has one exception). */
 interface MovementBase {
   itemId: string;
   warehouseId: string;
@@ -71,8 +71,13 @@ export interface InboundInput extends MovementBase {
   value: Decimal.Value;
 }
 
-export interface OutboundInput extends MovementBase {
+export interface OutboundInput extends Omit<MovementBase, 'warehouseId'> {
   movementType: 'Out' | 'AdjustmentOut';
+  /**
+   * null only for stock that no warehouse holds (the item vs warehouse drift write-off, PR-6.3d):
+   * the row then takes the quantity off the item total alone.
+   */
+  warehouseId: string | null;
   /** The cost is decided here (outboundValue), never by the caller. */
   quantity: Decimal.Value;
 }

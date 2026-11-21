@@ -10,7 +10,8 @@ import path from 'node:path';
  * The list is the state of the code when the guard was added and may only SHRINK: the value
  * ledger PRs move every writer behind services/inventory/inventoryLedger.ts, the one entry that was
  * added (PR-6.4b2) and the only one left after PR-6.4e besides wipe and seed (PR-6.4d moved the
- * delivery order, invoice cancellation and transfer writers behind it). Write stock fields
+ * delivery order, invoice cancellation and transfer writers behind it, PR-6.4c1 the goods receipt,
+ * opening stock import and manual movement writers; the drift repair's warehouse placement is left). Write stock fields
  * inline in the call (not through a data variable built earlier) so the guard sees them.
  *
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
@@ -37,12 +38,9 @@ const ALLOWLIST: Record<string, Counts> = {
   'services/averageCostRecompute.ts': { 'inventoryItem.update(stock)': 1 },
   'services/cogsBackfillService.ts': { 'inventoryItem.update(stock)': 1 },
   'services/demoData/wipe.ts': { 'sql:UPDATE inventory_items': 1 },
-  'services/goodsReceiptCancel.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
-  'services/goodsReceiptSubmit.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
   'services/inventory/inventoryLedger.ts': { 'inventoryStock.update': 1, 'inventoryItem.update(stock)': 2, 'stockMovement.create': 1, 'stockMovement.updateMany': 2 },
-  'services/inventory/manualMovement.ts': { 'inventoryStock.upsert': 1, 'stockMovement.create': 1, 'stockMovement.update': 2, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 2 },
+  'services/inventory/manualMovement.ts': { 'inventoryStock.upsert': 1 },
   'services/inventory/stockLocks.ts': { 'inventoryStock.createMany': 1 },
-  'services/openingStockImport.ts': { 'stockMovement.create': 1, 'inventoryItem.update(stock)': 1, adjustWarehouseStock: 1 },
   'services/production/productionPosting.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
   'services/purchaseInvoiceRevise.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'services/purchaseInvoiceSubmit.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },

@@ -263,7 +263,8 @@ d('references sent by a client', () => {
       for (const [row, expected] of [[manual, null], [legacy, 'PurchaseInvoice']] as const) {
         const res = await editMovement(row.id, { movementType: 'In', quantity: 12, unitCost: 1_000, date: DAY, offsetAccountId, referenceType: 'GoodsReceipt' });
         expect(res.status).toBe(200);
-        const after = await tx.stockMovement.findUniqueOrThrow({ where: { id: row.id } });
+        // The edit cancels the row and posts a new one, which carries the old row's reference type.
+        const after = await tx.stockMovement.findUniqueOrThrow({ where: { id: res.body.id } });
         expect(after.referenceType).toBe(expected);
         expect(after.referenceId).toBeNull();
         expect(Number(after.quantity)).toBe(12);
