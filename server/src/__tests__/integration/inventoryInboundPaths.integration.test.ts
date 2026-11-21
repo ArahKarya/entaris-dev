@@ -7,11 +7,11 @@
  *   the value-ledger backfill sets it): cancelling it takes back the locked cost, not total_value;
  * - an STT whose goods partly went out since is refused with REVERSAL_NEEDS_TRUE_UP, nothing moves;
  * - customer-owned goods (owner decision #5): refused into an item that holds own goods, accepted at
- *   value 0 into an item that holds none;
+ *   value 0 into an item that holds none; own goods refused into an item that holds customer goods;
  * - opening stock import: the journal debit and the ledger value are the same 2 dp amount;
  * - manual movements: In at the body cost, Out valued from the book, an edit cancels the row and
  *   posts a new one, a cancel takes the row back exactly; an inbound edit after goods went out is
- *   refused with REVERSAL_NEEDS_TRUE_UP;
+ *   refused with REVERSAL_NEEDS_TRUE_UP; an In picked as a transfer's batch cannot be edited or cancelled;
  * - the demo wipe resets stock, stock_value and average together.
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2110.
  */
@@ -38,6 +38,7 @@ import {
   cancelManualMovementInTx, createManualMovementInTx, editManualMovementInTx,
 } from '../../services/inventory/manualMovement';
 import { resetDerivedBalances } from '../../services/demoData/wipe';
+import { submitStockTransferInTx } from '../../services/stockTransfer';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -189,6 +190,30 @@ d('goods receipt (STT) on the value ledger', () => {
       return [consigned.id];
     });
   });
+
+  it('own goods are refused into an item that holds customer-owned goods (decision #5, reverse)', async () => {
+    await inWorld(async (tx, w) => {
+      const consigned = await tx.inventoryItem.create({
+        data: { code: `IT-IB-TTP2-${Date.now()}`, name: 'Gabah titipan 2', unit: 'kg', isActive: true, accountId: w.accounts.inventory.id },
+      });
+      const line = (isCustomerOwned: boolean) => inRouteTx((t) => submitGoodsReceiptInTx(t, {
+        date: DAY, partyId: w.supplier.id, isCustomerOwned,
+        items: [{
+          inventoryItemId: consigned.id, warehouseId: w.warehouseA.id, itemName: consigned.name, quantity: 1_000, unit: 'kg',
+          lockedUnitCost: isCustomerOwned ? undefined : 10_000,
+        }],
+      }, w.userId));
+      const customer = await line(true);
+      expect(await codeOf(line(false))).toBe(GR_CUSTOMER_OWNED_OWN_STOCK);
+      expect(await bookOf(tx, consigned.id)).toEqual({ stock: '1000.000', value: '0.00', average: '0.000000' });
+
+      // Once the customer goods are gone (the STT cancelled here), own goods come in again.
+      await inRouteTx((t) => cancelGoodsReceiptInTx(t, customer.id, w.userId));
+      await line(false);
+      expect(await bookOf(tx, consigned.id)).toEqual({ stock: '1000.000', value: '10000000.00', average: '10000.000000' });
+      return [consigned.id];
+    });
+  });
 });
 
 d('opening stock import on the value ledger', () => {
@@ -286,6 +311,26 @@ d('manual movements on the value ledger', () => {
         movementType: 'In', quantity: 1_000, unitCost: 9_000, date: DAY, offsetAccountId: offset.id,
       }, w.userId)))).toBe(REVERSAL_NEEDS_TRUE_UP);
       expect(await codeOf(inRouteTx((t) => cancelManualMovementInTx(t, inbound.id, w.userId)))).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await bookOf(tx, w.item.id)).toEqual(before);
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } })).isCancelled).toBe(false);
+    });
+  });
+
+  it('an In picked as the batch of a transfer cannot be edited or cancelled', async () => {
+    await inWorld(async (tx, w) => {
+      const { offset, inbound } = await stocked(tx, w);
+      await inRouteTx((t) => submitStockTransferInTx(t, {
+        date: DAY, fromWarehouseId: w.warehouseA.id, toWarehouseId: w.warehouseB.id,
+        items: [{ itemId: w.item.id, quantity: 500, sourceMovementId: inbound.id }],
+      }, w.userId));
+      const before = await bookOf(tx, w.item.id);
+      const refused = async (p: Promise<unknown>) => {
+        await expect(p).rejects.toThrow(/sudah dipakai di transaksi lain/);
+      };
+      await refused(inRouteTx((t) => editManualMovementInTx(t, inbound.id, {
+        movementType: 'In', quantity: 1_000, unitCost: 9_000, date: DAY, offsetAccountId: offset.id,
+      }, w.userId)));
+      await refused(inRouteTx((t) => cancelManualMovementInTx(t, inbound.id, w.userId)));
       expect(await bookOf(tx, w.item.id)).toEqual(before);
       expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } })).isCancelled).toBe(false);
     });

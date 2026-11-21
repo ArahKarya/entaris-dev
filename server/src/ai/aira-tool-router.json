@@ -21128,7 +21128,7 @@
       "phase": 3,
       "service": "goodsReceiptSubmit",
       "draftCapable": false,
-      "postingEffect": "Stok masuk (StockMovement In) + stok per gudang bertambah; nilai persediaan item bertambah sebesar qty x lockedUnitCost (atau averageCost bila 0) dan rata-rata dihitung dari nilai itu. Jurnal: DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar nilai yang sama. qtyReceived item PO bertambah bila terkait PO. Barang titipan Customer (isCustomerOwned): nilai dan GL nol, tidak bisa ditagih, dan ditolak ke item yang punya stok milik perusahaan.",
+      "postingEffect": "Stok masuk (StockMovement In) + stok per gudang bertambah; nilai persediaan item bertambah sebesar qty x lockedUnitCost (atau averageCost bila 0) dan rata-rata dihitung dari nilai itu. Jurnal: DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar nilai yang sama. qtyReceived item PO bertambah bila terkait PO. Barang titipan Customer (isCustomerOwned): nilai dan GL nol, tidak bisa ditagih, dan ditolak ke item yang punya stok milik perusahaan; barang perusahaan juga ditolak ke item yang berisi barang titipan Customer.",
       "confirm_template": "Catat penerimaan barang dari pemasok {partyId} tanggal {date}, {items} baris item. Stok dan hutang belum tagih akan dibukukan. Setujui?",
       "prerequisites": [
         "Periode fiskal terbuka",
@@ -21139,7 +21139,7 @@
         "400: pemasok tidak aktif/bukan supplier",
         "400: PO sudah dibatalkan/belum dipesan/sudah ditutup",
         "400: item atau gudang tidak ditemukan/tidak aktif",
-        "400 GR_CUSTOMER_OWNED_OWN_STOCK: STT titipan Customer ke item yang punya stok milik perusahaan; pakai item terpisah untuk barang titipan",
+        "400 GR_CUSTOMER_OWNED_OWN_STOCK: STT titipan Customer ke item yang punya stok milik perusahaan, atau STT barang perusahaan ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
@@ -30375,6 +30375,7 @@
         "400: gerakan sudah dibatalkan",
         "400: pergerakan lama tanpa gudang tidak dapat diedit; batalkan lalu catat ulang",
         "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
+        "400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu",
         "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)",
         "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
@@ -30438,7 +30439,8 @@
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
-        "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok",
+        "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
+        "400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu",
         "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)",
         "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",

@@ -81,6 +81,11 @@ export interface ReplayOptions {
   /** Stock/avg base before the first movement (default 0 / 0). */
   openingStock?: number | string | Decimal;
   openingAverageCost?: number | string | Decimal;
+  /**
+   * Which rows blend into the average (default movementBlendsAverage). A read-only audit of rows
+   * the old live code valued passes the rule that code had (manualMovementAudit.ts).
+   */
+  blends?: (m: ReplayMovement) => boolean;
 }
 
 export function replayWeightedAverage(
@@ -90,11 +95,12 @@ export function replayWeightedAverage(
   let stock = new Decimal((options.openingStock ?? 0).toString());
   let avg = new Decimal((options.openingAverageCost ?? 0).toString());
   let hasCostedInbound = false;
+  const blends = options.blends ?? movementBlendsAverage;
 
   for (const m of sortMovementsForReplay(movements)) {
     if (m.isCancelled) continue;
     const qty = new Decimal(m.quantity.toString());
-    if (movementBlendsAverage(m)) {
+    if (blends(m)) {
       avg = new Decimal(calcWeightedAverage(stock, avg, qty, new Decimal(m.unitCost.toString())));
       hasCostedInbound = true;
     }

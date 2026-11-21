@@ -8,7 +8,8 @@
  * - an edit cancels the row and posts a new one through the value ledger: an Out is re-valued from
  *   the book after the reversal, an In takes its own value back and books the new cost; cancel voids
  *   the journal;
- * - the journal is a SYSTEM_DOC journal through postJournal, and stored balances follow the ledger.
+ * - the journal is a SYSTEM_DOC journal through postJournal, and stored balances follow the ledger;
+ * - every test ends with assertLedgerInvariant over the items it created.
  *
  * Fixtures are created here (fiscal year 2106, own warehouse, item, accounts and the
  * INVENTORY_VARIANCE / ROUNDING_ACCOUNT mappings). Everything runs in a rollback transaction.
@@ -22,6 +23,7 @@ import { callRoute, txPrismaProxy, type RouteResult, type Tx } from '../helpers/
 import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -60,6 +62,9 @@ async function inRollback(fn: (tx: Tx) => Promise<void>) {
       invalidatePermissionCache();
       try {
         await fn(tx);
+        // Every item this file creates (setup's GKP included) ends with a whole book (plan rule 11).
+        const items = await tx.inventoryItem.findMany({ where: { code: { startsWith: 'IT-E3R4-' } }, select: { id: true } });
+        await assertLedgerInvariant(tx, items.map((i) => i.id), { warehouses: true });
       } finally {
         state.tx = null;
         invalidatePermissionCache();

@@ -72,6 +72,8 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Stok tidak cukup. Stok saat ini (setelah pembalikan): {0} {1}": "Not enough stock. Current stock (after reversal): {0} {1}",
   "Gagal mengupdate gerakan stok.": "Failed to update the stock movement.",
   "Gerakan stok sudah dibatalkan.": "Stock movement is already cancelled.",
+  "Gerakan stok {0} tidak dapat diedit: barang dari stok masuk ini sudah dipakai di transaksi lain ({1}). Batalkan transaksi tersebut terlebih dahulu.": "Stock movement {0} cannot be edited: goods from this stock in are already used in other transactions ({1}). Cancel those transactions first.",
+  "Gerakan stok {0} tidak dapat dibatalkan: barang dari stok masuk ini sudah dipakai di transaksi lain ({1}). Batalkan transaksi tersebut terlebih dahulu.": "Stock movement {0} cannot be cancelled: goods from this stock in are already used in other transactions ({1}). Cancel those transactions first.",
   "Tidak dapat membatalkan: stok tidak mencukupi untuk pembalikan.": "Cannot cancel: not enough stock to reverse.",
   "Gerakan stok dibatalkan.": "Stock movement cancelled.",
   "Gagal membatalkan gerakan stok.": "Failed to cancel the stock movement.",
@@ -219,6 +221,7 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Pembatalan ditolak: stok '{0}' menjadi 0 tetapi nilai persediaannya masih {1}, jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.": "Cancellation refused: the stock of '{0}' becomes 0 but its inventory value is still {1}, so that remaining value needs a correction. Automatic value correction is not available yet; contact the accountant.",
   // value ledger (E3-R6), inbound paths: goodsReceiptSubmit.ts (owner decision #5), openingStockImport.ts, manualMovement.ts
   "Barang titipan Customer tidak dapat diterima ke item '{0}' karena item ini punya stok milik perusahaan. Gunakan item terpisah untuk barang titipan.": "Customer-owned goods cannot be received into item '{0}' because it holds goods owned by the company. Use a separate item for customer-owned goods.",
+  "Barang milik perusahaan tidak dapat diterima ke item '{0}' karena item ini berisi barang titipan Customer. Gunakan item terpisah untuk barang titipan.": "Company-owned goods cannot be received into item '{0}' because it holds customer-owned goods. Use a separate item for customer-owned goods.",
   "Akun persediaan item '{0}' tidak ditemukan.": "The inventory account of item '{0}' was not found.",
   "Gerakan stok tanpa gudang tidak dapat diedit. Batalkan lalu catat ulang.": "A stock movement without a warehouse cannot be edited. Cancel it and record it again.",
 };

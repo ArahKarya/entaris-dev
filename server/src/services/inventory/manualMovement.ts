@@ -302,7 +302,33 @@ async function lockManualMovement(tx: Tx, id: string, action: 'edit' | 'cancel')
   // Document movements are changed from their document: a per-line change would orphan its journal.
   const lockMessage = documentMovementLockMessage(movement, action);
   if (lockMessage) throw new BusinessError(lockMessage, MOVEMENT_DOCUMENT_LOCKED);
+  await assertBatchNotConsumed(tx, movement, action);
   return movement;
+}
+
+/**
+ * Refuses an edit or cancel of a row that an active movement consumes as its batch
+ * (sourceMovementId), as goodsReceiptCancel.ts does: the edit posts a new row with a new id, so the
+ * consumer would point at a cancelled batch and the picker would offer its quantity again.
+ */
+async function assertBatchNotConsumed(tx: Tx, movement: StockMovement, action: 'edit' | 'cancel'): Promise<void> {
+  const consumers = await tx.stockMovement.findMany({
+    where: { sourceMovementId: movement.id, isCancelled: false },
+    select: { movementNumber: true, referenceNumber: true },
+    take: 5,
+  });
+  if (consumers.length === 0) return;
+  const ref = consumers.map((c) => c.referenceNumber || c.movementNumber).join(', ');
+  if (action === 'edit') {
+    throw new BusinessError(
+      `Gerakan stok ${movement.movementNumber} tidak dapat diedit: barang dari stok masuk ini sudah dipakai di transaksi lain (${ref}). ` +
+        'Batalkan transaksi tersebut terlebih dahulu.',
+    );
+  }
+  throw new BusinessError(
+    `Gerakan stok ${movement.movementNumber} tidak dapat dibatalkan: barang dari stok masuk ini sudah dipakai di transaksi lain (${ref}). ` +
+      'Batalkan transaksi tersebut terlebih dahulu.',
+  );
 }
 
 /**

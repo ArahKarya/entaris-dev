@@ -15,7 +15,10 @@ import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
 
-/** Error code (400): a customer-owned STT line into an item that holds goods of the company (owner decision #5). */
+/**
+ * Error code (400): a customer-owned STT line into an item that holds goods of the company, or a
+ * company STT line into an item that holds customer-owned goods (owner decision #5).
+ */
 export const GR_CUSTOMER_OWNED_OWN_STOCK = 'GR_CUSTOMER_OWNED_OWN_STOCK';
 
 /**
@@ -34,6 +37,29 @@ function holdsOwnStock(item: LockedItem): boolean {
 function customerOwnedIntoOwnStock(itemName: string): BusinessError {
   return new BusinessError(
     `Barang titipan Customer tidak dapat diterima ke item '${itemName}' karena item ini punya stok milik perusahaan. ` +
+      'Gunakan item terpisah untuk barang titipan.',
+    GR_CUSTOMER_OWNED_OWN_STOCK,
+  );
+}
+
+/**
+ * Whether the item holds customer-owned goods: stock above 0 without value, and an active
+ * customer-owned STT line of the item. The source is checked, not the zero value alone, so an item
+ * that holds only zero-cost goods of its own (a by-product) still takes a receipt.
+ */
+async function holdsCustomerGoods(tx: Tx, item: LockedItem): Promise<boolean> {
+  if (!item.currentStock.gt(0) || !item.stockValue.isZero()) return false;
+  const line = await tx.goodsReceiptItem.findFirst({
+    where: { inventoryItemId: item.id, goodsReceipt: { isCustomerOwned: true, status: 'Submitted' } },
+    select: { id: true },
+  });
+  return line !== null;
+}
+
+/** The reverse of owner decision #5: own goods blended with zero-value customer goods would be costed at a diluted average. */
+function ownIntoCustomerStock(itemName: string): BusinessError {
+  return new BusinessError(
+    `Barang milik perusahaan tidak dapat diterima ke item '${itemName}' karena item ini berisi barang titipan Customer. ` +
       'Gunakan item terpisah untuk barang titipan.',
     GR_CUSTOMER_OWNED_OWN_STOCK,
   );
@@ -177,6 +203,7 @@ export async function submitGoodsReceiptInTx(
     if (!invItem) throw new BusinessError(`Item '${line.itemName}' tidak ditemukan.`);
     if (!invItem.isActive) throw new BusinessError(`Item '${invItem.name}' tidak aktif.`);
     if (isCustomerOwned && holdsOwnStock(invItem)) throw customerOwnedIntoOwnStock(invItem.name);
+    if (!isCustomerOwned && (await holdsCustomerGoods(tx, invItem))) throw ownIntoCustomerStock(invItem.name);
 
     const wh = await tx.warehouse.findUnique({ where: { id: line.warehouseId } });
     if (!wh) throw new BusinessError(`Gudang tidak ditemukan untuk '${line.itemName}'.`);
