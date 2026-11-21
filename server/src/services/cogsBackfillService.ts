@@ -7,7 +7,7 @@ import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { UNIT_COST_DP } from './inventory/inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 

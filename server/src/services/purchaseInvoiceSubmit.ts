@@ -10,7 +10,7 @@ import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 import { resolvePurchaseLineType, resolvePurchaseOrderIdFromReceipts } from './purchaseInvoiceLinks';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { UNIT_COST_DP } from './inventory/inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 

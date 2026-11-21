@@ -209,4 +209,6 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Stok '{0}' di luar gudang {1} {2}; perbaikan {3} {4} ditolak.": "Stock of '{0}' outside any warehouse is {1} {2}; the repair of {3} {4} is refused.",
   "Gerakan stok perbaikan selisih gudang tidak dapat diedit per baris. Koreksi lewat Penyesuaian Stok.": "A warehouse drift repair movement cannot be edited per row. Correct it with a stock adjustment.",
   "Gerakan stok perbaikan selisih gudang tidak dapat dibatalkan per baris. Koreksi lewat Penyesuaian Stok.": "A warehouse drift repair movement cannot be cancelled per row. Correct it with a stock adjustment.",
+  // value ledger (E3-R6): services/inventory/inventoryValueMath.ts
+  "Nilai persediaan negatif ({0}) padahal stok masih {1}. Barang tidak bisa dikeluarkan sampai nilainya diperbaiki.": "The inventory value is negative ({0}) while {1} is still in stock. The goods cannot go out until the value is corrected.",
 };

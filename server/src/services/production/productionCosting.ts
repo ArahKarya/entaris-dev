@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { splitProductionDiff } from '../ledger/systemRoleAccounts';
-import { UNIT_COST_DP } from '../../utils/costPrecision';
+import { UNIT_COST_DP } from '../inventory/inventoryValueMath';
 
 /**
  * Production costing (E6-R1): the one home of the run's cost arithmetic. Pure, no database:

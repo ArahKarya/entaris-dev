@@ -12,7 +12,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { UNIT_COST_DP } from './inventory/inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 

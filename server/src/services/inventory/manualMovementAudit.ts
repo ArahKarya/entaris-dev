@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import type { Prisma } from '@prisma/client';
 import { replayWeightedAverage, sortMovementsForReplay, type ReplayMovement } from '../../utils/weightedAverageReplay';
-import { UNIT_COST_DP } from '../../utils/costPrecision';
+import { UNIT_COST_DP } from './inventoryValueMath';
 
 type Db = Pick<Prisma.TransactionClient, 'stockMovement' | 'systemAccountMapping'>;
 
