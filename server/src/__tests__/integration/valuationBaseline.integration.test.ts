@@ -269,7 +269,8 @@ d('value-ledger migration data part (E3-R6)', () => {
       expect(await valueOf(tx, tOut.id)).toBe(0);
       expect(await valueOf(tx, tIn.id)).toBe(0);
       expect(await valueOf(tx, cancelled.id)).toBe(35_000); // cancelled rows too, for a later reversal
-      expect(report.backfilled).toBeGreaterThanOrEqual(5);
+      // out, adjIn, adjOut and the cancelled row; seedStock's In carries its value_delta already.
+      expect(report.backfilled).toBeGreaterThanOrEqual(4);
       expect(report.newRows.filter((r) => r.itemId === item.id)).toHaveLength(0);
       expect(report.stockValueChanges.find((c) => c.itemId === item.id)?.after.toFixed(2)).toBe('300000.00');
       await assertSelfCheck(tx, [item.id]);
