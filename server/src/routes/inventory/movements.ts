@@ -68,7 +68,7 @@ router.get('/summary', async (req, res) => {
       by: ['movementType', 'isCancelled'],
       where: filter.where,
       _count: { _all: true },
-      _sum: { quantity: true, totalValue: true },
+      _sum: { quantity: true, totalValue: true, valueDelta: true },
     });
     return res.json(summarizeStockMovements(groups));
   } catch (error) {

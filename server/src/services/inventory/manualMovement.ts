@@ -19,7 +19,7 @@
 import type { Prisma, StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../utils/errors';
-import { UNIT_COST_DP } from '../../utils/costPrecision';
+import { UNIT_COST_DP } from './inventoryValueMath';
 import { MOVEMENT_DOCUMENT_LOCKED, STOCK_DRIFT_REFERENCE, documentMovementLockMessage } from '../documentMovementLock';
 import { assertBatchSource } from './batchSource';
 import { generateDocumentNumber } from '../../utils/documentNumber';

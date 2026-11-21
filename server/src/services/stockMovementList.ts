@@ -83,7 +83,7 @@ export interface StockMovementTypeGroup {
   movementType: StockMovementType;
   isCancelled: boolean;
   _count: { _all: number };
-  _sum: { quantity: Prisma.Decimal | null; totalValue: Prisma.Decimal | null };
+  _sum: { quantity: Prisma.Decimal | null; totalValue: Prisma.Decimal | null; valueDelta: Prisma.Decimal | null };
 }
 
 export interface StockMovementSummary {
@@ -98,7 +98,7 @@ export interface StockMovementSummary {
   outCount: number;
   outQty: number;
   outValue: number;
-  /** Non-cancelled Revaluation rows: value only, no quantity (total_value is unsigned until 6.4b1). */
+  /** Non-cancelled Revaluation rows: value only, no quantity; the signed net of their value_delta. */
   revaluationCount: number;
   revaluationValue: number;
 }
@@ -126,7 +126,7 @@ export function summarizeStockMovements(groups: readonly StockMovementTypeGroup[
     }
     if (VALUE_ONLY_TYPES.includes(g.movementType)) {
       revaluationCount += c;
-      revaluationValue = revaluationValue.plus(dec(g._sum.totalValue));
+      revaluationValue = revaluationValue.plus(dec(g._sum.valueDelta));
     } else if (INBOUND_TYPES.includes(g.movementType)) {
       inCount += c;
       inQty = inQty.plus(dec(g._sum.quantity));

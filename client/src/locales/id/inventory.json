@@ -213,6 +213,7 @@
       "editFromDocument": "Gerakan dari {{doc}} hanya bisa diubah atau dibatalkan lewat halaman {{page}}.",
       "openingBalance": "Gerakan saldo awal tidak bisa diubah per baris. Koreksi stok awal lewat Penyesuaian Stok.",
       "stockDriftRepair": "Gerakan perbaikan selisih gudang tidak bisa diubah per baris. Koreksi lewat Penyesuaian Stok.",
+      "revaluation": "Gerakan revaluasi nilai tidak bisa diubah per baris. Nilainya bagian dari buku nilai persediaan.",
       "page": {
         "GoodsReceipt": "STT",
         "DeliveryOrder": "Surat Jalan",
@@ -243,7 +244,8 @@
       "SalesReturn": "Retur Penjualan",
       "StockDriftRepair": "Perbaikan Selisih Gudang",
       "StockOpname": "Stok Opname",
-      "StockTransfer": "Transfer Stok"
+      "StockTransfer": "Transfer Stok",
+      "ValuationBaseline": "Nilai Awal Buku Nilai"
     }
   },
   "invoiceItemsSection": {

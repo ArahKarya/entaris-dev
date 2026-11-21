@@ -7,7 +7,7 @@
 import Decimal from 'decimal.js';
 import { StockMovementType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { UNIT_COST_DP } from './inventory/inventoryValueMath';
 
 const IN_TYPES: StockMovementType[] = [
   StockMovementType.In,

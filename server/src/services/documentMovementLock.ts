@@ -31,7 +31,10 @@ export interface LockableMovement {
  *  • OpeningBalance, which has no document: correct opening stock with a stock adjustment;
  *  • StockDriftRepair, the write-off of the item vs warehouse drift repair (e3-stock-drift): undoing
  *    it per row would bring the drift back; correct it with a stock adjustment;
- *  • TransferIn / TransferOut whatever their reference: only the transfer reverses both sides.
+ *  • TransferIn / TransferOut whatever their reference: only the transfer reverses both sides;
+ *  • a Revaluation without a document (the value-ledger migration's ValuationBaseline rows): it has
+ *    no quantity and no journal, and the value-ledger replay starts from it; a per-row edit or cancel
+ *    would break stock_value = Σ value_delta. One of a document is changed through that document.
  */
 export function documentMovementLockMessage(mov: LockableMovement, action: 'edit' | 'cancel'): string | null {
   if (mov.referenceType === STOCK_DRIFT_REFERENCE) {
@@ -48,6 +51,11 @@ export function documentMovementLockMessage(mov: LockableMovement, action: 'edit
   const doc = isTransfer
     ? DOCUMENT_LABELS.StockTransfer
     : mov.referenceType && mov.referenceId ? DOCUMENT_LABELS[mov.referenceType] : undefined;
+  if (!doc && mov.movementType === 'Revaluation') {
+    return action === 'edit'
+      ? 'Gerakan revaluasi nilai tidak dapat diedit per baris. Nilainya bagian dari buku nilai persediaan.'
+      : 'Gerakan revaluasi nilai tidak dapat dibatalkan per baris. Nilainya bagian dari buku nilai persediaan.';
+  }
   if (!doc) return null;
   return action === 'edit'
     ? `Gerakan stok dari ${doc.label} tidak dapat diedit per baris. Ubah atau batalkan dokumennya dari halaman ${doc.page}.`

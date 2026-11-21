@@ -17,7 +17,7 @@ import { resolveWarehouseId, adjustWarehouseStock } from '../utils/warehouseStoc
 import { assertStockAvailable, lockInventoryRows, stockKey } from '../services/inventory/stockLocks';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
 import { INBOUND_TYPES } from '../services/stockMovementList';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { UNIT_COST_DP } from '../services/inventory/inventoryValueMath';
 import {
   buildStockOpnameWhere,
   DEFAULT_STOCK_OPNAME_SORT,

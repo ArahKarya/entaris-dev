@@ -5,7 +5,7 @@ import Decimal from 'decimal.js';
 import { prisma } from '../lib/prisma';
 import { systemAccounts } from '../services/systemAccounts';
 import { updateAccountBalance } from '../utils/accountBalance';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { UNIT_COST_DP } from '../services/inventory/inventoryValueMath';
 
 async function main() {
   const invoices = await prisma.purchaseInvoice.findMany({

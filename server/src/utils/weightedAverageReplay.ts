@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { calcWeightedAverage } from './weightedAverage';
-import { UNIT_COST_DP } from './costPrecision';
+import { UNIT_COST_DP } from '../services/inventory/inventoryValueMath';
 
 /**
  * Weighted-average-cost (WAC) REPLAY.
@@ -19,8 +19,9 @@ import { UNIT_COST_DP } from './costPrecision';
  *    the live paths restock at the original/current cost WITHOUT touching avg;
  *  - Out / AdjustmentOut -> stock -= qty, avg untouched;
  *  - TransferIn / TransferOut -> stock only (item-level they net to zero);
- *  - Revaluation (qty 0, value only) -> nothing yet: no path writes one before the value
- *    ledger (6.4b1), which makes the replay value-based.
+ *  - Revaluation (qty 0, value only) -> nothing: the value-ledger migration (6.4b1) writes
+ *    them (baselines, purchase invoice deltas), but this replay stays unit-cost based until it
+ *    becomes value-based (replayItemValue, plan §2.3).
  *
  * Pure function: no I/O, no mutation of its input.
  */
