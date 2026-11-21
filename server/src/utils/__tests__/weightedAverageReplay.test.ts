@@ -25,18 +25,15 @@ const mv = (
   };
 };
 
-/** Independent re-implementation of the LIVE incremental paths (state = stock, avg). */
+/** Independent re-implementation of the incremental rule (state = stock, avg): every inbound blends (E3-R7). */
 interface Live { stock: number; avg: number }
 function applyLive(s: Live, m: ReplayMovement): Live {
   const q = Number(m.quantity);
   const c = Number(m.unitCost);
   switch (m.movementType) {
     case 'In':
-      if (m.referenceType === 'SalesReturn') return { stock: s.stock + q, avg: s.avg }; // restock, avg untouched
-      return { stock: s.stock + q, avg: c > 0 ? calcWeightedAverage(s.stock, s.avg, q, c) : s.avg };
     case 'AdjustmentIn':
-      if (m.referenceType === 'StockOpname') return { stock: s.stock + q, avg: s.avg };
-      return { stock: s.stock + q, avg: c > 0 ? calcWeightedAverage(s.stock, s.avg, q, c) : s.avg };
+      return { stock: s.stock + q, avg: calcWeightedAverage(s.stock, s.avg, q, c) };
     case 'TransferIn':
       return { stock: s.stock + q, avg: s.avg };
     default: // Out, AdjustmentOut, TransferOut
@@ -122,18 +119,25 @@ describe('replayWeightedAverage - basics', () => {
     expect(onlyOut.averageCost).toBe(12);
   });
 
-  it('zero-cost inbound and stock-only paths never dilute the average', () => {
+  it('every inbound blends, zero-cost, sales return and opname gain included; transfers are stock only', () => {
     const ms = [
       mv('In', 100, 10),
-      mv('In', 500, 0, { referenceType: 'GoodsReceipt' }),
-      mv('In', 50, 99, { referenceType: 'SalesReturn' }),
-      mv('AdjustmentIn', 50, 99, { referenceType: 'StockOpname' }),
+      mv('In', 100, 0, { referenceType: 'GoodsReceipt' }),
+      mv('In', 50, 40, { referenceType: 'SalesReturn' }),
+      mv('AdjustmentIn', 50, 40, { referenceType: 'StockOpname' }),
       mv('TransferOut', 20, 10),
       mv('TransferIn', 20, 10),
     ];
+    // (100 x 10 + 100 x 0) / 200 = 5; (200 x 5 + 50 x 40) / 250 = 12; (250 x 12 + 50 x 40) / 300 = 16.666667.
     const r = replayWeightedAverage(ms, { fallbackAverageCost: 0 });
-    expect(r.averageCost).toBe(10);
-    expect(r.stock).toBe(700);
+    expect(r.averageCost).toBe(16.666667);
+    expect(r.stock).toBe(300);
+  });
+
+  it('a zero-cost inbound alone takes the average to 0 (no fallback: it is a costed inbound of value 0)', () => {
+    const r = replayWeightedAverage([mv('In', 10, 0, { referenceType: 'GoodsReceipt' })], { fallbackAverageCost: 500 });
+    expect(r.averageCost).toBe(0);
+    expect(r.hasCostedInbound).toBe(true);
   });
 
   it('does not mutate its input', () => {

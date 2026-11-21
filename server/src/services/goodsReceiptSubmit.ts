@@ -5,14 +5,39 @@ import { resolvePoItemLinks } from './purchaseOrderRules';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
-import { adjustWarehouseStock } from '../utils/warehouseStock';
-import { lockInventoryRows } from './inventory/stockLocks';
-import { calcWeightedAverage } from '../utils/weightedAverage';
+import { lockInventoryRows, type LockedItem } from './inventory/stockLocks';
+import { postInbound } from './inventory/inventoryLedger';
+import { UNIT_COST_DP } from './inventory/inventoryValueMath';
+import { inventoryAccountFor } from './inventory/itemMasterGuard';
 import { updateAccountBalance } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
+
+/** Error code (400): a customer-owned STT line into an item that holds goods of the company (owner decision #5). */
+export const GR_CUSTOMER_OWNED_OWN_STOCK = 'GR_CUSTOMER_OWNED_OWN_STOCK';
+
+/**
+ * Whether the item holds goods of the company: book value, or stock below 0 (own goods went out
+ * ahead of a receipt). Customer-owned goods carry no value, so an item that holds only them, or
+ * nothing, does not count.
+ */
+function holdsOwnStock(item: LockedItem): boolean {
+  return !item.stockValue.isZero() || item.currentStock.lt(0);
+}
+
+/**
+ * Until a separate consignment item exists (E3-PR16), customer-owned goods at value 0 would pull the
+ * average of the company's own goods down (owner decision #5), so they are refused into such an item.
+ */
+function customerOwnedIntoOwnStock(itemName: string): BusinessError {
+  return new BusinessError(
+    `Barang titipan Customer tidak dapat diterima ke item '${itemName}' karena item ini punya stok milik perusahaan. ` +
+      'Gunakan item terpisah untuk barang titipan.',
+    GR_CUSTOMER_OWNED_OWN_STOCK,
+  );
+}
 
 export interface SubmitGoodsReceiptInput {
   date: string;
@@ -39,8 +64,10 @@ export interface SubmitGoodsReceiptInput {
 }
 
 /**
- * Submit an STT/BPB: In movements update stock and WAC, linked PO lines get qtyReceived.
- * One JE per STT: DR Persediaan (per inventory account) / CR Hutang Belum Tagih (accrual).
+ * Submit an STT/BPB: each line posts an In through the value ledger (postInbound) at its line value,
+ * linked PO lines get qtyReceived. One JE per STT: DR Persediaan (per inventoryAccountFor) / CR Hutang
+ * Belum Tagih (accrual), of the same line values, so book = GL. A customer-owned line comes in at
+ * value 0 and is refused into an item that holds own goods (owner decision #5).
  * Caller owns the transaction.
  */
 export async function submitGoodsReceiptInTx(
@@ -112,8 +139,6 @@ export async function submitGoodsReceiptInTx(
     }
   }
 
-  // Resolve inventory accounts up-front so JE can group properly
-  const defaultInvAccount = await systemAccounts.getAccount('INVENTORY');
   const accruedAcct = await systemAccounts.getAccount('ACCRUED_PAYABLE');
 
   const sttNumber = await generateDocumentNumber(tx, 'STT', parsedDate, fiscalYear.id);
@@ -138,7 +163,6 @@ export async function submitGoodsReceiptInTx(
 
   // Lock every line's item (and its row at the line warehouse) once, before the first SM number:
   // the reads inside the loop then see the stock and average no concurrent posting can change.
-  // A line repeating an item reads the row again after the earlier line's update.
   await lockInventoryRows(tx, {
     itemIds: body.items.map((l) => l.inventoryItemId),
     pairs: body.items.map((l) => ({ itemId: l.inventoryItemId, warehouseId: l.warehouseId })),
@@ -148,9 +172,11 @@ export async function submitGoodsReceiptInTx(
   let totalCr = new Decimal(0);
 
   for (const line of body.items) {
-    const invItem = await tx.inventoryItem.findUnique({ where: { id: line.inventoryItemId } });
+    // Read again per line: a line repeating an item sees the book after the earlier line.
+    const invItem = (await lockInventoryRows(tx, { itemIds: [line.inventoryItemId] })).items.get(line.inventoryItemId);
     if (!invItem) throw new BusinessError(`Item '${line.itemName}' tidak ditemukan.`);
     if (!invItem.isActive) throw new BusinessError(`Item '${invItem.name}' tidak aktif.`);
+    if (isCustomerOwned && holdsOwnStock(invItem)) throw customerOwnedIntoOwnStock(invItem.name);
 
     const wh = await tx.warehouse.findUnique({ where: { id: line.warehouseId } });
     if (!wh) throw new BusinessError(`Gudang tidak ditemukan untuk '${line.itemName}'.`);
@@ -162,7 +188,7 @@ export async function submitGoodsReceiptInTx(
     let unitCost = new Decimal(0);
     if (!isCustomerOwned) {
       if (provided > 0) unitCost = new Decimal(provided);
-      else if (Number(invItem.averageCost) > 0) unitCost = new Decimal(invItem.averageCost.toString());
+      else if (invItem.averageCost.gt(0)) unitCost = invItem.averageCost;
       else if (line.purchaseOrderItemId) {
         const poLine = await tx.purchaseOrderItem.findUnique({
           where: { id: line.purchaseOrderItemId },
@@ -171,6 +197,7 @@ export async function submitGoodsReceiptInTx(
         if (poLine && Number(poLine.estimatedRate) > 0) unitCost = new Decimal(poLine.estimatedRate.toString());
       }
     }
+    unitCost = unitCost.toDecimalPlaces(UNIT_COST_DP);
     // Customer-owned goods are valued at 0 (not our asset), so the JE is skipped (totalCr = 0).
 
     // Own goods must not come in at cost 0: it dilutes WAC to 0 and later Outs drive the
@@ -183,49 +210,27 @@ export async function submitGoodsReceiptInTx(
       );
     }
 
+    // The line's debit to inventory; the ledger books the same amount (book = GL).
     const totalValue = qty.times(unitCost).toDecimalPlaces(2);
+    const acctId = await inventoryAccountFor(tx, invItem);
+    if (!acctId) throw new BusinessError('Akun Persediaan belum dipetakan di Akun Sistem.');
 
-    const movementNumber = await generateDocumentNumber(tx, 'SM', parsedDate, fiscalYear.id);
-    const movement = await tx.stockMovement.create({
-      data: {
-        movementNumber,
-        date: parsedDate,
-        itemId: invItem.id,
-        warehouseId: wh.id,
-        movementType: 'In',
-        quantity: qty.toNumber(),
-        unitCost: unitCost.toNumber(),
-        totalValue: totalValue.toNumber(),
-        referenceType: 'GoodsReceipt',
-        referenceId: goodsReceipt.id,
-        referenceNumber: sttNumber,
-        // The STT journal credits Hutang Belum Tagih for every valued line.
-        offsetAccountId: totalValue.gt(0) ? accruedAcct.id : null,
-        notes: `Penerimaan barang dari ${party.name} (${sttNumber})`,
-        createdById: userId,
-        fiscalYearId: fiscalYear.id,
-      },
+    const { movement } = await postInbound(tx, {
+      movementType: 'In',
+      itemId: invItem.id,
+      warehouseId: wh.id,
+      quantity: qty,
+      value: totalValue,
+      date: parsedDate,
+      fiscalYearId: fiscalYear.id,
+      createdById: userId,
+      referenceType: 'GoodsReceipt',
+      referenceId: goodsReceipt.id,
+      referenceNumber: sttNumber,
+      // The STT journal credits Hutang Belum Tagih for every valued line.
+      offsetAccountId: accruedAcct.id,
+      notes: `Penerimaan barang dari ${party.name} (${sttNumber})`,
     });
-
-    // Customer-owned goods leave averageCost untouched (0-cost qty would dilute WAC of own stock).
-    const newAvg = isCustomerOwned
-      ? Number(invItem.averageCost)
-      : calcWeightedAverage(
-          invItem.currentStock,
-          invItem.averageCost,
-          qty.toNumber(),
-          unitCost.toNumber(),
-        );
-    await tx.inventoryItem.update({
-      where: { id: invItem.id },
-      data: {
-        currentStock: { increment: qty.toNumber() },
-        averageCost: newAvg,
-        updatedAt: new Date(),
-      },
-    });
-
-    await adjustWarehouseStock(tx, invItem.id, wh.id, qty.toNumber());
 
     // Create GR item row with SM link
     const grItem = await tx.goodsReceiptItem.create({
@@ -236,7 +241,7 @@ export async function submitGoodsReceiptInTx(
         itemName: line.itemName,
         quantity: qty.toNumber(),
         unit: line.unit,
-        lockedUnitCost: unitCost.toNumber(),
+        lockedUnitCost: unitCost.toString(),
         description: line.description ?? null,
         purchaseOrderItemId: line.purchaseOrderItemId ?? null,
         stockMovementId: movement.id,
@@ -250,7 +255,6 @@ export async function submitGoodsReceiptInTx(
       });
     }
 
-    const acctId = invItem.accountId ?? defaultInvAccount.id;
     const existing = drByAccount.get(acctId);
     if (existing) {
       existing.amount = existing.amount.plus(totalValue);

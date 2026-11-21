@@ -1,10 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
-import { adjustWarehouseStock } from '../utils/warehouseStock';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
-import { recomputeAverageCostFromReplay } from './averageCostRecompute';
+import { reverseDocumentMovements } from './inventory/inventoryLedger';
 import { cancelJournalsInTx, findDocumentJournals } from './ledger/cancelJournals';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 
@@ -26,9 +25,9 @@ interface CancelOptions {
 /**
  * Cancel an STT. Rejected for legacy backfill STTs (cancel the PI instead) and while any of its
  * lines is billed by a purchase invoice that is not cancelled (cancel it first; not auto-cancelled
- * because of payment side effects). Reverses stock, voids the STT journal (it and its ledger
- * entries are cancelled and the balances reversed per line; no `-CXL` journal) and decrements PO
- * qtyReceived.
+ * because of payment side effects). Reverses its stock movements through the value ledger, voids
+ * the STT journal (it and its ledger entries are cancelled and the balances reversed per line; no
+ * `-CXL` journal) and decrements PO qtyReceived.
  */
 export async function cancelGoodsReceiptInTx(
   tx: Tx,
@@ -140,36 +139,19 @@ export async function cancelGoodsReceiptInTx(
     },
   );
 
-  const affectedItemIds = new Set<string>();
+  // Every row the STT owns comes back at its own value_delta (the locked cost the STT journal
+  // debited, also for a legacy row whose total_value a purchase invoice overwrote); the journal
+  // voided below carries the same amounts, so book = GL. Refused with REVERSAL_NEEDS_TRUE_UP when
+  // goods of the item went out since (value true-up, PR-6.5a).
+  await reverseDocumentMovements(tx, { referenceType: 'GoodsReceipt', referenceId: stt.id }, { userId });
+
   for (const grItem of stt.items) {
     const sm = grItem.stockMovement;
-    if (!sm || sm.isCancelled) continue;
-
-    await tx.stockMovement.update({
-      where: { id: sm.id },
-      data: { isCancelled: true, updatedAt: new Date() },
+    if (!sm || sm.isCancelled || !grItem.purchaseOrderItemId) continue;
+    await tx.purchaseOrderItem.update({
+      where: { id: grItem.purchaseOrderItemId },
+      data: { qtyReceived: { decrement: Number(sm.quantity) } },
     });
-
-    const qty = Number(sm.quantity);
-    await tx.inventoryItem.update({
-      where: { id: grItem.inventoryItemId },
-      data: { currentStock: { decrement: qty }, updatedAt: new Date() },
-    });
-    await adjustWarehouseStock(tx, grItem.inventoryItemId, grItem.warehouseId, -qty);
-    affectedItemIds.add(grItem.inventoryItemId);
-
-    if (grItem.purchaseOrderItemId) {
-      await tx.purchaseOrderItem.update({
-        where: { id: grItem.purchaseOrderItemId },
-        data: { qtyReceived: { decrement: qty } },
-      });
-    }
-  }
-
-  // Recompute averageCost by replaying remaining active movements.
-  // Customer-owned STTs are skipped: their submit never touched WAC.
-  for (const itemId of stt.isCustomerOwned ? [] : affectedItemIds) {
-    await recomputeAverageCostFromReplay(tx, itemId);
   }
 
   const journals = await findDocumentJournals(tx, `JV-${stt.sttNumber}`);
