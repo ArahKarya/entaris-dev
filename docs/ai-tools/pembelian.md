@@ -62,7 +62,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
 | PI dari STT | DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang |
 | Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> akun Selisih Harga Pembelian terpetakan (bawaan 5.11). Lawan selalu Hutang Usaha (akun AP terpetakan, bawaan 2.1.1) |
-| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), STT dilepas (`invoiceId` dikosongkan) |
+| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), Revaluation selisih harga milik PI dibalik sebesar nilainya (ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila barangnya sudah keluar sejak itu atau stok jadi 0 dengan sisa nilai), STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
 | Batal refund uang muka (`vdep_refund_cancel`) | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pemasok pulih |
@@ -494,7 +494,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.
+**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.
 
 **Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.
 
@@ -509,6 +509,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
 - 400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)
+- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak nilai PI masuk, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
@@ -548,7 +549,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `items[].rate` | body | `number` | ya | (mis. potongan jasa angkutan vendor pakai armada perusahaan). |
 | `items[].kualitas` | body | `string` | tidak |  |

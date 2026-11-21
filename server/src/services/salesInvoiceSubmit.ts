@@ -7,6 +7,7 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
 import { cogsAccountFor } from './ledger/systemRoleAccounts';
+import { inventoryAccountFor } from './inventory/itemMasterGuard';
 import { logger } from '../lib/logger';
 
 type Tx = Prisma.TransactionClient;
@@ -32,8 +33,7 @@ export interface SubmitSalesInvoiceInput {
     pphPct?: number;
     description?: string | null;
     // When set, this line was billed from an existing DO. Skip new stock-out
-    // (DO already did it); COGS uses the unitCost locked on the DO's
-    // stockMovement (not the current averageCost).
+    // (DO already did it); COGS is the value of the DO line's stock movement.
     deliveryOrderItemId?: string | null;
     // Batch picker: stock-out, sales line and COGS lock to the linked inbound batch's unitCost
     // instead of WAC.
@@ -71,7 +71,6 @@ export async function submitSalesInvoiceInTx(
   const arAccount = await systemAccounts.getAccount('AR');
   const salesAccount = await systemAccounts.getAccount('SALES');
   const serviceRevenueAccount = await systemAccounts.getAccount('SERVICE_REVENUE');
-  const inventoryAccount = await systemAccounts.getAccount('INVENTORY');
   const cogsAccount = await cogsAccountFor(tx);
 
   // Pre-fetch all referenced account/serviceItem rows in batch — avoids
@@ -328,10 +327,13 @@ export async function submitSalesInvoiceInTx(
   await assertPartySideLocked(tx, body.partyId, 'RECEIVABLE');
   await recalcPartyOutstanding(tx, body.partyId);
 
-  // COGS: stock-out already happened at DO submit, so COGS uses the unitCost locked on the
-  // DO's stockMovement (the cost of the goods actually delivered).
+  // COGS: the goods left stock at DO submit, through the value ledger. COGS of a billed DO line is
+  // the value its Out movement took out of the book (−value_delta), whatever quantity the invoice
+  // line states and whether or not the item is still active, so the credit to the item's
+  // inventory account equals what left its stock_value. Which DO lines an invoice must bill is
+  // E3-PR10. A DO line with no active movement moved no value: no COGS.
   let totalCogs = new Decimal(0);
-  const cogsByAccount = new Map<string, { amount: number; names: string[] }>();
+  const cogsByAccount = new Map<string, { amount: Decimal; names: string[] }>();
   // Collect DO ids touched by this invoice so we can mark them as Invoiced
   // after the loop.
   const linkedDOIds = new Set<string>();
@@ -340,9 +342,7 @@ export async function submitSalesInvoiceInTx(
     if (!invItemId) continue;
 
     const inventoryItem = await tx.inventoryItem.findUnique({ where: { id: invItemId } });
-    if (!inventoryItem || !inventoryItem.isActive) continue;
-
-    const qty = Number(item.quantity);
+    if (!inventoryItem) continue;
 
     // From-DO branch
     if (item.deliveryOrderItemId) {
@@ -354,17 +354,21 @@ export async function submitSalesInvoiceInTx(
         throw new BusinessError(`Baris dari Surat Jalan tidak ditemukan (id=${item.deliveryOrderItemId}).`);
       }
       // Status and invoice link were checked under the row lock before the journals.
-      // averageCost is only a defensive fallback when the DO line has no stock movement.
-      const cogsUnitCost = doItem.stockMovement
-        ? Number(doItem.stockMovement.unitCost)
-        : Math.max(0, Number(inventoryItem.averageCost));
-      const cogsAmount = new Decimal(qty).times(new Decimal(cogsUnitCost)).toDecimalPlaces(2).toNumber();
+      const movement = doItem.stockMovement && !doItem.stockMovement.isCancelled ? doItem.stockMovement : null;
+      if (!movement) {
+        logger.warn(
+          { invoiceId: invoice.id, doId: doItem.deliveryOrderId, doItemId: doItem.id, stockMovementId: doItem.stockMovementId },
+          'Sales invoice line billed from a delivery order line without an active stock movement: no COGS',
+        );
+      }
+      const cogsAmount = movement ? new Decimal(movement.valueDelta.toString()).negated() : new Decimal(0);
 
-      totalCogs = totalCogs.plus(new Decimal(cogsAmount));
-      const invAcctId = inventoryItem.accountId || inventoryAccount.id;
+      totalCogs = totalCogs.plus(cogsAmount);
+      const invAcctId = await inventoryAccountFor(tx, inventoryItem);
+      if (!invAcctId) throw new BusinessError('Akun Persediaan belum dipetakan di Akun Sistem.');
       const existing = cogsByAccount.get(invAcctId);
       if (existing) {
-        existing.amount += cogsAmount;
+        existing.amount = existing.amount.plus(cogsAmount);
         existing.names.push(item.itemName);
       } else {
         cogsByAccount.set(invAcctId, { amount: cogsAmount, names: [item.itemName] });
@@ -372,7 +376,7 @@ export async function submitSalesInvoiceInTx(
 
       linkedDOIds.add(doItem.deliveryOrderId);
       logger.info(
-        { invoiceId: invoice.id, doId: doItem.deliveryOrderId, doItemId: doItem.id, qty, lockedUnitCost: cogsUnitCost },
+        { invoiceId: invoice.id, doId: doItem.deliveryOrderId, doItemId: doItem.id, qty: Number(item.quantity), cogs: cogsAmount.toFixed(2) },
         'Sales invoice line billed from existing delivery order',
       );
       continue; // skip the direct-sale path
@@ -405,9 +409,10 @@ export async function submitSalesInvoiceInTx(
       { accountId: cogsAccount.id, debit: totalCogsNum, credit: 0, description: `HPP: ${invoice.invoiceNumber}` },
     ];
     for (const [acctId, data] of cogsByAccount) {
+      if (data.amount.isZero()) continue;
       cogsJournalItems.push({
         accountId: acctId,
-        debit: 0, credit: data.amount,
+        debit: 0, credit: data.amount.toNumber(),
         description: `Persediaan keluar ${data.names.join(', ')}: ${invoice.invoiceNumber}`,
       });
     }
@@ -440,7 +445,8 @@ export async function submitSalesInvoiceInTx(
 
     await updateAccountBalance(tx, cogsAccount.id, totalCogsNum, 0);
     for (const [acctId, data] of cogsByAccount) {
-      await updateAccountBalance(tx, acctId, 0, data.amount);
+      if (data.amount.isZero()) continue;
+      await updateAccountBalance(tx, acctId, 0, data.amount.toNumber());
     }
   }
 

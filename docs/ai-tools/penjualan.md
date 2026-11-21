@@ -42,7 +42,7 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 | `do_update` | Balik pergerakan lama + keluar baru | Tidak ada |
 | `do_cancel` | Stok dikembalikan | Tidak ada |
 | `do_from_invoice` | Tidak ada (stok sudah dipotong invoice) | Tidak ada |
-| `si_create` | Keluar untuk baris inventori (kecuali baris dari DO, yang memakai unitCost terkunci di DO) | DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran; lalu JV-COGS: DR 5.1 HPP (fallback 5) / CR Persediaan |
+| `si_create` | Keluar untuk baris inventori (kecuali baris dari DO: HPP-nya seluruh nilai mutasi Keluar SJ) | DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran; lalu JV-COGS: DR 5.1 HPP (fallback 5) / CR Persediaan |
 | `si_cancel` | Stok dikembalikan | Semua jurnal invoice + HPP dibalik |
 | `sret_create` | Masuk lagi untuk baris `restock=true` | JV-RN: DR 4.3 Retur Penjualan (+ PPN Keluaran) / CR 1.2.1 Piutang (sebesar yang mengurangi outstanding) dan CR 2.1.2 Uang Muka Pelanggan (kelebihan, jadi kredit pelanggan); JV-COGS-RN: DR Persediaan / CR HPP pada biaya asli |
 | `cdep_apply` | Tidak ada | DR 2.1.2 Uang Muka Pelanggan / CR 1.2.1 Piutang Usaha |
@@ -50,7 +50,7 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 | `cdep_cancel`, `cdep_apply_cancel` | Tidak ada | Jurnal asal dibalik (soft-cancel ledger, bukan jurnal pembalik) |
 | `cdep_refund_cancel` | Tidak ada | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pelanggan pulih. Menu Jurnal (`je_cancel`) menolak jurnal refund (`JOURNAL_USE_DEPOSIT_REFUND_CANCEL`) |
 
-Biaya (HPP) diambil dengan prioritas: unitCost pergerakan stok DO -> `unitCostLoaded` baris invoice -> `averageCost` item (WAC). Pembayaran invoice ada di toolset kas-bank (`pay_record`: DR Kas/Bank / CR Piutang).
+Biaya (HPP) baris dari DO = seluruh nilai mutasi Keluar SJ itu (berapa pun qty invoice-nya, juga untuk item nonaktif); baris lain: `unitCostLoaded` baris invoice -> `averageCost` item (WAC). Pembayaran invoice ada di toolset kas-bank (`pay_record`: DR Kas/Bank / CR Piutang).
 
 ### Persetujuan
 
@@ -83,7 +83,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.
 5. **Status invoice mengikuti sisa tagihan**: Paid bila sisa <= Rp 0,01, Submitted bila belum ada yang dilunasi, selain itu PartiallyPaid. Invoice yang diretur penuh berstatus Paid dan tidak menerima alokasi pembayaran. Status `Overdue` tidak pernah disimpan; jatuh tempo dibaca dari `dueDate`.
 6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak. `sret_cancel` juga ditolak (`STOCK_INSUFFICIENT`) bila barang retur sudah keluar lagi dari gudang retur; membatalkan juga butuh `allowNegativeStock` + `negativeStockReason` dan capability `inventory.negative_stock` (stok jadi minus).
-7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan memakai unitCost terkunci DO; DO yang sudah Cancelled atau sudah di invoice lain ditolak. `si_create`, `do_update` dan `do_cancel` atas DO yang sama berjalan berurutan: yang menunggu melihat hasil yang lain (dua invoice atas satu DO: yang kedua ditolak; DO yang sudah diedit: baris lamanya "tidak ditemukan", ambil ulang barisnya). `do_create`/`do_update` menjumlah baris item yang sama per gudang dan menjawab `STOCK_INSUFFICIENT`; `STOCK_BUSY` (409) berarti stok sedang diproses transaksi lain, ulangi sebentar lagi.
+7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan HPP-nya seluruh nilai mutasi Keluar SJ; DO yang sudah Cancelled atau sudah di invoice lain ditolak. `si_create`, `do_update` dan `do_cancel` atas DO yang sama berjalan berurutan: yang menunggu melihat hasil yang lain (dua invoice atas satu DO: yang kedua ditolak; DO yang sudah diedit: baris lamanya "tidak ditemukan", ambil ulang barisnya). `do_create`/`do_update` menjumlah baris item yang sama per gudang dan menjawab `STOCK_INSUFFICIENT`; `STOCK_BUSY` (409) berarti stok sedang diproses transaksi lain, ulangi sebentar lagi.
 8. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
 9. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
 10. **Tahun fiskal**: pembuatan dokumen bernomor (QO, PSN, INQ, DO, SI, RN, JV) butuh tahun fiskal terbuka pada tanggal dokumen.
@@ -108,7 +108,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | Uang muka pelanggan, DP | Payment `paymentType=CustomerDeposit`, akun 2.1.2, `refundedAmount`, `CustomerDepositApplication` |
 | Piutang usaha | akun 1.2.1 (`AR`) |
 | Penjualan / Pendapatan jasa | akun 4.1 / 4.2 |
-| HPP, COGS | akun 5.1 (fallback 5); biaya dari WAC/unitCost terkunci |
+| HPP, COGS | akun 5.1 (fallback 5); biaya dari WAC/nilai mutasi SJ |
 | Retur Penjualan (akun) | akun 4.3 |
 | PPN Keluaran / PPh dibayar dimuka | `TAX_OUTPUT` / akun 1.5.4 |
 | WAC | rata-rata tertimbang biaya item (`averageCost`) |
@@ -2688,7 +2688,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `notes` | body | `string` | tidak | Catatan bebas. |
 | `potongan` | body | `number` | tidak | Potongan nominal tingkat dokumen. |
@@ -3031,7 +3031,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `notes` | body | `string` | tidak | Catatan bebas. |
 | `potongan` | body | `number` | tidak |  |
@@ -3266,7 +3266,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `notes` | body | `string` | tidak | Catatan bebas. |
 | `potongan` | body | `number` | tidak | Potongan nominal tingkat dokumen. |
@@ -3746,7 +3746,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `notes` | body | `string` | tidak | Catatan bebas. |
 | `potongan` | body | `number` | tidak |  |
@@ -3894,7 +3894,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `dueDate` | body | `date` | tidak | Tanggal jatuh tempo (YYYY-MM-DD). |
 | `notes` | body | `string` | tidak | Catatan bebas. |
@@ -3940,7 +3940,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** SalesInvoice yang dibuat (invoiceNumber, status, items, customer, grandTotal).
 
-**Efek pembukuan/stok:** GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.
+**Efek pembukuan/stok:** GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO: HPP = seluruh nilai mutasi Keluar SJ itu, berapa pun qty invoice-nya, juga untuk item nonaktif). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.
 
 **Teks konfirmasi:** Terbitkan Invoice Penjualan untuk pelanggan {partyId} tanggal {date} (jurnal & stok langsung diposting)?
 

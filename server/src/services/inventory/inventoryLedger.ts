@@ -2,8 +2,7 @@
  * Inventory value ledger (E3-R6). With services/inventory/inventoryValueMath.ts this is the one
  * value-ledger module: after the train (PR-6.4e) it is the only writer of current_stock,
  * stock_value, average_cost, inventory_stocks and stock_movements. Paths move behind it one train
- * PR at a time; postTransfer (6.4d), postRevaluation (6.4c2) and reverseDocumentMovements (6.4d)
- * arrive with their first caller.
+ * PR at a time; postRevaluation (6.4c2) arrives with its first caller.
  *
  * Every call locks its rows through lockInventoryRows (idempotent in the transaction, so a caller
  * that locked every item of its operation first keeps the LOCK ORDER of stockLocks.ts), then reads
@@ -16,8 +15,10 @@
  * the caller.
  *
  * Rows it writes: value_delta (signed, 2 dp), total_value = |value_delta|, unit_cost =
- * |value_delta| / quantity (6 dp). A row is never rewritten after it is posted, except is_cancelled
- * when it is reversed and an empty journal_entry_id filled once by linkMovementJournal.
+ * |value_delta| / quantity (6 dp). A transfer leg carries value_delta 0 (value is per item, I-43);
+ * its unit_cost / total_value are for display only. A row is never rewritten after it is posted,
+ * except is_cancelled when it is reversed and an empty journal_entry_id filled once by
+ * linkMovementJournal.
  *
  * Journal link: an inbound caller knows its journal first and passes journalEntryId. An outbound
  * caller only learns the amount from postOutbound, so it posts the journal of −valueDelta after it
@@ -54,6 +55,7 @@ interface MovementBase {
   referenceId?: string | null;
   referenceNumber?: string | null;
   notes?: string | null;
+  /** Kept only on a row that carries value: a zero-value row has no counter entry. */
   offsetAccountId?: string | null;
   journalEntryId?: string | null;
   sourceMovementId?: string | null;
@@ -73,6 +75,35 @@ export interface OutboundInput extends MovementBase {
   movementType: 'Out' | 'AdjustmentOut';
   /** The cost is decided here (outboundValue), never by the caller. */
   quantity: Decimal.Value;
+}
+
+/** Both legs of one transfer line; the item total, stock_value and average do not move. */
+export interface TransferInput {
+  itemId: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  quantity: Decimal.Value;
+  date: Date;
+  fiscalYearId: string;
+  createdById: string;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  referenceNumber?: string | null;
+  /** Picked batch, stored on the TransferOut leg (batch consumption). */
+  sourceMovementId?: string | null;
+  /** Display only (unit_cost, total_value of both legs): a picked batch's cost; default the locked average. */
+  displayUnitCost?: Decimal.Value | null;
+  /**
+   * Numbers taken by the caller after lockInventoryRows (the ledger takes 'SM' numbers otherwise) and
+   * notes. A number is taken from the rows already written, so a caller takes at most the first one.
+   */
+  out: { movementNumber?: string; notes?: string | null };
+  in: { movementNumber?: string; notes?: string | null };
+}
+
+export interface PostedTransfer {
+  out: StockMovement;
+  in: StockMovement;
 }
 
 export interface PostedMovement {
@@ -117,6 +148,7 @@ interface ItemState {
 
 const INBOUND_TYPES = new Set(['In', 'AdjustmentIn']);
 const OUTBOUND_TYPES = new Set(['Out', 'AdjustmentOut']);
+const TRANSFER_TYPES = new Set(['TransferOut', 'TransferIn']);
 
 const dec = (v: { toString(): string }) => new Decimal(v.toString());
 
@@ -126,12 +158,13 @@ function positiveQuantity(q: Decimal.Value, fn: string): Decimal {
   return qty;
 }
 
-/** Locks the item (and its warehouse row) and returns it; a missing item or warehouse is refused. */
-async function lockItem(tx: Tx, itemId: string, warehouseId: string | null): Promise<LockedItem> {
-  const locked = await lockInventoryRows(tx, { itemIds: [itemId], pairs: warehouseId ? [{ itemId, warehouseId }] : [] });
+/** Locks the item (and its warehouse rows) and returns it; a missing item or warehouse is refused. */
+async function lockItem(tx: Tx, itemId: string, ...warehouseIds: (string | null)[]): Promise<LockedItem> {
+  const warehouses = warehouseIds.filter((w): w is string => w !== null);
+  const locked = await lockInventoryRows(tx, { itemIds: [itemId], pairs: warehouses.map((warehouseId) => ({ itemId, warehouseId })) });
   const item = locked.items.get(itemId);
   if (!item) throw new BusinessError('Item stok tidak ditemukan.');
-  if (warehouseId && !locked.stocks.has(stockKey(itemId, warehouseId))) throw new BusinessError('Gudang tidak ditemukan.');
+  if (warehouses.some((w) => !locked.stocks.has(stockKey(itemId, w)))) throw new BusinessError('Gudang tidak ditemukan.');
   return item;
 }
 
@@ -141,18 +174,27 @@ function stateAfter(item: LockedItem, qtyDelta: Decimal, valueDelta: Decimal): I
   return { stock, value, average: averageAfter(stock, value, item.averageCost) };
 }
 
-/** The item total, book value and average under the lock, and the warehouse row (none for a legacy null). */
-async function writeStock(tx: Tx, itemId: string, warehouseId: string | null, qtyDelta: Decimal, next: ItemState): Promise<void> {
+/**
+ * The warehouse row (none for a legacy null) and, unless `next` is null (a transfer leg, which moves
+ * stock between warehouses only), the item total, book value and average under the lock.
+ */
+async function writeStock(tx: Tx, itemId: string, warehouseId: string | null, qtyDelta: Decimal, next: ItemState | null): Promise<void> {
   if (warehouseId && !qtyDelta.isZero()) {
     await tx.inventoryStock.update({
       where: { itemId_warehouseId: { itemId, warehouseId } },
       data: { currentStock: { increment: qtyDelta.toString() } },
     });
   }
+  if (!next) return;
   await tx.inventoryItem.update({
     where: { id: itemId },
     data: { currentStock: next.stock.toString(), stockValue: next.value.toString(), averageCost: next.average.toString() },
   });
+}
+
+/** The one insert of a movement row in this module. */
+function insertMovement(tx: Tx, data: Prisma.StockMovementUncheckedCreateInput): Promise<StockMovement> {
+  return tx.stockMovement.create({ data });
 }
 
 /** Writes one inbound or outbound posting: number, stock, item state, then the movement row. */
@@ -166,17 +208,15 @@ async function writePosting(
   const unitCost = p.valueDelta.abs().div(p.quantity).toDecimalPlaces(UNIT_COST_DP);
   const movementNumber = i.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
   await writeStock(tx, i.itemId, i.warehouseId, qtyDelta, next);
-  const movement = await tx.stockMovement.create({
-    data: {
-      movementNumber, date: i.date, itemId: i.itemId, warehouseId: i.warehouseId, movementType: i.movementType,
-      quantity: p.quantity.toString(), unitCost: unitCost.toString(),
-      totalValue: p.valueDelta.abs().toString(), valueDelta: p.valueDelta.toString(),
-      notes: i.notes ?? null, referenceType: i.referenceType ?? null, referenceId: i.referenceId ?? null,
-      referenceNumber: i.referenceNumber ?? null, offsetAccountId: i.offsetAccountId ?? null,
-      journalEntryId: i.journalEntryId ?? null, sourceMovementId: i.sourceMovementId ?? null,
-      unitCostLoaded: i.unitCostLoaded == null ? null : new Decimal(i.unitCostLoaded).toDecimalPlaces(UNIT_COST_DP).toString(),
-      fiscalYearId: i.fiscalYearId, createdById: i.createdById,
-    },
+  const movement = await insertMovement(tx, {
+    movementNumber, date: i.date, itemId: i.itemId, warehouseId: i.warehouseId, movementType: i.movementType,
+    quantity: p.quantity.toString(), unitCost: unitCost.toString(),
+    totalValue: p.valueDelta.abs().toString(), valueDelta: p.valueDelta.toString(),
+    notes: i.notes ?? null, referenceType: i.referenceType ?? null, referenceId: i.referenceId ?? null,
+    referenceNumber: i.referenceNumber ?? null, offsetAccountId: p.valueDelta.isZero() ? null : i.offsetAccountId ?? null,
+    journalEntryId: i.journalEntryId ?? null, sourceMovementId: i.sourceMovementId ?? null,
+    unitCostLoaded: i.unitCostLoaded == null ? null : new Decimal(i.unitCostLoaded).toDecimalPlaces(UNIT_COST_DP).toString(),
+    fiscalYearId: i.fiscalYearId, createdById: i.createdById,
   });
   return { movement, valueDelta: p.valueDelta, unitCost, stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average };
 }
@@ -205,6 +245,38 @@ export async function postOutbound(tx: Tx, i: OutboundInput): Promise<PostedMove
 }
 
 /**
+ * Moves `quantity` of one item from one warehouse to another: a TransferOut and a TransferIn leg,
+ * each value_delta 0, so the item total, stock_value and average stay as they are. The caller checks
+ * the source stock (assertStockAvailable) first. unit_cost / total_value of the legs are display
+ * only: displayUnitCost (a picked batch) or the locked average, total rounded to 2 dp.
+ */
+export async function postTransfer(tx: Tx, i: TransferInput): Promise<PostedTransfer> {
+  const quantity = positiveQuantity(i.quantity, 'postTransfer');
+  if (i.fromWarehouseId === i.toWarehouseId) throw new Error('postTransfer: source and destination are the same warehouse');
+  const item = await lockItem(tx, i.itemId, i.fromWarehouseId, i.toWarehouseId);
+  const unitCost = new Decimal(i.displayUnitCost ?? item.averageCost).toDecimalPlaces(UNIT_COST_DP);
+  const totalValue = quantity.times(unitCost).toDecimalPlaces(VALUE_DP);
+  const leg = async (
+    movementType: 'TransferOut' | 'TransferIn',
+    warehouseId: string,
+    side: TransferInput['out'],
+    sourceMovementId: string | null,
+  ): Promise<StockMovement> => {
+    const movementNumber = side.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
+    await writeStock(tx, i.itemId, warehouseId, movementType === 'TransferOut' ? quantity.negated() : quantity, null);
+    return insertMovement(tx, {
+      movementNumber, date: i.date, itemId: i.itemId, warehouseId, movementType,
+      quantity: quantity.toString(), unitCost: unitCost.toString(), totalValue: totalValue.toString(), valueDelta: 0,
+      notes: side.notes ?? null, referenceType: i.referenceType ?? null, referenceId: i.referenceId ?? null,
+      referenceNumber: i.referenceNumber ?? null, sourceMovementId, fiscalYearId: i.fiscalYearId, createdById: i.createdById,
+    });
+  };
+  const out = await leg('TransferOut', i.fromWarehouseId, i.out, i.sourceMovementId ?? null);
+  const inLeg = await leg('TransferIn', i.toWarehouseId, i.in, null);
+  return { out, in: inLeg };
+}
+
+/**
  * Links the journal the caller posted for a ledger row (the outbound pattern in the header). Only an
  * empty journal_entry_id is filled; a row that is cancelled or already linked is refused.
  */
@@ -217,15 +289,29 @@ export async function linkMovementJournal(tx: Tx, movementId: string, journalEnt
 }
 
 /**
- * True when an active Out / AdjustmentOut of the item was posted at or after the row (createdAt; a
- * tie counts, so the check errs towards refusing). Those rows were valued at an average that
- * included this row, so taking its value back exactly leaves an average no cost explains.
+ * When the row's value entered the book: its createdAt, or for a Revaluation the earlier createdAt
+ * of the row it adjusts. The value-ledger backfill (migration 20261112200000) stamped its purchase
+ * invoice Revaluations with the deploy time although the old code had put the delta into the
+ * average at the invoice, before sales that came after it.
+ */
+async function valueEnteredAt(tx: Tx, movement: StockMovement): Promise<Date> {
+  if (movement.movementType !== 'Revaluation' || !movement.adjustsMovementId) return movement.createdAt;
+  const adjusted = await tx.stockMovement.findUnique({ where: { id: movement.adjustsMovementId }, select: { createdAt: true } });
+  return adjusted && adjusted.createdAt < movement.createdAt ? adjusted.createdAt : movement.createdAt;
+}
+
+/**
+ * True when an active Out / AdjustmentOut of the item was posted at or after the row's value entered
+ * the book (valueEnteredAt; a tie counts, so the check errs towards refusing). Those rows were valued
+ * at an average that included this row, so taking its value back exactly leaves an average no cost
+ * explains.
  */
 async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
+  const since = await valueEnteredAt(tx, movement);
   const later = await tx.stockMovement.findFirst({
     where: {
       itemId: movement.itemId, isCancelled: false, movementType: { in: ['Out', 'AdjustmentOut'] },
-      id: { not: movement.id }, createdAt: { gte: movement.createdAt },
+      id: { not: movement.id }, createdAt: { gte: since },
     },
     select: { id: true },
   });
@@ -241,12 +327,23 @@ function needsTrueUp(itemName: string, next: ItemState): BusinessError {
   );
 }
 
+/** Stock 0 with value left and no sweep asked: nothing needs to have gone out for this one. */
+function residueAtZero(itemName: string, next: ItemState): BusinessError {
+  return new BusinessError(
+    `Pembatalan ditolak: stok '${itemName}' menjadi 0 tetapi nilai persediaannya masih ${next.value.toFixed(VALUE_DP)}, `
+      + 'jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.',
+    REVERSAL_NEEDS_TRUE_UP,
+    409,
+  );
+}
+
 /**
- * The value to sweep after a reversal, or a refusal (train guard until PR-6.5a):
+ * The value to sweep after a reversal, or a refusal (train guard until PR-6.5a); a Revaluation row
+ * counts as inbound here:
  * - an inbound reversal that moves value after goods went out (soldSince), except when the stock
  *   reaches 0 and is swept: then the sweep makes the total COGS exact;
  * - an inbound reversal that moves value and leaves stock_value < 0, or stock > 0 with value <= 0;
- * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise.
+ * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise (residueAtZero).
  * A row that carries no value moves none, so it never trips the first two rules.
  */
 async function reversalSweep(
@@ -257,14 +354,16 @@ async function reversalSweep(
   valueDelta: Decimal,
   sweepAtZero: boolean,
 ): Promise<Decimal> {
-  const inboundWithValue = INBOUND_TYPES.has(movement.movementType) && !valueDelta.isZero();
+  // A Revaluation row changed the value of goods on hand like an inbound row, so taking it back has
+  // the same exposure to goods that went out since.
+  const inboundWithValue = (INBOUND_TYPES.has(movement.movementType) || movement.movementType === 'Revaluation') && !valueDelta.isZero();
   if (inboundWithValue && (next.value.lt(0) || (next.stock.gt(0) && next.value.lte(0)))) {
     throw needsTrueUp(itemName, next);
   }
   const sweptToZero = next.stock.isZero() && sweepAtZero;
   if (inboundWithValue && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next);
   if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
-  if (!sweepAtZero) throw needsTrueUp(itemName, next);
+  if (!sweepAtZero) throw residueAtZero(itemName, next);
   return next.value;
 }
 
@@ -284,14 +383,12 @@ async function sweepPeriod(tx: Tx, opts: ReverseOptions): Promise<SweepPeriod> {
 async function writeSweepRow(tx: Tx, movement: StockMovement, residue: Decimal, period: SweepPeriod, userId: string): Promise<StockMovement> {
   const { date, fiscalYearId } = period;
   const movementNumber = await generateDocumentNumber(tx, 'SM', date, fiscalYearId);
-  return tx.stockMovement.create({
-    data: {
-      movementNumber, date, itemId: movement.itemId, warehouseId: null, movementType: 'Revaluation',
-      quantity: 0, unitCost: 0, totalValue: residue.abs().toString(), valueDelta: residue.negated().toString(),
-      adjustsMovementId: movement.id, referenceType: movement.referenceType, referenceId: movement.referenceId,
-      referenceNumber: movement.referenceNumber, notes: `Sisa nilai saat stok 0 (pembatalan ${movement.movementNumber})`,
-      fiscalYearId, createdById: userId,
-    },
+  return insertMovement(tx, {
+    movementNumber, date, itemId: movement.itemId, warehouseId: null, movementType: 'Revaluation',
+    quantity: 0, unitCost: 0, totalValue: residue.abs().toString(), valueDelta: residue.negated().toString(),
+    adjustsMovementId: movement.id, referenceType: movement.referenceType, referenceId: movement.referenceId,
+    referenceNumber: movement.referenceNumber, notes: `Sisa nilai saat stok 0 (pembatalan ${movement.movementNumber})`,
+    fiscalYearId, createdById: userId,
   });
 }
 
@@ -302,12 +399,31 @@ async function claimReversal(tx: Tx, movementId: string): Promise<void> {
 }
 
 /**
- * Takes an In / AdjustmentIn / Out / AdjustmentOut row back exactly: its quantity at its warehouse
- * (the item total for a legacy row without one) and its value_delta, then marks it cancelled. The
- * caller checks the stock an inbound reversal needs (assertStockAvailable, reversal) and voids the
- * row's journal, whose inventory amount is −valueDelta. Refused with REVERSAL_NEEDS_TRUE_UP where
- * the book would need a true-up (reversalSweep). Transfer legs (6.4d) and Revaluation rows
- * (6.4d / 6.4c3) are not reversed here yet.
+ * A transfer leg back at its warehouse (TransferOut returns to the source, TransferIn leaves the
+ * destination); the item total and value never moved, so only the warehouse row changes. The caller
+ * reverses both legs of a line and checks the destination stock first.
+ */
+async function reverseTransferLeg(tx: Tx, movement: StockMovement, item: LockedItem): Promise<ReverseResult> {
+  if (!movement.warehouseId) throw new Error(`reverseMovement: transfer leg ${movement.id} has no warehouse`);
+  const quantity = dec(movement.quantity);
+  await claimReversal(tx, movement.id);
+  await writeStock(tx, movement.itemId, movement.warehouseId, movement.movementType === 'TransferOut' ? quantity : quantity.negated(), null);
+  return {
+    movement: { ...movement, isCancelled: true }, valueDelta: new Decimal(0), toCogs: new Decimal(0), sweep: null,
+    stockAfter: item.currentStock, stockValueAfter: item.stockValue, averageCostAfter: item.averageCost,
+  };
+}
+
+/**
+ * Takes a row back exactly and marks it cancelled:
+ * - In / AdjustmentIn / Out / AdjustmentOut: its quantity at its warehouse (the item total for a
+ *   legacy row without one) and its value_delta;
+ * - Revaluation (quantity 0, no warehouse): its value_delta only, e.g. a purchase invoice price
+ *   delta when the invoice is cancelled (its journal is voided by the caller);
+ * - TransferOut / TransferIn: the quantity at its warehouse only (value_delta 0).
+ * The caller checks the stock an inbound reversal needs (assertStockAvailable, reversal) and voids
+ * the row's journal, whose inventory amount is −valueDelta. Refused with REVERSAL_NEEDS_TRUE_UP where
+ * the book would need a true-up (reversalSweep).
  */
 export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseOptions): Promise<ReverseResult> {
   const ref = await tx.stockMovement.findUnique({ where: { id: movementId }, select: { itemId: true, warehouseId: true } });
@@ -315,8 +431,9 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const item = await lockItem(tx, ref.itemId, ref.warehouseId);
   const movement = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
   if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
+  if (TRANSFER_TYPES.has(movement.movementType)) return reverseTransferLeg(tx, movement, item);
   const inbound = INBOUND_TYPES.has(movement.movementType);
-  if (!inbound && !OUTBOUND_TYPES.has(movement.movementType)) {
+  if (!inbound && !OUTBOUND_TYPES.has(movement.movementType) && movement.movementType !== 'Revaluation') {
     throw new Error(`reverseMovement: ${movement.movementType} rows are not reversed by this function`);
   }
   const quantity = dec(movement.quantity);
@@ -338,6 +455,38 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
     movement: { ...movement, isCancelled: true }, valueDelta, toCogs: residue, sweep,
     stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average,
   };
+}
+
+export interface DocumentRef {
+  referenceType: string;
+  referenceId: string;
+}
+
+/**
+ * Reverses every active row a document owns (reference_type / reference_id), in id order, after
+ * one lockInventoryRows call for all their items and warehouses (LOCK ORDER of stockLocks.ts). A
+ * sweep row an earlier reversal of the document wrote (a Revaluation adjusting a cancelled row of
+ * the same document) is already the settlement of that row and is left alone. A refusal of any
+ * row is thrown after earlier rows were written: the caller's transaction rolls back as a whole.
+ */
+export async function reverseDocumentMovements(tx: Tx, ref: DocumentRef, opts: ReverseOptions): Promise<ReverseResult[]> {
+  const rows = await tx.stockMovement.findMany({
+    where: { referenceType: ref.referenceType, referenceId: ref.referenceId, isCancelled: false },
+    orderBy: { id: 'asc' },
+    select: {
+      id: true, itemId: true, warehouseId: true,
+      adjustsMovement: { select: { isCancelled: true, referenceType: true, referenceId: true } },
+    },
+  });
+  const owned = rows.filter((r) => !(r.adjustsMovement?.isCancelled
+    && r.adjustsMovement.referenceType === ref.referenceType && r.adjustsMovement.referenceId === ref.referenceId));
+  await lockInventoryRows(tx, {
+    itemIds: owned.map((r) => r.itemId),
+    pairs: owned.flatMap((r) => (r.warehouseId ? [{ itemId: r.itemId, warehouseId: r.warehouseId }] : [])),
+  });
+  const results: ReverseResult[] = [];
+  for (const row of owned) results.push(await reverseMovement(tx, row.id, opts));
+  return results;
 }
 
 /** Re-derives average_cost from the locked stock and stock_value (averageAfter) and returns it. */

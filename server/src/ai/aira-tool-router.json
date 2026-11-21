@@ -25003,7 +25003,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -25199,7 +25199,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.",
+      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.",
       "confirm_template": "Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
@@ -25208,6 +25208,7 @@
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
         "400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak nilai PI masuk, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
@@ -25535,7 +25536,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -26776,7 +26777,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -26868,7 +26869,7 @@
       "phase": 3,
       "service": "salesInvoiceSubmit",
       "draftCapable": false,
-      "postingEffect": "GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.",
+      "postingEffect": "GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO: HPP = seluruh nilai mutasi Keluar SJ itu, berapa pun qty invoice-nya, juga untuk item nonaktif). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.",
       "confirm_template": "Terbitkan Invoice Penjualan untuk pelanggan {partyId} tanggal {date} (jurnal & stok langsung diposting)?",
       "accessNote": "Risiko direklasifikasi dari write: endpoint ini memposting GL, stok, dan HPP sekaligus.",
       "prerequisites": [
@@ -32589,7 +32590,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -32805,7 +32806,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -33063,7 +33064,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",

@@ -470,7 +470,7 @@ d('closed fiscal year: delivery notes', () => {
 
       const before = await snapshot(tx, itemIds, []);
       expect(await codeOf(inRouteTx((t) => editDeliveryOrderInTx(t, doc.id, body(`${Y + 1}-01-02`), userId)))).toBe(PERIOD_CLOSED);
-      expect(await codeOf(inRouteTx((t) => cancelDeliveryOrderInTx(t, doc.id)))).toBe(PERIOD_CLOSED);
+      expect(await codeOf(inRouteTx((t) => cancelDeliveryOrderInTx(t, doc.id, userId)))).toBe(PERIOD_CLOSED);
       expect(await snapshot(tx, itemIds, [])).toEqual(before);
       expect((await tx.deliveryOrder.findUniqueOrThrow({ where: { id: doc.id } })).status).toBe('Submitted');
     });

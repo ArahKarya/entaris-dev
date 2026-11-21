@@ -3,9 +3,10 @@ import Decimal from 'decimal.js';
 import { BusinessError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
-import { adjustWarehouseStock, resolveWarehouseId } from '../utils/warehouseStock';
+import { resolveWarehouseId } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
 import { assertStockAvailable, lockInventoryRows, STOCK_INSUFFICIENT } from './inventory/stockLocks';
+import { postOutbound } from './inventory/inventoryLedger';
 import { linkTemporaryNotesToDoInTx } from './temporaryDeliveryNote';
 import { resolveCogsAccountId } from './cogsAccount';
 
@@ -34,8 +35,9 @@ export interface SubmitDeliveryOrderInput {
 }
 
 /**
- * Submit a delivery order. Out movements lock unitCost from averageCost so the later sales invoice
- * posts COGS at delivery-time cost. No GL impact here (the invoice posts it). Caller owns the transaction.
+ * Submit a delivery order. Each inventory line is an Out of the value ledger (postOutbound), valued
+ * from the book at delivery time; the later sales invoice posts exactly that value as COGS. No GL
+ * impact here (the invoice posts it). Caller owns the transaction.
  */
 export async function submitDeliveryOrderInTx(
   tx: Tx,
@@ -59,7 +61,7 @@ export async function submitDeliveryOrderInTx(
   // Resolve each inventory line's warehouse once (the default one when the line has none), lock
   // the items and their rows at those warehouses, then check the lines summed per (item,
   // warehouse) against the locked stock: a concurrent outbound of the same stock waits for this
-  // note instead of passing the same check. The average cost is read from the locked rows.
+  // note instead of passing the same check.
   const lineWarehouse = new Map<number, string>();
   for (const [i, it] of body.items.entries()) {
     if (!it.inventoryItemId) continue;
@@ -89,7 +91,7 @@ export async function submitDeliveryOrderInTx(
     ),
   });
 
-  // Counter account the invoice will post COGS against; stored on each Out movement.
+  // Counter account the invoice will post COGS against; stored on each Out movement that carries value.
   const cogsAccountId = await resolveCogsAccountId(tx);
 
   const deliveryOrder = await tx.deliveryOrder.create({
@@ -108,44 +110,28 @@ export async function submitDeliveryOrderInTx(
     },
   });
 
-  // Per-line: decrement stock + create stockMovement + create DO item row.
+  // Per line: an Out through the ledger, then the DO item row linked to it.
   for (const [i, it] of body.items.entries()) {
     let stockMovementId: string | null = null;
 
     if (it.inventoryItemId) {
       const inventoryItem = locked.items.get(it.inventoryItemId)!;
       const warehouseId = lineWarehouse.get(i)!;
-
       const qty = it.quantity;
-      // An Out leaves the average unchanged, so the locked value holds for every line of the item.
-      const unitCost = inventoryItem.averageCost.toNumber();
-      const totalValue = new Decimal(qty).times(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
 
-      await tx.inventoryItem.update({
-        where: { id: inventoryItem.id },
-        data: { currentStock: { decrement: qty } },
-      });
-      await adjustWarehouseStock(tx, inventoryItem.id, warehouseId, -qty);
-
-      const movementNumber = await generateDocumentNumber(tx, 'SM', parsedDate, fiscalYear.id);
-      const movement = await tx.stockMovement.create({
-        data: {
-          movementNumber,
-          date: parsedDate,
-          itemId: inventoryItem.id,
-          warehouseId,
-          movementType: 'Out',
-          quantity: qty,
-          unitCost,
-          totalValue,
-          notes: `Auto dari ${doNumber}`,
-          referenceType: 'DeliveryOrder',
-          referenceId: deliveryOrder.id,
-          referenceNumber: doNumber,
-          offsetAccountId: totalValue > 0 ? cogsAccountId : null,
-          fiscalYearId: fiscalYear.id,
-          createdById: userId,
-        },
+      const { movement } = await postOutbound(tx, {
+        movementType: 'Out',
+        itemId: inventoryItem.id,
+        warehouseId,
+        quantity: qty,
+        date: parsedDate,
+        fiscalYearId: fiscalYear.id,
+        createdById: userId,
+        notes: `Auto dari ${doNumber}`,
+        referenceType: 'DeliveryOrder',
+        referenceId: deliveryOrder.id,
+        referenceNumber: doNumber,
+        offsetAccountId: cogsAccountId,
       });
       stockMovementId = movement.id;
 
