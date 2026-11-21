@@ -23,6 +23,12 @@ const IGNORED = new Set<string>([
   'No Admin user available to attribute public inquiry to',
   'Inventory item {0} not found during COGS backfill settle.',
   'HTTP {0}',
+  // Programming errors of the value ledger's callers (services/inventory/inventoryLedger.ts), never reach a client.
+  '{0}: quantity must be above 0',
+  'postInbound: {0} is not an inbound type',
+  'postOutbound: {0} is not an outbound type',
+  'postInbound: value must be 0 or more',
+  'reverseMovement: {0} rows are not reversed by this function',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
   // Programming errors of the sourceKey builders (services/ledger/journalSource.ts sourceKeys), never reach a client.
