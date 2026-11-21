@@ -15,7 +15,7 @@ import { makeAutoTx } from '../../__tests__/helpers/autoTx';
 const item = { id: 'item-1', code: 'GKP' };
 /** The row lockInventoryRows reads back after locking the item. */
 const lockedRow = (accountId: string | null = null) => () => [
-  { id: 'item-1', name: 'Gabah', unit: 'Kg', isActive: true, accountId, currentStock: '0', averageCost: '0' },
+  { id: 'item-1', name: 'Gabah', unit: 'Kg', isActive: true, accountId, currentStock: '0', averageCost: '0', stockValue: '0' },
 ];
 
 function journalTx(extra: Record<string, (a: any) => unknown> = {}) {
@@ -75,7 +75,7 @@ describe('postOpeningStockInTx', () => {
   it('locks the item and takes its stock and average from the locked row, not the caller', async () => {
     const { tx, fn } = journalTx({
       'inventoryItem.findMany': () => [
-        { id: 'item-1', name: 'Gabah', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '4000' },
+        { id: 'item-1', name: 'Gabah', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '4000', stockValue: '400000' },
       ],
     });
     await postOpeningStockInTx(tx, { item, quantity: 100, unitCost: 6000, totalValue: 600_000, userId: 'u1' });
