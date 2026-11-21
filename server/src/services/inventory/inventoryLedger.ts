@@ -289,15 +289,29 @@ export async function linkMovementJournal(tx: Tx, movementId: string, journalEnt
 }
 
 /**
- * True when an active Out / AdjustmentOut of the item was posted at or after the row (createdAt; a
- * tie counts, so the check errs towards refusing). Those rows were valued at an average that
- * included this row, so taking its value back exactly leaves an average no cost explains.
+ * When the row's value entered the book: its createdAt, or for a Revaluation the earlier createdAt
+ * of the row it adjusts. The value-ledger backfill (migration 20261112200000) stamped its purchase
+ * invoice Revaluations with the deploy time although the old code had put the delta into the
+ * average at the invoice, before sales that came after it.
+ */
+async function valueEnteredAt(tx: Tx, movement: StockMovement): Promise<Date> {
+  if (movement.movementType !== 'Revaluation' || !movement.adjustsMovementId) return movement.createdAt;
+  const adjusted = await tx.stockMovement.findUnique({ where: { id: movement.adjustsMovementId }, select: { createdAt: true } });
+  return adjusted && adjusted.createdAt < movement.createdAt ? adjusted.createdAt : movement.createdAt;
+}
+
+/**
+ * True when an active Out / AdjustmentOut of the item was posted at or after the row's value entered
+ * the book (valueEnteredAt; a tie counts, so the check errs towards refusing). Those rows were valued
+ * at an average that included this row, so taking its value back exactly leaves an average no cost
+ * explains.
  */
 async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
+  const since = await valueEnteredAt(tx, movement);
   const later = await tx.stockMovement.findFirst({
     where: {
       itemId: movement.itemId, isCancelled: false, movementType: { in: ['Out', 'AdjustmentOut'] },
-      id: { not: movement.id }, createdAt: { gte: movement.createdAt },
+      id: { not: movement.id }, createdAt: { gte: since },
     },
     select: { id: true },
   });
@@ -313,13 +327,23 @@ function needsTrueUp(itemName: string, next: ItemState): BusinessError {
   );
 }
 
+/** Stock 0 with value left and no sweep asked: nothing needs to have gone out for this one. */
+function residueAtZero(itemName: string, next: ItemState): BusinessError {
+  return new BusinessError(
+    `Pembatalan ditolak: stok '${itemName}' menjadi 0 tetapi nilai persediaannya masih ${next.value.toFixed(VALUE_DP)}, `
+      + 'jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.',
+    REVERSAL_NEEDS_TRUE_UP,
+    409,
+  );
+}
+
 /**
  * The value to sweep after a reversal, or a refusal (train guard until PR-6.5a); a Revaluation row
  * counts as inbound here:
  * - an inbound reversal that moves value after goods went out (soldSince), except when the stock
  *   reaches 0 and is swept: then the sweep makes the total COGS exact;
  * - an inbound reversal that moves value and leaves stock_value < 0, or stock > 0 with value <= 0;
- * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise.
+ * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise (residueAtZero).
  * A row that carries no value moves none, so it never trips the first two rules.
  */
 async function reversalSweep(
@@ -339,7 +363,7 @@ async function reversalSweep(
   const sweptToZero = next.stock.isZero() && sweepAtZero;
   if (inboundWithValue && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next);
   if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
-  if (!sweepAtZero) throw needsTrueUp(itemName, next);
+  if (!sweepAtZero) throw residueAtZero(itemName, next);
   return next.value;
 }
 

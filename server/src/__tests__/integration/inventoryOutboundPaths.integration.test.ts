@@ -13,7 +13,9 @@
  *   rounded; its cancel puts both warehouses back;
  * - a purchase invoice whose price delta sits in a Revaluation row (as the value-ledger backfill
  *   writes it): cancelling it lowers stock_value by the delta and GL = book; after goods went out
- *   it is refused with REVERSAL_NEEDS_TRUE_UP and nothing changes.
+ *   (also when the row was stamped after those sales, as the backfill does) it is refused with
+ *   REVERSAL_NEEDS_TRUE_UP and nothing changes;
+ * - a legacy invoice receipt that leaves stock 0 with a baseline residue: refused as a residue.
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2111.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -262,7 +264,7 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
    * way the value-ledger backfill (or PR-6.4c3) writes it: quantity 0, no warehouse, adjusting the
    * receipt, referenced to the invoice, and debited to inventory by the invoice's journal.
    */
-  async function invoiceWithRevaluation(tx: Tx, w: SalesFlowWorld, receiptId: string) {
+  async function invoiceWithRevaluation(tx: Tx, w: SalesFlowWorld, receiptId: string, createdAt?: Date) {
     const delta = new Decimal(50_000);
     const supplier = await tx.party.create({ data: { name: `IT-SF Supplier ${Date.now()}`, partyType: 'Supplier', isActive: true } });
     const invoiceNumber = `IT-SF-PI-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -285,6 +287,7 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
         movementNumber: `SM-RV-${invoiceNumber}`, date: new Date(DAY), itemId: w.item.id, warehouseId: null, movementType: 'Revaluation',
         quantity: 0, unitCost: 0, totalValue: delta.toNumber(), valueDelta: delta.toNumber(), referenceType: 'PurchaseInvoice',
         referenceId: pi.id, referenceNumber: invoiceNumber, adjustsMovementId: receiptId, fiscalYearId: w.fyId, createdById: w.userId,
+        ...(createdAt ? { createdAt } : {}),
       },
     });
     const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: w.item.id } });
@@ -324,6 +327,66 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
       expect(await bookOf(tx, w.item.id)).toEqual(before);
       expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
       expect(await tx.stockMovement.count({ where: { referenceId: pi.id, isCancelled: false } })).toBe(1);
+    });
+  });
+
+  it('a backfilled Revaluation stamped after the sales (deploy time) is still refused: goods went out after the receipt it adjusts', async () => {
+    await inWorld(async (tx, w) => {
+      const { movementId } = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
+      await deliver(tx, w, DAY, [{ qty: 90 }]);
+      // The backfill writes the row at migration time, after the old delivery orders.
+      const pi = await invoiceWithRevaluation(tx, w, movementId, new Date(Date.now() + 60_000));
+      const before = await bookOf(tx, w.item.id);
+      expect(before).toEqual({ stock: '10.000', value: '150000.00', average: '15000.000000' });
+
+      expect(await codeOf(inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null })))).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await bookOf(tx, w.item.id)).toEqual(before);
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
+    });
+  });
+
+  it('a legacy purchase invoice receipt that leaves stock 0 with a baseline residue is refused as a residue, not as goods gone out', async () => {
+    await inWorld(async (tx, w) => {
+      const { movementId } = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
+      const supplier = await tx.party.create({ data: { name: `IT-SF Supplier ${Date.now()}`, partyType: 'Supplier', isActive: true } });
+      const invoiceNumber = `IT-SF-PI-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const pi = await tx.purchaseInvoice.create({
+        data: {
+          invoiceNumber, date: new Date(DAY), partyId: supplier.id, status: 'Submitted', grandTotal: 1_000_000,
+          outstanding: 1_000_000, fiscalYearId: w.fyId, createdBy: w.userId, submittedAt: new Date(),
+        },
+      });
+      // A legacy invoice that received the goods itself, and the 6.4b1 baseline that closed the item's gap.
+      await tx.stockMovement.update({ where: { id: movementId }, data: { referenceType: 'PurchaseInvoice', referenceId: pi.id, referenceNumber: invoiceNumber } });
+      await tx.stockMovement.create({
+        data: {
+          movementNumber: `IT-SF-BL-${invoiceNumber}`, date: new Date(DAY), itemId: w.item.id, warehouseId: null, movementType: 'Revaluation',
+          quantity: 0, unitCost: 0, totalValue: 3_250, valueDelta: 3_250, referenceType: 'ValuationBaseline', fiscalYearId: w.fyId, createdById: w.userId,
+        },
+      });
+      await tx.inventoryItem.update({ where: { id: w.item.id }, data: { stockValue: '1003250', averageCost: '10032.5' } });
+      await postJournal(tx, {
+        date: new Date(DAY), narration: `IT-SF baseline ${invoiceNumber}`,
+        lines: [
+          { accountId: w.accounts.inventory.id, debit: '3250', credit: 0, description: 'baseline' },
+          { accountId: w.accounts.receiptOffset.id, debit: 0, credit: '3250', description: 'baseline' },
+        ],
+        sourceType: 'SYSTEM_DOC', createdBy: w.userId, accountRule: DOCUMENT_RULE, partyRule: 'off',
+      });
+      const before = await bookOf(tx, w.item.id);
+
+      let refusal: BusinessError | null = null;
+      try {
+        await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null }));
+      } catch (e) {
+        if (!(e instanceof BusinessError)) throw e;
+        refusal = e;
+      }
+      expect(refusal).toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP, status: 409 });
+      expect(refusal!.message).toContain('menjadi 0 tetapi nilai persediaannya masih 3250.00');
+      expect(refusal!.message).not.toContain('sudah sebagian keluar');
+      expect(await bookOf(tx, w.item.id)).toEqual(before);
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
     });
   });
 });

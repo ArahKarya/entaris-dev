@@ -135,7 +135,8 @@ export async function cancelSalesInvoiceInTx(
  * a Revaluation row that carries the invoice's price delta on an STT receipt (the value-ledger
  * backfill; PR-6.4c3 posts them), taken back by its value_delta while the voided journal reverses
  * the same amount in inventory. Either is refused with REVERSAL_NEEDS_TRUE_UP when goods of the
- * item went out since (value true-up, PR-6.5a).
+ * item went out since its value entered the book, or when a receipt leaves stock 0 with value left
+ * (value true-up, PR-6.5a).
  */
 export async function cancelPurchaseInvoiceInTx(
   tx: Tx,
