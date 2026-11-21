@@ -736,7 +736,8 @@ Aturan wajib:
 **Error umum**
 
 - 400: gerakan sudah dibatalkan
-- 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok
+- 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok
+- 400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu
 - 400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)
 - 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
@@ -1042,6 +1043,7 @@ Aturan wajib:
 - 400: gerakan sudah dibatalkan
 - 400: pergerakan lama tanpa gudang tidak dapat diedit; batalkan lalu catat ulang
 - 400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok
+- 400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu
 - 400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)
 - 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi

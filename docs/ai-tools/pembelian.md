@@ -36,7 +36,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 - Nomor `STT-...`. `gr_create` langsung berstatus `Submitted` (tidak ada draft): memposting stok masuk per gudang dan jurnal accrual.
 - Harga di STT **tidak wajib**. Bila `lockedUnitCost` = 0/kosong, dipakai `averageCost` saat ini sebagai harga provisional. Harga aktual baru muncul di PI.
 - Terkait PO: PO harus `Submitted`, belum ditutup, belum dibatalkan. `qtyReceived` item PO bertambah.
-- **Barang titipan pelanggan** (`isCustomerOwned=true`, jasa repros): nilai dan GL nol, tidak boleh terkait PO, dan tidak pernah ditagih PI. Ditolak (`GR_CUSTOMER_OWNED_OWN_STOCK`) ke item yang punya stok milik perusahaan; pakai item terpisah untuk barang titipan.
+- **Barang titipan pelanggan** (`isCustomerOwned=true`, jasa repros): nilai dan GL nol, tidak boleh terkait PO, dan tidak pernah ditagih PI. Ditolak (`GR_CUSTOMER_OWNED_OWN_STOCK`) ke item yang punya stok milik perusahaan, dan STT barang perusahaan ditolak dengan kode yang sama ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan.
 - `gr_pending` = STT `Submitted`, belum ditagih (`invoiceId` kosong), bukan legacy, bukan titipan, untuk satu pemasok. Dipakai saat menyusun PI.
 - Filter daftar STT (`status`): `Uninvoiced`, `Invoiced`, `CustomerOwned`, `Cancelled`, `Draft`, `Submitted`. STT virtual hasil backfill PI lama (`isLegacyBackfill=true`) disembunyikan kecuali `includeLegacy=true`.
 
@@ -289,7 +289,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** STT yang dibuat (id, sttNumber, status Submitted). HTTP 201.
 
-**Efek pembukuan/stok:** Stok masuk (StockMovement In) + stok per gudang bertambah; nilai persediaan item bertambah sebesar qty x lockedUnitCost (atau averageCost bila 0) dan rata-rata dihitung dari nilai itu. Jurnal: DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar nilai yang sama. qtyReceived item PO bertambah bila terkait PO. Barang titipan Customer (isCustomerOwned): nilai dan GL nol, tidak bisa ditagih, dan ditolak ke item yang punya stok milik perusahaan.
+**Efek pembukuan/stok:** Stok masuk (StockMovement In) + stok per gudang bertambah; nilai persediaan item bertambah sebesar qty x lockedUnitCost (atau averageCost bila 0) dan rata-rata dihitung dari nilai itu. Jurnal: DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar nilai yang sama. qtyReceived item PO bertambah bila terkait PO. Barang titipan Customer (isCustomerOwned): nilai dan GL nol, tidak bisa ditagih, dan ditolak ke item yang punya stok milik perusahaan; barang perusahaan juga ditolak ke item yang berisi barang titipan Customer.
 
 **Teks konfirmasi:** Catat penerimaan barang dari pemasok {partyId} tanggal {date}, {items} baris item. Stok dan hutang belum tagih akan dibukukan. Setujui?
 
@@ -304,7 +304,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: pemasok tidak aktif/bukan supplier
 - 400: PO sudah dibatalkan/belum dipesan/sudah ditutup
 - 400: item atau gudang tidak ditemukan/tidak aktif
-- 400 GR_CUSTOMER_OWNED_OWN_STOCK: STT titipan Customer ke item yang punya stok milik perusahaan; pakai item terpisah untuk barang titipan
+- 400 GR_CUSTOMER_OWNED_OWN_STOCK: STT titipan Customer ke item yang punya stok milik perusahaan, atau STT barang perusahaan ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 

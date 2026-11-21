@@ -26,7 +26,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 - Nomor `STT-...`. `gr_create` langsung berstatus `Submitted` (tidak ada draft): memposting stok masuk per gudang dan jurnal accrual.
 - Harga di STT **tidak wajib**. Bila `lockedUnitCost` = 0/kosong, dipakai `averageCost` saat ini sebagai harga provisional. Harga aktual baru muncul di PI.
 - Terkait PO: PO harus `Submitted`, belum ditutup, belum dibatalkan. `qtyReceived` item PO bertambah.
-- **Barang titipan pelanggan** (`isCustomerOwned=true`, jasa repros): nilai dan GL nol, tidak boleh terkait PO, dan tidak pernah ditagih PI. Ditolak (`GR_CUSTOMER_OWNED_OWN_STOCK`) ke item yang punya stok milik perusahaan; pakai item terpisah untuk barang titipan.
+- **Barang titipan pelanggan** (`isCustomerOwned=true`, jasa repros): nilai dan GL nol, tidak boleh terkait PO, dan tidak pernah ditagih PI. Ditolak (`GR_CUSTOMER_OWNED_OWN_STOCK`) ke item yang punya stok milik perusahaan, dan STT barang perusahaan ditolak dengan kode yang sama ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan.
 - `gr_pending` = STT `Submitted`, belum ditagih (`invoiceId` kosong), bukan legacy, bukan titipan, untuk satu pemasok. Dipakai saat menyusun PI.
 - Filter daftar STT (`status`): `Uninvoiced`, `Invoiced`, `CustomerOwned`, `Cancelled`, `Draft`, `Submitted`. STT virtual hasil backfill PI lama (`isLegacyBackfill=true`) disembunyikan kecuali `includeLegacy=true`.
 
