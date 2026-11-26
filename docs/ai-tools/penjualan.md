@@ -4765,6 +4765,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 **Error umum**
 
 - 400: qty retur melebihi sisa yang bisa diretur.
+- 400 SALES_RETURN_DUPLICATE_LINE: satu baris invoice muncul lebih dari sekali dalam items; gabungkan qty-nya dalam satu baris
 - 400: invoice sudah dibatalkan.
 - 400: gudang retur wajib dipilih untuk baris restock (bila baris Invoice dan Surat Jalan asal juga tanpa gudang).
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi

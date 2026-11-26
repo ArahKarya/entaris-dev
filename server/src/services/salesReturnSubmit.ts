@@ -15,6 +15,9 @@ import { UNIT_COST_DP, VALUE_DP } from './inventory/inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 
+/** Error code (400): a return request lists the same invoice line twice. */
+export const SALES_RETURN_DUPLICATE_LINE = 'SALES_RETURN_DUPLICATE_LINE';
+
 // Mirrors CreateSalesReturnSchema (already Zod-validated at the route).
 export interface SubmitSalesReturnInput {
   salesInvoiceId: string;
@@ -163,6 +166,16 @@ export async function submitSalesReturnInTx(
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan, tidak bisa diretur.');
   if (invoice.status === 'Draft') throw new BusinessError('Invoice masih draft, belum bisa diretur.');
 
+  // One return line per invoice line: the qty guard and the value cap below read earlier returns
+  // per invoice line, and each return item is linked to its own In by invoice line.
+  const seenLines = new Set<string>();
+  for (const line of body.items) {
+    if (seenLines.has(line.salesInvoiceItemId)) {
+      throw new BusinessError('Satu baris invoice hanya boleh muncul sekali dalam satu retur.', SALES_RETURN_DUPLICATE_LINE);
+    }
+    seenLines.add(line.salesInvoiceItemId);
+  }
+
   // Already-returned quantity per invoice line (non-cancelled returns) — guard.
   const priorReturns = await tx.salesReturnItem.groupBy({
     by: ['salesInvoiceItemId'],
@@ -231,8 +244,6 @@ export async function submitSalesReturnInTx(
       if (!delivery.isCancelled) {
         const prior = returned.get(src.id) ?? { quantity: new Decimal(0), value: new Decimal(0) };
         value = returnLineValue(line.quantity, { quantity: delivery.quantity.toString(), value: new Decimal(delivery.valueDelta.toString()).negated() }, prior);
-        // A second restocked line of this request on the same invoice line sees this one.
-        if (restock) returned.set(src.id, { quantity: prior.quantity.plus(line.quantity), value: prior.value.plus(value) });
       }
     } else if (src.inventoryItemId) {
       const legacyCost = src.unitCostLoaded != null ? new Decimal(src.unitCostLoaded.toString()) : Decimal.max(0, src.inventoryItem?.averageCost.toString() ?? 0);

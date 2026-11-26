@@ -10,8 +10,11 @@
  *   cost, the typed cost then revalues the counted stock (Revaluation +480.000) with the same net
  *   variance as before the ledger (150.000); a surplus comes in at the line cost; cancel restores
  *   the book exactly;
- * - with no stock on hand a revaluation goes to COGS whole (postRevaluation), and a count to 0
- *   with a typed cost leaves nothing to revalue;
+ * - with no stock on hand a revaluation goes to COGS whole (postRevaluation), and a count that
+ *   leaves no stock but types a cost other than the average is refused
+ *   (OPNAME_REVALUATION_NO_STOCK), storing nothing;
+ * - a return that lists one invoice line twice is refused (SALES_RETURN_DUPLICATE_LINE): the value
+ *   cap of later returns reads each return item's own In;
  * - a count whose journal holds a revaluation but which owns no Revaluation row (before the value
  *   ledger) cannot be cancelled: OPNAME_LEGACY_REVALUATION.
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2130.
@@ -35,8 +38,8 @@ const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import { prisma as appPrisma } from '../../lib/prisma';
-import stockOpnameRouter, { OPNAME_LEGACY_REVALUATION } from '../../routes/stockOpname';
-import { submitSalesReturnInTx } from '../../services/salesReturnSubmit';
+import stockOpnameRouter, { OPNAME_LEGACY_REVALUATION, OPNAME_REVALUATION_NO_STOCK } from '../../routes/stockOpname';
+import { SALES_RETURN_DUPLICATE_LINE, submitSalesReturnInTx } from '../../services/salesReturnSubmit';
 import { cancelSalesReturnInTx } from '../../services/salesReturnCancel';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -208,6 +211,26 @@ d('sales returns on the value ledger (PR-6.4c2)', () => {
     });
   });
 
+  it('a return listing one invoice line twice is refused (SALES_RETURN_DUPLICATE_LINE) and changes nothing', async () => {
+    await inWorld(async (tx, w) => {
+      await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
+      const sale = await sell(tx, w, 100);
+      const before = await bookOf(tx, w.item.id);
+      const twice = { salesInvoiceItemId: sale.line.id, quantity: 50, restock: true, warehouseId: w.warehouseA.id };
+
+      expect(await codeOf(inRouteTx((t) => submitSalesReturnInTx(t, {
+        salesInvoiceId: sale.invoice.id, date: DAY, items: [twice, twice],
+      }, w.userId)))).toBe(SALES_RETURN_DUPLICATE_LINE);
+      expect(await tx.salesReturn.count({ where: { salesInvoiceId: sale.invoice.id } })).toBe(0);
+      expect(await bookOf(tx, w.item.id)).toEqual(before);
+
+      // One line of 100 is linked to its own In and takes the whole COGS back.
+      const ret = await returnGoods(tx, w, sale, 100);
+      expect(money((await returnRow(tx, ret!.id)).valueDelta.toString())).toBe('1000000.00');
+      expect(money(await glBalance(tx, w.accounts.cogs.id))).toBe('0.00');
+    });
+  });
+
   it('a return cancel after goods of the item went out is refused (REVERSAL_NEEDS_TRUE_UP) and changes nothing', async () => {
     await inWorld(async (tx, w) => {
       await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 1_000, avg: 12_000, day: DAY });
@@ -265,10 +288,18 @@ d('stock count on the value ledger (PR-6.4c2)', () => {
     });
   });
 
-  it('with no stock on hand a revaluation goes to COGS whole; a count to 0 with a typed cost revalues nothing', async () => {
+  it('with no stock on hand a revaluation goes to COGS whole; a count to 0 with a typed cost is refused', async () => {
     await inWorld(async (tx, w) => {
       await stockForCount(tx, w);
-      const so = await count(tx, w, { actualStock: 0, unitCost: 15_000 });
+      const refused = await callRoute(stockOpnameRouter, 'post', '/', {
+        userId: w.userId,
+        body: { date: DAY, warehouseId: w.warehouseA.id, items: [{ itemId: w.item.id, actualStock: 0, unitCost: 15_000 }] },
+      });
+      expect([refused.status, (refused.body as { code?: string }).code]).toEqual([400, OPNAME_REVALUATION_NO_STOCK]);
+      expect(await tx.stockOpname.count({ where: { fiscalYearId: w.fyId } })).toBe(0);
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '150.000', value: '1650000.00', average: '11000.000000' });
+
+      const so = await count(tx, w, { actualStock: 0 });
       const rows = await tx.stockMovement.findMany({ where: { referenceType: 'StockOpname', referenceId: so.id } });
       expect(rows.map((r) => [r.movementType, money(r.valueDelta.toString())])).toEqual([['AdjustmentOut', '-1650000.00']]);
       expect(await bookOf(tx, w.item.id)).toEqual({ stock: '0.000', value: '0.00', average: '11000.000000' });

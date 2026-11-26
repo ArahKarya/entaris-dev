@@ -42,6 +42,13 @@ type Tx = Prisma.TransactionClient;
  */
 export const OPNAME_LEGACY_REVALUATION = 'OPNAME_LEGACY_REVALUATION';
 
+/**
+ * Error code (400): a typed unit cost differs from the average but the item has no stock on hand
+ * after the count, so there is nothing to revalue; the count is refused rather than storing a cost
+ * that was never applied.
+ */
+export const OPNAME_REVALUATION_NO_STOCK = 'OPNAME_REVALUATION_NO_STOCK';
+
 /** Description prefix of a revaluation line in the count's journal (written here before and since the value ledger). */
 const REVALUATION_LINE = 'Revaluasi nilai ';
 
@@ -84,7 +91,7 @@ async function itemInventoryAccount(tx: Tx, item: LockedItem): Promise<string> {
  * - a typed unit cost (revaluation), after the quantity lines: the counted stock is revalued to
  *   that cost, delta = round(stock x cost, 2) − stock_value, through postRevaluation; a part stock
  *   cannot absorb goes to COGS in the same journal. With no stock on hand after the count there
- *   is nothing to revalue.
+ *   is nothing to revalue, so the count is refused (OPNAME_REVALUATION_NO_STOCK).
  * Returns the posted movement of each quantity line.
  */
 async function postOpnameEffects(tx: Tx, i: OpnameEffectsInput) {
@@ -112,7 +119,13 @@ async function postOpnameEffects(tx: Tx, i: OpnameEffectsInput) {
   for (const rev of i.revaluations) {
     // The book after this count's quantity lines (lockInventoryRows reads the locked rows again).
     const item = (await lockInventoryRows(tx, { itemIds: [rev.itemId] })).items.get(rev.itemId)!;
-    if (item.currentStock.lte(0)) continue;
+    if (item.currentStock.lte(0)) {
+      throw new BusinessError(
+        `Nilai satuan "${item.name}" tidak dapat diubah karena stok setelah opname ${item.currentStock.toString()}. `
+          + 'Kosongkan nilai satuan atau samakan dengan rata-rata.',
+        OPNAME_REVALUATION_NO_STOCK,
+      );
+    }
     const delta = item.currentStock.times(rev.newCost).toDecimalPlaces(VALUE_DP).minus(item.stockValue);
     if (delta.isZero()) continue;
     const desc = `${REVALUATION_LINE}${item.name} (${item.averageCost.toString()} -> ${rev.newCost}): ${i.opnameNumber}`;
