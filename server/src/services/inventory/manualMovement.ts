@@ -30,6 +30,7 @@ import { assertBatchSource } from './batchSource';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { assertPeriodOpen } from '../../utils/periodGuard';
+import { businessToday } from '../../utils/businessDate';
 import { mappedAccount } from '../systemAccounts';
 import { settleCogsBackfillForItem } from '../cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../cogsBackfillReverse';
@@ -356,6 +357,18 @@ async function reverseManualRow(tx: Tx, movement: StockMovement, context: string
 }
 
 /**
+ * Locks today's SM and JV series, which the true-up row of reverseManualRow and its journal take
+ * (dated today, postReversalValueJournals), before the COGS settlement reversal locks account rows
+ * (LOCK ORDER of stockLocks.ts: numbers before accounts). The numbers are not used here; the series
+ * lock is held until commit. generateDocumentNumber does not read the fiscal year id.
+ */
+async function lockTrueUpSeries(tx: Tx, fiscalYearId: string): Promise<void> {
+  const today = new Date(businessToday());
+  await generateDocumentNumber(tx, 'SM', today, fiscalYearId);
+  await generateDocumentNumber(tx, 'JV', today, fiscalYearId);
+}
+
+/**
  * Edits a manual movement: the old row is reversed through the ledger and cancelled, its journal
  * voided, and a new row is posted from the body on the same warehouse (a ledger row is never
  * rewritten). An outbound row is valued from the book after the reversal, never at the client's
@@ -378,6 +391,7 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
   // themselves are taken after the reversal, whose true-up row and journal may take the next ones.
   await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
   await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
+  await lockTrueUpSeries(tx, fiscalYear.id);
 
   // The COGS settlement the row triggered first: it was posted on the book the row left.
   await reverseCogsSettlementsByTrigger(tx, 'StockMovement', oldMov.id);
@@ -413,12 +427,14 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
 export async function cancelManualMovementInTx(tx: Tx, id: string, userId: string): Promise<void> {
   const movement = await lockManualMovement(tx, id, 'cancel');
   // By date only, as on edit: the journal and auto-settle journals check their own year.
-  await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
-  // Item and warehouse before the settlement journals lock accounts (LOCK ORDER of stockLocks.ts).
+  const fiscalYear = await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
+  // Item and warehouse, then the true-up's number series, before the settlement journals lock
+  // accounts (LOCK ORDER of stockLocks.ts).
   await lockInventoryRows(tx, {
     itemIds: [movement.itemId],
     pairs: movement.warehouseId ? [{ itemId: movement.itemId, warehouseId: movement.warehouseId }] : [],
   });
+  await lockTrueUpSeries(tx, fiscalYear.id);
   // The COGS settlement the row triggered first: it was posted on the book the row left.
   await reverseCogsSettlementsByTrigger(tx, 'StockMovement', id);
   await reverseManualRow(tx, movement, 'inventory.movement.cancel', userId);
