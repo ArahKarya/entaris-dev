@@ -399,7 +399,7 @@
     "toast": {
       "allDelivered": "All SO items are fully delivered. Enter a qty to ship more.",
       "pendingApproval": "Delivery order submitted and waiting for manager approval (negative stock).",
-      "updated": "{{number}} updated. Old stock returned, new stock issued.",
+      "updated": "{{number}} updated. Unchanged lines keep their original cost.",
       "created": "Delivery order created. Stock issued from the warehouse."
     },
     "errors": {

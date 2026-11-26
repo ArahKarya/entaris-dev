@@ -258,8 +258,8 @@ const DeliveryOrderModal: React.FC<Props> = ({ onClose, editDO }) => {
   };
 
   const mutation = useMutation({
-    mutationFn: async (vars: { endpoint: string; method: 'post' | 'put'; body: any }) => {
-      const res = vars.method === 'put' ? await api.put(vars.endpoint, vars.body) : await api.post(vars.endpoint, vars.body);
+    mutationFn: async (vars: { endpoint: string; method: 'post' | 'put' | 'patch'; body: any }) => {
+      const res = await api[vars.method](vars.endpoint, vars.body);
       return res.data;
     },
     onSuccess: (data: any) => {
@@ -311,6 +311,27 @@ const DeliveryOrderModal: React.FC<Props> = ({ onClose, editDO }) => {
     return acc;
   }, {});
 
+  // Qty SJ yang diedit per (item + gudang), sebelum diubah.
+  const originalQty = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of editDO?.items ?? []) {
+      if (!it.inventoryItemId || !it.warehouseId) continue;
+      const key = `${it.inventoryItemId}|${it.warehouseId}`;
+      m.set(key, (m.get(key) ?? 0) + Number(it.quantity));
+    }
+    return m;
+  }, [editDO]);
+
+  // Hanya header (sopir, nomor mobil, penerima, catatan) yang berubah: PATCH, stok dan biaya tetap.
+  const lineSignature = (l: { inventoryItemId: string | null; warehouseId: string | null; itemName: string; quantity: number; unit: string; description: string | null }) =>
+    [l.inventoryItemId || '', l.warehouseId || '', l.itemName, Number(l.quantity), l.unit, (l.description ?? '').trim()].join('|');
+  const headerOnlyEdit = !!editDO
+    && date === editDO.date.slice(0, 10)
+    && partyId === editDO.partyId
+    && !allowNegativeStock
+    && JSON.stringify(items.filter((i) => i.itemName && Number(i.quantity) > 0).map(lineSignature))
+      === JSON.stringify(editDO.items.map(lineSignature));
+
   // Deteksi kekurangan stok PER (item + gudang) — bukan total semua gudang.
   const stockShortages = (() => {
     const qtyByKey = new Map<string, { itemId: string; warehouseId: string; needed: number }>();
@@ -324,8 +345,10 @@ const DeliveryOrderModal: React.FC<Props> = ({ onClose, editDO }) => {
     qtyByKey.forEach(({ itemId, warehouseId, needed }) => {
       const inv = inventoryItems?.find((i: any) => i.id === itemId);
       if (!inv) return;
-      const available = lineStock(itemId, warehouseId);
-      if (available == null) return; // stok gudang belum termuat — jangan blok
+      const stock = lineStock(itemId, warehouseId);
+      if (stock == null) return; // stok gudang belum termuat — jangan blok
+      // Saat edit, qty SJ ini sendiri sudah keluar dari gudang dan kembali bila baris diubah.
+      const available = stock + (originalQty.get(`${itemId}|${warehouseId}`) ?? 0);
       if (available < needed) {
         const wh = warehouses?.find((w: any) => w.id === warehouseId);
         out.push({ id: itemId, name: inv.name, unit: inv.unit || '', warehouse: wh?.name ?? wh?.code ?? '', available, needed });
@@ -379,6 +402,20 @@ const DeliveryOrderModal: React.FC<Props> = ({ onClose, editDO }) => {
             quantity: Number(i.quantity),
             description: i.description?.trim() || null,
           })),
+        },
+      });
+      return;
+    }
+
+    if (headerOnlyEdit) {
+      mutation.mutate({
+        endpoint: `/delivery-orders/${editDO!.id}`,
+        method: 'patch',
+        body: {
+          nomorMobil: nomorMobil.trim() || null,
+          driverName: driverName.trim() || null,
+          recipientName: recipientName.trim() || null,
+          notes: notes.trim() || null,
         },
       });
       return;

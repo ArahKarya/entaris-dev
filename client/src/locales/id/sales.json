@@ -399,7 +399,7 @@
     "toast": {
       "allDelivered": "Semua item SO sudah terkirim penuh. Isi qty bila mau kirim lebih.",
       "pendingApproval": "Surat jalan diajukan dan menunggu persetujuan manajer (stok minus).",
-      "updated": "{{number}} diperbarui. Stok lama dikembalikan, stok baru dikeluarkan.",
+      "updated": "{{number}} diperbarui. Baris yang tidak berubah tetap memakai biaya lama.",
       "created": "Surat jalan dibuat. Stok dikeluarkan dari gudang."
     },
     "errors": {
