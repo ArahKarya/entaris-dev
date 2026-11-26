@@ -45,7 +45,7 @@ Kunci ringkas: **stok bergerak = SM**, **jurnal hanya bila ada nilai uang yang b
 |------|-----------|---------|----------|
 | `inv_mov_create` In/AdjustmentIn | + qty (gudang & total) | DR Persediaan (akun item / 1.4.0) / CR akun lawan (wajib); `unitCost` wajib > 0 (`MANUAL_IN_ZERO_COST`), akun lawan wajib (`OFFSET_REQUIRED`) | dihitung ulang: `(stok x WAC lama + qty x unitCost) / (stok + qty)` |
 | `inv_mov_create` Out/AdjustmentOut | - qty (ditolak `STOCK_INSUFFICIENT` bila stok gudang < qty) | DR akun lawan (default Selisih Persediaan, role `INVENTORY_VARIANCE`) / CR Persediaan sebesar qty x WAC item; `unitCost` dari input diabaikan | tidak berubah |
-| `inv_mov_update` | batal lama + buat baru | jurnal lama dibatalkan, jurnal baru diposting | dihitung ulang dari replay riwayat (`recomputeAverageCostFromReplay`), COGS backfill diselesaikan ulang |
+| `inv_mov_update` | batal lama + buat baru | jurnal lama dibatalkan, jurnal baru diposting | baris lama dibalik persis sebesar nilainya di buku nilai, baris baru diposting; rata-rata mengikuti nilai buku, COGS backfill diselesaikan ulang |
 | `inv_mov_cancel` | dibalik | jurnal terkait Cancelled, saldo akun dikurangi per baris jurnal | recompute |
 | `stf_create` | - qty gudang asal, + qty gudang tujuan; total item tetap | **tidak ada** (akun persediaan sama, net nol) | tidak berubah |
 | `stf_cancel` | dibalik | tidak ada | tidak berubah |

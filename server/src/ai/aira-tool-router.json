@@ -22063,7 +22063,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "fall back to WAC-based costing (legacy behavior)."
+              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
             },
             {
               "name": "batchUnitCost",
@@ -22390,7 +22390,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).",
+      "postingEffect": "Cabang bypass: stok input keluar (SM Out, dinilai dari buku nilai persediaan; batch terpilih hanya penelusuran, tidak menentukan nilai) & output masuk (SM In) sebesar nilai baris, termasuk produk samping NRV 0 yang ikut menurunkan rata-rata; COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).",
       "confirm_template": "Posting draft produksi {id} menjadi Data Produksi? Stok, WAC, dan jurnal akan terbentuk (non-Admin: masuk antrian persetujuan).",
       "accessNote": "Pembuat draft atau pemegang approval.bypass. Klaim draft atomik sehingga tidak bisa dobel-posting.",
       "prerequisites": [
@@ -30756,7 +30756,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "fall back to WAC-based costing (legacy behavior)."
+              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
             },
             {
               "name": "batchUnitCost",
@@ -31030,7 +31030,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.",
+      "postingEffect": "Cabang bypass (Admin): stok input/output lama dibalik persis sebesar nilainya di buku nilai persediaan (ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output sudah keluar sejak diterima), jurnal lama dibatalkan, stok & jurnal baru diposting (input dinilai dari buku nilai) (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.",
       "confirm_template": "Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).",
       "accessNote": "Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).",
       "prerequisites": [
@@ -31111,7 +31111,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal.",
+      "postingEffect": "Stok input dikembalikan dan stok output dikurangi, masing-masing persis sebesar nilainya di buku nilai persediaan (ditolak bila stok output tidak cukup kecuali allowNegativeStock); rata-rata mengikuti nilai buku; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output sudah keluar sejak diterima (juga lewat bypass stok minus).",
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -31126,7 +31126,8 @@
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan",
         "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "409 REVERSAL_NEEDS_TRUE_UP: output run ini sudah keluar sejak diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)"
       ],
       "related": [
         "prod_run_get"
@@ -31244,7 +31245,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "fall back to WAC-based costing (legacy behavior)."
+              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
             },
             {
               "name": "batchUnitCost",
