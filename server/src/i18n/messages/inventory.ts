@@ -124,8 +124,6 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Tidak ada tahun fiskal aktif untuk tanggal ini.": "No active fiscal year for this date.",
   "Masih ada stok opname Draft yang belum selesai.": "There is still an unfinished Draft stock count.",
   "Item dengan ID {0} tidak ditemukan.": "Item with ID {0} not found.",
-  "Stok aktual \"{0}\" tidak boleh negatif.": "Actual stock \"{0}\" cannot be negative.",
-  "Gudang opname wajib dipilih. Pilih gudang di form atau set salah satu gudang sebagai default.": "A stock count warehouse is required. Select a warehouse on the form or set one as the default.",
   "Gagal membuat stok opname.": "Failed to create the stock count.",
   "Stok opname sudah dibatalkan.": "Stock count is already cancelled.",
   "Stok opname Draft tidak perlu dibatalkan.": "A Draft stock count does not need to be cancelled.",
@@ -228,10 +226,19 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   // value ledger (E3-R6), stock count and sales return: routes/stockOpname.ts, services/salesReturnSubmit.ts
   "Stok opname {0} berisi revaluasi nilai dari sebelum buku nilai persediaan, jadi tidak dapat dibatalkan otomatis. Minta akuntan membuat jurnal koreksi.": "Stock count {0} holds a value revaluation from before the inventory value ledger, so it cannot be cancelled automatically. Ask the accountant to post a correcting journal.",
   "Gudang retur untuk '{0}' wajib dipilih.": "Choose the return warehouse for '{0}'.",
-  "Nilai satuan \"{0}\" tidak dapat diubah karena stok setelah opname {1}. Kosongkan nilai satuan atau samakan dengan rata-rata.": "The unit cost of \"{0}\" cannot be changed because the stock after the count is {1}. Clear the unit cost or set it equal to the average.",
   "Satu baris invoice hanya boleh muncul sekali dalam satu retur.": "An invoice line can appear only once in one return.",
   // cancel value (E3-R8): services/inventory/reversalErrors.ts
   "Pembatalan ditolak: gerakan stok {0} '{1}' dicatat sebelum buku nilai dirilis (sudah termasuk nilai awalnya), dan barangnya sudah ikut keluar, jadi koreksi nilainya tidak bisa dihitung otomatis. Minta akuntan membuat jurnal koreksi.": "Cancellation refused: stock movement {0} of '{1}' was entered before the value ledger was released (it is part of its opening value) and its goods have gone out since, so its value correction cannot be calculated automatically. Ask the accountant to post a correcting journal.",
   "Pembatalan ditolak: riwayat gerakan stok '{0}' tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis. Hubungi akuntan.": "Cancellation refused: the stock movement history of '{0}' does not explain its current stock and value, so the value correction cannot be calculated automatically. Contact the accountant.",
   "Pembatalan ditolak: tanpa gerakan stok ini, barang '{0}' yang keluar sesudahnya melebihi stoknya, jadi koreksi nilainya tidak bisa dihitung otomatis. Hubungi akuntan.": "Cancellation refused: without this stock movement, the goods of '{0}' that went out afterwards exceed its stock, so the value correction cannot be calculated automatically. Contact the accountant.",
+  // opname as-of (E3-R11): utils/schemas.ts (CreateStockOpnameSchema), routes/stockOpname.ts
+  "Stok aktual tidak boleh negatif.": "Actual stock cannot be negative.",
+  "Stok sistem yang ditampilkan form wajib dikirim.": "Send the system stock the form showed.",
+  "Nilai satuan tidak dapat diubah lewat stok opname. Penyesuaian nilai persediaan akan tersedia sebagai dokumen tersendiri.": "A unit cost cannot be changed through a stock count. Inventory value adjustments will be available as a separate document.",
+  "Tanggal wajib diisi (YYYY-MM-DD).": "The date is required (YYYY-MM-DD).",
+  "Gudang opname wajib dipilih.": "Choose the stock count warehouse.",
+  "Satu item hanya boleh muncul sekali dalam satu stok opname.": "An item can appear only once in one stock count.",
+  "Gudang opname tidak ditemukan.": "The stock count warehouse was not found.",
+  "Stok sistem {0} item berubah sejak form dibuka ({1}). Muat ulang stok sistem lalu periksa lagi barisnya.": "The system stock of {0} items changed since the form was opened ({1}). Reload the system stock and check those lines again.",
+  "Gagal mengambil stok sistem per tanggal.": "Failed to load the system stock as of the date.",
 };

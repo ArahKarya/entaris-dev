@@ -8,20 +8,23 @@ import { BusinessError, handleRouteError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
-import { recalculateAccountBalances } from '../utils/accountBalance';
+import { businessToday, parseDateParam } from '../utils/businessDate';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { cancelJournalsInTx, findDocumentJournals } from '../services/ledger/cancelJournals';
-import { systemAccounts } from '../services/systemAccounts';
+import { postJournal } from '../services/ledger/postJournal';
+import { DOCUMENT_RULE } from '../services/ledger/accountGuard';
+import type { JournalLineInput } from '../utils/journalLineRules';
 import { logger } from '../lib/logger';
 import type { Prisma } from '@prisma/client';
-import { resolveWarehouseId } from '../utils/warehouseStock';
-import { assertStockAvailable, lockInventoryRows, stockKey, type LockedItem } from '../services/inventory/stockLocks';
-import { postInbound, postOutbound, postRevaluation, reverseDocumentMovements } from '../services/inventory/inventoryLedger';
+import { assertStockAvailable, lockInventoryRows, type LockedItem } from '../services/inventory/stockLocks';
+import { postInbound, postOutbound, reverseDocumentMovements } from '../services/inventory/inventoryLedger';
+import { postReversalValueJournals } from '../services/inventory/reversalValueJournal';
 import { inventoryAccountFor } from '../services/inventory/itemAccount';
-import { cogsAccountFor } from '../services/ledger/systemRoleAccounts';
+import { assertVarianceAccountUsable } from '../services/inventory/varianceAccount';
+import { qtyAsOf } from '../services/inventory/stockAsOf';
 import { firstString, parseListPaging, parseSort } from '../utils/listQuery';
 import { INBOUND_TYPES } from '../services/stockMovementList';
-import { UNIT_COST_DP, VALUE_DP } from '../services/inventory/inventoryValueMath';
+import { VALUE_DP } from '../services/inventory/inventoryValueMath';
 import {
   buildStockOpnameWhere,
   DEFAULT_STOCK_OPNAME_SORT,
@@ -43,16 +46,40 @@ type Tx = Prisma.TransactionClient;
 export const OPNAME_LEGACY_REVALUATION = 'OPNAME_LEGACY_REVALUATION';
 
 /**
- * Error code (400): a typed unit cost differs from the average but the item has no stock on hand
- * after the count, so there is nothing to revalue; the count is refused rather than storing a cost
- * that was never applied.
+ * Error code (409): the stock of a sent line as of the count date is no longer the stock the form
+ * showed (expectedSystemStock): a movement was posted since the form loaded it. The answer lists the
+ * lines; the user reloads the system stock and checks them again (E3-R11).
  */
-export const OPNAME_REVALUATION_NO_STOCK = 'OPNAME_REVALUATION_NO_STOCK';
+export const OPNAME_STOCK_CHANGED = 'OPNAME_STOCK_CHANGED';
 
-/** Description prefix of a revaluation line in the count's journal (written here before and since the value ledger). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** |expected − as of| above this is a changed stock (quantities are stored to 3 decimals). */
+const OPNAME_VERSION_TOLERANCE = new Decimal('0.0005');
+
+/** Description prefix of a revaluation line in a count's journal (written before PR-6.8a removed count revaluation). */
 const REVALUATION_LINE = 'Revaluasi nilai ';
 
-interface JournalLine { accountId: string; debit: number; credit: number; description: string }
+export interface OpnameStockChange {
+  itemId: string;
+  itemName: string;
+  expectedSystemStock: string;
+  systemStock: string;
+}
+
+/** OPNAME_STOCK_CHANGED with the changed lines, so the form can mark and refresh them. */
+export class OpnameStockChangedError extends BusinessError {
+  constructor(readonly items: OpnameStockChange[]) {
+    super(
+      `Stok sistem ${items.length} item berubah sejak form dibuka (${items.map((i) => i.itemName).join(', ')}). Muat ulang stok sistem lalu periksa lagi barisnya.`,
+      OPNAME_STOCK_CHANGED,
+      409,
+    );
+    this.name = 'OpnameStockChangedError';
+  }
+}
+
+interface OpnameLine { itemId: string; difference: Decimal; totalValue: Decimal }
 
 interface OpnameEffectsInput {
   opnameId: string;
@@ -62,15 +89,14 @@ interface OpnameEffectsInput {
   userId: string;
   warehouseId: string;
   items: Map<string, LockedItem>;
-  lines: { itemId: string; difference: number; unitCost: number; totalValue: number }[];
-  revaluations: { itemId: string; newCost: number }[];
+  lines: OpnameLine[];
 }
 
 /** DR `debitId` / CR `creditId` of a positive amount, or the other way round of a negative one. */
-function pair(debitId: string, creditId: string, amount: Decimal, description: string): JournalLine[] {
+function pair(debitId: string, creditId: string, amount: Decimal, description: string): JournalLineInput[] {
   if (amount.isZero()) return [];
   const [dr, cr] = amount.gt(0) ? [debitId, creditId] : [creditId, debitId];
-  const value = amount.abs().toNumber();
+  const value = amount.abs().toString();
   return [
     { accountId: dr, debit: value, credit: 0, description },
     { accountId: cr, debit: 0, credit: value, description },
@@ -84,19 +110,16 @@ async function itemInventoryAccount(tx: Tx, item: LockedItem): Promise<string> {
 }
 
 /**
- * The count's stock and value through the value ledger (E3-R6), then its journal JV-<opname> of
- * the same amounts against Selisih Persediaan:
- * - a surplus line: AdjustmentIn at the line cost (|difference| x unit cost);
- * - a deficit line: AdjustmentOut valued by the ledger from the book, not by the line cost;
- * - a typed unit cost (revaluation), after the quantity lines: the counted stock is revalued to
- *   that cost, delta = round(stock x cost, 2) − stock_value, through postRevaluation; a part stock
- *   cannot absorb goes to COGS in the same journal. With no stock on hand after the count there
- *   is nothing to revalue, so the count is refused (OPNAME_REVALUATION_NO_STOCK).
- * Returns the posted movement of each quantity line.
+ * The count's stock and value through the value ledger (E3-R6), dated the count date, then its
+ * journal JV-<opname> of the same amounts against Selisih Persediaan through postJournal
+ * (assertVarianceAccountUsable: never the rounding account or a group):
+ * - a surplus line: AdjustmentIn at |difference| x the average;
+ * - a deficit line: AdjustmentOut valued by the ledger from the book.
+ * Returns the posted movement of each line.
  */
 async function postOpnameEffects(tx: Tx, i: OpnameEffectsInput) {
-  const varianceAccount = await systemAccounts.getAccount('INVENTORY_VARIANCE');
-  const journalLines: JournalLine[] = [];
+  const varianceAccount = await assertVarianceAccountUsable(tx);
+  const journalLines: JournalLineInput[] = [];
   const posted: { itemId: string; movementId: string; unitCost: Decimal; value: Decimal }[] = [];
   const base = {
     date: i.date, fiscalYearId: i.fiscalYearId, createdById: i.userId, warehouseId: i.warehouseId,
@@ -106,59 +129,29 @@ async function postOpnameEffects(tx: Tx, i: OpnameEffectsInput) {
 
   for (const line of i.lines) {
     const item = i.items.get(line.itemId)!;
-    const quantity = new Decimal(line.difference).abs();
+    const quantity = line.difference.abs();
     const notes = `Stok opname ${i.opnameNumber}: ${item.name}`;
-    const movement = line.difference > 0
+    const movement = line.difference.gt(0)
       ? await postInbound(tx, { ...base, itemId: item.id, movementType: 'AdjustmentIn', quantity, value: line.totalValue, notes })
       : await postOutbound(tx, { ...base, itemId: item.id, movementType: 'AdjustmentOut', quantity, notes });
     posted.push({ itemId: item.id, movementId: movement.movement.id, unitCost: movement.unitCost, value: movement.valueDelta.abs() });
-    const label = line.difference > 0 ? 'Surplus' : 'Defisit';
+    const label = line.difference.gt(0) ? 'Surplus' : 'Defisit';
     journalLines.push(...pair(await itemInventoryAccount(tx, item), varianceAccount.id, movement.valueDelta, `${label} stok ${item.name}: ${i.opnameNumber}`));
   }
 
-  for (const rev of i.revaluations) {
-    // The book after this count's quantity lines (lockInventoryRows reads the locked rows again).
-    const item = (await lockInventoryRows(tx, { itemIds: [rev.itemId] })).items.get(rev.itemId)!;
-    if (item.currentStock.lte(0)) {
-      throw new BusinessError(
-        `Nilai satuan "${item.name}" tidak dapat diubah karena stok setelah opname ${item.currentStock.toString()}. `
-          + 'Kosongkan nilai satuan atau samakan dengan rata-rata.',
-        OPNAME_REVALUATION_NO_STOCK,
-      );
-    }
-    const delta = item.currentStock.times(rev.newCost).toDecimalPlaces(VALUE_DP).minus(item.stockValue);
-    if (delta.isZero()) continue;
-    const desc = `${REVALUATION_LINE}${item.name} (${item.averageCost.toString()} -> ${rev.newCost}): ${i.opnameNumber}`;
-    const result = await postRevaluation(tx, {
-      itemId: item.id, delta, date: i.date, fiscalYearId: i.fiscalYearId, createdById: i.userId,
-      referenceType: OPNAME_REFERENCE_TYPE, referenceId: i.opnameId, referenceNumber: i.opnameNumber,
-      notes: `Revaluasi stok opname ${i.opnameNumber}: ${item.name}`,
-    });
-    journalLines.push(...pair(await itemInventoryAccount(tx, item), varianceAccount.id, result.valueDelta, desc));
-    if (!result.toCogs.isZero()) journalLines.push(...pair((await cogsAccountFor(tx)).id, varianceAccount.id, result.toCogs, desc));
-  }
-
   if (journalLines.length > 0) {
-    const journal = await tx.journalEntry.create({
-      data: {
-        entryNumber: `JV-${i.opnameNumber}`,
-        date: i.date,
-        narration: `Penyesuaian stok opname: ${i.opnameNumber}`,
-        status: 'Submitted',
-        fiscalYearId: i.fiscalYearId,
-        createdBy: i.userId,
-        submittedAt: new Date(),
-        items: { create: journalLines },
-      },
+    await postJournal(tx, {
+      date: i.date,
+      narration: `Penyesuaian stok opname: ${i.opnameNumber}`,
+      lines: journalLines,
+      sourceType: 'SYSTEM_DOC',
+      createdBy: i.userId,
+      // The cancel finds and voids the count's journal by this number (findDocumentJournals).
+      entryNumber: `JV-${i.opnameNumber}`,
+      accountRule: DOCUMENT_RULE,
+      partyRule: 'off',
+      expectFiscalYearId: i.fiscalYearId,
     });
-    await tx.accountingLedgerEntry.createMany({
-      data: journalLines.map((ji) => ({
-        date: i.date, accountId: ji.accountId, debit: ji.debit, credit: ji.credit,
-        referenceType: 'JournalEntry', referenceId: journal.id, description: ji.description, fiscalYearId: i.fiscalYearId,
-      })),
-    });
-    // Recalculate balances from JE sums for affected accounts (prevents drift)
-    await recalculateAccountBalances(tx, [...new Set(journalLines.map((ji) => ji.accountId))]);
   }
   return { lines: posted };
 }
@@ -265,6 +258,36 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/stock-opname/system-stock?warehouseId&date — the form's "stok sistem per tanggal"
+// (E3-R11): each active item's stock in the warehouse as of the end of `date` (default today, WIB),
+// plus inactive items still holding stock then. The form sends it back as expectedSystemStock.
+// → { warehouseId, date, items: [{ itemId, code, name, unit, systemStock }] } by item code.
+// Defined before '/:id' so the path is not taken as an id.
+router.get('/system-stock', async (req, res) => {
+  try {
+    const warehouseId = firstString((req.query as Record<string, unknown>).warehouseId);
+    if (!warehouseId || !UUID_RE.test(warehouseId)) return res.status(400).json({ error: 'Gudang opname wajib dipilih.' });
+    const day = parseDateParam(req.query.date);
+    if (day === null) return res.status(400).json({ error: 'Parameter date tidak valid.' });
+    const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId }, select: { id: true } });
+    if (!warehouse) return res.status(400).json({ error: 'Gudang opname tidak ditemukan.' });
+    const date = day ?? businessToday();
+
+    const items = await prisma.inventoryItem.findMany({
+      select: { id: true, code: true, name: true, unit: true, isActive: true },
+      orderBy: { code: 'asc' },
+    });
+    const stock = await qtyAsOf(prisma, { warehouseId, itemIds: items.map((i) => i.id), day: date });
+    const rows = items
+      .map((i) => ({ itemId: i.id, code: i.code, name: i.name, unit: i.unit, isActive: i.isActive, systemStock: stock.get(i.id)!.toNumber() }))
+      .filter((r) => r.isActive || r.systemStock !== 0)
+      .map(({ isActive: _isActive, ...r }) => r);
+    return res.json({ warehouseId, date, items: rows });
+  } catch (error) {
+    return handleRouteError(res, error, 'GET /stock-opname/system-stock', 'Gagal mengambil stok sistem per tanggal.');
+  }
+});
+
 // GET /api/stock-opname/:id — Get detail
 router.get('/:id', async (req, res) => {
   try {
@@ -289,121 +312,104 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/stock-opname — Create and submit in one step
+// POST /api/stock-opname — Create and submit in one step (E3-R11)
+// Body: { date, warehouseId, notes?, items: [{ itemId, actualStock, expectedSystemStock, notes? }] }:
+// only the lines the user changed. systemStock is the warehouse stock as of the count date
+// (stockAsOf); a line whose stock differs from expectedSystemStock refuses the count (409
+// OPNAME_STOCK_CHANGED + items). Differences post on the count date.
 router.post('/', async (req: AuthRequest, res) => {
   const body = validateBody(CreateStockOpnameSchema, req.body, res);
   if (!body) return;
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      // UTC midnight of the date: inside its business day (WIB), so movements and the journal fall on it.
       const txDate = new Date(body.date);
       const fiscalYear = await getOpenFiscalYear(tx, txDate);
+      const userId = req.user!.userId;
 
-      // Check no other Draft exists
       const existingDraft = await tx.stockOpname.findFirst({ where: { status: 'Draft' as any } });
       if (existingDraft) throw new BusinessError('Masih ada stok opname Draft yang belum selesai.');
 
-      // Stock opname applies to one warehouse per session. Prefer the
-      // explicit pick from the UI; fall back to the default warehouse. The
-      // header and every line keep it so the list shows Gudang even when
-      // the count had no difference.
-      const opnameWarehouseId = await resolveWarehouseId(tx, body.warehouseId);
+      const warehouseId = body.warehouseId;
+      const warehouse = await tx.warehouse.findUnique({ where: { id: warehouseId }, select: { isActive: true } });
+      if (!warehouse) throw new BusinessError('Gudang opname tidak ditemukan.');
+      if (!warehouse.isActive) throw new BusinessError('Gudang tidak aktif.');
 
-      // Lock every counted item (and its row at the opname warehouse) before reading the system
-      // stock, so a movement committing meanwhile cannot make the difference stale. systemStock is
-      // the per-warehouse balance when the user picked a warehouse, else the item total. The form
-      // sends every item: only existing rows are locked, so a count without a difference adds no
-      // empty row to the warehouse (the ledger creates one for a difference).
-      const allItemIds: string[] = body.items.map((i: any) => i.itemId);
+      // Lock every counted item (and its row at the warehouse) before reading the stock as of the
+      // date, so no movement can commit between that read and the count's own posting. Only
+      // existing rows are locked; the ledger creates one for a surplus.
+      const itemIds = body.items.map((i) => i.itemId);
       const locked = await lockInventoryRows(tx, {
-        itemIds: allItemIds,
-        pairs: opnameWarehouseId ? allItemIds.map((itemId) => ({ itemId, warehouseId: opnameWarehouseId })) : [],
+        itemIds,
+        pairs: itemIds.map((itemId) => ({ itemId, warehouseId })),
         createMissing: false,
       });
-      const itemMap = locked.items;
-      // Numbers after the item locks (LOCK ORDER in services/inventory/stockLocks.ts).
-      const opnameNumber = await generateDocumentNumber(tx, 'SO', txDate, fiscalYear.id);
+      const missing = itemIds.find((id) => !locked.items.has(id));
+      if (missing) throw new BusinessError(`Item dengan ID ${missing} tidak ditemukan.`);
 
-      for (const input of body.items) {
-        if (!itemMap.has(input.itemId)) {
-          throw new BusinessError(`Item dengan ID ${input.itemId} tidak ditemukan.`);
-        }
+      const systemStock = await qtyAsOf(tx, { warehouseId, itemIds, day: body.date });
+      const changed = body.items.filter((l) => systemStock.get(l.itemId)!.minus(l.expectedSystemStock).abs().gt(OPNAME_VERSION_TOLERANCE));
+      if (changed.length > 0) {
+        throw new OpnameStockChangedError(changed.map((l) => ({
+          itemId: l.itemId,
+          itemName: locked.items.get(l.itemId)!.name,
+          expectedSystemStock: new Decimal(l.expectedSystemStock).toString(),
+          systemStock: systemStock.get(l.itemId)!.toString(),
+        })));
       }
-      const warehouseStockOf = (itemId: string) =>
-        Number(locked.stocks.get(stockKey(itemId, body.warehouseId!))?.currentStock ?? 0);
 
-      // Revaluasi: item yang nilai satuannya diubah manual lewat form opname.
-      const revaluations: { itemId: string; newCost: number }[] = [];
-
-      // Build opname items with difference calculation
-      const opnameItems = body.items.map((input: any) => {
-        const item = itemMap.get(input.itemId)!;
-        const systemStock = body.warehouseId ? warehouseStockOf(input.itemId) : item.currentStock.toNumber();
-        const actualStock = input.actualStock;
-        // Reject negatives only when the user changed this count: the form sends every item,
-        // so untouched items that are already negative historically must not block submit.
-        const diffFromSystem = new Decimal(actualStock).minus(new Decimal(systemStock)).toDecimalPlaces(3).toNumber();
-        if (actualStock < 0 && diffFromSystem !== 0) {
-          throw new BusinessError(`Stok aktual "${item.name}" tidak boleh negatif.`);
-        }
-        const diff = diffFromSystem;
-        const oldCost = item.averageCost.toNumber();
-        const hasManualCost = input.unitCost !== undefined && input.unitCost !== null;
-        const unitCost = hasManualCost
-          ? new Decimal(input.unitCost).toDecimalPlaces(UNIT_COST_DP).toNumber()
-          : oldCost;
-        if (hasManualCost && unitCost !== oldCost) {
-          revaluations.push({ itemId: input.itemId, newCost: unitCost });
-        }
-        const totalValue = new Decimal(Math.abs(diff)).mul(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
-
+      const lines = body.items.map((input) => {
+        const item = locked.items.get(input.itemId)!;
+        const system = systemStock.get(input.itemId)!.toDecimalPlaces(3);
+        const difference = new Decimal(input.actualStock).minus(system).toDecimalPlaces(3);
         return {
           itemId: input.itemId,
-          systemStock,
-          actualStock,
-          difference: diff,
-          unitCost,
-          totalValue,
+          system,
+          actualStock: input.actualStock,
+          difference,
+          // A surplus comes in at the average; a deficit's cost and value are the ledger's (set below).
+          unitCost: item.averageCost,
+          totalValue: difference.abs().times(item.averageCost).toDecimalPlaces(VALUE_DP),
           notes: input.notes || null,
         };
       });
+      const withDiff = lines.filter((l) => !l.difference.isZero());
 
-      // Filter items with actual difference
-      const itemsWithDiff = opnameItems.filter((i: any) => i.difference !== 0);
-      // Opname perlu diproses kalau ada selisih qty ATAU ada revaluasi nilai.
-      const needsProcessing = itemsWithDiff.length > 0 || revaluations.length > 0;
+      // A count dated in the past takes its deficit out of today's stock: the warehouse must still
+      // hold it (the stock that left since was counted as there).
+      await assertStockAvailable(
+        tx,
+        withDiff.filter((l) => l.difference.lt(0)).map((l) => ({ itemId: l.itemId, warehouseId, quantity: l.difference.abs() })),
+        { context: 'stockOpname.create', userId },
+      );
 
-      // Create the StockOpname record
+      // Numbers after the item locks (LOCK ORDER in services/inventory/stockLocks.ts).
+      const opnameNumber = await generateDocumentNumber(tx, 'SO', txDate, fiscalYear.id);
       const so = await tx.stockOpname.create({
         data: {
           opnameNumber,
           date: txDate,
           status: 'Submitted' as any,
           notes: body.notes || null,
-          warehouseId: opnameWarehouseId,
+          warehouseId,
           fiscalYearId: fiscalYear.id,
-          createdById: req.user!.userId,
+          createdById: userId,
           submittedAt: new Date(),
           items: {
-            create: opnameItems.map((line) => ({ ...line, warehouseId: opnameWarehouseId })),
+            create: lines.map((l) => ({
+              itemId: l.itemId, warehouseId, systemStock: l.system.toString(), actualStock: l.actualStock,
+              difference: l.difference.toString(), unitCost: l.unitCost.toString(), totalValue: l.totalValue.toString(), notes: l.notes,
+            })),
           },
         },
       });
 
-      // Process adjustments for items with difference / revaluation
-      if (needsProcessing) {
-        // Adjustments need a warehouse: force the user to pick one when no
-        // default exists. (Multi-warehouse opname → one session per warehouse.)
-        if (!opnameWarehouseId) {
-          throw new BusinessError(
-            'Gudang opname wajib dipilih. Pilih gudang di form atau set salah satu gudang sebagai default.',
-          );
-        }
+      if (withDiff.length > 0) {
         const posted = await postOpnameEffects(tx, {
-          opnameId: so.id, opnameNumber, date: txDate, fiscalYearId: fiscalYear.id, userId: req.user!.userId,
-          warehouseId: opnameWarehouseId, items: itemMap, lines: itemsWithDiff, revaluations,
+          opnameId: so.id, opnameNumber, date: txDate, fiscalYearId: fiscalYear.id, userId,
+          warehouseId, items: locked.items, lines: withDiff,
         });
-
         // Link the movements and store each line's posted cost and value (a deficit is valued from the book).
         for (const line of posted.lines) {
           await tx.stockOpnameItem.updateMany({
@@ -417,6 +423,7 @@ router.post('/', async (req: AuthRequest, res) => {
         where: { id: so.id },
         include: {
           createdBy: { select: { fullName: true } },
+          warehouse: { select: { id: true, code: true, name: true } },
           items: {
             include: { item: { select: { id: true, name: true, code: true, unit: true } } },
             orderBy: { item: { code: 'asc' } },
@@ -427,6 +434,9 @@ router.post('/', async (req: AuthRequest, res) => {
 
     return res.status(201).json(result);
   } catch (error: any) {
+    if (error instanceof OpnameStockChangedError) {
+      return res.status(409).json({ error: error.message, code: error.code, items: error.items });
+    }
     return handleRouteError(res, error, 'POST /stock-opname', 'Gagal membuat stok opname.');
   }
 });
@@ -467,9 +477,13 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
           .map((m) => ({ itemId: m.itemId, warehouseId: m.warehouseId, quantity: m.quantity.toString() })),
         { context: 'stockOpname.cancel', userId: req.user!.userId, reversal: true },
       );
-      // Refused with REVERSAL_NEEDS_TRUE_UP when goods of a surplus or revalued item went out since
-      // (a stock count has no value true-up yet; PR-6.8a adds its own).
-      await reverseDocumentMovements(tx, { referenceType: OPNAME_REFERENCE_TYPE, referenceId: so.id }, { userId: req.user!.userId });
+      // When goods of the item went out since, the value they took differently comes back as a
+      // true-up against COGS, and value left at zero stock is swept to COGS (E3-R8), journalled
+      // before the count's journal is voided (lock order): book = GL.
+      const reversed = await reverseDocumentMovements(
+        tx, { referenceType: OPNAME_REFERENCE_TYPE, referenceId: so.id }, { userId: req.user!.userId, trueUp: 'replay', sweepAtZero: true },
+      );
+      await postReversalValueJournals(tx, reversed, { userId: req.user!.userId, documentLabel: `stok opname ${so.opnameNumber}` });
 
       // Void the opname's journals (JV-<opnameNumber> and any satellites); balances are reversed per line.
       await cancelJournalsInTx(tx, await findDocumentJournals(tx, `JV-${so.opnameNumber}`), {

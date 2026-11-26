@@ -924,30 +924,26 @@ export const UpdateServiceItemSchema = CreateServiceItemSchema.partial().extend(
   isActive: z.boolean().optional(),
 });
 
-// Stok Opname
+// Stok Opname (E3-R11): one warehouse per count, only the lines the user changed, each with the
+// system stock the form showed (as of the count date) so the server can refuse a stale count.
 const StockOpnameItemSchema = z.object({
   itemId: z.string().uuid('Item ID harus UUID yang valid.'),
-  // Not validated >= 0: the form sends every item, including ones already negative
-  // in the system. The route rejects actualStock < 0 only when it differs from system stock.
-  actualStock: z.coerce.number(),
-  // Optional manual unit value. If it differs from averageCost, the item is revalued
-  // to it and the value difference is journaled to Selisih Persediaan.
-  unitCost: z.coerce.number().min(0, 'Nilai satuan tidak boleh negatif.').optional(),
+  actualStock: z.coerce.number().min(0, 'Stok aktual tidak boleh negatif.'),
+  // The form's "stok sistem per tanggal" (GET /stock-opname/system-stock); the server answers 409
+  // OPNAME_STOCK_CHANGED when the stock as of the count date differs from it.
+  expectedSystemStock: z.coerce.number({ error: 'Stok sistem yang ditampilkan form wajib dikirim.' }),
+  // Revaluing through a count was removed (owner decision #8); a value adjustment gets its own
+  // document later (E3-PR9).
+  unitCost: z.never({ error: 'Nilai satuan tidak dapat diubah lewat stok opname. Penyesuaian nilai persediaan akan tersedia sebagai dokumen tersendiri.' }).optional(),
   notes: z.string().nullable().optional(),
 });
 
 export const CreateStockOpnameSchema = z.object({
-  date: z.string().min(1, 'Tanggal wajib diisi.'),
-  // Warehouse where this opname session was counted. Preferred over the
-  // default-warehouse fallback so user is explicit per session.
-  warehouseId: z.string().uuid('Gudang wajib dipilih.').nullable().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Tanggal wajib diisi (YYYY-MM-DD).'),
+  warehouseId: z.string({ error: 'Gudang opname wajib dipilih.' }).uuid('Gudang opname wajib dipilih.'),
   notes: z.string().nullable().optional(),
-  items: z.array(StockOpnameItemSchema).min(1, 'Minimal satu item stok opname.'),
-});
-
-export const SubmitStockOpnameSchema = z.object({
-  warehouseId: z.string().uuid('Gudang wajib dipilih.').nullable().optional(),
-  items: z.array(StockOpnameItemSchema).min(1, 'Minimal satu item stok opname.'),
+  items: z.array(StockOpnameItemSchema).min(1, 'Minimal satu item stok opname.')
+    .refine((items) => new Set(items.map((i) => i.itemId)).size === items.length, 'Satu item hanya boleh muncul sekali dalam satu stok opname.'),
 });
 
 // Delivery Order (Surat Jalan)

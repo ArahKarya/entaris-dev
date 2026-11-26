@@ -166,7 +166,7 @@
   },
   "src/routes/stockOpname.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 7
+      "count": 4
     }
   },
   "src/routes/telegram.ts": {
@@ -205,11 +205,6 @@
     }
   },
   "src/services/purchaseInvoiceSubmit.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/services/stockSnapshot.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }

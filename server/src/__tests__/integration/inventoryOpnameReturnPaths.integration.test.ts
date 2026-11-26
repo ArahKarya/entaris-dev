@@ -6,13 +6,10 @@
  *   it back exactly, and after a later sale replays the item for its true-up (PR-6.5a);
  * - three returns of a third of a note line never take back more than its COGS: 3.333,33 +
  *   3.333,33 + 3.333,34 = 10.000,00;
- * - a count deficit leaves at the ledger's cost (330.000 for 30 kg at 11.000), not the typed unit
- *   cost, the typed cost then revalues the counted stock (Revaluation +480.000) with the same net
- *   variance as before the ledger (150.000); a surplus comes in at the line cost; cancel restores
- *   the book exactly;
- * - with no stock on hand a revaluation goes to COGS whole (postRevaluation), and a count that
- *   leaves no stock but types a cost other than the average is refused
- *   (OPNAME_REVALUATION_NO_STOCK), storing nothing;
+ * - a count deficit leaves at the ledger's cost (330.000 for 30 kg at 11.000); a surplus comes in
+ *   at the average; cancel restores the book exactly (a typed unit cost is refused since PR-6.8a,
+ *   owner decision #8: stockOpnameAsOf.integration.test.ts);
+ * - with no stock on hand a revaluation goes to COGS whole (postRevaluation);
  * - a return that lists one invoice line twice is refused (SALES_RETURN_DUPLICATE_LINE): the value
  *   cap of later returns reads each return item's own In;
  * - a count whose journal holds a revaluation but which owns no Revaluation row (before the value
@@ -38,7 +35,7 @@ const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 
 import { prisma as appPrisma } from '../../lib/prisma';
-import stockOpnameRouter, { OPNAME_LEGACY_REVALUATION, OPNAME_REVALUATION_NO_STOCK } from '../../routes/stockOpname';
+import stockOpnameRouter, { OPNAME_LEGACY_REVALUATION } from '../../routes/stockOpname';
 import { SALES_RETURN_DUPLICATE_LINE, submitSalesReturnInTx } from '../../services/salesReturnSubmit';
 import { cancelSalesReturnInTx } from '../../services/salesReturnCancel';
 
@@ -134,10 +131,12 @@ async function returnRow(tx: Tx, returnId: string) {
   return tx.stockMovement.findUniqueOrThrow({ where: { id: item.stockMovementId! } });
 }
 
-async function count(tx: Tx, w: World, line: { actualStock: number; unitCost?: number }) {
+/** A count of the world's item in warehouse A; the shown system stock is the live one (no later movements). */
+async function count(tx: Tx, w: World, line: { actualStock: number }) {
+  const shown = Number((await tx.inventoryStock.findFirst({ where: { itemId: w.item.id, warehouseId: w.warehouseA.id } }))?.currentStock ?? 0);
   const res = await callRoute(stockOpnameRouter, 'post', '/', {
     userId: w.userId,
-    body: { date: DAY, warehouseId: w.warehouseA.id, items: [{ itemId: w.item.id, ...line }] },
+    body: { date: DAY, warehouseId: w.warehouseA.id, items: [{ itemId: w.item.id, ...line, expectedSystemStock: shown }] },
   });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body as { id: string; opnameNumber: string };
@@ -248,21 +247,19 @@ d('sales returns on the value ledger (PR-6.4c2)', () => {
 });
 
 d('stock count on the value ledger (PR-6.4c2)', () => {
-  it('a deficit leaves at the ledger cost, the typed cost revalues the counted stock; cancel restores the book', async () => {
+  it('a deficit leaves at the ledger cost; cancel restores the book', async () => {
     await inWorld(async (tx, w) => {
       await stockForCount(tx, w);
-      const so = await count(tx, w, { actualStock: 120, unitCost: 15_000 });
+      const so = await count(tx, w, { actualStock: 120 });
 
-      const rows = await tx.stockMovement.findMany({ where: { referenceType: 'StockOpname', referenceId: so.id }, orderBy: { valueDelta: 'asc' } });
+      const rows = await tx.stockMovement.findMany({ where: { referenceType: 'StockOpname', referenceId: so.id } });
       expect(rows.map((r) => [r.movementType, r.quantity.toFixed(3), money(r.valueDelta.toString()), r.warehouseId]))
-        .toEqual([['AdjustmentOut', '30.000', '-330000.00', w.warehouseA.id], ['Revaluation', '0.000', '480000.00', null]]);
+        .toEqual([['AdjustmentOut', '30.000', '-330000.00', w.warehouseA.id]]);
       const line = await tx.stockOpnameItem.findFirstOrThrow({ where: { stockOpnameId: so.id } });
       expect([line.unitCost.toFixed(6), money(line.totalValue.toString())]).toEqual(['11000.000000', '330000.00']);
-      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '120.000', value: '1800000.00', average: '15000.000000' });
-      // Inventory +150.000 net; the variance account takes the same 150.000 as the old revaluation
-      // on 150 kg (600.000) less the deficit at the typed cost (450.000).
-      expect(await opnameJournal(tx, w, so.opnameNumber)).toEqual({ inventory: '150000.00', variance: '-150000.00', cogs: '0.00' });
-      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('1800000.00');
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '120.000', value: '1320000.00', average: '11000.000000' });
+      expect(await opnameJournal(tx, w, so.opnameNumber)).toEqual({ inventory: '-330000.00', variance: '330000.00', cogs: '0.00' });
+      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('1320000.00');
 
       const res = await cancelCount(tx, so.id);
       expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -273,7 +270,7 @@ d('stock count on the value ledger (PR-6.4c2)', () => {
     });
   });
 
-  it('a surplus comes in at the line cost and blends; cancel takes it back', async () => {
+  it('a surplus comes in at the average; cancel takes it back', async () => {
     await inWorld(async (tx, w) => {
       await stockForCount(tx, w);
       const so = await count(tx, w, { actualStock: 160 });
@@ -288,17 +285,9 @@ d('stock count on the value ledger (PR-6.4c2)', () => {
     });
   });
 
-  it('with no stock on hand a revaluation goes to COGS whole; a count to 0 with a typed cost is refused', async () => {
+  it('with no stock on hand a revaluation goes to COGS whole', async () => {
     await inWorld(async (tx, w) => {
       await stockForCount(tx, w);
-      const refused = await callRoute(stockOpnameRouter, 'post', '/', {
-        userId: w.userId,
-        body: { date: DAY, warehouseId: w.warehouseA.id, items: [{ itemId: w.item.id, actualStock: 0, unitCost: 15_000 }] },
-      });
-      expect([refused.status, (refused.body as { code?: string }).code]).toEqual([400, OPNAME_REVALUATION_NO_STOCK]);
-      expect(await tx.stockOpname.count({ where: { fiscalYearId: w.fyId } })).toBe(0);
-      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '150.000', value: '1650000.00', average: '11000.000000' });
-
       const so = await count(tx, w, { actualStock: 0 });
       const rows = await tx.stockMovement.findMany({ where: { referenceType: 'StockOpname', referenceId: so.id } });
       expect(rows.map((r) => [r.movementType, money(r.valueDelta.toString())])).toEqual([['AdjustmentOut', '-1650000.00']]);
@@ -333,18 +322,24 @@ d('stock count on the value ledger (PR-6.4c2)', () => {
   it('a count with a journaled revaluation but no Revaluation row (before the ledger) cannot be cancelled', async () => {
     await inWorld(async (tx, w) => {
       await stockForCount(tx, w);
-      const so = await count(tx, w, { actualStock: 150, unitCost: 12_000 });
-      const rev = await tx.stockMovement.findFirstOrThrow({ where: { referenceType: 'StockOpname', referenceId: so.id, movementType: 'Revaluation' } });
-      expect(money(rev.valueDelta.toString())).toBe('150000.00');
-      // Legacy shape: the value went into the average directly, no row records it.
-      await tx.stockMovement.update({ where: { id: rev.id }, data: { referenceType: 'ValuationBaseline', referenceId: null } });
+      const so = await count(tx, w, { actualStock: 160 });
+      // Legacy shape: the count's journal also revalued the item (its value went into the average
+      // directly before the value ledger), and no Revaluation row records it.
+      const je = await tx.journalEntry.findUniqueOrThrow({ where: { entryNumber: `JV-${so.opnameNumber}` } });
+      const desc = `Revaluasi nilai ${w.item.name} (11000 -> 12000): ${so.opnameNumber}`;
+      await tx.journalItem.createMany({
+        data: [
+          { journalEntryId: je.id, accountId: w.accounts.inventory.id, debit: 160_000, credit: 0, description: desc },
+          { journalEntryId: je.id, accountId: w.variance.id, debit: 0, credit: 160_000, description: desc },
+        ],
+      });
       const before = await bookOf(tx, w.item.id);
 
       const res = await cancelCount(tx, so.id);
       expect([res.status, res.body.code]).toEqual([409, OPNAME_LEGACY_REVALUATION]);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: so.id } })).status).toBe('Submitted');
       expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('1800000.00');
+      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('1760000.00');
     });
   });
 });

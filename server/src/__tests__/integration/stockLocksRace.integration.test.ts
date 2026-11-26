@@ -441,9 +441,9 @@ d('aggregate stock checks per warehouse', () => {
           date: `${Y}-03-11`,
           warehouseId: s.whA,
           items: [
-            { itemId: held.id, actualStock: 100 },
-            { itemId: elsewhere.id, actualStock: 0 },
-            { itemId: found.id, actualStock: 20, unitCost: 6000 },
+            { itemId: held.id, actualStock: 100, expectedSystemStock: 100 },
+            { itemId: elsewhere.id, actualStock: 0, expectedSystemStock: 0 },
+            { itemId: found.id, actualStock: 20, expectedSystemStock: 0 },
           ],
         },
         userId: s.actor.userId, role: s.actor.role,
@@ -462,7 +462,7 @@ d('aggregate stock checks per warehouse', () => {
       await seed(tx, s, gabah.id, s.whA, 100, 6000);
       await seed(tx, s, gabah.id, s.whB, 1000, 6000);
       const opname = await callRoute(stockOpnameRouter, 'post', '/', {
-        body: { date: `${Y}-03-11`, warehouseId: s.whA, items: [{ itemId: gabah.id, actualStock: 400 }] },
+        body: { date: `${Y}-03-11`, warehouseId: s.whA, items: [{ itemId: gabah.id, actualStock: 400, expectedSystemStock: 100 }] },
         userId: s.actor.userId, role: s.actor.role,
       });
       expect(opname.status, JSON.stringify(opname.body)).toBe(201);
@@ -476,9 +476,7 @@ d('aggregate stock checks per warehouse', () => {
       expect(refused.body.code).toBe(STOCK_INSUFFICIENT);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: opname.body.id } })).status).toBe('Submitted');
 
-      // Take the Out back (a new In would not do: the value ledger refuses to reverse the surplus
-      // after goods of the item went out, REVERSAL_NEEDS_TRUE_UP: a stock count cancel has no
-      // true-up until PR-6.8a); the cancel then goes through once.
+      // Take the Out back so warehouse A holds the surplus again; the cancel then goes through once.
       const back = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: out.body.id }, userId: s.actor.userId, role: s.actor.role });
       expect(back.status, JSON.stringify(back.body)).toBe(200);
       const done = await cancel();

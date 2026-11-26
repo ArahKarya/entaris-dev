@@ -299,12 +299,15 @@ d('closed fiscal year: stock movements', () => {
 });
 
 d('closed fiscal year: stock opname', () => {
-  /** POST /stock-opname on `date` (20 Dec of Y by default), counting `actualStock`; returns the opname and its journals. */
+  /**
+   * POST /stock-opname on `date` (20 Dec of Y by default), counting `actualStock` of an item that
+   * holds 100 there (stockItem); returns the opname and its journals.
+   */
   async function opname(tx: Tx, itemId: string, actualStock: number, date = `${Y}-12-20`) {
     // A Draft opname blocks a new one; set any leftover aside inside the rollback.
     await tx.stockOpname.updateMany({ where: { status: 'Draft' }, data: { status: 'Cancelled' } });
     const r = await callRoute(stockOpnameRouter, 'post', '/', {
-      body: { date, warehouseId, items: [{ itemId, actualStock }] },
+      body: { date, warehouseId, items: [{ itemId, actualStock, expectedSystemStock: 100 }] },
       userId, role,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(201);

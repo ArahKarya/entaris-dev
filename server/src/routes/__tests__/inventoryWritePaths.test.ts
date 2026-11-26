@@ -1,6 +1,6 @@
 /**
  * Write paths that used to leave UI cells empty: manual stock movement GL
- * lines without description, and stock opname without a header warehouse.
+ * lines without description, and the stock opname warehouse and version check (E3-R11).
  * Also the closed fiscal year guard on movement edit/cancel and opname cancel.
  * Manual movement journals go through postJournal (mocked here; the integration test
  * manualMovementCost.integration.test.ts posts them for real).
@@ -196,34 +196,48 @@ describe('stock opname header warehouse', () => {
       ...fiscalYearHandlers(),
       ...lockHandlers(systemStock),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: systemStock }],
+      'warehouse.findUnique': () => ({ isActive: true }),
+      // The lock reads its rows by OR pairs; the as-of walk (stockAsOf.ts) by warehouse and item lists.
+      'inventoryStock.findMany': ({ where }: any) => (where.OR
+        ? (where.OR as { itemId: string; warehouseId: string }[]).map((p) => ({ id: `st-${p.warehouseId}`, ...p, currentStock: systemStock }))
+        : [{ itemId: ITEM_ID, warehouseId: WH, currentStock: systemStock }]),
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
     });
 
   it('stores the warehouse on the header and lines even when nothing differs', async () => {
     current = opnameTx('10');
     const res = await send('POST', '/stock-opname', {
-      date: '2026-10-10', warehouseId: WH, items: [{ itemId: ITEM_ID, actualStock: 10 }],
+      date: '2026-10-10', warehouseId: WH, items: [{ itemId: ITEM_ID, actualStock: 10, expectedSystemStock: 10 }],
     });
     expect(res.status).toBe(201);
     const data = current.fn('stockOpname.create').mock.calls[0]![0].data;
     expect(data.warehouseId).toBe(WH);
-    expect(data.items.create[0]).toMatchObject({ itemId: ITEM_ID, difference: 0, warehouseId: WH });
+    expect(data.items.create[0]).toMatchObject({ itemId: ITEM_ID, difference: '0', systemStock: '10', warehouseId: WH });
     expect(current.fn('stockMovement.create')).not.toHaveBeenCalled();
+    expect(vi.mocked(postJournal)).not.toHaveBeenCalled();
   });
 
-  it('falls back to the default warehouse when none is picked', async () => {
-    current = makeAutoTx({
-      ...fiscalYearHandlers(),
-      ...lockHandlers(),
-      'inventoryItem.findMany': () => [{ ...ITEM, currentStock: '10' }],
-      'warehouse.findFirst': () => ({ id: 'wh-default' }),
-      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
-      'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
+  it('refuses a count without a warehouse, a line with a unit cost, and a line without the shown system stock (400)', async () => {
+    current = opnameTx('10');
+    const bodies = [
+      { date: '2026-10-10', items: [{ itemId: ITEM_ID, actualStock: 12, expectedSystemStock: 10 }] },
+      { date: '2026-10-10', warehouseId: WH, items: [{ itemId: ITEM_ID, actualStock: 12, expectedSystemStock: 10, unitCost: 9000 }] },
+      { date: '2026-10-10', warehouseId: WH, items: [{ itemId: ITEM_ID, actualStock: 12 }] },
+    ];
+    for (const body of bodies) expect((await send('POST', '/stock-opname', body)).status).toBe(400);
+    expect(current.fn('stockOpname.create')).not.toHaveBeenCalled();
+  });
+
+  it('answers 409 OPNAME_STOCK_CHANGED with the line when the stock moved since the form loaded it', async () => {
+    current = opnameTx('8');
+    const res = await send('POST', '/stock-opname', {
+      date: '2026-10-10', warehouseId: WH, items: [{ itemId: ITEM_ID, actualStock: 12, expectedSystemStock: 10 }],
     });
-    const res = await send('POST', '/stock-opname', { date: '2026-10-10', items: [{ itemId: ITEM_ID, actualStock: 12 }] });
-    expect(res.status).toBe(201);
-    expect(current.fn('stockOpname.create').mock.calls[0]![0].data.warehouseId).toBe('wh-default');
-    expect(current.fn('stockMovement.create').mock.calls[0]![0].data.warehouseId).toBe('wh-default');
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: 'OPNAME_STOCK_CHANGED', items: [{ itemId: ITEM_ID, itemName: 'Beras', expectedSystemStock: '10', systemStock: '8' }],
+    });
+    expect(current.fn('stockOpname.create')).not.toHaveBeenCalled();
   });
 });
 

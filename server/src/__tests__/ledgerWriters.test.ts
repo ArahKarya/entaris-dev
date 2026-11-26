@@ -23,7 +23,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'routes/journals.ts': { 'accountingLedgerEntry.updateMany': 1 },
   'routes/projectGuarantees.ts': { 'journalEntry.create': 2, 'accountingLedgerEntry.createMany': 2 },
   'routes/settings/dummyData.ts': { 'accountingLedgerEntry.deleteMany': 1, 'journalItem.deleteMany': 1, 'journalEntry.deleteMany': 1 },
-  'routes/stockOpname.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/vendorDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
   'scripts/repair/e1-journal-source-backfill.ts': { 'journalEntry.updateMany': 2 },
   'services/cogsBackfillReverse.ts': { 'journalEntry.update': 2, 'accountingLedgerEntry.updateMany': 2 },
