@@ -276,7 +276,7 @@ d('closed fiscal year: stock movements', () => {
     await inRollback(async (tx) => {
       const { old, next } = await years(tx);
       const item = await stockItem(tx, 100, 1_000);
-      // The Out goes first: an inbound edited after goods went out needs a value true-up (PR-6.5a).
+      // The Out goes first: an inbound edited after goods went out needs a value true-up (manual movements: PR-6.5b).
       const cancelled = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentOut', quantity: 5, unitCost: 1_000, date: `${Y + 1}-01-05` });
       const edited = await postMovement(tx, { itemId: item.id, movementType: 'AdjustmentIn', quantity: 10, unitCost: 1_000, date: `${Y + 1}-01-05` });
       // Older edits moved the date across the year end but kept the earlier fiscal year.

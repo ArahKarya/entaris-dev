@@ -4,6 +4,7 @@ import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks'
 import { assertPeriodsOpen } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { reverseDocumentMovements } from './inventory/inventoryLedger';
+import { postReversalValueJournals } from './inventory/reversalValueJournal';
 import { cancelJournalsInTx, findDocumentJournals } from './ledger/cancelJournals';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 
@@ -141,9 +142,13 @@ export async function cancelGoodsReceiptInTx(
 
   // Every row the STT owns comes back at its own value_delta (the locked cost the STT journal
   // debited, also for a legacy row whose total_value a purchase invoice overwrote); the journal
-  // voided below carries the same amounts, so book = GL. Refused with REVERSAL_NEEDS_TRUE_UP when
-  // goods of the item went out since (value true-up, PR-6.5a).
-  await reverseDocumentMovements(tx, { referenceType: 'GoodsReceipt', referenceId: stt.id }, { userId });
+  // voided below carries the same amounts. When goods of the item went out since, the value they
+  // took differently comes back as a true-up against COGS, and value left at zero stock is swept to
+  // COGS (E3-R8), journalled before the STT journal is voided (lock order): book = GL.
+  const reversed = await reverseDocumentMovements(
+    tx, { referenceType: 'GoodsReceipt', referenceId: stt.id }, { userId, trueUp: 'replay', sweepAtZero: true },
+  );
+  await postReversalValueJournals(tx, reversed, { userId, documentLabel: `STT ${stt.sttNumber}` });
 
   for (const grItem of stt.items) {
     const sm = grItem.stockMovement;

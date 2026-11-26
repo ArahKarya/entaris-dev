@@ -13,9 +13,9 @@
  *   rounded; its cancel puts both warehouses back;
  * - a purchase invoice whose price delta sits in a Revaluation row (as the value-ledger backfill
  *   writes it): cancelling it lowers stock_value by the delta and GL = book; after goods went out
- *   (also when the row was stamped after those sales, as the backfill does) it is refused with
- *   REVERSAL_NEEDS_TRUE_UP and nothing changes;
- * - a legacy invoice receipt that leaves stock 0 with a baseline residue: refused as a residue.
+ *   the part of the delta they took comes back with a true-up against COGS (PR-6.5a), none when
+ *   the row was stamped after those sales (as the backfill does);
+ * - a legacy invoice receipt that leaves stock 0 with a baseline residue: the residue is swept to COGS.
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2111.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -29,14 +29,18 @@ import {
   bookOf, createSalesFlowWorld, deliver, glBalance, invoiceDelivery, receiveStock, type SalesFlowWorld,
 } from '../helpers/salesFlowFixture';
 import { averageAfter } from '../../services/inventory/inventoryValueMath';
-import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
+import { sourceKeys } from '../../services/ledger/journalSource';
 import { systemAccounts } from '../../services/systemAccounts';
 import { postJournal } from '../../services/ledger/postJournal';
 import { DOCUMENT_RULE } from '../../services/ledger/accountGuard';
-import { BusinessError } from '../../utils/errors';
 
-const state = vi.hoisted(() => ({ tx: null as Tx | null }));
+const state = vi.hoisted(() => ({ tx: null as Tx | null, today: null as string | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
+// "Today" of a cancel's value true-up journal (owner decision #3): the fixture day when set.
+vi.mock('../../utils/businessDate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/businessDate')>();
+  return { ...actual, businessToday: (...args: Parameters<typeof actual.businessToday>) => state.today ?? actual.businessToday(...args) };
+});
 
 import { prisma as appPrisma } from '../../lib/prisma';
 import { editDeliveryOrderInTx } from '../../services/deliveryOrderEdit';
@@ -72,12 +76,14 @@ async function inWorld(fn: (tx: Tx, w: SalesFlowWorld) => Promise<void>) {
   try {
     await prisma.$transaction(async (tx) => {
       state.tx = tx;
+      state.today = DAY;
       try {
         const w = await createSalesFlowWorld(tx, YEAR);
         await fn(tx, w);
         await assertLedgerInvariant(tx, [w.item.id], { warehouses: true });
       } finally {
         state.tx = null;
+        state.today = null;
         systemAccounts.invalidateCache();
       }
       throw new RollbackSentinel();
@@ -90,16 +96,6 @@ async function inWorld(fn: (tx: Tx, w: SalesFlowWorld) => Promise<void>) {
 /** Runs fn in a savepoint of the test transaction: a refusal leaves no partial writes. */
 function inRouteTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   return appPrisma.$transaction(fn as (tx: unknown) => Promise<T>) as Promise<T>;
-}
-
-async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
-  try {
-    await p;
-  } catch (e) {
-    if (e instanceof BusinessError) return e.code;
-    throw e;
-  }
-  return 'NO_ERROR';
 }
 
 const money = (v: Decimal.Value) => new Decimal(v).toFixed(2);
@@ -315,7 +311,7 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
     });
   });
 
-  it('after goods went out, the purchase invoice cancel is refused with REVERSAL_NEEDS_TRUE_UP and nothing changes', async () => {
+  it('after goods went out, the purchase invoice cancel takes the delta back with a true-up of the part sold', async () => {
     await inWorld(async (tx, w) => {
       const { movementId } = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
       const pi = await invoiceWithRevaluation(tx, w, movementId);
@@ -323,14 +319,21 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
       const before = await bookOf(tx, w.item.id);
       expect(before).toEqual({ stock: '90.000', value: '945000.00', average: '10500.000000' });
 
-      expect(await codeOf(inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null })))).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
-      expect(await tx.stockMovement.count({ where: { referenceId: pi.id, isCancelled: false } })).toBe(1);
+      const revaluation = await tx.stockMovement.findFirstOrThrow({ where: { referenceId: pi.id, movementType: 'Revaluation' } });
+      await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null }));
+      // The 10 delivered took 5.000 of the delta (105.000 at 10.500, 100.000 without it): it comes
+      // back from COGS, DR inventory 5.000; the 90 left hold 900.000 at 10.000.
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '90.000', value: '900000.00', average: '10000.000000' });
+      const [journal] = await tx.journalEntry.findMany({ where: { sourceKey: sourceKeys.inventoryTrueUp(revaluation.id) }, include: { items: true } });
+      expect(money(journal.items.find((i) => i.accountId === w.accounts.inventory.id)!.debit.toString())).toBe('5000.00');
+      expect(money(journal.items.find((i) => i.accountId === w.accounts.cogs.id)!.credit.toString())).toBe('5000.00');
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Cancelled');
+      // GL = book + the 10 on the note not invoiced yet (105.000).
+      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('1005000.00');
     });
   });
 
-  it('a backfilled Revaluation stamped after the sales (deploy time) is still refused: goods went out after the receipt it adjusts', async () => {
+  it('a backfilled Revaluation stamped after the sales (deploy time) is replayed where it was written: true-up 0', async () => {
     await inWorld(async (tx, w) => {
       const { movementId } = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
       await deliver(tx, w, DAY, [{ qty: 90 }]);
@@ -339,13 +342,16 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
       const before = await bookOf(tx, w.item.id);
       expect(before).toEqual({ stock: '10.000', value: '150000.00', average: '15000.000000' });
 
-      expect(await codeOf(inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null })))).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
+      // Goods went out after the receipt it adjusts (the replay runs), but the 90 delivered were
+      // valued without the delta, so taking it back exactly is already right.
+      await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null }));
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '10.000', value: '100000.00', average: '10000.000000' });
+      expect(await tx.stockMovement.count({ where: { itemId: w.item.id, adjustsMovementId: { not: null }, isCancelled: false } })).toBe(0);
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Cancelled');
     });
   });
 
-  it('a legacy purchase invoice receipt that leaves stock 0 with a baseline residue is refused as a residue, not as goods gone out', async () => {
+  it('a legacy purchase invoice receipt that leaves stock 0 with a baseline residue: the residue is swept to COGS', async () => {
     await inWorld(async (tx, w) => {
       const { movementId } = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
       const supplier = await tx.party.create({ data: { name: `IT-SF Supplier ${Date.now()}`, partyType: 'Supplier', isActive: true } });
@@ -373,20 +379,15 @@ d('outbound paths on the value ledger (PR-6.4d)', () => {
         ],
         sourceType: 'SYSTEM_DOC', createdBy: w.userId, accountRule: DOCUMENT_RULE, partyRule: 'off',
       });
-      const before = await bookOf(tx, w.item.id);
-
-      let refusal: BusinessError | null = null;
-      try {
-        await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null }));
-      } catch (e) {
-        if (!(e instanceof BusinessError)) throw e;
-        refusal = e;
-      }
-      expect(refusal).toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP, status: 409 });
-      expect(refusal!.message).toContain('menjadi 0 tetapi nilai persediaannya masih 3250.00');
-      expect(refusal!.message).not.toContain('sudah sebagian keluar');
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
+      await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, { cancelledById: w.userId, cancelReason: null }));
+      expect(await bookOf(tx, w.item.id)).toMatchObject({ stock: '0.000', value: '0.00' });
+      const sweep = await tx.stockMovement.findFirstOrThrow({ where: { adjustsMovementId: movementId, movementType: 'Revaluation' } });
+      expect(money(sweep.valueDelta.toString())).toBe('-3250.00');
+      const journal = await tx.journalEntry.findFirstOrThrow({ where: { sourceKey: sourceKeys.inventoryTrueUp(movementId) }, include: { items: true } });
+      expect(sweep.journalEntryId).toBe(journal.id);
+      expect(money(journal.items.find((i) => i.accountId === w.accounts.cogs.id)!.debit.toString())).toBe('3250.00');
+      expect(money(journal.items.find((i) => i.accountId === w.accounts.inventory.id)!.credit.toString())).toBe('3250.00');
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Cancelled');
     });
   });
 });

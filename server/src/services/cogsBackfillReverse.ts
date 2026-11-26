@@ -16,7 +16,7 @@ const NEAR_ZERO_QTY = 0.0005;
  * Takes back exactly the settlement Revaluation rows (LEGACY_COGS_SETTLE) that `where` selects, under
  * one lock of their items, while the caller voids their journals: the voided journal reverses the
  * same inventory amount. Refused with REVERSAL_NEEDS_TRUE_UP when goods of the item went out since
- * (true-up, PR-6.5a). A settlement journal from before the value ledger has no row: voiding it moves
+ * (no true-up: the legacy queue is owner decision #6, PR-6.6). A settlement journal from before the value ledger has no row: voiding it moves
  * the GL alone, its differential sits in the valuation baseline.
  */
 async function reverseSettleRows(tx: Tx, where: Prisma.StockMovementWhereInput, trail?: CancelTrail): Promise<void> {

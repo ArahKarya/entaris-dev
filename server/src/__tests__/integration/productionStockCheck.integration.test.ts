@@ -9,7 +9,7 @@
  * - an edit checks the new inputs after its own reversal, at its (new) warehouse;
  * - reversing an output (cancel, edit) is checked at the movement's warehouse, not the item total;
  *   with the bypass, an output that went out since is refused by the value ledger
- *   (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a).
+ *   (REVERSAL_NEEDS_TRUE_UP, until PR-6.12).
  *
  * Committed fixtures (same year, deleted after; no value, so no journal or account balance moves):
  * - two cancels of one run at once: one cancels, the other gets STALE_STATUS, stock reversed once;
@@ -232,7 +232,7 @@ d('production input stock at the production warehouse (rollback)', () => {
         .toEqual({ isCancelled: false });
 
       // The bypass passes the stock check at A, but the 600 beras of the run went out since: on the
-      // value ledger taking their value back needs a value true-up (PR-6.5a / PR-6.12), so it is
+      // value ledger taking their value back needs a value true-up (PR-6.12), so it is
       // refused until then and nothing changes, at A or at B.
       expect(await codeOf(attempt(tx, (t) => cancelProductionRunInTx(t, first.id, {
         userId: w.userId, allowNegativeStock: true, negativeStockReason: 'IT 6.2b koreksi produksi',

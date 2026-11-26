@@ -17351,7 +17351,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: mengembalikan stok & pergerakan keluar dibatalkan. Tidak ada jurnal GL.",
+      "postingEffect": "Stok: mengembalikan stok & pergerakan keluar dibatalkan (nilai persediaan kembali sebesar nilai keluarnya). Tidak ada jurnal GL dokumen. Bila barang item itu sudah keluar sesudah surat jalan ini, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.",
       "confirm_template": "Batalkan Surat Jalan {id} (stok dikembalikan)?",
       "errors": [
         "400: batalkan invoice terkait dulu.",
@@ -17359,7 +17359,10 @@
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
-        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai"
       ],
       "prerequisites": [
         "Tahun buku tanggal SJ masih terbuka."
@@ -21209,7 +21212,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, nilai persediaan berkurang sebesar nilai baris STT = debit Persediaan jurnal STT). Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak STT diterima, atau stok jadi 0 dengan sisa nilai. Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
+      "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, nilai persediaan berkurang sebesar nilai baris STT = debit Persediaan jurnal STT). Bila barang item itu sudah keluar sejak nilainya masuk, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama. Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant). Bypass stok minus (allowNegativeStock) juga butuh capability inventory.negative_stock (default hanya Admin).",
       "prerequisites": [
@@ -21223,14 +21226,16 @@
         "400: ada PI Paid / PI belum dibatalkan",
         "400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu",
         "400 GR_CANCEL_INSUFFICIENT_STOCK: stok gudang penerimaan tidak cukup untuk dibalikkan (baris item yang sama dijumlah per gudang)",
-        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak STT diterima (juga lewat bypass stok minus), atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
-        "400: alasan pembatalan maksimal 500 karakter"
+        "400: alasan pembatalan maksimal 500 karakter",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai"
       ],
       "related": [
         "pi_cancel",
@@ -25202,7 +25207,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.",
+      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Bila barang item itu sudah keluar sejak nilainya masuk, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.",
       "confirm_template": "Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
@@ -25211,14 +25216,17 @@
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
         "400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)",
-        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak nilai PI masuk, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "409 REVERSAL_NEEDS_TRUE_UP: penyelesaian HPP menyusul lama (antrean COGS backfill) invoice ini tidak bisa dibalik karena barang item itu sudah keluar sesudahnya; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
-        "400: alasan pembatalan maksimal 500 karakter"
+        "400: alasan pembatalan maksimal 500 karakter",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai"
       ],
       "related": [
         "pay_cancel",
@@ -26626,20 +26634,22 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak retur diterima.",
+      "postingEffect": "Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Bila barang item itu sudah keluar sejak nilainya masuk, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.",
       "confirm_template": "Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)",
-        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak retur diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)",
-        "400: alasan pembatalan maksimal 500 karakter"
+        "400: alasan pembatalan maksimal 500 karakter",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."
@@ -26940,7 +26950,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.",
+      "postingEffect": "Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan beserta nilainya; Bila barang item itu sudah keluar sesudah invoice ini, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.",
       "confirm_template": "Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: invoice sudah lunas.",
@@ -26951,7 +26961,11 @@
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.",
         "400: alasan pembatalan maksimal 500 karakter",
-        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi"
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "409 REVERSAL_NEEDS_TRUE_UP: penyelesaian HPP menyusul lama (antrean COGS backfill) invoice ini tidak bisa dibalik karena barang item itu sudah keluar sesudahnya; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai"
       ],
       "prerequisites": [
         "Tahun buku dokumen dan jurnalnya masih terbuka."

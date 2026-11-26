@@ -468,7 +468,7 @@ router.put('/:id/cancel', requireCap('doc.cancel'), async (req: AuthRequest, res
         { context: 'stockOpname.cancel', userId: req.user!.userId, reversal: true },
       );
       // Refused with REVERSAL_NEEDS_TRUE_UP when goods of a surplus or revalued item went out since
-      // (value true-up, PR-6.5a).
+      // (a stock count has no value true-up yet; PR-6.8a adds its own).
       await reverseDocumentMovements(tx, { referenceType: OPNAME_REFERENCE_TYPE, referenceId: so.id }, { userId: req.user!.userId });
 
       // Void the opname's journals (JV-<opnameNumber> and any satellites); balances are reversed per line.

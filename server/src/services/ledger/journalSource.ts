@@ -78,6 +78,11 @@ export const sourceKeys = {
    * times); cancelling the invoice voids every journal under purchaseRevisionPrefix(invoiceId).
    */
   purchaseRevision: (invoiceId: string, entryNumber: string): string => `${purchaseRevisionPrefix(invoiceId)}${keyPart(entryNumber)}`,
+  /**
+   * Value true-up and zero-stock sweep of a cancelled stock movement (E3-R8, PR-6.5a), by the
+   * movement taken back: DR/CR inventory against COGS (services/inventory/reversalValueJournal.ts).
+   */
+  inventoryTrueUp: (movementId: string): string => `INVENTORY_TRUE_UP:${keyPart(movementId)}`,
 } as const;
 
 /** Prefix of the sourceKeys of a purchase invoice's price revisions (for startsWith queries). */
