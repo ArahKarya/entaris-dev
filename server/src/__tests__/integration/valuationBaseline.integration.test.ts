@@ -25,7 +25,6 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { seedStock, seedUnplacedStock } from '../helpers/inventoryFixture';
 import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
-import { cancelPurchaseInvoiceInTx } from '../../services/invoiceCancellation';
 import { reviseJournalNarration } from '../../services/purchaseInvoiceRevise';
 import {
   findValueBaselineNotes,
@@ -189,7 +188,12 @@ d('value-ledger migration data part (E3-R6)', () => {
     await inWorld(async (tx, w) => {
       const item = await createItem(tx, w, 'PIX');
       const { movementId, pi } = await sttWithInvoice(tx, w, item.id);
-      await cancelPurchaseInvoiceInTx(tx, pi.id, { cancelledById: w.userId, cancelReason: 'valuation baseline test' });
+      // The cancel as the code before the value ledger did it: the invoice is Cancelled and its lines
+      // unlinked from the STT; the STT row and the item stay as they were. The current service
+      // refuses this shape (assertLandedCostBacked), so it is written straight.
+      await tx.purchaseInvoice.update({ where: { id: pi.id }, data: { status: 'Cancelled', outstanding: 0, cancelledAt: new Date() } });
+      await tx.goodsReceipt.updateMany({ where: { invoiceId: pi.id }, data: { invoiceId: null, invoicedAt: null } });
+      await tx.purchaseInvoiceItem.updateMany({ where: { purchaseInvoiceId: pi.id }, data: { goodsReceiptItemId: null } });
       const kept = await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } });
       expect(Number(kept.averageCost)).toBe(11_000); // the cancel leaves STT-owned stock and average alone
 
@@ -345,6 +349,35 @@ d('value-ledger migration data part (E3-R6)', () => {
       expect(again.newRows.filter((r) => r.itemId === item.id)).toHaveLength(0);
       expect(again.stockValueChanges.filter((c) => c.itemId === item.id)).toHaveLength(0);
       expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).stockValue)).toBe(-190_000);
+      await assertSelfCheck(tx, [item.id]);
+    });
+  });
+
+  it('adds nothing on a re-run for an item without a baseline row that the ledger left at stock 0 with a residue', async () => {
+    await inWorld(async (tx, w) => {
+      const item = await createItem(tx, w, 'RES');
+      await seedStock(tx, { itemId: item.id, warehouseId: w.warehouseId, qty: 10, avg: 100, date: DAY });
+      expect((await runValueBaselineData(tx)).newRows.filter((r) => r.itemId === item.id)).toHaveLength(0);
+
+      // As the ledger posts it: 15 out of 10 on hand = 1.000 + 5 x 100, stock −5, value −500; 5 in at
+      // 120 (+600): stock 0, value 100 = Σ value_delta, but stock x average is 0.
+      const at = (n: string, movementType: 'In' | 'Out', quantity: number, valueDelta: number) => tx.stockMovement.create({
+        data: {
+          movementNumber: `IT-VB-${n}-${w.stamp}`, date: new Date(`${YEAR}-03-01T00:00:00.000Z`), itemId: item.id, warehouseId: w.warehouseId,
+          movementType, quantity, unitCost: Math.abs(valueDelta) / quantity, totalValue: Math.abs(valueDelta), valueDelta,
+          fiscalYearId: w.fyId, createdById: w.userId,
+        },
+      });
+      await at('ROUT', 'Out', 15, -1_500);
+      await at('RIN', 'In', 5, 600);
+      await tx.inventoryItem.update({ where: { id: item.id }, data: { currentStock: 0, stockValue: 100, averageCost: 100 } });
+      await tx.inventoryStock.update({ where: { itemId_warehouseId: { itemId: item.id, warehouseId: w.warehouseId } }, data: { currentStock: 0 } });
+
+      const again = await runValueBaselineData(tx);
+
+      expect(again.newRows.filter((r) => r.itemId === item.id)).toHaveLength(0);
+      expect(again.stockValueChanges.filter((c) => c.itemId === item.id)).toHaveLength(0);
+      expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).stockValue)).toBe(100);
       await assertSelfCheck(tx, [item.id]);
     });
   });

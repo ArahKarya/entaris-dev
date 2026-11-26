@@ -50,6 +50,9 @@ export async function cancelDeliveryOrderInTx(
     pairs: returning.flatMap((line) => (line.warehouseId ? [{ itemId: line.inventoryItemId!, warehouseId: line.warehouseId }] : [])),
   });
 
+  // The stock-0 residue rule judges an item after all of its lines are back, not after each.
+  const reversible = deliveryOrder.items.filter((line) => line.stockMovement && !line.stockMovement.isCancelled);
+  const lastLineOfItem = new Map(reversible.map((line, i) => [line.stockMovement!.itemId, i]));
   for (const line of deliveryOrder.items) {
     if (!line.stockMovementId) continue;
 
@@ -62,7 +65,7 @@ export async function cancelDeliveryOrderInTx(
       continue;
     }
 
-    await reverseMovement(tx, sm.id, { userId });
+    await reverseMovement(tx, sm.id, { userId, intermediate: lastLineOfItem.get(sm.itemId) !== reversible.indexOf(line) });
   }
 
   // Surat Jalan Sementara yang tertaut ke DO ini kembali Terbuka

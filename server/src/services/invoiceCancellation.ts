@@ -8,7 +8,8 @@ import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
-import { reverseDocumentMovements } from './inventory/inventoryLedger';
+import { REVERSAL_NEEDS_TRUE_UP, reverseDocumentMovements } from './inventory/inventoryLedger';
+import { findDocumentJournals } from './ledger/cancelJournals';
 import { purchaseRevisionPrefix } from './ledger/journalSource';
 import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
@@ -19,6 +20,31 @@ type Tx = Prisma.TransactionClient;
  * its landed-cost delta ('PurchaseInvoice') and of its price revisions ('PurchaseRevision', PR-6.4c3).
  */
 const PURCHASE_INVOICE_ROW_TYPES = ['PurchaseInvoice', 'PurchaseRevision'] as const;
+
+/** Description markers of the inventory lines a purchase invoice journals for its landed-cost delta. */
+const LANDED_LINE_MARKERS = ['adj-landed ', 'Persediaan adj. landed cost'];
+
+/**
+ * A purchase invoice from before the value ledger that was also revised has no Revaluation row for
+ * its landed-cost delta (the migration left that delta in the valuation baseline), yet its journal
+ * carries the inventory line. Voiding the journal would move the GL alone, so the cancel is refused
+ * and the accountant corrects it by a journal.
+ */
+async function assertLandedCostBacked(tx: Tx, invoice: { id: string; invoiceNumber: string }): Promise<void> {
+  const journals = await findDocumentJournals(tx, `JV-${invoice.invoiceNumber}`);
+  const carriesLanded = journals.some((j) => j.items.some((line) => LANDED_LINE_MARKERS.some((m) => line.description?.includes(m))));
+  if (!carriesLanded) return;
+  const rows = await tx.stockMovement.count({
+    where: { referenceType: 'PurchaseInvoice', referenceId: invoice.id, movementType: 'Revaluation' },
+  });
+  if (rows > 0) return;
+  throw new BusinessError(
+    `Invoice ${invoice.invoiceNumber} berisi selisih landed cost dari sebelum buku nilai persediaan, jadi tidak dapat dibatalkan otomatis. `
+      + 'Minta akuntan membuat jurnal koreksi.',
+    REVERSAL_NEEDS_TRUE_UP,
+    409,
+  );
+}
 
 /** Error code: a sales invoice with a return that is not cancelled cannot be cancelled. */
 export const INVOICE_HAS_ACTIVE_RETURNS = 'INVOICE_HAS_ACTIVE_RETURNS';
@@ -203,6 +229,8 @@ export async function cancelPurchaseInvoiceInTx(
       reversal: true,
     },
   );
+
+  await assertLandedCostBacked(tx, invoice);
 
   // Main AP journal plus satellites (JV-<no>-CORR, -CORR-2, …).
   const jvNumber = `JV-${invoice.invoiceNumber}`;
