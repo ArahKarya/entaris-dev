@@ -40,8 +40,10 @@ async function reverseSettleRows(tx: Tx, where: Prisma.StockMovementWhereInput, 
  */
 async function assertSettlementsBacked(tx: Tx, jeIds: readonly string[]): Promise<void> {
   for (const jeId of jeIds) {
-    const je = await tx.journalEntry.findUnique({ where: { id: jeId }, select: { entryNumber: true, status: true } });
+    const je = await tx.journalEntry.findUnique({ where: { id: jeId }, select: { entryNumber: true, status: true, fiscalYearId: true, date: true } });
     if (!je || je.status === 'Cancelled') continue;
+    // A closed period refuses first, whatever the journal is backed by.
+    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'jurnal');
     const backed = await tx.stockMovement.count({
       where: { journalEntryId: jeId, referenceType: LEGACY_COGS_SETTLE, movementType: 'Revaluation', isCancelled: false },
     });
