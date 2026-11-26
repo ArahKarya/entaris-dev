@@ -4,12 +4,12 @@ import { AuthRequest, requireCap } from '../middleware/auth';
 import { hasCap } from '../services/permissionService';
 import { validateBody } from '../utils/validate';
 import { CreateDeliveryOrderSchema } from '../utils/schemas';
-import { BusinessError, handleRouteError } from '../utils/errors';
+import { handleRouteError } from '../utils/errors';
 import { submitDeliveryOrderInTx } from '../services/deliveryOrderSubmit';
 import { cancelDeliveryOrderInTx } from '../services/deliveryOrderCancel';
-import { editDeliveryOrderInTx } from '../services/deliveryOrderEdit';
+import { editDeliveryOrderHeaderInTx, editDeliveryOrderInTx } from '../services/deliveryOrderEdit';
 import { createDeliveryOrderFromInvoiceInTx } from '../services/deliveryOrderFromInvoice';
-import { CreateDOFromInvoiceSchema } from '../utils/schemas';
+import { CreateDOFromInvoiceSchema, PatchDeliveryOrderHeaderSchema } from '../utils/schemas';
 import { logger } from '../lib/logger';
 import { parseListPaging, parseSort } from '../utils/listQuery';
 import {
@@ -190,28 +190,14 @@ router.post('/from-invoice/:invoiceId', async (req: AuthRequest, res) => {
 });
 
 // PATCH /:id edit header
-// Only header fields (notes, nomorMobil, driverName, recipientName) — quantities
-// and items can't change once stock has moved. Status must still be Submitted.
+// Only header fields (notes, nomorMobil, driverName, recipientName): stock, movements and their cost
+// do not change. Status must still be Submitted (claimed in the write) and the note's period open.
 router.patch('/:id', async (req: AuthRequest, res) => {
+  const body = validateBody(PatchDeliveryOrderHeaderSchema, req.body ?? {}, res);
+  if (!body) return;
   try {
-    const existing = await prisma.deliveryOrder.findUnique({
-      where: { id: req.params.id as string },
-    });
-    if (!existing) return res.status(404).json({ error: 'Surat jalan tidak ditemukan.' });
-    if (existing.status !== 'Submitted') {
-      throw new BusinessError('Hanya surat jalan berstatus Submitted yang bisa diedit.');
-    }
-
-    const { notes, nomorMobil, driverName, recipientName } = req.body ?? {};
-    const updated = await prisma.deliveryOrder.update({
-      where: { id: existing.id },
-      data: {
-        notes: notes === undefined ? existing.notes : notes,
-        nomorMobil: nomorMobil === undefined ? existing.nomorMobil : nomorMobil,
-        driverName: driverName === undefined ? existing.driverName : driverName,
-        recipientName: recipientName === undefined ? existing.recipientName : recipientName,
-      },
-    });
+    const updated = await prisma.$transaction((tx) => editDeliveryOrderHeaderInTx(tx, req.params.id as string, body));
+    if (!updated) return res.status(404).json({ error: 'Surat jalan tidak ditemukan.' });
     return res.json(updated);
   } catch (error) {
     return handleRouteError(res, error, 'PATCH /delivery-orders/:id', 'Gagal memperbarui surat jalan.');

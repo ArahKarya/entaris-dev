@@ -985,6 +985,14 @@ export const CreateDeliveryOrderSchema = z.object({
   }
 });
 
+// PATCH /delivery-orders/:id: header fields only; a field left out keeps its value.
+export const PatchDeliveryOrderHeaderSchema = z.object({
+  nomorMobil: z.string().max(50).nullable().optional(),
+  driverName: z.string().max(200).nullable().optional(),
+  recipientName: z.string().max(200).nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
+
 // Body for the retroactive "DO dari Invoice" flow. Items are inherited from
 // the invoice, so the request only carries the physical-delivery metadata.
 export const CreateDOFromInvoiceSchema = z.object({
