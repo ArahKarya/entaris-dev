@@ -2,7 +2,7 @@
 
 > Dibangkitkan otomatis — jangan edit manual (`npm run ai-tools:docs`).
 
-Total **514** tool (read 237 · write 165 · critical 112); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
+Total **515** tool (read 238 · write 165 · critical 112); semuanya aktif secara default (override per tool di Settings → AIRA). Endpoint terlarang: [DENYLIST.md](DENYLIST.md). Istilah: [GLOSARIUM.md](GLOSARIUM.md).
 
 ## Toolset
 
@@ -10,7 +10,7 @@ Total **514** tool (read 237 · write 165 · critical 112); semuanya aktif secar
 |---|---|---|---|---|---|
 | [Penjualan](penjualan.md) | 94 | 41 | 35 | 18 | Penawaran, Sales Order, Surat Jalan, Invoice Penjualan, Retur, Uang Muka Pelanggan. |
 | [Pembelian](pembelian.md) | 30 | 13 | 5 | 12 | PO, Penerimaan Barang (STT/BPB), Invoice Pembelian, Uang Muka Vendor. |
-| [Persediaan](persediaan.md) | 34 | 19 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
+| [Persediaan](persediaan.md) | 35 | 20 | 6 | 9 | Barang, gudang, mutasi stok, transfer, stok opname. |
 | [Produksi](produksi.md) | 28 | 13 | 9 | 6 | Draft & posting produksi, standar biaya, proses, mesin. |
 | [Akuntansi](akuntansi.md) | 39 | 17 | 8 | 14 | COA, jurnal, tahun buku, pajak, akun sistem, aset tetap. |
 | [Kas & Bank](kas-bank.md) | 37 | 15 | 13 | 9 | Pembayaran/penerimaan, rekonsiliasi bank, transaksi berulang, uang jaminan proyek. |
@@ -324,6 +324,7 @@ Total **514** tool (read 237 · write 165 · critical 112); semuanya aktif secar
 | [`opn_create`](persediaan.md#opn_create) | persediaan | critical | tidak | Admin, Accountant | `POST /api/stock-opname` |
 | [`opn_get`](persediaan.md#opn_get) | persediaan | read | - | Admin, Accountant | `GET /api/stock-opname/:id` |
 | [`opn_list`](persediaan.md#opn_list) | persediaan | read | - | Admin, Accountant | `GET /api/stock-opname` |
+| [`opn_system_stock`](persediaan.md#opn_system_stock) | persediaan | read | - | Admin, Accountant | `GET /api/stock-opname/system-stock` |
 | [`party_create`](master-data.md#party_create) | master-data | write | tidak | Admin, Accountant, StaffProduksi | `POST /api/parties` |
 | [`party_dashboard`](master-data.md#party_dashboard) | master-data | read | - | Admin, Accountant, StaffProduksi, Viewer | `GET /api/parties/dashboard` |
 | [`party_delete`](master-data.md#party_delete) | master-data | critical | tidak | Admin, Accountant | `DELETE /api/parties/:id` |

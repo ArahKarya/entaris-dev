@@ -12461,7 +12461,7 @@
       "output": {
         "opname": "object"
       },
-      "outputSummary": "Objek opname dengan baris item (systemStock, actualStock, difference, unitCost, totalValue, movementId).",
+      "outputSummary": "Objek opname dengan baris item yang dikirim (systemStock = stok sistem gudang per tanggal opname, actualStock, difference, unitCost, totalValue, movementId).",
       "handler": "GET /api/stock-opname/:id",
       "permAction": "view",
       "enabled": true,
@@ -12473,6 +12473,55 @@
       "related": [
         "opn_list",
         "opn_cancel"
+      ]
+    },
+    {
+      "name": "opn_system_stock",
+      "group": "Stok & Produksi",
+      "toolset": "persediaan",
+      "module": "stock_opname",
+      "desc": "Stok sistem per tanggal untuk form Stok Opname: stok tiap item aktif di satu gudang per akhir tanggal tertentu (WIB), ditambah item nonaktif yang masih bersaldo pada tanggal itu. Nilainya dikirim balik sebagai expectedSystemStock di opn_create.",
+      "risk": "read",
+      "roles": [
+        "Admin",
+        "Accountant"
+      ],
+      "input": {
+        "warehouseId": "uuid",
+        "date": "date"
+      },
+      "params": [
+        {
+          "name": "warehouseId",
+          "in": "query",
+          "type": "uuid",
+          "required": true,
+          "description": "UUID gudang yang dihitung."
+        },
+        {
+          "name": "date",
+          "in": "query",
+          "type": "date",
+          "required": false,
+          "description": "Tanggal opname (YYYY-MM-DD). Default hari ini (WIB)."
+        }
+      ],
+      "output": {
+        "items": "array"
+      },
+      "outputSummary": "{warehouseId, date, items:[{itemId, code, name, unit, systemStock}]} urut kode item.",
+      "handler": "GET /api/stock-opname/system-stock",
+      "permAction": "view",
+      "enabled": true,
+      "level": 1,
+      "phase": 1,
+      "errors": [
+        "400: gudang opname wajib dipilih / tidak ditemukan",
+        "400: parameter date tidak valid"
+      ],
+      "related": [
+        "opn_create",
+        "opn_list"
       ]
     },
     {
@@ -27056,7 +27105,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "stock_opname",
-      "desc": "Membuat dan langsung memfinalkan Stok Opname dalam satu langkah (tidak ada tahap draft di API): selisih stok aktual vs sistem langsung menjadi pergerakan penyesuaian stok + jurnal selisih persediaan. Bila unitCost manual diisi dan berbeda dari WAC, nilai persediaan direvaluasi.",
+      "desc": "Membuat dan langsung memfinalkan Stok Opname satu gudang dalam satu langkah (tidak ada tahap draft di API): hanya baris yang diubah yang dikirim, masing-masing dengan stok sistem per tanggal opname yang ditampilkan (ambil dulu lewat opn_system_stock). Selisih stok aktual vs stok sistem per tanggal opname menjadi pergerakan penyesuaian stok bertanggal opname + jurnal selisih persediaan. Revaluasi nilai satuan lewat opname tidak ada lagi.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -27074,14 +27123,14 @@
           "in": "body",
           "type": "date",
           "required": true,
-          "description": "Tanggal opname (YYYY-MM-DD), harus di tahun fiskal aktif."
+          "description": "Tanggal opname (YYYY-MM-DD), harus di tahun fiskal aktif. Stok sistem dihitung per akhir tanggal ini (WIB)."
         },
         {
           "name": "warehouseId",
           "in": "body",
           "type": "uuid",
-          "required": false,
-          "description": "UUID gudang yang dihitung; bila diisi, stok sistem dibandingkan dengan saldo gudang itu saja."
+          "required": true,
+          "description": "UUID gudang yang dihitung (wajib; satu sesi opname per gudang)."
         },
         {
           "name": "notes",
@@ -27107,14 +27156,14 @@
               "in": "body",
               "type": "number",
               "required": true,
-              "description": "sistem saat ini (artinya user aktif mengetik angka negatif)."
+              "description": "Stok fisik hasil hitung (>= 0)."
             },
             {
-              "name": "unitCost",
+              "name": "expectedSystemStock",
               "in": "body",
               "type": "number",
-              "required": false,
-              "description": "ke nilai ini dan selisih nilainya dijurnal ke akun Selisih Persediaan."
+              "required": true,
+              "description": "Stok sistem per tanggal opname yang ditampilkan saat baris diisi (dari opn_system_stock); beda > 0,0005 dari stok sistem saat posting = 409 OPNAME_STOCK_CHANGED."
             },
             {
               "name": "notes",
@@ -27123,7 +27172,7 @@
               "required": false
             }
           ],
-          "description": "Baris hitung: [{itemId, actualStock, unitCost?, notes?}]. actualStock negatif ditolak bila berbeda dari stok sistem. unitCost opsional = revaluasi nilai satuan."
+          "description": "Hanya baris yang diubah: [{itemId, actualStock, expectedSystemStock, notes?}]; satu item sekali per opname. unitCost ditolak (400)."
         }
       ],
       "output": {
@@ -27137,22 +27186,31 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok gudang & total disesuaikan sebesar selisih (SM AdjustmentIn/Out per item berselisih). GL: surplus = DR Persediaan (akun item atau 1.4.0) / CR Selisih Persediaan (INVENTORY_VARIANCE, default 6.38); defisit = DR Selisih Persediaan / CR Persediaan. Lewat buku nilai persediaan: surplus bernilai qty x biaya baris (ikut rata-rata), defisit dinilai dari buku nilai (bukan unitCost yang diketik). Revaluasi unitCost (sesudah penyesuaian qty): stok terhitung dinilai ulang ke biaya itu (baris Revaluation, selisih nilai ke Selisih Persediaan; porsi yang tidak terserap persediaan ke HPP); tanpa stok tersisa sesudah opname, unitCost yang berbeda dari WAC ditolak (400 OPNAME_REVALUATION_NO_STOCK).",
+      "postingEffect": "Per baris berselisih (stok aktual - stok sistem per tanggal opname): SM AdjustmentIn/Out di gudang opname, bertanggal opname. Lewat buku nilai persediaan: surplus bernilai qty x rata-rata (ikut rata-rata), defisit dinilai dari buku nilai. GL lewat jalur posting bersama (sumber Dokumen sistem, nomor JV-<nomor opname>): surplus = DR Persediaan (akun item atau 1.4.0) / CR Selisih Persediaan (INVENTORY_VARIANCE); defisit = DR Selisih Persediaan / CR Persediaan. Baris tanpa selisih hanya disimpan, tanpa pergerakan dan jurnal.",
       "confirm_template": "Finalkan stok opname tanggal {date} gudang {warehouseId}? Stok dan jurnal selisih akan langsung diposting.",
       "prerequisites": [
         "Tahun fiskal aktif untuk tanggal opname.",
-        "Tidak ada sesi opname berstatus Draft lain."
+        "Tidak ada sesi opname berstatus Draft lain.",
+        "Stok sistem per tanggal tiap baris diambil lewat opn_system_stock tepat sebelum posting.",
+        "Akun Selisih Persediaan (INVENTORY_VARIANCE) dipetakan ke akun rinci tersendiri, bukan akun grup atau akun Pembulatan."
       ],
       "errors": [
         "400: tidak ada tahun fiskal aktif",
         "400: masih ada stok opname Draft",
-        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
+        "400: gudang opname wajib dipilih / tidak ditemukan / tidak aktif",
+        "400: nilai satuan tidak dapat diubah lewat stok opname (unitCost dikirim)",
+        "400: stok sistem yang ditampilkan form wajib dikirim (expectedSystemStock kosong)",
         "400: stok aktual tidak boleh negatif",
-        "400 OPNAME_REVALUATION_NO_STOCK: unitCost berbeda dari WAC padahal stok item sesudah opname 0 atau minus; kosongkan unitCost atau samakan dengan WAC",
+        "400: satu item hanya boleh muncul sekali dalam satu stok opname",
         "400: item tidak ditemukan",
+        "409 OPNAME_STOCK_CHANGED: stok sistem per tanggal opname berubah sejak baris diisi; respons memuat items [{itemId, itemName, expectedSystemStock, systemStock}], ambil ulang lewat opn_system_stock lalu periksa barisnya",
+        "400 STOCK_INSUFFICIENT: opname bertanggal mundur yang defisitnya melebihi stok gudang saat ini",
+        "400 INVENTORY_VARIANCE_UNSAFE: akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan",
+        "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
+        "opn_system_stock",
         "opn_get",
         "opn_cancel",
         "inv_items_list"
@@ -34105,19 +34163,20 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Semua baris opname (termasuk Revaluation) dibalik persis sebesar nilainya di buku nilai persediaan. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item surplus/revaluasi sudah keluar sejak opname, dan 409 OPNAME_LEGACY_REVALUATION untuk opname lama yang revaluasinya dijurnal tanpa baris Revaluation.",
+      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Semua baris opname dibalik persis sebesar nilainya di buku nilai persediaan; bila barang item sudah keluar sejak opname, selisih nilai yang terbawa keluar dikoreksi (baris Revaluation + jurnal DR/CR Persediaan lawan HPP, bertanggal hari pembatalan), dan sisa nilai saat stok jadi 0 disapu ke HPP. Ditolak 409 OPNAME_LEGACY_REVALUATION untuk opname lama yang revaluasinya dijurnal tanpa baris Revaluation.",
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
         "Stok item saat ini cukup untuk membalik surplus.",
-        "Tahun buku dokumen dan jurnalnya masih terbuka."
+        "Tahun buku dokumen dan jurnalnya masih terbuka; bila ada koreksi nilai, periode hari pembatalan juga terbuka."
       ],
       "errors": [
         "400: stok opname sudah dibatalkan",
         "400 STOCK_INSUFFICIENT: stok gudang opname tidak cukup untuk membalik surplus (dijumlah per item per gudang)",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan opname ini lebih dulu; tidak ada yang dibalik dua kali",
-        "409 REVERSAL_NEEDS_TRUE_UP: barang item surplus atau revaluasi sudah keluar sejak opname; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 OPNAME_LEGACY_REVALUATION: opname lama berisi revaluasi nilai dari sebelum buku nilai persediaan; minta akuntan membuat jurnal koreksi",
+        "409 TRUE_UP_PRE_BASELINE: baris opname dicatat sebelum buku nilai dirilis dan barangnya sudah keluar; minta akuntan membuat jurnal koreksi",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya, koreksi nilai tidak bisa dihitung otomatis",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan",

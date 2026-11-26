@@ -17,7 +17,7 @@ Sumber pergerakan stok (siapa yang menghasilkan SM):
 3. **Produksi**: `ProductionRun` = bahan input keluar, produk output masuk (lihat toolset produksi).
 4. **Manual** (`inv_mov_create`): stok awal, koreksi, pemakaian lain.
 5. **Transfer antar gudang** (`stf_create`): `TransferOut` + `TransferIn` berpasangan.
-6. **Stok opname** (`opn_create`): penyesuaian selisih fisik vs sistem.
+6. **Stok opname** (`opn_system_stock` lalu `opn_create`): penyesuaian selisih fisik vs stok sistem per tanggal opname, satu gudang per sesi.
 
 Pergerakan yang lahir dari dokumen lain (STT/GoodsReceipt, ProductionRun) **tidak boleh diedit/dibatalkan per baris** lewat `inv_mov_update` / `inv_mov_cancel`; koreksi dilakukan di dokumen sumbernya.
 
@@ -39,8 +39,8 @@ Kunci ringkas: **stok bergerak = SM**, **jurnal hanya bila ada nilai uang yang b
 | `inv_mov_cancel` | dibalik | jurnal terkait Cancelled, saldo akun dikurangi per baris jurnal | baris dibalik persis sebesar nilainya di buku nilai; rata-rata mengikuti nilai buku, COGS backfill dibalik |
 | `stf_create` | - qty gudang asal, + qty gudang tujuan; total item tetap | **tidak ada** (akun persediaan sama, net nol) | tidak berubah |
 | `stf_cancel` | dibalik | tidak ada | tidak berubah |
-| `opn_create` | disesuaikan = stok aktual - stok sistem per item | surplus: DR Persediaan / CR Selisih Persediaan (6.38 default, role `INVENTORY_VARIANCE`) sebesar qty x biaya baris; defisit: DR Selisih Persediaan / CR Persediaan sebesar nilai dari buku nilai persediaan (bukan `unitCost` yang diketik); revaluasi `unitCost` manual: baris `Revaluation`, selisih nilai stok terhitung ke Selisih Persediaan (porsi yang tidak terserap persediaan ke HPP) | surplus ikut rata-rata; revaluasi sesudah penyesuaian qty membuat rata-rata stok terhitung = `unitCost` manual (tanpa stok tersisa sesudah opname: `unitCost` yang berbeda dari WAC ditolak `OPNAME_REVALUATION_NO_STOCK`) |
-| `opn_cancel` | dibalik | jurnal `JV-<nomor opname>` Cancelled | semua baris opname (termasuk `Revaluation`) dibalik persis sebesar nilainya; ditolak `REVERSAL_NEEDS_TRUE_UP` bila barang item itu sudah keluar sejak opname, dan `OPNAME_LEGACY_REVALUATION` untuk opname lama yang revaluasinya dijurnal tanpa baris `Revaluation` |
+| `opn_create` | disesuaikan = stok aktual - stok sistem gudang per tanggal opname, bertanggal opname | lewat jalur posting bersama (`JV-<nomor opname>`, sumber Dokumen sistem): surplus DR Persediaan / CR Selisih Persediaan (role `INVENTORY_VARIANCE`, wajib akun rinci tersendiri) sebesar qty x rata-rata; defisit DR Selisih Persediaan / CR Persediaan sebesar nilai dari buku nilai persediaan | surplus ikut rata-rata; tidak ada revaluasi lewat opname (`unitCost` ditolak) |
+| `opn_cancel` | dibalik | jurnal `JV-<nomor opname>` Cancelled; bila barang item sudah keluar sejak opname, jurnal koreksi nilai DR/CR Persediaan lawan HPP bertanggal hari pembatalan | semua baris opname dibalik persis sebesar nilainya, lalu koreksi nilai (true-up) dan sapu sisa nilai saat stok 0 ke HPP; `OPNAME_LEGACY_REVALUATION` untuk opname lama yang revaluasinya dijurnal tanpa baris `Revaluation` |
 
 Aturan wajib:
 - Setiap jurnal harus seimbang (debit = kredit); sistem menjaga ini, AIRA tidak perlu menghitung manual.
@@ -62,8 +62,8 @@ Aturan wajib:
 3. **Akun lawan**. Stok masuk wajib `offsetAccountId` (`OFFSET_REQUIRED`); tidak ada lagi default Ekuitas Saldo Awal 3.1. Stok keluar tanpa akun lawan dibukukan ke akun Selisih Persediaan (role `INVENTORY_VARIANCE`); selama role itu dipetakan ke akun grup atau ke akun yang sama dengan akun Pembulatan, sistem menolak (`INVENTORY_VARIANCE_UNSAFE`) dan Pemeriksaan Sistem memberi peringatan "Akun Selisih Persediaan tersendiri". Akun lawan yang ditolak: 3.1 Ekuitas Saldo Awal, akun kontrol (piutang, hutang, uang muka, persediaan, hutang belum ditagih), akun pajak, akun grup, akun nonaktif, dan akun di kelompok persediaan (`STOCK_OFFSET_INVENTORY`).
 4. **Edit = batal + buat ulang**. `inv_mov_update` bukan edit draft; pergerakan lama dibatalkan, pergerakan baru bernomor SM baru (id baru di respons), dan jurnal lama berstatus Cancelled. Edit atau batal stok masuk manual ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila barang item itu sudah keluar sesudahnya: nilai persediaan perlu dikoreksi akuntan, koreksi otomatis untuk mutasi manual belum tersedia. Pembatalan dokumen (`gr_cancel`, `do_cancel`, `sret_cancel`, `si_cancel`, `pi_cancel`) mengoreksi nilainya otomatis (true-up): satu jurnal per gerakan yang dibalik, bertanggal hari pembatalan (periodenya harus terbuka), Persediaan item lawan COGS; sisa nilai saat stok jadi 0 ikut disapu ke COGS.
 5. **Transfer langsung berlaku**. `stf_create` tidak punya draft; kesalahan harus diperbaiki dengan `stf_cancel` lalu buat ulang. `stf_update` hanya mengubah metadata cetak (mobil, supir, penerima, catatan).
-6. **Opname langsung final**. `opn_create` memposting penyesuaian dan jurnal saat itu juga. Kirim semua item yang dihitung (termasuk yang tidak berselisih) agar jejak audit lengkap; angka aktual negatif ditolak kecuali sama dengan stok sistem minus historis.
-7. **Revaluasi tak sengaja**. Mengisi `unitCost` pada baris opname yang berbeda dari WAC akan menilai ulang stok terhitung ke biaya itu (baris `Revaluation`, rata-rata item berubah) dan menjurnal selisih nilai. Isi hanya bila memang revaluasi.
+6. **Opname langsung final, hanya baris yang diubah**. `opn_create` memposting penyesuaian dan jurnal saat itu juga. Gudang wajib. Ambil stok sistem per tanggal lewat `opn_system_stock` tepat sebelum posting, lalu kirim hanya baris yang diubah dengan `expectedSystemStock` = angka itu. Bila stok berubah sejak diambil, `opn_create` ditolak `409 OPNAME_STOCK_CHANGED` dengan daftar barisnya: ambil ulang dan periksa lagi, jangan menebak. Stok aktual negatif ditolak.
+7. **Opname bukan revaluasi**. `unitCost` pada baris opname ditolak (400); penurunan nilai persediaan akan menjadi dokumen tersendiri. Opname bertanggal mundur membandingkan stok per tanggal itu (STT sesudahnya tidak mengganggu), tetapi defisitnya diambil dari stok gudang saat ini.
 8. **Pembatalan butuh stok di gudangnya**. `inv_mov_cancel`/`inv_mov_update` untuk pergerakan masuk, `opn_cancel` untuk surplus, dan `gr_cancel` ditolak (`STOCK_INSUFFICIENT` / `GR_CANCEL_INSUFFICIENT_STOCK`) bila stok **di gudang mutasi itu** tidak cukup untuk dibalik; stok di gudang lain tidak dihitung. Baris item yang sama dalam satu dokumen dijumlah (juga di `stf_create`). Mutasi lama tanpa gudang dicek terhadap total item.
 9. **Stok sedang diproses (`STOCK_BUSY`, 409)**. Transaksi stok atas item yang sama berjalan berurutan; bila menunggu lebih dari 5 detik, permintaan ditolak tanpa perubahan apa pun. Ulangi sebentar lagi, jangan ubah isinya.
 10. **Hapus master**. `inv_item_delete` menghapus permanen item + pergerakan batalnya, dan ditolak bila ada mutasi aktif/dipakai invoice. `wh_delete` ditolak untuk gudang default/bersaldo/berriwayat; nonaktifkan saja (`wh_update isActive=false`).
@@ -82,7 +82,7 @@ Aturan wajib:
 | Penyesuaian stok | `AdjustmentIn` / `AdjustmentOut` |
 | Transfer / mutasi antar gudang / SJG (Surat Jalan Antar Gudang) | `StockTransfer` (`TransferOut` + `TransferIn`) |
 | Stok opname / hitung fisik | `StockOpname` (nomor `SO-...`; jangan tertukar dengan Sales Order) |
-| Selisih opname | `difference` = stok aktual - stok sistem; akun Selisih Persediaan (6.38) |
+| Selisih opname | `difference` = stok aktual - stok sistem per tanggal opname; akun Selisih Persediaan (6.38) |
 | HPP / harga pokok rata-rata / WAC | `averageCost` (Weighted Average Cost, satu angka per item) |
 | Nilai persediaan | stok x `averageCost` |
 | Stok minimum / stok rendah | `minimumStock`; status stok `low` / `out` / `ok` |
