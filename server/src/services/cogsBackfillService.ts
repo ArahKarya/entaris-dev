@@ -36,10 +36,11 @@ export const LEGACY_COGS_SETTLE = 'LegacyCogsSettle';
 /**
  * After a stock-in event, settle pending COGS backfill entries for the item (FIFO). The batch's
  * differential moves value between inventory and COGS through the value ledger: one Revaluation of
- * −differential (postRevaluation, LEGACY_COGS_SETTLE), and a single JV of the part stock absorbs
- * (DR HPP / CR Persediaan, or reverse), linked to that row. A part stock cannot absorb (no stock on
- * hand, or a decrease beyond stock_value) would go to COGS, the counter account itself, so it moves
- * nothing. Safe to call when no pending entries exist — returns null without DB writes.
+ * −differential (postRevaluation, LEGACY_COGS_SETTLE, wholeToInventory) and a single JV of the same
+ * amount (DR HPP / CR Persediaan, or reverse), linked to that row. The whole differential moves
+ * stock_value, also when the stock-in leaves stock at or below 0: it re-values the oversold units
+ * the stock-in covered, which a split to COGS would leave in the book at zero quantity. Safe to
+ * call when no pending entries exist — returns null without DB writes.
  */
 export async function settleCogsBackfillForItem(
   tx: Tx,
@@ -101,16 +102,14 @@ export async function settleCogsBackfillForItem(
       itemId, date: settleDate, fiscalYearId, createdById: userId, delta: totalDifferential.negated(),
       referenceType: LEGACY_COGS_SETTLE, referenceId: source.refId, referenceNumber: source.refNo ?? null,
       notes: `Auto-settle HPP ${settlements.length} entri, pemicu ${source.type}${source.refNo ? ' ' + source.refNo : ''}`,
+      wholeToInventory: true,
     });
     // > 0: inventory down, DR HPP / CR Persediaan.
-    const amount = reval.valueDelta.negated();
-    if (!amount.isZero()) {
-      journalEntryId = await postSettleJournal(tx, {
-        item, amount, fiscalYearId, settleDate, userId,
-        narration: `Auto-settle COGS ${item.name}: ${settlements.length} entry, trigger ${source.type}${source.refNo ? ' ' + source.refNo : ''}`,
-      });
-      await linkMovementJournal(tx, reval.movement.id, journalEntryId);
-    }
+    journalEntryId = await postSettleJournal(tx, {
+      item, amount: reval.valueDelta.negated(), fiscalYearId, settleDate, userId,
+      narration: `Auto-settle COGS ${item.name}: ${settlements.length} entry, trigger ${source.type}${source.refNo ? ' ' + source.refNo : ''}`,
+    });
+    await linkMovementJournal(tx, reval.movement.id, journalEntryId);
   }
 
   // Persist queue updates + settlement records

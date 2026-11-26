@@ -22,7 +22,7 @@ export async function assertBatchSource(
 ): Promise<{ id: string; unitCost: Prisma.Decimal }> {
   const batch = await tx.stockMovement.findUnique({
     where: { id: input.sourceMovementId },
-    select: { id: true, itemId: true, isCancelled: true, movementType: true, quantity: true, unitCost: true, totalValue: true },
+    select: { id: true, itemId: true, isCancelled: true, movementType: true, quantity: true, unitCost: true, totalValue: true, valueDelta: true },
   });
   const name = input.itemName;
   const line = input.inputLine;

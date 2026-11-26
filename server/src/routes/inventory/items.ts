@@ -147,7 +147,7 @@ router.get('/:id/batches', async (req, res) => {
       where: inboundFilter,
       orderBy: { date: 'asc' },
       select: {
-        id: true, movementNumber: true, date: true, quantity: true, unitCost: true, totalValue: true,
+        id: true, movementNumber: true, date: true, quantity: true, unitCost: true, totalValue: true, valueDelta: true,
         referenceType: true, referenceId: true, referenceNumber: true,
         warehouseId: true,
       },

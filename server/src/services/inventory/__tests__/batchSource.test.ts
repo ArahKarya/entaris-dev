@@ -4,6 +4,7 @@ import { assertBatchSource, MOVEMENT_SOURCE_BATCH_INVALID } from '../batchSource
 
 type Batch = {
   id: string; itemId: string; isCancelled: boolean; movementType: string; quantity: number; unitCost: number; totalValue: number;
+  valueDelta: number;
 };
 
 /** `adjusted`: Σ value_delta of the active Revaluations that adjust the batch (none: no group). */
@@ -15,7 +16,7 @@ const txWith = (batch: Batch | null, adjusted?: number) =>
     },
   }) as unknown as Prisma.TransactionClient;
 
-const good: Batch = { id: 'sm-1', itemId: 'gkp', isCancelled: false, movementType: 'In', quantity: 100, unitCost: 6000, totalValue: 600_000 };
+const good: Batch = { id: 'sm-1', itemId: 'gkp', isCancelled: false, movementType: 'In', quantity: 100, unitCost: 6000, totalValue: 600_000, valueDelta: 600_000 };
 const named = { sourceMovementId: 'sm-1', inventoryItemId: 'gkp', itemName: 'GKP' };
 const byLine = { ...named, inputLine: 2 };
 
@@ -40,6 +41,20 @@ describe('assertBatchSource', () => {
     // 600.000 + 50.000 over 100 kg.
     const batch = await assertBatchSource(txWith(good, 50_000), named);
     expect(batch.unitCost.toString()).toBe('6500');
+  });
+
+  it('starts from value_delta when a purchase invoice before the value ledger rewrote total_value (backfilled shape)', async () => {
+    // The old submit rewrote the row to 650.000 / 6.500; value_delta is the locked 600.000 and the
+    // backfill's SM-RV- row adjusting it carries the +50.000: counted once.
+    const rewritten = { ...good, unitCost: 6500, totalValue: 650_000 };
+    expect((await assertBatchSource(txWith(rewritten, 50_000), named)).unitCost.toString()).toBe('6500');
+    // That Revaluation cancelled with its invoice: back to the locked cost, not the rewritten unit_cost.
+    expect((await assertBatchSource(txWith(rewritten), named)).unitCost.toString()).toBe('6000');
+  });
+
+  it('a transfer leg (value_delta 0) adjusted by a Revaluation starts from total_value', async () => {
+    const leg = { ...good, movementType: 'TransferIn', valueDelta: 0 };
+    expect((await assertBatchSource(txWith(leg, 50_000), named)).unitCost.toString()).toBe('6500');
   });
 
   it.each([

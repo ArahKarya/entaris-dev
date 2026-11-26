@@ -93,8 +93,14 @@ export async function cancelSalesInvoiceInTx(
   const stockMovements = await tx.stockMovement.findMany({
     where: { referenceType: 'SalesInvoice', referenceId: invoice.id, isCancelled: false },
   });
+  // The items of its COGS backfill queue too (a from-DO invoice owns no rows of them): closing the
+  // queue reverses their settlement rows after the journals below have locked accounts.
+  const queueItems = await tx.cogsBackfillQueue.findMany({
+    where: { salesInvoiceId: invoice.id, status: { not: 'Cancelled' } },
+    select: { inventoryItemId: true },
+  });
   await lockInventoryRows(tx, {
-    itemIds: stockMovements.map((sm) => sm.itemId),
+    itemIds: [...stockMovements.map((sm) => sm.itemId), ...queueItems.map((q) => q.inventoryItemId)],
     pairs: stockMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
   });
 
@@ -220,9 +226,12 @@ export async function cancelPurchaseInvoiceInTx(
 
   await recalcPartyOutstanding(tx, invoice.partyId);
 
-  for (const referenceType of PURCHASE_INVOICE_ROW_TYPES) {
-    await reverseDocumentMovements(tx, { referenceType, referenceId: invoice.id }, { userId: trail?.cancelledById ?? invoice.createdBy });
-  }
+  // Both types in one pass, newest first: a revision was posted on the book the landed cost left.
+  await reverseDocumentMovements(
+    tx,
+    { referenceType: PURCHASE_INVOICE_ROW_TYPES, referenceId: invoice.id },
+    { userId: trail?.cancelledById ?? invoice.createdBy },
+  );
 
   await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', invoice.id, trail);
 

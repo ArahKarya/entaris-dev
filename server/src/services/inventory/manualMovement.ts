@@ -405,6 +405,11 @@ export async function cancelManualMovementInTx(tx: Tx, id: string, userId: strin
   const movement = await lockManualMovement(tx, id, 'cancel');
   // By date only, as on edit: the journal and auto-settle journals check their own year.
   await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
+  // Item and warehouse before the settlement journals lock accounts (LOCK ORDER of stockLocks.ts).
+  await lockInventoryRows(tx, {
+    itemIds: [movement.itemId],
+    pairs: movement.warehouseId ? [{ itemId: movement.itemId, warehouseId: movement.warehouseId }] : [],
+  });
   // The COGS settlement the row triggered first: it was posted on the book the row left.
   await reverseCogsSettlementsByTrigger(tx, 'StockMovement', id);
   await reverseManualRow(tx, movement, 'inventory.movement.cancel', userId);

@@ -10,8 +10,12 @@
  * - a revision down beyond the value left: the rest goes to COGS, the average is 0, never negative;
  * - a revision of an STT that carries a backfilled Revaluation: batch cost and average take both,
  *   cancelling the invoice takes both back and voids the revision journal;
+ * - cancelling a PI whose revision brought the book below its landed cost takes the rows back newest
+ *   first, through states the book had;
  * - a legacy COGS settlement moves value out of stock by a Revaluation linked to its journal, and
- *   reversing the trigger takes it back.
+ *   reversing the trigger takes it back; a stock-in that leaves stock at 0 or still negative moves
+ *   the whole differential (book = GL, nothing left at zero quantity); cancelling the sales invoice
+ *   after a later sale of the item is refused (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a).
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2131.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -38,7 +42,9 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 import { prisma as appPrisma } from '../../lib/prisma';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise';
-import { cancelPurchaseInvoiceInTx } from '../../services/invoiceCancellation';
+import { cancelPurchaseInvoiceInTx, cancelSalesInvoiceInTx } from '../../services/invoiceCancellation';
+import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
+import { createManualMovementInTx } from '../../services/inventory/manualMovement';
 import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import { LEGACY_COGS_SETTLE, settleCogsBackfillForItem } from '../../services/cogsBackfillService';
@@ -250,11 +256,15 @@ d('purchase invoice price revision on the value ledger (PR-6.4c3)', () => {
           referenceNumber: pi.invoiceNumber, adjustsMovementId: stt.movementId, fiscalYearId: w.fyId, createdById: w.userId,
         },
       });
+      // The old submit rewrote the STT row to the landed amount; its value_delta is the locked cost.
+      await tx.stockMovement.update({ where: { id: stt.movementId }, data: { totalValue: 1_050_000, unitCost: 10_500 } });
       const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: w.item.id } });
       await tx.inventoryItem.update({
         where: { id: w.item.id },
         data: { stockValue: '1050000', averageCost: averageAfter(item.currentStock.toString(), '1050000', item.averageCost.toString()).toString() },
       });
+
+      expect(await batchCost(tx, stt.movementId)).toBe('10500.000000');
 
       // 10.000 -> 10.500 on the 100 kg still in stock: +50.000 more.
       const line = await tx.purchaseInvoiceItem.findFirstOrThrow({ where: { purchaseInvoiceId: pi.id } });
@@ -272,6 +282,24 @@ d('purchase invoice price revision on the value ledger (PR-6.4c3)', () => {
       expect(await revaluationsOf(tx, pi.id)).toEqual([]);
       expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: revision.id } })).status).toBe('Cancelled');
       expect(await batchCost(tx, stt.movementId)).toBe('10000.000000');
+    });
+  });
+});
+
+d('purchase invoice cancel order (PR-6.4c3)', () => {
+  it('a revision that left the book below the landed cost is taken back first, then the landed cost', async () => {
+    await inWorld(async (tx, w) => {
+      const stt = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
+      const pi = await invoiceReceipt(tx, w, stt.goodsReceiptId, 10_500);
+      // (400 − 10.500) x 100 = −1.010.000 out of 1.050.000: 40.000 left, below the landed +50.000.
+      const line = await tx.purchaseInvoiceItem.findFirstOrThrow({ where: { purchaseInvoiceId: pi.id } });
+      await revisePurchaseInvoiceInTx(tx, { invoiceId: pi.id, lines: [{ itemId: line.id, newRate: 400 }], reason: 'Harga final dari Supplier turun' }, w.userId);
+      expect(await bookAndGl(tx, w)).toEqual({ stock: '100.000', value: '40000.00', average: '400.000000' });
+
+      // Landed cost first would leave −10.000 at 100 kg and be refused.
+      await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, pi.id, trail(w)));
+      expect(await bookAndGl(tx, w)).toEqual({ stock: '100.000', value: '1000000.00', average: '10000.000000' });
+      expect(await revaluationsOf(tx, pi.id)).toEqual([]);
     });
   });
 });
@@ -308,6 +336,95 @@ d('legacy COGS settlement on the value ledger (PR-6.4c3, decision #6)', () => {
       expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: row.id } })).isCancelled).toBe(true);
       const queue = await tx.cogsBackfillQueue.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
       expect([queue.status, Number(queue.qtyPending)]).toEqual(['Pending', 40]);
+    });
+  });
+
+  /** 10 kg in @1.000, 20 kg out (10 kg below zero), and the legacy queue of the 10 oversold kg at 1.000. */
+  async function oversold(tx: Tx, w: SalesFlowWorld) {
+    await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 10, avg: 1_000, day: DAY });
+    const doc = await submitDeliveryOrderInTx(tx, {
+      date: DAY, partyId: w.customer.id, allowNegativeStock: true, negativeStockReason: 'Barang sudah dikirim, STT menyusul',
+      items: [{ inventoryItemId: w.item.id, warehouseId: w.warehouseA.id, itemName: w.item.name, quantity: 20, unit: 'kg' }],
+    }, w.userId);
+    const invoice = await invoiceDelivery(tx, w, DAY, doc, { rate: 15_000 });
+    const siItem = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+    await tx.cogsBackfillQueue.create({
+      data: {
+        salesInvoiceId: invoice.id, salesInvoiceItemId: siItem.id, inventoryItemId: w.item.id,
+        qtyPending: 10, qtyOriginal: 10, costAtSale: 1_000, fiscalYearId: invoice.fiscalYearId,
+      },
+    });
+    expect(await bookAndGl(tx, w)).toMatchObject({ stock: '-10.000', value: '-10000.00' });
+    return { invoice, cogsBefore: await glBalance(tx, w.accounts.cogs.id) };
+  }
+
+  /** A manual stock-in of `qty` @10.000 through the real service, which settles the queue. */
+  async function stockIn(tx: Tx, w: SalesFlowWorld, qty: number) {
+    const code = `IT-PRV-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const offset = await tx.account.create({ data: { name: `Beban uji ${code}`, accountNumber: code, accountType: 'EXPENSE', rootType: 'EXPENSE' } });
+    return inRouteTx((t) => createManualMovementInTx(t, {
+      itemId: w.item.id, warehouseId: w.warehouseA.id, movementType: 'AdjustmentIn', quantity: qty, unitCost: 10_000,
+      date: DAY, offsetAccountId: offset.id,
+    }, w.userId));
+  }
+
+  it('a stock-in that brings stock exactly to 0 moves the whole differential: stock_value 0 = GL', async () => {
+    await inWorld(async (tx, w) => {
+      const { invoice, cogsBefore } = await oversold(tx, w);
+      // −10.000 + 100.000 = 90.000 at 0 kg; 10 x (10.000 − 1.000) = 90.000 to COGS.
+      const movement = await stockIn(tx, w, 10);
+      expect(await bookAndGl(tx, w)).toMatchObject({ stock: '0.000', value: '0.00' });
+      expect(money((await glBalance(tx, w.accounts.cogs.id)).minus(cogsBefore))).toBe('90000.00');
+      const row = await tx.stockMovement.findFirstOrThrow({ where: { referenceType: LEGACY_COGS_SETTLE, referenceId: movement.id } });
+      expect([money(row.valueDelta.toString()), row.journalEntryId !== null]).toEqual(['-90000.00', true]);
+      const queue = await tx.cogsBackfillQueue.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      expect([queue.status, Number(queue.qtyPending)]).toEqual(['Settled', 0]);
+    });
+  });
+
+  it('a stock-in that leaves stock negative moves the differential of the kg it settled', async () => {
+    await inWorld(async (tx, w) => {
+      const { invoice, cogsBefore } = await oversold(tx, w);
+      // −10.000 + 50.000 = 40.000 at −5 kg; 5 x 9.000 = 45.000 to COGS: −5.000, the 5 kg still oversold at 1.000.
+      await stockIn(tx, w, 5);
+      expect(await bookAndGl(tx, w)).toMatchObject({ stock: '-5.000', value: '-5000.00' });
+      expect(money((await glBalance(tx, w.accounts.cogs.id)).minus(cogsBefore))).toBe('45000.00');
+      const queue = await tx.cogsBackfillQueue.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      expect([queue.status, Number(queue.qtyPending)]).toEqual(['PartiallySettled', 5]);
+
+      // The rest: 5 kg more @10.000 settles the queue and leaves 0 = GL.
+      await stockIn(tx, w, 5);
+      expect(await bookAndGl(tx, w)).toMatchObject({ stock: '0.000', value: '0.00' });
+      expect(money((await glBalance(tx, w.accounts.cogs.id)).minus(cogsBefore))).toBe('90000.00');
+    });
+  });
+
+  it('cancelling the sales invoice after a later sale of the item is refused until the true-up (PR-6.5a)', async () => {
+    await inWorld(async (tx, w) => {
+      const stt = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
+      const invoice = await submitSalesInvoiceInTx(tx, {
+        date: DAY, partyId: w.customer.id, items: [{ itemName: 'Jasa uji HPP', itemType: 'service', quantity: 1, rate: 1_000_000 }],
+      }, w.userId);
+      const siItem = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      await tx.cogsBackfillQueue.create({
+        data: {
+          salesInvoiceId: invoice.id, salesInvoiceItemId: siItem.id, inventoryItemId: w.item.id,
+          qtyPending: 40, qtyOriginal: 40, costAtSale: 9_000, fiscalYearId: invoice.fiscalYearId,
+        },
+      });
+      await settleCogsBackfillForItem(tx, {
+        itemId: w.item.id, qtyAvailable: 100, unitCostNow: 10_000, userId: w.userId, settleDate: new Date(DAY),
+        source: { type: 'StockMovement', refId: stt.movementId, refNo: 'IT-PRV-SM' },
+      });
+      // Goods out after the settlement were valued at an average that included it.
+      await sell(tx, w, 10);
+      const before = await bookAndGl(tx, w);
+
+      expect(await codeOf(inRouteTx((t) => cancelSalesInvoiceInTx(t, invoice.id, trail(w))))).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await bookOf(tx, w.item.id)).toEqual(before);
+      expect((await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).not.toBe('Cancelled');
+      const queue = await tx.cogsBackfillQueue.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      expect(queue.status).toBe('Settled');
     });
   });
 });

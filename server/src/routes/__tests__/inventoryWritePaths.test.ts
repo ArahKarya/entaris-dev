@@ -382,7 +382,7 @@ describe('document movement lock and references (E3-R2)', () => {
       ...lockHandlers(),
       'stockOpname.updateMany': () => ({ count: 1 }),
       'stockMovement.findMany': ({ where }: any) =>
-        [live, dead].filter((m) => m.referenceType === where.referenceType && m.referenceId === where.referenceId && m.isCancelled === where.isCancelled),
+        [live, dead].filter((m) => (where.referenceType?.in ?? [where.referenceType]).includes(m.referenceType) && m.referenceId === where.referenceId && m.isCancelled === where.isCancelled),
       'stockMovement.findUnique': ({ where }: any) => [live, dead].find((m) => m.id === where.id) ?? null,
       'stockMovement.findUniqueOrThrow': ({ where }: any) => [live, dead].find((m) => m.id === where.id),
       'stockMovement.updateMany': () => ({ count: 1 }),

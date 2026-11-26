@@ -270,6 +270,12 @@ export interface RevaluationInput {
   journalEntryId?: string | null;
   /** Taken by the caller after lockInventoryRows; the ledger takes an 'SM' number otherwise. */
   movementNumber?: string;
+  /**
+   * The whole delta moves stock_value, with no revaluationSplit (toCogs 0). The legacy COGS settle
+   * only: its differential re-values units sold below zero that the triggering stock-in has just
+   * covered, so it belongs to the book whatever stock is left (0, or still negative).
+   */
+  wholeToInventory?: boolean;
 }
 
 export interface PostedRevaluation extends PostedMovement {
@@ -283,14 +289,17 @@ export interface PostedRevaluation extends PostedMovement {
 /**
  * Changes the value of the item's stock by `delta` through revaluationSplit: the part stock can
  * absorb moves stock_value (valueDelta, the caller's inventory amount), the rest is returned as
- * toCogs (no stock on hand, or a decrease larger than stock_value). The row is written even when
- * valueDelta is 0 (all to COGS) so the document owns a trace of its journal line.
+ * toCogs (no stock on hand, or a decrease larger than stock_value); wholeToInventory skips the
+ * split. The row is written even when valueDelta is 0 (all to COGS) so the document owns a trace of
+ * its journal line.
  */
 export async function postRevaluation(tx: Tx, i: RevaluationInput): Promise<PostedRevaluation> {
   const delta = new Decimal(i.delta).toDecimalPlaces(VALUE_DP);
   if (!delta.isFinite() || delta.isZero()) throw new Error('postRevaluation: delta must be a non-zero amount');
   const item = await lockItem(tx, i.itemId, null);
-  const { toInventory, toCogs } = revaluationSplit(item.currentStock, item.stockValue, delta);
+  const { toInventory, toCogs } = i.wholeToInventory
+    ? { toInventory: delta, toCogs: new Decimal(0) }
+    : revaluationSplit(item.currentStock, item.stockValue, delta);
   const next = stateAfter(item, new Decimal(0), toInventory);
   const movementNumber = i.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
   await writeStock(tx, i.itemId, null, new Decimal(0), next);
@@ -529,32 +538,35 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
 }
 
 export interface DocumentRef {
-  referenceType: string;
+  /** One type, or several a document owns rows under (a purchase invoice: landed cost and revisions). */
+  referenceType: string | readonly string[];
   referenceId: string;
 }
 
 /**
  * Reverses every active row a document owns (reference_type / reference_id) after one
  * lockInventoryRows call for all their items and warehouses (LOCK ORDER of stockLocks.ts): its
- * Out / AdjustmentOut rows first, then the others, each group in id order. The document's own
- * outbound rows are not goods that went out after its inbound or Revaluation rows (a stock count
- * writes both for one item in one transaction), so they are back before reversalSweep looks for
- * sales since. A sweep row an earlier reversal of the document wrote (a Revaluation adjusting a
- * cancelled row of the same document) is already the settlement of that row and is left alone. A
- * refusal of any row is thrown after earlier rows were written: the caller's transaction rolls
- * back as a whole.
+ * Out / AdjustmentOut rows first, then the others, each group newest first (createdAt, then
+ * movement number): a later row was posted on the book the earlier one left, so taking it back
+ * first walks the book through states that existed. The document's own outbound rows are not goods
+ * that went out after its inbound or Revaluation rows (a stock count writes both for one item in
+ * one transaction), so they are back before reversalSweep looks for sales since. A sweep row an
+ * earlier reversal of the document wrote (a Revaluation adjusting a cancelled row of the same
+ * document) is already the settlement of that row and is left alone. A refusal of any row is thrown
+ * after earlier rows were written: the caller's transaction rolls back as a whole.
  */
 export async function reverseDocumentMovements(tx: Tx, ref: DocumentRef, opts: ReverseOptions): Promise<ReverseResult[]> {
+  const types: readonly string[] = typeof ref.referenceType === 'string' ? [ref.referenceType] : ref.referenceType;
   const rows = await tx.stockMovement.findMany({
-    where: { referenceType: ref.referenceType, referenceId: ref.referenceId, isCancelled: false },
-    orderBy: { id: 'asc' },
+    where: { referenceType: { in: [...types] }, referenceId: ref.referenceId, isCancelled: false },
+    orderBy: [{ createdAt: 'desc' }, { movementNumber: 'desc' }],
     select: {
       id: true, itemId: true, warehouseId: true, movementType: true,
       adjustsMovement: { select: { isCancelled: true, referenceType: true, referenceId: true } },
     },
   });
   const settled = rows.filter((r) => !(r.adjustsMovement?.isCancelled
-    && r.adjustsMovement.referenceType === ref.referenceType && r.adjustsMovement.referenceId === ref.referenceId));
+    && types.includes(r.adjustsMovement.referenceType ?? '') && r.adjustsMovement.referenceId === ref.referenceId));
   const owned = [
     ...settled.filter((r) => OUTBOUND_TYPES.has(r.movementType)),
     ...settled.filter((r) => !OUTBOUND_TYPES.has(r.movementType)),
@@ -574,13 +586,18 @@ export interface BatchRow {
   quantity: Prisma.Decimal | Decimal.Value;
   unitCost: Prisma.Decimal | Decimal.Value;
   totalValue: Prisma.Decimal | Decimal.Value;
+  valueDelta: Prisma.Decimal | Decimal.Value;
 }
 
 /**
- * Unit cost of inbound batches as the batch picker shows them: the row's own value plus every active
- * Revaluation that adjusts it (a purchase invoice's landed cost or price revision, PR-6.4c3), over
- * its quantity, 6 dp. Computed, never stored: the row itself is not rewritten. A row nothing adjusts
- * keeps its unit_cost (a transfer leg's display cost included).
+ * Unit cost of inbound batches as the batch picker shows them: the value the row put into the book
+ * plus every active Revaluation that adjusts it (a purchase invoice's landed cost or price revision,
+ * PR-6.4c3), over its quantity, 6 dp. Computed, never stored: the row itself is not rewritten. The
+ * row's value is its value_delta, not total_value: a purchase invoice before the value ledger
+ * rewrote the STT row's total_value / unit_cost to the landed amount, and the backfill carries that
+ * delta as an SM-RV- Revaluation adjusting the row (whose value_delta is the locked cost), so
+ * total_value would count it twice. A row whose value_delta is 0 (a transfer leg) uses total_value;
+ * a row that nothing adjusts and nothing rewrote keeps its unit_cost.
  */
 export async function batchUnitCosts(db: Tx, rows: readonly BatchRow[]): Promise<Map<string, Decimal>> {
   const costs = new Map<string, Decimal>();
@@ -592,10 +609,13 @@ export async function batchUnitCosts(db: Tx, rows: readonly BatchRow[]): Promise
   });
   const adjusted = new Map(adjustments.map((a) => [a.adjustsMovementId, dec(a._sum.valueDelta ?? 0)]));
   for (const row of rows) {
-    const extra = adjusted.get(row.id);
+    const extra = adjusted.get(row.id) ?? new Decimal(0);
     const quantity = dec(row.quantity);
-    costs.set(row.id, extra && !extra.isZero() && quantity.gt(0)
-      ? dec(row.totalValue).plus(extra).div(quantity).toDecimalPlaces(UNIT_COST_DP)
+    const booked = dec(row.valueDelta);
+    const base = booked.isZero() ? dec(row.totalValue) : booked;
+    const rewritten = !booked.isZero() && !booked.eq(dec(row.totalValue));
+    costs.set(row.id, quantity.gt(0) && (!extra.isZero() || rewritten)
+      ? base.plus(extra).div(quantity).toDecimalPlaces(UNIT_COST_DP)
       : dec(row.unitCost));
   }
   return costs;
