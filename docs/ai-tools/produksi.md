@@ -43,7 +43,7 @@ Master pendukung: `Machine` (kapasitas ideal per jam untuk OEE), `ProductionProc
 
 Saat sebuah run diposting (langsung oleh Admin, atau setelah disetujui):
 
-1. **Input**: stok bahan keluar (SM `Out` per baris input) di gudang run, dinilai dari **buku nilai persediaan** (bagian nilai sebanding qty; baris yang menghabiskan stok membawa sisa nilainya). Batch sumber boleh dipilih (`sourceMovementId`), tetapi hanya untuk penelusuran: `batchUnitCost` dan biaya batch tidak menentukan nilai.
+1. **Input**: stok bahan keluar (SM `Out` per baris input) di gudang run, dinilai dari **buku nilai persediaan** (bagian nilai sebanding qty; baris yang menghabiskan stok membawa sisa nilainya). Batch sumber boleh dipilih (`sourceMovementId`), tetapi hanya untuk penelusuran qty: biaya batch tidak menentukan nilai, dan `batchUnitCost` diabaikan (jangan dikirim). Batch harus berada di **gudang produksi** (`PRODUCTION_BATCH_WAREHOUSE`; edit tetap boleh memakai batch yang sudah dipakai run itu) dan sisanya harus cukup untuk semua baris yang memakainya, dijumlah (`PRODUCTION_BATCH_QTY_INSUFFICIENT`; sisa = `inv_item_batches`, pada edit dihitung setelah pemakaian run itu sendiri dibalik). `batch_unit_cost` baris menyimpan biaya buku nilai yang dipakai.
 2. **Output**: stok produk masuk (SM `In`) sebesar nilai barisnya dan rata-rata item output mengikuti nilai buku. Output **utama** dan **produk samping** (`isByProduct=true`) sama-sama masuk stok; produk samping NRV 0 ikut menurunkan rata-rata (mis. sekam 500 kg senilai 100.000 + 1.000 kg NRV 0 -> rata-rata 66,666667).
 3. **HPP terbebani per kg output utama**:
    `(nilai bahan input + biaya sisi input + biaya sisi output - nilai produk samping) / qty output utama`, dengan nilai bahan = nilai yang benar-benar keluar dari buku nilai.
@@ -779,11 +779,11 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 | `referenceType` | body | `string` | tidak |  |
 | `referenceId` | body | `string` | tidak |  |
 | `referenceNumber` | body | `string` | tidak |  |
-| `inputs` | body | `array<object>` | ya | Baris bahan input: [{itemId, quantity, sourceMovementId?(batch), batchUnitCost?}]. |
+| `inputs` | body | `array<object>` | ya | Baris bahan input: [{itemId, quantity, sourceMovementId?(batch)}]. |
 | `inputs[].itemId` | body | `string` | ya |  |
 | `inputs[].quantity` | body | `number` | ya |  |
-| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch). |
-| `inputs[].batchUnitCost` | body | `number` | tidak |  |
+| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran qty saja; nilai input dari buku nilai persediaan, bukan biaya batch). Batch harus ada di gudang produksi dan sisanya cukup untuk semua baris yang memakainya; edit tetap boleh memakai batch lama run itu. |
+| `inputs[].batchUnitCost` | body | `number` | tidak | Diabaikan (hanya agar draft lama tetap valid); jangan dikirim. Biaya bahan dihitung server. |
 | `outputs` | body | `array<object>` | ya | Baris output: [{itemId, quantity, unitPrice?, isByProduct}]. Output utama tanpa unitPrice diisi HPP terhitung; produk samping WAJIB unitPrice (NRV). |
 | `outputs[].itemId` | body | `string` | ya |  |
 | `outputs[].quantity` | body | `number` | ya |  |
@@ -1112,8 +1112,8 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 | `inputs` | body | `array<object>` | ya | Daftar bahan baku/input produksi (array objek). |
 | `inputs[].itemId` | body | `string` | ya |  |
 | `inputs[].quantity` | body | `number` | ya |  |
-| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch). |
-| `inputs[].batchUnitCost` | body | `number` | tidak |  |
+| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran qty saja; nilai input dari buku nilai persediaan, bukan biaya batch). Batch harus ada di gudang produksi dan sisanya cukup untuk semua baris yang memakainya; edit tetap boleh memakai batch lama run itu. |
+| `inputs[].batchUnitCost` | body | `number` | tidak | Diabaikan (hanya agar draft lama tetap valid); jangan dikirim. Biaya bahan dihitung server. |
 | `outputs` | body | `array<object>` | ya | Daftar hasil/output produksi (array objek). |
 | `outputs[].itemId` | body | `string` | ya |  |
 | `outputs[].quantity` | body | `number` | ya |  |
@@ -1625,8 +1625,8 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 | `inputs` | body | `array<object>` | ya | Baris input baru (menggantikan semua baris lama). |
 | `inputs[].itemId` | body | `string` | ya |  |
 | `inputs[].quantity` | body | `number` | ya |  |
-| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch). |
-| `inputs[].batchUnitCost` | body | `number` | tidak |  |
+| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran qty saja; nilai input dari buku nilai persediaan, bukan biaya batch). Batch harus ada di gudang produksi dan sisanya cukup untuk semua baris yang memakainya; edit tetap boleh memakai batch lama run itu. |
+| `inputs[].batchUnitCost` | body | `number` | tidak | Diabaikan (hanya agar draft lama tetap valid); jangan dikirim. Biaya bahan dihitung server. |
 | `outputs` | body | `array<object>` | ya | Baris output baru (menggantikan semua baris lama). |
 | `outputs[].itemId` | body | `string` | ya |  |
 | `outputs[].quantity` | body | `number` | ya |  |

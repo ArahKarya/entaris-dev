@@ -67,7 +67,7 @@ Aturan wajib:
 8. **Pembatalan butuh stok di gudangnya**. `inv_mov_cancel`/`inv_mov_update` untuk pergerakan masuk, `opn_cancel` untuk surplus, dan `gr_cancel` ditolak (`STOCK_INSUFFICIENT` / `GR_CANCEL_INSUFFICIENT_STOCK`) bila stok **di gudang mutasi itu** tidak cukup untuk dibalik; stok di gudang lain tidak dihitung. Baris item yang sama dalam satu dokumen dijumlah (juga di `stf_create`). Mutasi lama tanpa gudang dicek terhadap total item.
 9. **Stok sedang diproses (`STOCK_BUSY`, 409)**. Transaksi stok atas item yang sama berjalan berurutan; bila menunggu lebih dari 5 detik, permintaan ditolak tanpa perubahan apa pun. Ulangi sebentar lagi, jangan ubah isinya.
 10. **Hapus master**. `inv_item_delete` menghapus permanen item + pergerakan batalnya, dan ditolak bila ada mutasi aktif/dipakai invoice. `wh_delete` ditolak untuk gudang default/bersaldo/berriwayat; nonaktifkan saja (`wh_update isActive=false`).
-11. **Batch**. `inv_item_batches` hanya melacak pemakaian yang tertaut `sourceMovementId`; jumlah sisa batch tidak selalu sama dengan stok fisik.
+11. **Batch**. `inv_item_batches` melacak pemakaian yang tertaut `sourceMovementId`; stok yang keluar tanpa tautan (SJ, Stok Keluar manual) dikurangkan dari batch tertua, sehingga total sisa batch tidak melebihi stok gudang. Produksi memakai aturan sisa yang sama.
 12. **Data referensi terbuka**. GET items, gudang tidak butuh izin khusus (semua user login boleh membaca) sehingga tool `read` untuk master tersedia bagi semua role; hanya penulisan butuh `edit`.
 13. **Stok minus** (hasil penjualan/produksi dengan bypass) dipantau di dashboard "Stok Minus Aktif"; COGS penjualan yang tertunda diselesaikan otomatis (COGS backfill) ketika stok masuk berikutnya tercatat.
 
