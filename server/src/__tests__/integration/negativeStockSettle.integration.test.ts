@@ -12,7 +12,13 @@
  * - cancelling the settling receipt (with the bypass) takes the settlement back through its value
  *   true-up: the book returns to the 100 sold past zero at 10.000;
  * - a delivery past zero, a receipt that settles it, then the delivery cancelled: the settlement
- *   comes back through the true-up (+100.000) and the receipt keeps its whole value.
+ *   comes back through the true-up (+100.000) and the receipt keeps its whole value;
+ * - a receipt into negative stock the ledger did not settle (legacy COGS queue rows open, owner
+ *   decision #6; the same as a receipt posted before PR-6.6), a later delivery, then the delivery
+ *   past zero cancelled: the replay invents no settlement at the receipt, the true-up is only what
+ *   the later delivery took differently (+50.000), stock 250 at 3.000.000;
+ * - a sales return that restocks into negative stock: the settlement's SM and JV numbers are taken
+ *   before any account row other than AR (step 1) is locked (LOCK ORDER of stockLocks.ts).
  * Book = GL (+ the value of notes not invoiced yet) after every step; every scenario ends with
  * assertLedgerInvariant (warehouses included). "Today" is the fixture year's day (businessToday
  * mocked). Fiscal year 2116.
@@ -44,6 +50,7 @@ import deliveryOrdersRouter from '../../routes/deliveryOrders';
 import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
 import { cancelDeliveryOrderInTx } from '../../services/deliveryOrderCancel';
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
+import { submitSalesReturnInTx } from '../../services/salesReturnSubmit';
 import { NEGATIVE_STOCK_NO_COST, batchUnitCosts } from '../../services/inventory/inventoryLedger';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -254,4 +261,112 @@ d('negative stock settled on inbound (E3-R9)', () => {
       await expectBookEqualsGl(tx, w);
     });
   });
+
+  it('a receipt the ledger did not settle, a later delivery, the delivery past zero cancelled -> true-up +50.000 only', async () => {
+    await inWorld(`${YEAR}-08-20`, async (tx, w) => {
+      await averageAtZero(tx, w, 10_000, `${YEAR}-08-01`);
+      const minus = await deliverPastZero(tx, w, `${YEAR}-08-02`, 100);
+      expect(await bookOf(tx, w.item.id)).toMatchObject({ stock: '-100.000', value: '-1000000.00' });
+
+      // An open legacy queue row of the item leaves the receipt unsettled (owner decision #6).
+      const invoice = await tx.salesInvoice.findFirstOrThrow({ where: { partyId: w.customer.id } });
+      const siItem = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      const queue = await tx.cogsBackfillQueue.create({
+        data: {
+          salesInvoiceId: invoice.id, salesInvoiceItemId: siItem.id, inventoryItemId: w.item.id,
+          qtyPending: 1, qtyOriginal: 1, costAtSale: 10_000, fiscalYearId: invoice.fiscalYearId,
+        },
+      });
+      const receipt = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 300, avg: 12_000, day: `${YEAR}-08-03` });
+      expect(await tx.stockMovement.count({ where: { adjustsMovementId: receipt.movementId } })).toBe(0);
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '200.000', value: '2600000.00', average: '13000.000000' });
+      await tx.cogsBackfillQueue.update({ where: { id: queue.id }, data: { status: 'Settled', qtyPending: 0, settledAt: new Date() } });
+
+      await deliver(tx, w, `${YEAR}-08-04`, [{ qty: 50 }]); // 650.000 at 13.000
+      expect(await bookOf(tx, w.item.id)).toMatchObject({ stock: '150.000', value: '1950000.00' });
+      await expectBookEqualsGl(tx, w);
+
+      const minusRow = await tx.stockMovement.findFirstOrThrow({ where: { referenceType: 'DeliveryOrder', referenceId: minus.id } });
+      await inRouteTx((t) => cancelDeliveryOrderInTx(t, minus.id, w.userId));
+
+      // Without the note past zero the receipt came into stock 0 (average 12.000) and the later 50
+      // took 600.000: 50.000 back. The receipt never held a settlement, so none is taken back.
+      const [trueUp, ...more] = await journalsByKey(tx, sourceKeys.inventoryTrueUp(minusRow.id));
+      expect(more).toHaveLength(0);
+      expect(money(trueUp.items.find((i) => i.accountId === w.accounts.inventory.id)!.debit)).toBe('50000.00');
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '250.000', value: '3000000.00', average: '12000.000000' });
+      expect(await tx.stockMovement.count({ where: { itemId: w.item.id, referenceType: NEGATIVE_STOCK_SETTLE_REFERENCE } })).toBe(0);
+      await expectBookEqualsGl(tx, w);
+    });
+  });
+
+  it('a sales return into negative stock takes its number series before it locks account rows', async () => {
+    await inWorld(`${YEAR}-09-20`, async (tx, w) => {
+      await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: `${YEAR}-09-01` });
+      const note = await deliver(tx, w, `${YEAR}-09-01`, [{ qty: 100 }]);
+      const invoice = await invoiceDelivery(tx, w, `${YEAR}-09-01`, note, { rate: 15_000 });
+      await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 20_000, day: `${YEAR}-09-02` });
+      await deliverPastZero(tx, w, `${YEAR}-09-03`, 200); // −100 / −2.000.000 at 20.000
+      const siItem = await tx.salesInvoiceItem.findFirstOrThrow({ where: { salesInvoiceId: invoice.id } });
+      const arId = (await systemAccounts.getAccount('AR')).id;
+
+      const rec = lockRecorder(tx, arId);
+      await submitSalesReturnInTx(rec.tx, {
+        salesInvoiceId: invoice.id, date: `${YEAR}-09-04`,
+        items: [{ salesInvoiceItemId: siItem.id, quantity: 50, restock: true, warehouseId: w.warehouseA.id }],
+      } as Parameters<typeof submitSalesReturnInTx>[1], w.userId);
+
+      // The 50 back at their sale cost 10.000 settle half the window held at −1.000.000: +500.000.
+      const restock = await tx.stockMovement.findFirstOrThrow({ where: { itemId: w.item.id, referenceType: 'SalesReturn' } });
+      const settle = await tx.stockMovement.findFirstOrThrow({ where: { adjustsMovementId: restock.id, referenceType: NEGATIVE_STOCK_SETTLE_REFERENCE } });
+      expect(money(settle.valueDelta)).toBe('500000.00');
+      const firstAccount = rec.events.indexOf('account');
+      expect(firstAccount).toBeGreaterThan(-1);
+      expect(rec.events.slice(firstAccount)).not.toContain('number');
+      expect(await bookOf(tx, w.item.id)).toMatchObject({ stock: '-50.000', value: '-1000000.00' });
+      await expectBookEqualsGl(tx, w);
+    });
+  });
 });
+
+/**
+ * Wraps `tx` and records, in order, each first take of a number series (pg_advisory_xact_lock of a
+ * key not held yet; a series already held does not wait) and each lock or update of an account row
+ * other than AR (locked first, as step 1 of the sales return).
+ */
+function lockRecorder(tx: Tx, arId: string) {
+  const events: ('number' | 'account')[] = [];
+  const held = new Set<string>();
+  const raw = (fn: (...a: unknown[]) => unknown) =>
+    (query: TemplateStringsArray | { strings: readonly string[]; values: unknown[] }, ...rest: unknown[]) => {
+      const [strings, values] = 'raw' in query ? [query as readonly string[], rest] : [query.strings, query.values];
+      const sql = strings.join('?');
+      if (/pg_advisory_xact_lock/.test(sql)) {
+        const key = String(values[0]);
+        if (!held.has(key)) { held.add(key); events.push('number'); }
+      }
+      if (/FOR UPDATE/.test(sql) && /FROM "?accounts"?/.test(sql) && !values.includes(arId)) events.push('account');
+      return fn(query, ...rest);
+    };
+  const account = (target: object) => new Proxy(target, {
+    get(t, k) {
+      const v = Reflect.get(t, k);
+      if ((k === 'update' || k === 'updateMany') && typeof v === 'function') {
+        return (args: { where?: { id?: unknown } }) => {
+          if (args?.where?.id !== arId) events.push('account');
+          return v.call(t, args);
+        };
+      }
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  const wrapped = new Proxy(tx, {
+    get(t, k) {
+      if (k === '$queryRaw' || k === '$executeRaw') return raw((Reflect.get(t, k) as (...a: unknown[]) => unknown).bind(t));
+      if (k === 'account') return account(t.account);
+      const v = Reflect.get(t, k);
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  }) as Tx;
+  return { tx: wrapped, events };
+}

@@ -372,9 +372,9 @@ export async function submitSalesReturnInTx(
       referenceType: 'JournalEntry', referenceId: journalEntry.id, description: j.description, fiscalYearId: fiscalYear.id,
     })),
   });
-  for (const j of jeItems) {
-    await updateAccountBalance(tx, j.accountId, j.debit, j.credit);
-  }
+  // The account balances of this journal are updated after the restock loop below: postInbound
+  // takes SM numbers, and the JV number of a negative-stock settlement (E3-R9), which come before
+  // account row locks (LOCK ORDER of stockLocks.ts, step 3 before step 4).
 
   // Reduce invoice outstanding by the AR portion; a full return leaves the invoice Paid.
   if (arReduceNum > 0) {
@@ -453,6 +453,10 @@ export async function submitSalesReturnInTx(
       if (ex) { ex.amount = ex.amount.plus(r.value); ex.names.push(r.itemName); }
       else cogsCreditByAccount.set(acctId, { amount: r.value, names: [r.itemName] });
     }
+  }
+
+  for (const j of jeItems) {
+    await updateAccountBalance(tx, j.accountId, j.debit, j.credit);
   }
 
   // COGS reversal JE: DR Persediaan / CR HPP
