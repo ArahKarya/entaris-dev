@@ -352,13 +352,21 @@ export async function linkMovementJournal(tx: Tx, movementId: string, journalEnt
 }
 
 /**
- * When the row's value entered the book: its createdAt, or for a Revaluation the earlier createdAt
- * of the row it adjusts. The value-ledger backfill (migration 20261112200000) stamped its purchase
- * invoice Revaluations with the deploy time although the old code had put the delta into the
- * average at the invoice, before sales that came after it.
+ * Number prefix of the purchase invoice Revaluations the value-ledger backfill wrote (migration
+ * 20261112200000, step 3). A live posting takes an 'SM-YYYYMM-' number.
+ */
+const BACKFILL_REVALUATION_PREFIX = 'SM-RV-';
+
+/**
+ * When the row's value entered the book: its createdAt, or for a backfilled purchase invoice
+ * Revaluation the earlier createdAt of the row it adjusts. The backfill stamped those rows with the
+ * deploy time although the old code had put the delta into the average at the invoice, before sales
+ * that came after it. A Revaluation posted live (PR-6.4c3) entered the book when it was written:
+ * goods that went out before it were valued without it.
  */
 async function valueEnteredAt(tx: Tx, movement: StockMovement): Promise<Date> {
   if (movement.movementType !== 'Revaluation' || !movement.adjustsMovementId) return movement.createdAt;
+  if (!movement.movementNumber.startsWith(BACKFILL_REVALUATION_PREFIX)) return movement.createdAt;
   const adjusted = await tx.stockMovement.findUnique({ where: { id: movement.adjustsMovementId }, select: { createdAt: true } });
   return adjusted && adjusted.createdAt < movement.createdAt ? adjusted.createdAt : movement.createdAt;
 }
@@ -558,6 +566,39 @@ export async function reverseDocumentMovements(tx: Tx, ref: DocumentRef, opts: R
   const results: ReverseResult[] = [];
   for (const row of owned) results.push(await reverseMovement(tx, row.id, opts));
   return results;
+}
+
+/** The fields of an inbound row its batch cost is computed from. */
+export interface BatchRow {
+  id: string;
+  quantity: Prisma.Decimal | Decimal.Value;
+  unitCost: Prisma.Decimal | Decimal.Value;
+  totalValue: Prisma.Decimal | Decimal.Value;
+}
+
+/**
+ * Unit cost of inbound batches as the batch picker shows them: the row's own value plus every active
+ * Revaluation that adjusts it (a purchase invoice's landed cost or price revision, PR-6.4c3), over
+ * its quantity, 6 dp. Computed, never stored: the row itself is not rewritten. A row nothing adjusts
+ * keeps its unit_cost (a transfer leg's display cost included).
+ */
+export async function batchUnitCosts(db: Tx, rows: readonly BatchRow[]): Promise<Map<string, Decimal>> {
+  const costs = new Map<string, Decimal>();
+  if (rows.length === 0) return costs;
+  const adjustments = await db.stockMovement.groupBy({
+    by: ['adjustsMovementId'],
+    where: { adjustsMovementId: { in: rows.map((r) => r.id) }, movementType: 'Revaluation', isCancelled: false },
+    _sum: { valueDelta: true },
+  });
+  const adjusted = new Map(adjustments.map((a) => [a.adjustsMovementId, dec(a._sum.valueDelta ?? 0)]));
+  for (const row of rows) {
+    const extra = adjusted.get(row.id);
+    const quantity = dec(row.quantity);
+    costs.set(row.id, extra && !extra.isZero() && quantity.gt(0)
+      ? dec(row.totalValue).plus(extra).div(quantity).toDecimalPlaces(UNIT_COST_DP)
+      : dec(row.unitCost));
+  }
+  return costs;
 }
 
 /** Re-derives average_cost from the locked stock and stock_value (averageAfter) and returns it. */

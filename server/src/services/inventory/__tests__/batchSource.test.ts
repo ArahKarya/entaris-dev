@@ -2,12 +2,20 @@ import { describe, expect, it } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { assertBatchSource, MOVEMENT_SOURCE_BATCH_INVALID } from '../batchSource';
 
-type Batch = { id: string; itemId: string; isCancelled: boolean; movementType: string; unitCost: number };
+type Batch = {
+  id: string; itemId: string; isCancelled: boolean; movementType: string; quantity: number; unitCost: number; totalValue: number;
+};
 
-const txWith = (batch: Batch | null) =>
-  ({ stockMovement: { findUnique: async () => batch } }) as unknown as Prisma.TransactionClient;
+/** `adjusted`: Σ value_delta of the active Revaluations that adjust the batch (none: no group). */
+const txWith = (batch: Batch | null, adjusted?: number) =>
+  ({
+    stockMovement: {
+      findUnique: async () => batch,
+      groupBy: async () => (adjusted === undefined ? [] : [{ adjustsMovementId: batch?.id, _sum: { valueDelta: adjusted } }]),
+    },
+  }) as unknown as Prisma.TransactionClient;
 
-const good: Batch = { id: 'sm-1', itemId: 'gkp', isCancelled: false, movementType: 'In', unitCost: 6000 };
+const good: Batch = { id: 'sm-1', itemId: 'gkp', isCancelled: false, movementType: 'In', quantity: 100, unitCost: 6000, totalValue: 600_000 };
 const named = { sourceMovementId: 'sm-1', inventoryItemId: 'gkp', itemName: 'GKP' };
 const byLine = { ...named, inputLine: 2 };
 
@@ -23,8 +31,15 @@ async function errorOf(batch: Batch | null, input: typeof named & { inputLine?: 
 describe('assertBatchSource', () => {
   it('returns the batch id and unit cost of an active inbound movement of the item', async () => {
     for (const movementType of ['In', 'AdjustmentIn', 'TransferIn']) {
-      await expect(assertBatchSource(txWith({ ...good, movementType }), named)).resolves.toEqual({ id: 'sm-1', unitCost: 6000 });
+      const batch = await assertBatchSource(txWith({ ...good, movementType }), named);
+      expect({ id: batch.id, unitCost: batch.unitCost.toString() }).toEqual({ id: 'sm-1', unitCost: '6000' });
     }
+  });
+
+  it('adds the Revaluations that adjust the batch to its unit cost (a purchase invoice landed cost)', async () => {
+    // 600.000 + 50.000 over 100 kg.
+    const batch = await assertBatchSource(txWith(good, 50_000), named);
+    expect(batch.unitCost.toString()).toBe('6500');
   });
 
   it.each([
