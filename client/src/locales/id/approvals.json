@@ -100,7 +100,6 @@
       "negativeStockReason": "Alasan:",
       "inputs": "Bahan Baku (Input)",
       "outputs": "Hasil Produksi (Output)",
-      "batchRate": "batch @{{rate}}",
       "byProduct": "Samping",
       "costs": "Komponen Biaya",
       "costSideOutput": "output",
@@ -112,10 +111,9 @@
       "processes": "Proses",
       "processCount_one": "{{count}} proses tercatat",
       "processCount_other": "{{count}} proses tercatat",
-      "hppEstimate": "Estimasi HPP",
-      "hppPerKg": "/ kg produk utama (estimasi)",
+      "hppEstimate": "Ringkasan Biaya",
       "costSummary": "Biaya: {{cost}} · Nilai by-product: {{byproduct}}",
-      "hppFinalNote": "HPP final (termasuk biaya material) dihitung saat disetujui."
+      "hppFinalNote": "Biaya bahan dihitung server dari rata-rata persediaan saat disetujui; batch hanya untuk telusur jumlah."
     },
     "basis": {
       "InputQty": "per kg input",

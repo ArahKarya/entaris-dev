@@ -5,10 +5,9 @@ import { LOCALE } from '@/lib/format';
 export interface LineItem {
   itemId: string;
   quantity: string;
-  // sourceMovementId is the picked batch (a back-link); batchUnitCost is a display snapshot only:
+  // sourceMovementId is the picked batch, a back-link whose remaining quantity the server checks;
   // the server costs every input from the value ledger.
   sourceMovementId: string;
-  batchUnitCost: string;
 }
 
 // Cost component row in the modal.

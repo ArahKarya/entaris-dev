@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { StatusBadge } from '@/components/shared';
 import { pinnedDialogClass, PinnedBody, PinnedFooter, PinnedHeader } from '../overlays/dialog-parts';
 import type { ApprovalRequest } from '../ApprovalPanel';
-import { approvalTypeLabel, fmtDate, fmtNum, isAiToolApproval, isEditApprovalType, piLineTotal, prodHppEstimate, resolvePiTotals } from './approval-utils';
+import { approvalTypeLabel, fmtDate, fmtNum, isAiToolApproval, isEditApprovalType, piLineTotal, prodCostSummary, resolvePiTotals } from './approval-utils';
 import { EditComparisonView } from './EditComparisonView';
 import { AiToolApprovalSummary } from './AiToolApprovalSummary';
 
@@ -80,7 +80,7 @@ function DetailContent({
   const fmtT = (v: any) => (v ? new Date(v).toLocaleString(LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
   const pi = isProd || isDO || isEdit || isAiToolApproval(detailReq.documentType) ? null : resolvePiTotals(detailCtx, p);
   const piFromServer = !!detailCtx?.piTotals;
-  const hppEst = isProd ? prodHppEstimate(p) : null;
+  const costSummary = isProd ? prodCostSummary(p) : null;
   const docLabel = approvalTypeLabel(detailReq.documentType);
   const isAi = isAiToolApproval(detailReq.documentType);
 
@@ -233,9 +233,6 @@ function DetailContent({
                     <div key={i} className="px-3 py-2 flex items-center justify-between text-xs">
                       <span className="text-foreground">
                         {itemName(it.itemId)}
-                        {Number(it.batchUnitCost ?? 0) > 0 && (
-                          <span className="ml-1.5 text-xs px-1 py-0.5 bg-info-subtle text-info-text rounded">{t('detail.production.batchRate', { rate: formatRupiah(Number(it.batchUnitCost)) })}</span>
-                        )}
                       </span>
                       <span className="font-mono tabular-nums text-muted-foreground">
                         {fmtNum(Number(it.quantity ?? 0))} {itemUnit(it.itemId)}
@@ -324,17 +321,11 @@ function DetailContent({
             {/* Estimasi HPP */}
             <div className="bg-muted/50 border border-border rounded-lg p-3">
               <p className="text-xs font-semibold text-foreground mb-1">{t('detail.production.hppEstimate')}</p>
-              {hppEst && hppEst.hpp != null ? (
-                <p className="text-sm font-semibold text-foreground">
-                  {formatRupiah(hppEst.hpp)} <span className="text-xs font-normal text-muted-foreground">{t('detail.production.hppPerKg')}</span>
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {t('detail.production.costSummary', { cost: formatRupiah(hppEst?.costTotal ?? 0), byproduct: formatRupiah(hppEst?.byproductValue ?? 0) })}
-                  <br />
-                  <span className="text-warning-text">{t('detail.production.hppFinalNote')}</span>
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                {t('detail.production.costSummary', { cost: formatRupiah(costSummary?.costTotal ?? 0), byproduct: formatRupiah(costSummary?.byproductValue ?? 0) })}
+                <br />
+                <span className="text-warning-text">{t('detail.production.hppFinalNote')}</span>
+              </p>
             </div>
           </>
         ) : (

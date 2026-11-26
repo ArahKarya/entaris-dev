@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { piLineTotal, piTotals, resolvePiTotals } from './approval-utils';
+import { piLineTotal, piTotals, prodCostSummary, resolvePiTotals } from './approval-utils';
 
 describe('piLineTotal', () => {
   it('uses timbanganDiterima when it is above zero, else quantity', () => {
@@ -43,5 +43,16 @@ describe('resolvePiTotals', () => {
     const local = { subtotal: 1000, potonganItem: 0, biayaLain: 0, grandTotal: 1000, headerPotonganMismatch: false };
     expect(resolvePiTotals(undefined, payload)).toEqual(local);
     expect(resolvePiTotals({ piTotals: null }, payload)).toEqual(local);
+  });
+});
+
+describe('prodCostSummary', () => {
+  it('sums conversion costs and by-product value; a batchUnitCost in the payload values nothing', () => {
+    const payload = {
+      inputs: [{ itemId: 'gkp', quantity: 5000, sourceMovementId: 'b1', batchUnitCost: 7000 }],
+      outputs: [{ itemId: 'beras', quantity: 3000 }, { itemId: 'bekatul', quantity: 200, unitPrice: 2000, isByProduct: true }],
+      costs: [{ basis: 'InputQty', rate: 300 }, { basis: 'OutputQty', rate: 100 }, { basis: 'Fixed', rate: 50_000 }],
+    };
+    expect(prodCostSummary(payload)).toEqual({ byproductValue: 400_000, costTotal: 1_850_000, mainQty: 3000 });
   });
 });
