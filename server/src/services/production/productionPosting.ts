@@ -186,7 +186,7 @@ function outputUsedError(mode: ProductionReversalMode, s: StockShortage): Busine
  * take back the value they put in, which is what the voided journal carried, so book = GL.
  * Reversing the outputs must not drive stock negative at the movement's warehouse (lines of one item
  * summed) unless bypassed, which is logged. An output whose item went out since it was received is
- * refused with REVERSAL_NEEDS_TRUE_UP (value true-up, PR-6.5a / PR-6.12). Call it under
+ * refused with REVERSAL_NEEDS_TRUE_UP (value true-up of a run, PR-6.12). Call it under
  * lockProductionStockInTx.
  */
 export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRunOptions): Promise<void> {

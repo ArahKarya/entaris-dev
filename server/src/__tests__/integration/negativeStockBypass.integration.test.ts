@@ -3,10 +3,10 @@
  * accepts it (E3-R1), not only doc.cancel or ownership of an approval request:
  * - goods receipt cancel: STT of 10.000 kg, 8.000 kg leave by a manual "Penyesuaian Stok -"
  *   (no sourceMovementId, so the consumed-batch guard does not fire). A forced cancel by a doc.cancel
- *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes, but the
- *   value ledger refuses the reversal (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a) and nothing changes;
+ *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes and the
+ *   value ledger takes the receipt back with its true-up (PR-6.5a; all at one cost, so 0): stock −8.000;
  * - production run cancel: the same through the body and through ?allowNegativeStock=true (the
- *   output went out since, so with the capability the value ledger refuses it too, until PR-6.5a);
+ *   output went out since, so with the capability the value ledger refuses it too, until PR-6.12);
  * - production run resubmit with the bypass: 403 and the request stays in NeedsRevision without the
  *   capability, Pending with it.
  *
@@ -24,8 +24,13 @@ import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { systemAccounts } from '../../services/systemAccounts';
 import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
 
-const state = vi.hoisted(() => ({ tx: null as Tx | null }));
+const state = vi.hoisted(() => ({ tx: null as Tx | null, today: null as string | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
+// "Today" of a cancel's value true-up journal (owner decision #3): the fixture day when set.
+vi.mock('../../utils/businessDate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/businessDate')>();
+  return { ...actual, businessToday: (...args: Parameters<typeof actual.businessToday>) => state.today ?? actual.businessToday(...args) };
+});
 
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
@@ -168,13 +173,19 @@ d('goods receipt cancel with the negative-stock bypass', () => {
       expect(plain.status).toBe(400);
       expect(plain.body.code).toBe('GR_CANCEL_INSUFFICIENT_STOCK');
 
-      // The bypass passes the stock check, but 8.000 kg of the receipt went out since: on the value
-      // ledger taking its value back needs a value true-up (PR-6.5a), so it is refused until then.
-      const refused = await cancel(admin);
-      expect(refused.status, JSON.stringify(refused.body)).toBe(409);
-      expect(refused.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await stockOf(tx, item.id, warehouseId)).toEqual({ item: 2_000, warehouse: 2_000 });
-      expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } })).status).not.toBe('Cancelled');
+      // The bypass passes the stock check. 8.000 kg of the receipt went out since, so the value
+      // ledger replays the item (PR-6.5a): without the receipt the item never had a cost, so the
+      // 8.000 went out at average 0. The true-up brings their 40.000.000 back from COGS (one
+      // journal on the day of the cancel) and the stock goes to −8.000 at value 0.
+      state.today = `${Y}-03-20`;
+      const forced = await cancel(admin).finally(() => { state.today = null; });
+      expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+      expect(await stockOf(tx, item.id, warehouseId)).toEqual({ item: -8_000, warehouse: -8_000 });
+      expect((await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).stockValue.toFixed(2)).toBe('0.00');
+      const trueUp = await tx.stockMovement.findFirstOrThrow({ where: { itemId: item.id, movementType: 'Revaluation', isCancelled: false } });
+      expect(trueUp.valueDelta.toFixed(2)).toBe('40000000.00');
+      expect(trueUp.journalEntryId).not.toBeNull();
+      expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } })).status).toBe('Cancelled');
     });
   });
 });
@@ -218,7 +229,7 @@ d('production run cancel with the negative-stock bypass', () => {
       const { run, output } = await usedRun(tx, warehouseId, clerk);
 
       // 50 kg of the output went out since: on the value ledger taking its value back needs a value
-      // true-up (PR-6.5a / PR-6.12), so the cancel is refused until then and nothing changes.
+      // true-up (PR-6.12), so the cancel is refused until then and nothing changes.
       const r = await callRoute(productionRunsRouter, 'put', '/:id/cancel', {
         params: { id: run.id }, query: { allowNegativeStock: 'true' }, body: { negativeStockReason: REASON }, userId: admin.userId, role: admin.role,
       });

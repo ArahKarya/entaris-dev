@@ -4,8 +4,8 @@
  * a rollback transaction (helpers/salesFlowFixture.ts):
  * - STT -> PI landed +50.000 -> cancel PI -> cancel STT: the STT row keeps its locked cost, one
  *   Revaluation carries the delta, book = GL of the item account at every step;
- * - a live Revaluation entered the book at the invoice: goods that went out before it do not refuse
- *   the invoice cancel, goods that went out after it do (REVERSAL_NEEDS_TRUE_UP);
+ * - a live Revaluation entered the book at the invoice: goods that went out before it leave the
+ *   invoice cancel exact, goods that went out after it get the true-up of their share (PR-6.5a);
  * - PI after the goods were all sold: the whole delta goes to COGS, stock_value stays 0;
  * - a revision down beyond the value left: the rest goes to COGS, the average is 0, never negative;
  * - a revision of an STT that carries a backfilled Revaluation: batch cost and average take both,
@@ -15,7 +15,8 @@
  * - a legacy COGS settlement moves value out of stock by a Revaluation linked to its journal, and
  *   reversing the trigger takes it back; a stock-in that leaves stock at 0 or still negative moves
  *   the whole differential (book = GL, nothing left at zero quantity); cancelling the sales invoice
- *   after a later sale of the item is refused (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a).
+ *   after a later sale of the item is refused: the legacy settlement is reversed without a true-up
+ *   (REVERSAL_NEEDS_TRUE_UP; the legacy queue is decision #6, PR-6.6).
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2131.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -36,8 +37,13 @@ import { DOCUMENT_RULE } from '../../services/ledger/accountGuard';
 import { purchaseRevisionPrefix } from '../../services/ledger/journalSource';
 import { BusinessError } from '../../utils/errors';
 
-const state = vi.hoisted(() => ({ tx: null as Tx | null }));
+const state = vi.hoisted(() => ({ tx: null as Tx | null, today: null as string | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
+// "Today" of a cancel's value true-up journal (owner decision #3): the fixture day.
+vi.mock('../../utils/businessDate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/businessDate')>();
+  return { ...actual, businessToday: (...args: Parameters<typeof actual.businessToday>) => state.today ?? actual.businessToday(...args) };
+});
 
 import { prisma as appPrisma } from '../../lib/prisma';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
@@ -77,12 +83,14 @@ async function inWorld(fn: (tx: Tx, w: SalesFlowWorld) => Promise<void>) {
   try {
     await prisma.$transaction(async (tx) => {
       state.tx = tx;
+      state.today = DAY;
       try {
         const w = await createSalesFlowWorld(tx, YEAR);
         await fn(tx, w);
         await assertLedgerInvariant(tx, [w.item.id], { warehouses: true });
       } finally {
         state.tx = null;
+        state.today = null;
         systemAccounts.invalidateCache();
       }
       throw new RollbackSentinel();
@@ -176,7 +184,7 @@ d('purchase invoice landed cost on the value ledger (PR-6.4c3)', () => {
     });
   });
 
-  it('goods sold before the invoice do not refuse its cancel; goods sold after it do', async () => {
+  it('goods sold before the invoice leave its cancel exact; goods sold after it get the true-up of their share', async () => {
     await inWorld(async (tx, w) => {
       const stt = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
       await sell(tx, w, 10);
@@ -189,10 +197,12 @@ d('purchase invoice landed cost on the value ledger (PR-6.4c3)', () => {
 
       const again = await invoiceReceipt(tx, w, stt.goodsReceiptId, 10_500);
       await sell(tx, w, 10);
-      const before = await bookAndGl(tx, w);
-      expect(await codeOf(inRouteTx((t) => cancelPurchaseInvoiceInTx(t, again.id, trail(w))))).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: again.id } })).status).toBe('Submitted');
+      // 10 of the 90 went out at 10.555,555556 (105.555,56), 100.000 without the delta.
+      expect(await bookAndGl(tx, w)).toEqual({ stock: '80.000', value: '844444.44', average: '10555.555500' });
+      await inRouteTx((t) => cancelPurchaseInvoiceInTx(t, again.id, trail(w)));
+      // Exact: 844.444,44 − 50.000; the true-up brings the 5.555,56 those 10 took back from COGS.
+      expect(await bookAndGl(tx, w)).toEqual({ stock: '80.000', value: '800000.00', average: '10000.000000' });
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: again.id } })).status).toBe('Cancelled');
     });
   });
 
@@ -399,7 +409,7 @@ d('legacy COGS settlement on the value ledger (PR-6.4c3, decision #6)', () => {
     });
   });
 
-  it('cancelling the sales invoice after a later sale of the item is refused until the true-up (PR-6.5a)', async () => {
+  it('cancelling the sales invoice after a later sale of the item is refused: its legacy settlement has no true-up', async () => {
     await inWorld(async (tx, w) => {
       const stt = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: DAY });
       const invoice = await submitSalesInvoiceInTx(tx, {

@@ -477,8 +477,8 @@ d('aggregate stock checks per warehouse', () => {
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: opname.body.id } })).status).toBe('Submitted');
 
       // Take the Out back (a new In would not do: the value ledger refuses to reverse the surplus
-      // after goods of the item went out, REVERSAL_NEEDS_TRUE_UP until PR-6.5a); the cancel then
-      // goes through once.
+      // after goods of the item went out, REVERSAL_NEEDS_TRUE_UP: a stock count cancel has no
+      // true-up until PR-6.8a); the cancel then goes through once.
       const back = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: out.body.id }, userId: s.actor.userId, role: s.actor.role });
       expect(back.status, JSON.stringify(back.body)).toBe(200);
       const done = await cancel();

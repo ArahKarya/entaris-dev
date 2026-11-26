@@ -18,10 +18,10 @@
  * Stock checks (rollback transaction, same year):
  * - a delivery note with two lines of one item, 60 + 60, from 100 -> 400 STOCK_INSUFFICIENT;
  * - sales return cancel whose returned goods were sold again -> 400 STOCK_INSUFFICIENT; the
- *   bypass needs inventory.negative_stock and a reason, then the value ledger refuses it (409
- *   REVERSAL_NEEDS_TRUE_UP, PR-6.4c2) until PR-6.5a;
+ *   bypass needs inventory.negative_stock and a reason, then the return comes back through the
+ *   value ledger's true-up (PR-6.5a; all at one cost, so the true-up is 0) and the stock goes below 0;
  * - purchase invoice cancel of a legacy PI-owned stock movement already used -> 400 likewise; with
- *   the bypass the value ledger refuses it (409 REVERSAL_NEEDS_TRUE_UP, PR-6.4d) until PR-6.5a.
+ *   the bypass it is cancelled the same way (PR-6.5a).
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -89,7 +89,7 @@ import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise'
 import { invalidatePermissionCache } from '../../services/permissionService';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
-import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 import { NEGATIVE_STOCK_FORBIDDEN } from '../../utils/negativeStockGate';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -549,14 +549,16 @@ d('stock checks of delivery notes and legacy reversals', () => {
       const noReason = await cancel(s.actor, { allowNegativeStock: true });
       expect(noReason.status).toBe(400);
 
-      // The bypass passes the stock check, but the value ledger (PR-6.4c2) refuses to take the
-      // return's value back after goods of the item went out (train guard until PR-6.5a).
+      // The bypass passes the stock check; goods of the item went out since, so the value ledger
+      // replays the item (PR-6.5a). Everything moved at 5.000, so the exact reversal is already
+      // right: true-up 0, no journal, and the 30 delivered again leave the stock at −30.
       const admin = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']);
       const forced = await cancel(admin, bypass);
-      expect(forced.status, JSON.stringify(forced.body)).toBe(409);
-      expect(forced.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: 10, warehouse: 10 });
-      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Submitted');
+      expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: -30, warehouse: -30 });
+      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Cancelled');
+      expect((await tx.inventoryItem.findUniqueOrThrow({ where: { id: beras.id } })).stockValue.toFixed(2)).toBe('-150000.00');
+      await assertLedgerInvariant(tx, [beras.id], { warehouses: true });
     });
   });
 
@@ -587,14 +589,15 @@ d('stock checks of delivery notes and legacy reversals', () => {
       expect(refused.body.error).toContain('tersedia 20 kg, dibutuhkan 100 kg');
       expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
 
-      // The bypass passes the stock check, but the value ledger (PR-6.4d) refuses to take a receipt's
-      // value back after goods of the item went out (train guard until the value true-up, PR-6.5a).
+      // The bypass passes the stock check; the value true-up (PR-6.5a) replays the item: all at
+      // 4.000, so the receipt comes back exactly (true-up 0) and warehouse A goes to −80.
       const admin = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']);
       const forced = await cancel(admin, { allowNegativeStock: true, negativeStockReason: 'faktur lama salah, stok sudah dikirim' });
-      expect(forced.status, JSON.stringify(forced.body)).toBe(409);
-      expect(forced.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await stockOf(tx, gkp.id, s.whA)).toEqual({ item: 520, warehouse: 20 });
-      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Submitted');
+      expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+      expect(await stockOf(tx, gkp.id, s.whA)).toEqual({ item: 420, warehouse: -80 });
+      expect((await tx.inventoryItem.findUniqueOrThrow({ where: { id: gkp.id } })).stockValue.toFixed(2)).toBe('1680000.00');
+      expect((await tx.purchaseInvoice.findUniqueOrThrow({ where: { id: pi.id } })).status).toBe('Cancelled');
+      await assertLedgerInvariant(tx, [gkp.id], { warehouses: true });
     });
   });
 });

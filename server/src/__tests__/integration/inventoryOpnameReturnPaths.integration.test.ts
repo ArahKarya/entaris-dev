@@ -3,7 +3,7 @@
  * PR-6.4c2), on fixtures made here inside a rollback transaction (helpers/salesFlowFixture.ts):
  * - a restocked return blends into the average: 100 kg returned at the 10.000 the delivery took
  *   onto 1.000 kg @12.000 -> average 11.818,181818, stock_value 13.000.000 = GL; its cancel takes
- *   it back exactly, and after a later sale is refused with REVERSAL_NEEDS_TRUE_UP;
+ *   it back exactly, and after a later sale replays the item for its true-up (PR-6.5a);
  * - three returns of a third of a note line never take back more than its COGS: 3.333,33 +
  *   3.333,33 + 3.333,34 = 10.000,00;
  * - a count deficit leaves at the ledger's cost (330.000 for 30 kg at 11.000), not the typed unit
@@ -30,7 +30,7 @@ import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 import {
   bookOf, createSalesFlowWorld, deliver, glBalance, invoiceDelivery, receiveStock, type SalesFlowWorld,
 } from '../helpers/salesFlowFixture';
-import { postRevaluation, REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
+import { postRevaluation } from '../../services/inventory/inventoryLedger';
 import { systemAccounts } from '../../services/systemAccounts';
 import { BusinessError } from '../../utils/errors';
 
@@ -231,18 +231,18 @@ d('sales returns on the value ledger (PR-6.4c2)', () => {
     });
   });
 
-  it('a return cancel after goods of the item went out is refused (REVERSAL_NEEDS_TRUE_UP) and changes nothing', async () => {
+  it('a return cancel after goods of the item went out replays the item (PR-6.5a): one cost, so true-up 0', async () => {
     await inWorld(async (tx, w) => {
       await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 1_000, avg: 12_000, day: DAY });
       const sale = await sell(tx, w, 100);
       const ret = await returnGoods(tx, w, sale, 40);
       await deliver(tx, w, LATER, [{ qty: 50 }]);
-      const before = await bookOf(tx, w.item.id);
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '890.000', value: '10680000.00', average: '12000.000000' });
 
-      expect(await codeOf(inRouteTx((t) => cancelSalesReturnInTx(t, ret!.id, { cancelledById: w.userId, cancelReason: 'test' }))))
-        .toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Submitted');
+      await inRouteTx((t) => cancelSalesReturnInTx(t, ret!.id, { cancelledById: w.userId, cancelReason: 'test' }));
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '850.000', value: '10200000.00', average: '12000.000000' });
+      expect(await tx.stockMovement.count({ where: { itemId: w.item.id, movementType: 'Revaluation', isCancelled: false } })).toBe(0);
+      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Cancelled');
     });
   });
 });
