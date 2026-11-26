@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock('../../utils/fiscalYear', () => ({ getOpenFiscalYear: vi.fn(async () => ({ id: 'fy-1' })) }));
 vi.mock('../../utils/documentNumber', () => ({ generateDocumentNumber: vi.fn(async () => 'PI-202610-0001') }));
+// The received items are locked before the invoice number (value ledger, PR-6.4c3).
+vi.mock('../inventory/stockLocks', () => ({ lockInventoryRows: vi.fn(async () => ({ items: new Map(), stocks: new Map() })) }));
 vi.mock('../systemAccounts', () => ({
   systemAccounts: { getAccount: vi.fn(async (role: string) => ({ id: `acc-${role}`, name: role })) },
 }));
@@ -15,6 +17,7 @@ function grItem(id: string, grId: string, poId: string | null) {
   return {
     id,
     goodsReceiptId: grId,
+    inventoryItemId: 'inv-1',
     invoiceItem: null,
     goodsReceipt: { id: grId, sttNumber: `STT-${grId}`, status: 'Submitted', isCustomerOwned: false, partyId: 'sup-1', purchaseOrderId: poId },
   };
