@@ -48,7 +48,7 @@ const OUTBOUND = new Set(['Out', 'AdjustmentOut']);
  * zero-cost inbound, a sales return and an opname gain added stock without touching the average.
  * Replaying with today's rule would flag Outs that were priced right at the time.
  */
-function legacyLiveBlend(m: ReplayMovement): boolean {
+export function legacyLiveBlend(m: ReplayMovement): boolean {
   if (m.movementType !== 'In' && m.movementType !== 'AdjustmentIn') return false;
   if (new Decimal(m.unitCost.toString()).lte(0)) return false;
   if (m.movementType === 'In' && m.referenceType === 'SalesReturn') return false;

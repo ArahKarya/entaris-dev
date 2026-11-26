@@ -10,7 +10,8 @@
  *   and the picker lists the same 3.000;
  * - an edit of a run that used up the rest of a batch passes with its own quantity (its consumption
  *   is reversed before the check), and is refused above it;
- * - a batch held in another warehouse than the production warehouse is refused (owner decision #10).
+ * - a batch held in another warehouse than the production warehouse is refused (owner decision #10);
+ * - the read-only e6-batch-cost-runs report lists a ledger-valued batch input at the replayed average.
  * Each scenario ends with assertLedgerInvariant (warehouses included) and stored balances = ALE.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -32,6 +33,7 @@ import {
   PRODUCTION_BATCH_QTY_INSUFFICIENT,
   PRODUCTION_BATCH_WAREHOUSE,
 } from '../../services/inventory/batchAvailability';
+import { findBatchCostRuns } from '../../services/production/productionAudit';
 import {
   createProductionWorld,
   seedWorldStock,
@@ -150,6 +152,13 @@ d('production batch remainder (PR-6.9)', () => {
         expect(jv.lines.inventory).toEqual({ debit: 30_000_000, credit: 30_000_000 });
         expect(await bookOf(tx, w.items.beras.id)).toEqual({ stock: '3000.000', value: '30000000.00', average: '10000.000000' });
         expect(await availableOf(tx, w, batch)).toBe('0.000');
+
+        // The read-only report (e6-batch-cost-runs) lists the input at the replayed average.
+        const listed = (await findBatchCostRuns(tx)).find((r) => r.movementId === out.id);
+        expect(listed).toMatchObject({
+          runId: run.id, runNumber: run.runNumber, sourceMovementId: batch, accountId: w.accounts.inventory.id,
+          unitCost: '6000', batchUnitCost: '7000.000000', replayedAverage: '6000.000000', difference: '0.00',
+        });
       });
     });
   }
