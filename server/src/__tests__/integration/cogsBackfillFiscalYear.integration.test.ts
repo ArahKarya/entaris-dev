@@ -12,6 +12,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { type Tx } from '../helpers/routeHarness';
 import { createFiscalYear } from '../helpers/periodFixture';
+import { seedStock } from '../helpers/inventoryFixture';
 import { BusinessError } from '../../utils/errors';
 import { PERIOD_CLOSED } from '../../utils/periodGuard';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
@@ -69,8 +70,11 @@ async function seedQueue(tx: Tx, qty: number, costAtSale: number) {
   const stamp = tag();
   const party = await tx.party.create({ data: { name: `IT-COGSFY-Customer-${stamp}`, partyType: 'Customer', isActive: true } });
   const item = await tx.inventoryItem.create({
-    data: { code: `IT-COGSFY-${stamp}`, name: `COGSFY ${stamp}`, unit: 'kg', currentStock: 0, averageCost: costAtSale, isActive: true },
+    data: { code: `IT-COGSFY-${stamp}`, name: `COGSFY ${stamp}`, unit: 'kg', isActive: true },
   });
+  // The stock-in a settlement follows: its differential moves value out of this stock (value ledger).
+  const warehouse = await tx.warehouse.create({ data: { code: `IT-COGSFY-${stamp}`, name: `COGSFY ${stamp}` } });
+  await seedStock(tx, { itemId: item.id, warehouseId: warehouse.id, qty, avg: costAtSale, date: '2175-06-10', userId: adminId });
   const invoice = await submitSalesInvoiceInTx(
     tx,
     { date: '2175-06-10', partyId: party.id, items: [{ itemName: 'Jasa uji HPP', itemType: 'service', quantity: 1, rate: 1_000_000 }] } as any,
