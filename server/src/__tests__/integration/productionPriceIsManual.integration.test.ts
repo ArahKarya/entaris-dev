@@ -27,6 +27,7 @@ import {
   assertBalancesMatchAle,
   type ProductionWorld,
 } from '../helpers/productionFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -56,7 +57,9 @@ async function inWorld(fn: (tx: Tx, world: ProductionWorld) => Promise<void>) {
       state.tx = tx;
       systemAccounts.invalidateCache();
       try {
-        await fn(tx, await createProductionWorld(tx, YEAR));
+        const world = await createProductionWorld(tx, YEAR);
+        await fn(tx, world);
+        await assertLedgerInvariant(tx, Object.values(world.items).map((i) => i.id), { warehouses: true });
       } finally {
         state.tx = null;
         systemAccounts.invalidateCache();

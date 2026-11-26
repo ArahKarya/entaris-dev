@@ -186,8 +186,9 @@ function outputUsedError(mode: ProductionReversalMode, s: StockShortage): Busine
  * take back the value they put in, which is what the voided journal carried, so book = GL.
  * Reversing the outputs must not drive stock negative at the movement's warehouse (lines of one item
  * summed) unless bypassed, which is logged. An output whose item went out since it was received is
- * refused with REVERSAL_NEEDS_TRUE_UP (value true-up of a run, PR-6.12). Call it under
- * lockProductionStockInTx.
+ * refused with REVERSAL_NEEDS_TRUE_UP (value true-up of a run, PR-6.12), also one received at value
+ * 0 (a by-product at NRV 0) that diluted the average the later sales were valued at; an edit is
+ * refused in its own words. Call it under lockProductionStockInTx.
  */
 export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRunOptions): Promise<void> {
   const movements = await tx.stockMovement.findMany({
@@ -206,7 +207,7 @@ export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRu
       error: (s) => outputUsedError(opts.mode, s),
     },
   );
-  await reverseDocumentMovements(tx, { referenceType: PRODUCTION_REFERENCE, referenceId: runId }, { userId: opts.userId });
+  await reverseDocumentMovements(tx, { referenceType: PRODUCTION_REFERENCE, referenceId: runId }, { userId: opts.userId, forEdit: opts.mode === 'edit' });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -457,6 +458,7 @@ export async function persistProductionRunDetails(
       inputs: body.inputs,
       outputs: body.outputs,
       batchSnapshots: args.costedInputs,
+      inputCosting: costing.inputLines,
       outputCosting: costing.outputLines,
     }),
   });

@@ -17,6 +17,7 @@ import { systemAccounts } from '../../services/systemAccounts';
 import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { editProductionRunInTx } from '../../services/productionRunEdit';
 import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -151,6 +152,7 @@ d('editProductionRunInTx — single input / single output', () => {
         const active = allMovements.filter((m) => !m.isCancelled);
         expect(cancelled.length).toBe(2); // v1 in + out
         expect(active.length).toBe(2);    // v2 in + out
+        await assertLedgerInvariant(tx, [inputItem.id, outputItem.id], { warehouses: true });
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });
@@ -205,6 +207,7 @@ d('editProductionRunInTx — single input / single output', () => {
             userId,
           ),
         ).rejects.toThrow(/sudah dibatalkan/i);
+        await assertLedgerInvariant(tx, [inputItem.id, outputItem.id], { warehouses: true });
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });

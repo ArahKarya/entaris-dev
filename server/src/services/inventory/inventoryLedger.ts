@@ -133,6 +133,8 @@ export interface ReverseOptions {
   sweepAtZero?: boolean;
   /** Business day (YYYY-MM-DD) of the true-up / sweep row and its journal; default today (WIB, owner decision #3). */
   journalDay?: string;
+  /** The reversal undoes a document for an edit: a refusal says so instead of naming a cancel. */
+  forEdit?: boolean;
 }
 
 export interface ReverseResult {
@@ -427,7 +429,9 @@ async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
  *   reaches 0 and is swept: then the sweep makes the total COGS exact;
  * - an inbound reversal that moves value and leaves stock_value < 0, or stock > 0 with value <= 0;
  * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise (residueAtZero).
- * A row that carries no value moves none, so it never trips the first two rules.
+ * An inbound row that carries no value (a by-product at NRV 0, an output at HPP 0) still moved the
+ * average by its quantity, so taking it back after goods went out is refused the same way while
+ * value stays on hand; it moves no value, so the sign rules do not apply to it.
  */
 async function reversalSweep(
   tx: Tx,
@@ -435,16 +439,22 @@ async function reversalSweep(
   itemName: string,
   next: ItemState,
   valueDelta: Decimal,
-  sweepAtZero: boolean,
+  opts: ReverseOptions,
 ): Promise<Decimal> {
+  const sweepAtZero = opts.sweepAtZero === true;
+  const forEdit = opts.forEdit === true;
   // A Revaluation row changed the value of goods on hand like an inbound row, so taking it back has
   // the same exposure to goods that went out since.
   const inboundWithValue = (INBOUND_TYPES.has(movement.movementType) || movement.movementType === 'Revaluation') && !valueDelta.isZero();
   if (inboundWithValue && (next.value.lt(0) || (next.stock.gt(0) && next.value.lte(0)))) {
-    throw needsTrueUp(itemName, next);
+    throw needsTrueUp(itemName, next, forEdit);
   }
+  // A zero-value inbound row diluted the average the later outbound rows were valued at; taking its
+  // quantity back raises the average of what is left unless no value is left to spread.
+  const dilutedAverage = INBOUND_TYPES.has(movement.movementType) && valueDelta.isZero()
+    && !dec(movement.quantity).isZero() && !next.value.isZero();
   const sweptToZero = next.stock.isZero() && sweepAtZero;
-  if (inboundWithValue && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next);
+  if ((inboundWithValue || dilutedAverage) && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next, forEdit);
   if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
   if (!sweepAtZero) throw residueAtZero(itemName, next);
   return next.value;
@@ -579,7 +589,7 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const reversed = stateAfter(item, qtyDelta, valueDelta.plus(trueUp));
   const residue = opts.trueUp === 'replay'
     ? replaySweep(item.name, reversed, sweepAtZero)
-    : await reversalSweep(tx, movement, item.name, reversed, valueDelta, sweepAtZero);
+    : await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts);
   // Every guard runs before the first write: a caller that catches a refusal keeps a whole book.
   const period = trueUp.isZero() && residue.isZero() ? null : await sweepPeriod(tx, opts);
 

@@ -1397,7 +1397,7 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 
 ### prod_run_cancel
 
-**Ringkasan:** Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.
+**Ringkasan:** Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, tiap baris persis sebesar nilainya di buku nilai persediaan (rata-rata mengikuti nilai buku, tidak dihitung ulang dari riwayat; ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output, juga produk samping bernilai 0, sudah keluar sejak diterima), jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1439,7 +1439,7 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 
 **Isi hasil:** {message: 'Proses produksi berhasil dibatalkan.'}
 
-**Efek pembukuan/stok:** Stok input dikembalikan dan stok output dikurangi, masing-masing persis sebesar nilainya di buku nilai persediaan (ditolak bila stok output tidak cukup kecuali allowNegativeStock); rata-rata mengikuti nilai buku; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output sudah keluar sejak diterima (juga lewat bypass stok minus).
+**Efek pembukuan/stok:** Stok input dikembalikan dan stok output dikurangi, masing-masing persis sebesar nilainya di buku nilai persediaan (ditolak bila stok output tidak cukup kecuali allowNegativeStock); rata-rata mengikuti nilai buku; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output (juga produk samping bernilai 0, yang ikut menurunkan rata-rata) sudah keluar sejak diterima, juga lewat bypass stok minus.
 
 **Teks konfirmasi:** Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.
 
@@ -1459,7 +1459,7 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 - 400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan
 - 400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
-- 409 REVERSAL_NEEDS_TRUE_UP: output run ini sudah keluar sejak diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
+- 409 REVERSAL_NEEDS_TRUE_UP: output run ini (juga produk samping bernilai 0) sudah keluar sejak diterima, dari gudang dan dokumen mana pun (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get)
 
@@ -1703,7 +1703,7 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 
 **Isi hasil:** Bypass: run hasil edit (200). Non-bypass: 202 {pendingApproval, request}.
 
-**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik persis sebesar nilainya di buku nilai persediaan (ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output sudah keluar sejak diterima), jurnal lama dibatalkan, stok & jurnal baru diposting (input dinilai dari buku nilai) (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.
+**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik persis sebesar nilainya di buku nilai persediaan (ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output, juga produk samping bernilai 0, sudah keluar sejak diterima; berlaku juga untuk edit header saja seperti mesin, shift, atau catatan), jurnal lama dibatalkan, stok & jurnal baru diposting (input dinilai dari buku nilai) (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.
 
 **Teks konfirmasi:** Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).
 
@@ -1724,6 +1724,7 @@ Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesa
 - 400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)
 - 400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama (juga saat disetujui; pengajuan tetap Pending)
 - 400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal revisi tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem (juga saat disetujui; pengajuan tetap Pending)
+- 409 REVERSAL_NEEDS_TRUE_UP: output run ini (juga produk samping bernilai 0) sudah keluar sejak diterima, dari gudang dan dokumen mana pun; edit ditolak (juga edit header saja: mesin, shift, catatan) sampai koreksi nilai otomatis tersedia, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)
 

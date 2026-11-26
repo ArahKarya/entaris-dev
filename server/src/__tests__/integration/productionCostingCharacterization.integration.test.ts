@@ -172,8 +172,8 @@ d('production costing characterization - PRD R1 fixture', () => {
       expect(await itemState(tx, w.items.beras.id)).toEqual({ currentStock: 600, averageCost: 10166.666667, warehouseSum: 600 });
       expect(await itemState(tx, w.items.bekatul.id)).toEqual({ currentStock: 100, averageCost: 2000, warehouseSum: 100 });
 
-      // Persisted lines: the main output carries the back-filled HPP at 2 dp.
-      expect(await lineOf(tx, run.id, w.items.gkp.id)).toMatchObject({ lineType: 'Input', quantity: 1000, unitPrice: null, batchUnitCost: null });
+      // Persisted lines: the input carries the ledger cost; the main output the back-filled HPP.
+      expect(await lineOf(tx, run.id, w.items.gkp.id)).toMatchObject({ lineType: 'Input', quantity: 1000, unitPrice: 6000, batchUnitCost: null });
       expect(await lineOf(tx, run.id, w.items.beras.id)).toMatchObject({ lineType: 'Output', quantity: 600, unitPrice: 10166.666667 });
       expect(await lineOf(tx, run.id, w.items.bekatul.id)).toMatchObject({ lineType: 'ByProduct', quantity: 100, unitPrice: 2000 });
 
