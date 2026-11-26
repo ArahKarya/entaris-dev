@@ -100,7 +100,6 @@
       "negativeStockReason": "Reason:",
       "inputs": "Raw materials (input)",
       "outputs": "Production output",
-      "batchRate": "batch @{{rate}}",
       "byProduct": "By-product",
       "costs": "Cost components",
       "costSideOutput": "output",
@@ -112,10 +111,9 @@
       "processes": "Processes",
       "processCount_one": "{{count}} process recorded",
       "processCount_other": "{{count}} processes recorded",
-      "hppEstimate": "Estimated COGS",
-      "hppPerKg": "/ kg main product (estimate)",
+      "hppEstimate": "Cost summary",
       "costSummary": "Costs: {{cost}} · By-product value: {{byproduct}}",
-      "hppFinalNote": "Final COGS (including material cost) is calculated on approval."
+      "hppFinalNote": "Material cost is calculated by the server from the inventory average on approval; a batch only traces quantity."
     },
     "basis": {
       "InputQty": "per kg input",

@@ -19,7 +19,7 @@ import {
 } from '../../services/inventoryItemList';
 import { logger } from '../../lib/logger';
 import { assertItemAccountValid, assertItemChangeAllowed, itemHoldsStock, ITEM_HAS_STOCK } from '../../services/inventory/itemMasterGuard';
-import { batchUnitCosts } from '../../services/inventory/inventoryLedger';
+import { listBatchAvailability } from '../../services/inventory/batchAvailability';
 
 const router = Router();
 
@@ -112,7 +112,7 @@ router.get('/summary', async (req, res) => {
 });
 
 // GET /api/inventory/items/:id/batches?warehouseId=X: inbound batches (non-cancelled inbound movements) with remaining qty
-// for the production batch picker. Callers should compare the batch total with the returned `currentStock`.
+// for the production batch picker (services/inventory/batchAvailability.ts, the rule production checks against).
 router.get('/:id/batches', async (req, res) => {
   try {
     const itemId = req.params.id as string;
@@ -120,111 +120,24 @@ router.get('/:id/batches', async (req, res) => {
       ? req.query.warehouseId
       : null;
 
-    const item = await prisma.inventoryItem.findUnique({
-      where: { id: itemId },
-      select: { id: true, code: true, name: true, unit: true, currentStock: true },
-    });
-    if (!item) return res.status(404).json({ error: 'Item tidak ditemukan.' });
+    const listed = await listBatchAvailability(prisma, itemId, warehouseId);
+    if (!listed) return res.status(404).json({ error: 'Item tidak ditemukan.' });
 
-    let currentStock: number = Number(item.currentStock);
-    if (warehouseId) {
-      const stockRow = await prisma.inventoryStock.findFirst({
-        where: { itemId, warehouseId },
-        select: { currentStock: true },
-      });
-      currentStock = Number(stockRow?.currentStock ?? 0);
-    }
-
-    // TransferIn counts as a batch: it carries the WAC at transfer time, so goods moved between warehouses stay pickable.
-    const inboundFilter: any = {
-      itemId,
-      isCancelled: false,
-      movementType: { in: ['In', 'AdjustmentIn', 'TransferIn'] },
-    };
-    if (warehouseId) inboundFilter.warehouseId = warehouseId;
-
-    const inbound = await prisma.stockMovement.findMany({
-      where: inboundFilter,
-      orderBy: { date: 'asc' },
-      select: {
-        id: true, movementNumber: true, date: true, quantity: true, unitCost: true, totalValue: true, valueDelta: true,
-        referenceType: true, referenceId: true, referenceNumber: true,
-        warehouseId: true,
-      },
-    });
-
-    if (inbound.length === 0) {
-      return res.json({ data: [], item, currentStock });
-    }
-
-    // Consumption = outbound movements linked back to the batch via source_movement_id (any submit service that sets it).
-    const consumed = await prisma.stockMovement.groupBy({
-      by: ['sourceMovementId'],
-      where: {
-        sourceMovementId: { in: inbound.map((m) => m.id) },
-        isCancelled: false,
-        movementType: { in: ['Out', 'AdjustmentOut', 'TransferOut'] },
-      },
-      _sum: { quantity: true },
-    });
-    const consumedMap = new Map<string, number>();
-    for (const c of consumed) {
-      if (c.sourceMovementId) {
-        consumedMap.set(c.sourceMovementId, Number(c._sum.quantity ?? 0));
-      }
-    }
-
-    // Batch cost includes the purchase invoice Revaluations that adjust the row (never rewritten).
-    const batchCosts = await batchUnitCosts(prisma, inbound);
-
-    // Availability from explicit tracking only.
-    const rawBatches = inbound.map((m) => {
-      const qtyConsumedTracked = consumedMap.get(m.id) ?? 0;
-      return {
-        id: m.id,
-        movementNumber: m.movementNumber,
-        date: m.date,
-        qtyInbound: Number(m.quantity),
-        unitCost: Number(batchCosts.get(m.id) ?? m.unitCost),
-        qtyConsumedTracked,
-        qtyAvailableTracked: Number(m.quantity) - qtyConsumedTracked,
-        sourceType: m.referenceType ?? 'Other',
-        sourceRef: m.referenceNumber ?? null,
-        sourceRefId: m.referenceId ?? null,
-      };
-    });
-
-    // Untracked outbound = max(0, tracked availability - currentStock), absorbed FIFO from the oldest batches
-    // (rawBatches is sorted by date asc) so the picker never shows more than is physically present.
-    const totalAvailableTracked = rawBatches.reduce((s, b) => s + b.qtyAvailableTracked, 0);
-    let untrackedRemaining = Math.max(0, totalAvailableTracked - currentStock);
-
-    const batches = rawBatches
-      .map((b) => {
-        let qtyAvailable = b.qtyAvailableTracked;
-        let qtyConsumedUntracked = 0;
-        if (untrackedRemaining > 0 && qtyAvailable > 0) {
-          const absorb = Math.min(qtyAvailable, untrackedRemaining);
-          qtyAvailable -= absorb;
-          qtyConsumedUntracked = absorb;
-          untrackedRemaining -= absorb;
-        }
-        return {
-          id: b.id,
-          movementNumber: b.movementNumber,
-          date: b.date,
-          qtyInbound: b.qtyInbound,
-          unitCost: b.unitCost,
-          qtyConsumed: b.qtyConsumedTracked + qtyConsumedUntracked,
-          qtyAvailable,
-          sourceType: b.sourceType,
-          sourceRef: b.sourceRef,
-          sourceRefId: b.sourceRefId,
-        };
-      })
-      .filter((b) => b.qtyAvailable > 0.001);
-
-    return res.json({ data: batches, item, currentStock });
+    const batches = listed.batches
+      .filter((b) => b.available.gt(0.001))
+      .map((b) => ({
+        id: b.id,
+        movementNumber: b.movementNumber,
+        date: b.date,
+        qtyInbound: b.quantity.toNumber(),
+        unitCost: b.unitCost.toNumber(),
+        qtyConsumed: b.consumed.toNumber(),
+        qtyAvailable: b.available.toNumber(),
+        sourceType: b.referenceType ?? 'Other',
+        sourceRef: b.referenceNumber ?? null,
+        sourceRefId: b.referenceId ?? null,
+      }));
+    return res.json({ data: batches, item: listed.item, currentStock: listed.currentStock.toNumber() });
   } catch (error) {
     logger.error({ error }, 'GET /inventory/items/:id/batches error');
     return res.status(500).json({ error: 'Gagal mengambil daftar batch stok.' });

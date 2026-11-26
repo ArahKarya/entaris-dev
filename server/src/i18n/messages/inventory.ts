@@ -232,4 +232,7 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Gudang retur untuk '{0}' wajib dipilih.": "Choose the return warehouse for '{0}'.",
   "Nilai satuan \"{0}\" tidak dapat diubah karena stok setelah opname {1}. Kosongkan nilai satuan atau samakan dengan rata-rata.": "The unit cost of \"{0}\" cannot be changed because the stock after the count is {1}. Clear the unit cost or set it equal to the average.",
   "Satu baris invoice hanya boleh muncul sekali dalam satu retur.": "An invoice line can appear only once in one return.",
+  // production costing (E6), batch remainder (E6-R3): services/inventory/batchAvailability.ts
+  "Batch {0} (input ke-{1}) tidak berada di gudang produksi {2}. Pilih batch dari gudang produksi.": "Batch {0} (input {1}) is not in the production warehouse {2}. Pick a batch from the production warehouse.",
+  "Sisa batch {0} (input ke-{1}) tidak cukup: tersedia {2} {3}, diminta {4} {5}.": "Batch {0} (input {1}) does not hold enough: {2} {3} left, {4} {5} asked.",
 };

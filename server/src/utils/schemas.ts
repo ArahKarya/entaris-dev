@@ -772,8 +772,9 @@ const ProductionRunCostInputSchema = z.object({
 const ProductionInputLineSchema = z.object({
   itemId: z.string().min(1, 'Item wajib dipilih.'),
   quantity: z.coerce.number().positive('Kuantitas harus lebih dari 0.'),
-  // Batch picker: the inbound batch the input is taken from, for traceability. The input is
-  // valued from the inventory value ledger; batchUnitCost is a display snapshot only.
+  // Batch picker: the inbound batch the input is taken from, for traceability; its remaining
+  // quantity is checked. The input is valued from the inventory value ledger. batchUnitCost is
+  // still accepted so old drafts and queued approvals stay valid, and ignored (E6-R3).
   sourceMovementId: z.string().uuid().nullable().optional(),
   batchUnitCost: z.coerce.number().min(0).nullable().optional(),
 });

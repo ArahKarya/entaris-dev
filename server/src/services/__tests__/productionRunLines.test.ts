@@ -10,7 +10,7 @@ describe('buildProductionRunLineItems', () => {
       { itemId: 'beras', quantity: 600 },
       { itemId: 'dedak', quantity: 100, isByProduct: true },
     ],
-    batchSnapshots: [{ sourceMovementId: 'sm-batch', batchUnitCost: 6000 }],
+    batchSnapshots: [{ sourceMovementId: 'sm-batch' }],
     inputCosting: [{ unitCost: 5800.5 }],
     outputCosting: [
       { persistedUnitPrice: 9500, priceIsManual: true, yieldPct: 60 },
@@ -25,14 +25,15 @@ describe('buildProductionRunLineItems', () => {
     expect(lines.every((l) => l.productionRunId === 'run-1')).toBe(true);
   });
 
-  it('keeps batch, yield and resolved price semantics; an input is priced at its ledger cost', () => {
+  it('keeps batch, yield and resolved price semantics; an input is priced at its ledger cost, batch line included', () => {
     const [input, main, byProduct] = buildProductionRunLineItems(base);
-    expect(input).toMatchObject({ lineType: 'Input', sourceMovementId: 'sm-batch', batchUnitCost: 6000, unitPrice: 5800.5 });
+    // A picked batch stores the ledger cost it was taken out at, not the batch's own cost (E6-R3).
+    expect(input).toMatchObject({ lineType: 'Input', sourceMovementId: 'sm-batch', batchUnitCost: 5800.5, unitPrice: 5800.5 });
     expect(main).toMatchObject({ lineType: 'Output', unitPrice: 9500, yieldPct: 60, isByProduct: false });
     expect(byProduct).toMatchObject({ lineType: 'ByProduct', unitPrice: 1500, yieldPct: null, isByProduct: true });
   });
 
-  it('falls back to an empty batch snapshot for unpicked inputs', () => {
+  it('stores no batch cost for unpicked inputs', () => {
     const [input] = buildProductionRunLineItems({ ...base, batchSnapshots: [] });
     expect(input).toMatchObject({ sourceMovementId: null, batchUnitCost: null });
   });

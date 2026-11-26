@@ -6,7 +6,7 @@
  *   at 0 -> average 66,666667; a sale of the 1.500 kg (delivery order + invoice) posts COGS 100.000
  *   and leaves stock_value 0 (before, the unvalued receipt skipped the average: 1.500 x 200);
  * - a picked batch @7.000 while the average is 6.000: the input is credited at its ledger value
- *   (6.000.000), the batch stays a back-link and a display snapshot; the cancel takes every row
+ *   (6.000.000), the batch stays a back-link; the cancel takes every row
  *   back at its own value;
  * - two input lines of one item, the second taking the rest of the book: the credits are the
  *   ledger values (33.333,33 + 66.666,67, not 20.000 x 3,333333 = 66.666,66), and the output is
@@ -231,7 +231,8 @@ d('production on the value ledger (PR-6.4e)', () => {
       const gkpOut = (await rowsOf(tx, run.id)).find((r) => r.itemId === w.items.gkp.id)!;
       expect(gkpOut).toMatchObject({ type: 'Out', valueDelta: '-6000000.00', unitCost: '6000.000000', sourceMovementId: batch });
       const line = await tx.productionRunItem.findFirstOrThrow({ where: { productionRunId: run.id, itemId: w.items.gkp.id } });
-      expect(Number(line.batchUnitCost)).toBe(7_000);
+      // The batch cost column carries the ledger cost the input went out at (PR-6.9).
+      expect(Number(line.batchUnitCost)).toBe(6_000);
       // The line's unit_price is the ledger cost the PDF and detail drawer show.
       expect(Number(line.unitPrice)).toBe(6_000);
       const stored = await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } });

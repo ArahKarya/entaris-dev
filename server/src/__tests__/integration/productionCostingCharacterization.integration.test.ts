@@ -387,10 +387,11 @@ d('production costing characterization - variants', () => {
       }));
 
       // Before the value ledger the client's batchUnitCost (5.000) valued the input and the HPP was
-      // 8.500 while the book kept 6.000: now the ledger values it, the snapshot stays for display.
+      // 8.500 while the book kept 6.000: now the ledger values it, and the line's batch cost is the
+      // ledger cost too (PR-6.9).
       const gkp = (await movementsOf(tx, run.id)).find((m) => m.itemId === w.items.gkp.id)!;
       expect(gkp).toMatchObject({ unitCost: 6000, totalValue: 6_000_000 });
-      expect(await lineOf(tx, run.id, w.items.gkp.id)).toMatchObject({ batchUnitCost: 5000 });
+      expect(await lineOf(tx, run.id, w.items.gkp.id)).toMatchObject({ batchUnitCost: 6000 });
       expect(Number((await runRow(tx, run.id)).computedHpp)).toBe(10166.666667);
       expect((await itemState(tx, w.items.gkp.id)).averageCost).toBe(6000);
       await assertBalancesMatchAle(tx, w);

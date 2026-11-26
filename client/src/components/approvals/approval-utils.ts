@@ -83,18 +83,16 @@ export function resolvePiTotals(
   return { ...local, headerPotonganMismatch: header > 0 && Math.abs(header - local.potonganItem) > 0.01 };
 }
 
-// Estimasi HPP/Kg produksi dari payload. Material hanya pasti bila batchUnitCost
-// terisi; jika tidak, material tak diketahui (return knownMaterial=false).
-export function prodHppEstimate(payload: any): { hpp: number | null; knownMaterial: boolean; byproductValue: number; costTotal: number; mainQty: number } {
+// Production cost summary from the payload: conversion costs and by-product value. Material is
+// valued by the server from the inventory average when the run is posted (E6-R3), so the client
+// never estimates it (a picked batch traces quantity only).
+export function prodCostSummary(payload: any): { byproductValue: number; costTotal: number; mainQty: number } {
   const inputs: any[] = payload?.inputs ?? [];
   const outputs: any[] = payload?.outputs ?? [];
   const costs: any[] = payload?.costs ?? [];
   const mainQty = outputs.filter((o) => !o.isByProduct).reduce((s, o) => s + Number(o.quantity ?? 0), 0);
   const inputQty = inputs.reduce((s, i) => s + Number(i.quantity ?? 0), 0);
   const byproductValue = outputs.filter((o) => o.isByProduct).reduce((s, o) => s + Number(o.quantity ?? 0) * Number(o.unitPrice ?? 0), 0);
-  // Material: hanya jika SEMUA input punya batchUnitCost > 0.
-  const allHaveBatch = inputs.length > 0 && inputs.every((i) => Number(i.batchUnitCost ?? 0) > 0);
-  const material = allHaveBatch ? inputs.reduce((s, i) => s + Number(i.quantity ?? 0) * Number(i.batchUnitCost ?? 0), 0) : 0;
   // Biaya: rate × basisQty (InputQty/OutputQty/Fixed).
   let costTotal = 0;
   for (const c of costs) {
@@ -103,9 +101,7 @@ export function prodHppEstimate(payload: any): { hpp: number | null; knownMateri
     else if (c.basis === 'OutputQty') costTotal += rate * mainQty;
     else costTotal += rate; // Fixed
   }
-  if (!allHaveBatch || mainQty <= 0) return { hpp: null, knownMaterial: allHaveBatch, byproductValue, costTotal: Math.round(costTotal), mainQty };
-  const hpp = (material + costTotal - byproductValue) / mainQty;
-  return { hpp: Math.round(hpp), knownMaterial: true, byproductValue, costTotal: Math.round(costTotal), mainQty };
+  return { byproductValue, costTotal: Math.round(costTotal), mainQty };
 }
 
 /** Party / item names the server resolves in GET /approvals/requests/:id/context. */

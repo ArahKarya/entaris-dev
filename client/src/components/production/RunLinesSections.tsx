@@ -7,7 +7,6 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Field, type ComboboxOption } from '@/components/shared';
 import { ComboboxField } from '@/components/overlays/ComboboxField';
 import { BatchSelect } from '@/components/overlays/BatchSelect';
-import type { Batch } from '@/components/overlays/BatchSelect';
 import { cn } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
 import { LOCALE } from '@/lib/format';
@@ -24,7 +23,7 @@ interface InputsSectionProps {
   warehouseId: string;
   getItemById: (id: string) => ItemLike | undefined;
   onUpdate: (idx: number, field: keyof LineItem, value: string) => void;
-  onPickBatch: (idx: number, batchId: string, batch: Batch | null) => void;
+  onPickBatch: (idx: number, batchId: string) => void;
   onSplit: (idx: number) => void;
   onAdd: () => void;
   onRemove: (idx: number) => void;
@@ -102,7 +101,7 @@ export function RunInputsSection({
                         excludeIds={inputs
                           .filter((r, i) => i !== idx && r.itemId === row.itemId && r.sourceMovementId)
                           .map((r) => r.sourceMovementId)}
-                        onChange={(id, batch) => onPickBatch(idx, id, batch)}
+                        onChange={(id) => onPickBatch(idx, id)}
                       />
                     </div>
                     {!row.sourceMovementId && (parseFloat(row.quantity) || 0) > 0 && warehouseId && (

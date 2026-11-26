@@ -22064,16 +22064,17 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
+              "description": "Batch masuk asal input (penelusuran qty saja; nilai input dari buku nilai persediaan, bukan biaya batch). Batch harus ada di gudang produksi dan sisanya cukup untuk semua baris yang memakainya; edit tetap boleh memakai batch lama run itu."
             },
             {
               "name": "batchUnitCost",
               "in": "body",
               "type": "number",
-              "required": false
+              "required": false,
+              "description": "Diabaikan (hanya agar draft lama tetap valid); jangan dikirim. Biaya bahan dihitung server."
             }
           ],
-          "description": "Baris bahan input: [{itemId, quantity, sourceMovementId?(batch), batchUnitCost?}]."
+          "description": "Baris bahan input: [{itemId, quantity, sourceMovementId?(batch)}]."
         },
         {
           "name": "outputs",
@@ -30757,13 +30758,14 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
+              "description": "Batch masuk asal input (penelusuran qty saja; nilai input dari buku nilai persediaan, bukan biaya batch). Batch harus ada di gudang produksi dan sisanya cukup untuk semua baris yang memakainya; edit tetap boleh memakai batch lama run itu."
             },
             {
               "name": "batchUnitCost",
               "in": "body",
               "type": "number",
-              "required": false
+              "required": false,
+              "description": "Diabaikan (hanya agar draft lama tetap valid); jangan dikirim. Biaya bahan dihitung server."
             }
           ],
           "description": "Baris input baru (menggantikan semua baris lama)."
@@ -31247,13 +31249,14 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
+              "description": "Batch masuk asal input (penelusuran qty saja; nilai input dari buku nilai persediaan, bukan biaya batch). Batch harus ada di gudang produksi dan sisanya cukup untuk semua baris yang memakainya; edit tetap boleh memakai batch lama run itu."
             },
             {
               "name": "batchUnitCost",
               "in": "body",
               "type": "number",
-              "required": false
+              "required": false,
+              "description": "Diabaikan (hanya agar draft lama tetap valid); jangan dikirim. Biaya bahan dihitung server."
             }
           ],
           "description": "Daftar bahan baku/input produksi (array objek)."

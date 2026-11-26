@@ -4,7 +4,6 @@ import api from '../lib/api';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { LOCALE } from '@/lib/format';
-import type { Batch } from './overlays/BatchSelect';
 import { cap } from '../lib/permissions';
 import { fetchBatches, allocateFifo } from '../lib/fifoAllocate';
 import { TriangleAlert } from 'lucide-react';
@@ -60,7 +59,7 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
   const [warehouseId, setWarehouseId] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [notes, setNotes] = useState('');
-  const [inputs, setInputs] = useState<LineItem[]>([{ itemId: '', quantity: '', sourceMovementId: '', batchUnitCost: '' }]);
+  const [inputs, setInputs] = useState<LineItem[]>([{ itemId: '', quantity: '', sourceMovementId: '' }]);
   const [outputs, setOutputs] = useState<OutputLineItem[]>([{ itemId: '', quantity: '', unitPrice: '', isByProduct: false }]);
   const [costs, setCosts] = useState<CostLine[]>([]);
   const [hppOverride, setHppOverride] = useState<string>('');
@@ -105,9 +104,8 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
           ? p.inputs.map((i: any) => ({
               itemId: i.itemId ?? '', quantity: String(Number(i.quantity ?? 0)),
               sourceMovementId: i.sourceMovementId ?? '',
-              batchUnitCost: i.batchUnitCost != null ? String(Number(i.batchUnitCost)) : '',
             }))
-          : [{ itemId: '', quantity: '', sourceMovementId: '', batchUnitCost: '' }]);
+          : [{ itemId: '', quantity: '', sourceMovementId: '' }]);
         setOutputs(Array.isArray(p.outputs) && p.outputs.length > 0
           ? p.outputs.map((o: any) => ({
               itemId: o.itemId ?? '', quantity: String(Number(o.quantity ?? 0)),
@@ -159,9 +157,8 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
               itemId: i.itemId ?? i.item?.id ?? '',
               quantity: String(Number(i.quantity)),
               sourceMovementId: i.sourceMovementId ?? '',
-              batchUnitCost: i.batchUnitCost != null ? String(Number(i.batchUnitCost)) : '',
             }))
-          : [{ itemId: '', quantity: '', sourceMovementId: '', batchUnitCost: '' }]
+          : [{ itemId: '', quantity: '', sourceMovementId: '' }]
         );
         setOutputs(outputItems.length > 0
           ? outputItems.map((o: any) => ({
@@ -180,7 +177,7 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
         setWarehouseId('');
         setReferenceNumber('');
         setNotes('');
-        setInputs([{ itemId: '', quantity: '', sourceMovementId: '', batchUnitCost: '' }]);
+        setInputs([{ itemId: '', quantity: '', sourceMovementId: '' }]);
         setOutputs([{ itemId: '', quantity: '', unitPrice: '', isByProduct: false }]);
       }
       if (editRun && Array.isArray(editRun.runCosts)) {
@@ -293,21 +290,15 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
       if (i !== idx) return row;
       // Changing the item resets the batch pick (different item = different batches).
       if (field === 'itemId') {
-        return { ...row, itemId: value, sourceMovementId: '', batchUnitCost: '' };
+        return { ...row, itemId: value, sourceMovementId: '' };
       }
       return { ...row, [field]: value };
     }));
   };
 
-  const onPickBatch = (idx: number, batchId: string, batch: Batch | null) => {
-    setInputs(prev => prev.map((row, i) => i === idx
-      ? {
-          ...row,
-          sourceMovementId: batchId,
-          batchUnitCost: batch ? String(batch.unitCost) : '',
-        }
-      : row,
-    ));
+  // A batch traces the quantity only: the server values every input at the inventory average.
+  const onPickBatch = (idx: number, batchId: string) => {
+    setInputs(prev => prev.map((row, i) => i === idx ? { ...row, sourceMovementId: batchId } : row));
   };
   const updateOutput = (idx: number, field: string, value: string | boolean) => {
     setOutputs(prev => prev.map((row, i) => i === idx ? { ...row, [field]: value } : row));
@@ -335,10 +326,9 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
         itemId: row.itemId,
         quantity: String(a.qty),
         sourceMovementId: a.batch.id,
-        batchUnitCost: String(a.batch.unitCost),
       }));
       if (shortfall > 0) {
-        newRows.push({ itemId: row.itemId, quantity: String(shortfall), sourceMovementId: '', batchUnitCost: '' });
+        newRows.push({ itemId: row.itemId, quantity: String(shortfall), sourceMovementId: '' });
         toast.warning(t('productionRunModal.batchShortfall', { qty: shortfall.toLocaleString(LOCALE) }));
       } else {
         toast.success(t('productionRunModal.batchSplit', { count: allocations.length }));
@@ -349,7 +339,7 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
     }
   };
 
-  const addInput = () => setInputs(prev => [...prev, { itemId: '', quantity: '', sourceMovementId: '', batchUnitCost: '' }]);
+  const addInput = () => setInputs(prev => [...prev, { itemId: '', quantity: '', sourceMovementId: '' }]);
   const removeInput = (idx: number) => setInputs(prev => prev.filter((_, i) => i !== idx));
   const addOutput = () => setOutputs(prev => [...prev, { itemId: '', quantity: '', unitPrice: '', isByProduct: false }]);
   const removeOutput = (idx: number) => setOutputs(prev => prev.filter((_, i) => i !== idx));
@@ -410,15 +400,11 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
     ? ((totalMainOutputQty / totalInputQty) * 100).toFixed(1)
     : null;
 
-  // Live HPP preview mirrors the server logic; the server re-computes authoritatively.
+  // Live HPP preview mirrors the server logic: every input at the item average (a picked batch does
+  // not change it); the server re-computes authoritatively from the value ledger.
   const totalMaterialCostPreview = inputs.reduce((s, r) => {
-    const qty = parseFloat(r.quantity) || 0;
-    let unitCost = parseFloat(r.batchUnitCost) || 0;
-    if (!r.batchUnitCost) {
-      const item = getItemById(r.itemId);
-      unitCost = item ? Number(item.averageCost) : 0;
-    }
-    return s + qty * unitCost;
+    const item = getItemById(r.itemId);
+    return s + (parseFloat(r.quantity) || 0) * (item ? Number(item.averageCost) : 0);
   }, 0);
 
   const computeCostTotal = (c: CostLine): number => {
@@ -496,7 +482,6 @@ export function ProductionRunModal({ isOpen, onClose, items, editRun, prefillPay
           itemId: i.itemId,
           quantity: parseFloat(i.quantity),
           sourceMovementId: i.sourceMovementId || null,
-          batchUnitCost: i.batchUnitCost ? parseFloat(i.batchUnitCost) : null,
         })),
         outputs: validOutputs.map(o => ({
           itemId: o.itemId,

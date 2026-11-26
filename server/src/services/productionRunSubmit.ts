@@ -15,8 +15,9 @@ export interface SubmitProductionRunInput {
   // location. Otherwise resolveWarehouseId falls back to the default. One of
   // the two must resolve, else the service throws.
   warehouseId?: string | null;
-  // Optional batch tracking: sourceMovementId is the picked inbound batch and batchUnitCost the
-  // cost the picker showed. Both are traceability only: the value ledger values every input.
+  // Optional batch tracking: sourceMovementId is the picked inbound batch, traceability only (its
+  // remaining quantity is checked; the value ledger values every input). batchUnitCost is still
+  // accepted from old drafts and ignored.
   inputs: Array<{
     itemId: string;
     quantity: number;
