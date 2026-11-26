@@ -8,13 +8,15 @@ import path from 'node:path';
  * stockValue, every adjustWarehouseStock call and every raw INSERT/UPDATE/DELETE on the three
  * tables, under server/src (scripts included), is counted per file and compared with ALLOWLIST.
  * The list is the state of the code when the guard was added and may only SHRINK: the value
- * ledger PRs move every writer behind services/inventory/inventoryLedger.ts, the one entry that was
- * added (PR-6.4b2) and the only one left after PR-6.4e besides wipe and seed (PR-6.4d moved the
- * delivery order, invoice cancellation and transfer writers behind it, PR-6.4c1 the goods receipt,
- * opening stock import and manual movement writers, PR-6.4c2 the stock count and sales return
- * writers, PR-6.4c3 the purchase invoice landed cost and price revision and the legacy COGS
- * settlement; the drift repair's warehouse placement is left). Write stock fields
- * inline in the call (not through a data variable built earlier) so the guard sees them.
+ * ledger PRs moved every writer behind services/inventory/inventoryLedger.ts, the one entry that was
+ * added (PR-6.4b2) and, since PR-6.4e, the only one left besides the demo wipe and the lock helper's
+ * empty warehouse rows (PR-6.4d moved the delivery order, invoice cancellation and transfer writers
+ * behind it, PR-6.4c1 the goods receipt, opening stock import and manual movement writers, PR-6.4c2
+ * the stock count and sales return writers, PR-6.4c3 the purchase invoice landed cost and price
+ * revision and the legacy COGS settlement, PR-6.4e production, the drift repair's warehouse
+ * placement and adjustWarehouseStock, and deleted the WAC replay writer and two legacy repair
+ * scripts). Write stock fields inline in the call (not through a data variable built earlier) so the
+ * guard sees them.
  *
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
  * it writes, unless it is in LOCK_EXEMPT (wipe, seed, the helpers themselves) or still in
@@ -34,24 +36,15 @@ const LOCK_CALL = /\blockInventoryRows\s*\(/;
 type Counts = Record<string, number>;
 
 const ALLOWLIST: Record<string, Counts> = {
-  'scripts/fixLandedCost.ts': { 'stockMovement.updateMany': 1 },
-  'scripts/fixPotonganAllocation.ts': { 'stockMovement.update': 1 },
-  'services/averageCostRecompute.ts': { 'inventoryItem.update(stock)': 1 },
   'services/demoData/wipe.ts': { 'sql:UPDATE inventory_items': 1 },
   'services/inventory/inventoryLedger.ts': { 'inventoryStock.update': 1, 'inventoryItem.update(stock)': 2, 'stockMovement.create': 1, 'stockMovement.updateMany': 2 },
-  'services/inventory/manualMovement.ts': { 'inventoryStock.upsert': 1 },
   'services/inventory/stockLocks.ts': { 'inventoryStock.createMany': 1 },
-  'services/production/productionPosting.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
-  'utils/warehouseStock.ts': { 'inventoryStock.upsert': 1 },
 };
 
 /** Writers that need no lockInventoryRows call of their own. */
 const LOCK_EXEMPT: Record<string, string> = {
   'services/demoData/wipe.ts': 'wipes demo data with no concurrent posting',
-  'services/inventory/stockLocks.ts': 'the lock helper itself (creates the rows it locks)',
-  'utils/warehouseStock.ts': 'adjustWarehouseStock runs inside callers that hold the lock',
-  'scripts/fixLandedCost.ts': 'one-off legacy repair script, deleted in PR-6.4e',
-  'scripts/fixPotonganAllocation.ts': 'one-off legacy repair script, deleted in PR-6.4e',
+  'services/inventory/stockLocks.ts': 'the lock helper itself (creates the empty warehouse rows it locks; no quantity or value)',
 };
 
 /** Writers that do not lock yet, with the PR that locks them. Empty since PR-6.2b; keep it so. */
@@ -140,6 +133,11 @@ describe('stock writers architecture', () => {
       }
     }
     expect(stale).toEqual([]);
+  });
+
+  it('only the value ledger writes stock, besides the exempt demo wipe and lock helper (PR-6.4e)', () => {
+    const others = Object.keys(ALLOWLIST).filter((f) => f !== 'services/inventory/inventoryLedger.ts' && !LOCK_EXEMPT[f]);
+    expect(others).toEqual([]);
   });
 
   it('every writer locks its rows with lockInventoryRows, or is exempt, or is pending with its PR', () => {

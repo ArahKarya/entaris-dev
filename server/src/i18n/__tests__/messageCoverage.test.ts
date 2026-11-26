@@ -33,6 +33,7 @@ const IGNORED = new Set<string>([
   'postTransfer: source and destination are the same warehouse',
   'reverseMovement: transfer leg {0} has no warehouse',
   'postRevaluation: delta must be a non-zero amount',
+  'placeUnplacedStock: quantity must be a non-zero amount',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
   // Programming errors of the sourceKey builders (services/ledger/journalSource.ts sourceKeys), never reach a client.

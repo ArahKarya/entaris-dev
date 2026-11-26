@@ -349,6 +349,19 @@ export async function postTransfer(tx: Tx, i: TransferInput): Promise<PostedTran
 }
 
 /**
+ * Item vs warehouse drift repair `assign` (PR-6.3d): books `quantity` of stock that no warehouse
+ * holds into `warehouseId`; a negative quantity takes a warehouse's excess over the item total back
+ * out of it. Only the warehouse row moves: the item total, stock_value and average stay, and no
+ * movement row is written. The caller checks under the lock that the quantity fits the drift.
+ */
+export async function placeUnplacedStock(tx: Tx, i: { itemId: string; warehouseId: string; quantity: Decimal.Value }): Promise<void> {
+  const quantity = new Decimal(i.quantity);
+  if (!quantity.isFinite() || quantity.isZero()) throw new Error('placeUnplacedStock: quantity must be a non-zero amount');
+  await lockItem(tx, i.itemId, i.warehouseId);
+  await writeStock(tx, i.itemId, i.warehouseId, quantity, null);
+}
+
+/**
  * Links the journal the caller posted for a ledger row (the outbound pattern in the header). Only an
  * empty journal_entry_id is filled; a row that is cancelled or already linked is refused.
  */
