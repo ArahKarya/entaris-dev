@@ -4,15 +4,19 @@ import { UNIT_COST_DP } from '../inventory/inventoryValueMath';
 
 /**
  * Production costing (E6-R1): the one home of the run's cost arithmetic. Pure, no database:
- * the caller loads the items and the per-input unit cost (productionCostContext), then posts the
- * movements and the journal from what this returns. Submit and edit share it, so the back-fill
- * rule for main output prices, the loaded HPP and the journal plan exist only here.
+ * the caller takes the inputs out through the value ledger first (productionPosting.ts), passes the
+ * value each one actually took out of the book, and posts the outputs and the journal from what this
+ * returns. Submit and edit share it, so the back-fill rule for main output prices, the loaded HPP and
+ * the journal plan exist only here.
  */
 
 export interface CostingInputLine {
   quantity: number;
-  /** Unit cost the input is consumed at (batch snapshot or WAC, resolved by the context). */
-  unitCost: number;
+  /**
+   * The value the input took out of stock: −valueDelta of its postOutbound row (E3-R6). Never a
+   * preview at average x quantity, nor the picked batch's cost (E6-R3).
+   */
+  value: Decimal.Value;
 }
 
 export interface CostingOutputLine {
@@ -44,8 +48,9 @@ export interface ResolvedCostLine extends CostingCostLine {
 }
 
 export interface CostedInputLine {
+  /** value / quantity, UNIT_COST_DP (the unit cost of the ledger row). */
   unitCost: number;
-  /** quantity x unitCost, 2 dp. */
+  /** The consumed value, 2 dp. */
   totalValue: number;
 }
 
@@ -111,6 +116,15 @@ const ZERO = new Decimal(0);
 
 function lineValue(quantity: number, unitCost: number): number {
   return new Decimal(quantity).mul(new Decimal(unitCost)).toDecimalPlaces(2).toNumber();
+}
+
+function costInput(i: CostingInputLine): CostedInputLine {
+  const value = new Decimal(i.value).toDecimalPlaces(2);
+  const quantity = new Decimal(i.quantity);
+  return {
+    unitCost: quantity.gt(0) ? value.div(quantity).toDecimalPlaces(UNIT_COST_DP).toNumber() : 0,
+    totalValue: value.toNumber(),
+  };
 }
 
 function sum(values: ReadonlyArray<Decimal>): Decimal {
@@ -200,7 +214,7 @@ export function computeProductionCosting(input: ProductionCostingInput): Product
   const inputQtyDec = sum(input.inputs.map((i) => new Decimal(i.quantity)));
   const mainOutputQtyDec = sum(mainOutputs.map((o) => new Decimal(o.quantity)));
 
-  const inputLines = input.inputs.map((i) => ({ unitCost: i.unitCost, totalValue: lineValue(i.quantity, i.unitCost) }));
+  const inputLines = input.inputs.map(costInput);
   const totalMaterialCost = sum(inputLines.map((l) => new Decimal(l.totalValue)));
 
   const resolvedCosts = resolveCosts(input.costs ?? [], inputQtyDec, mainOutputQtyDec);

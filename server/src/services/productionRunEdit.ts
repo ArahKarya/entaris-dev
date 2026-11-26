@@ -6,7 +6,6 @@ import { resolveWarehouseId } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
 import type { SubmitProductionRunInput } from './productionRunSubmit';
 import { dropBackfilledOutputPrices } from './productionRunLines';
-import { computeProductionCosting } from './production/productionCosting';
 import { loadProductionCostContext } from './production/productionCostContext';
 import {
   clearProductionRunDetails,
@@ -19,8 +18,9 @@ import {
 type Tx = Prisma.TransactionClient;
 
 /**
- * Edit a production run: undo its effects (movements and journals voided, record kept), re-cost
- * the new data and post it with a revision journal JV-{runNumber}-R{n}. Cancelled runs are
+ * Edit a production run: undo its effects (movements taken back at their values and journals
+ * voided, record kept), then post the new data through the value ledger, costed from the restored
+ * book, with a revision journal JV-{runNumber}-R{n}. Cancelled runs are
  * rejected. Balances move per journal line, through the cancel model and postJournal.
  */
 export async function editProductionRunInTx(
@@ -78,18 +78,12 @@ export async function editProductionRunInTx(
   });
   await clearProductionRunDetails(tx, runId);
 
-  // Loaded after the reversal, so inputs are checked against the restored stock and costed at the
-  // replayed WAC.
+  // Loaded after the reversal, so inputs are checked against the restored stock; the ledger then
+  // values them from the restored book.
   const { itemMap, inputs: costedInputs } = await loadProductionCostContext(tx, body, {
     warehouseId: productionWarehouseId,
     context: 'productionRun.edit',
     userId,
-  });
-  const costing = computeProductionCosting({
-    inputs: body.inputs.map((input, i) => ({ quantity: input.quantity, unitCost: costedInputs[i]!.unitCost })),
-    outputs: body.outputs,
-    costs: body.costs,
-    hppOverride: body.hppOverride,
   });
 
   await tx.productionRun.update({
@@ -100,7 +94,6 @@ export async function editProductionRunInTx(
       referenceType: body.referenceType || null,
       referenceId: body.referenceId || null,
       referenceNumber: body.referenceNumber || null,
-      yieldPct: costing.yieldPct,
       // OEE capture fields, cleared when omitted. Single machineId/startAt/endAt are
       // kept for backward compat only.
       machineId: body.machineId ?? null,
@@ -119,6 +112,22 @@ export async function editProductionRunInTx(
     },
   });
 
+  const costing = await postProductionEffectsInTx(tx, {
+    run: { id: runId, runNumber: oldRun.runNumber },
+    date: txDate,
+    fiscalYearId: fiscalYear.id,
+    warehouseId: productionWarehouseId,
+    notes: body.notes || null,
+    userId,
+    inputs: body.inputs,
+    outputs: body.outputs,
+    costs: body.costs,
+    hppOverride: body.hppOverride,
+    costedInputs,
+    itemMap,
+    revision: true,
+  });
+
   if (costing.clampedNegativeNumerator) {
     logger.warn(
       {
@@ -132,20 +141,6 @@ export async function editProductionRunInTx(
     );
   }
 
-  await postProductionEffectsInTx(tx, {
-    run: { id: runId, runNumber: oldRun.runNumber },
-    date: txDate,
-    fiscalYearId: fiscalYear.id,
-    warehouseId: productionWarehouseId,
-    notes: body.notes || null,
-    userId,
-    inputs: body.inputs,
-    outputs: body.outputs,
-    costedInputs,
-    costing,
-    itemMap,
-    revision: true,
-  });
   await persistProductionRunDetails(tx, runId, { body, warehouseId: productionWarehouseId, costedInputs, costing });
 
   return tx.productionRun.findUnique({
