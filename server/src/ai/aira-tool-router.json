@@ -13417,7 +13417,7 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "delivery_order",
-      "desc": "Mengubah field header Surat Jalan saja (catatan, no. mobil, driver, penerima). Tidak mengubah item/qty. Hanya SJ berstatus Submitted.",
+      "desc": "Mengubah field header Surat Jalan saja (catatan, no. mobil, driver, penerima). Tidak mengubah item/qty, pergerakan stok, maupun biayanya. Hanya SJ berstatus Submitted di periode terbuka.",
       "risk": "write",
       "roles": [
         "Admin",
@@ -13482,7 +13482,10 @@
       "confirm_template": "Ubah data header Surat Jalan {id}?",
       "errors": [
         "404: SJ tidak ditemukan.",
-        "400: hanya SJ Submitted yang bisa diedit."
+        "400: hanya SJ Submitted yang bisa diedit.",
+        "400 STALE_STATUS: SJ dibatalkan atau ditagih oleh permintaan lain saat diubah; muat ulang lalu periksa statusnya",
+        "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
       "related": [
         "do_update"
@@ -28268,7 +28271,7 @@
       "group": "Penjualan",
       "toolset": "penjualan",
       "module": "delivery_order",
-      "desc": "Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice. Butuh capability doc.cancel.",
+      "desc": "Mengedit penuh Surat Jalan dengan biaya asli dipertahankan (nomor DO tetap): baris lama dan baru dipasangkan per item dan gudang. Baris yang tidak berubah tetap memakai pergerakan stoknya; qty turun dikembalikan pada nilai satuan asli baris itu; qty naik hanya tambahannya dinilai rata-rata saat ini; baris dihapus dibalik sebesar nilainya; baris baru dinilai rata-rata saat ini. Untuk mengubah header saja (sopir, no. mobil, penerima, catatan) pakai do_patch. Hanya SJ Submitted yang belum masuk invoice. Butuh capability doc.cancel.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -28411,14 +28414,15 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: membalik pergerakan keluar lama dan membuat pergerakan keluar baru (stok & WAC per item berubah). TIDAK ada jurnal GL. Bypass stok minus butuh capability inventory.negative_stock (tanpa itu 403, tidak diantrikan).",
-      "confirm_template": "Edit penuh Surat Jalan {id} (stok akan dibalik dan diterapkan ulang)?",
+      "postingEffect": "Stok: hanya selisih qty yang bergerak; pergerakan baris yang qty-nya berubah (atau tanggalnya pindah dalam bulan yang sama) dibatalkan dan diganti satu pergerakan baru bernilai biaya asli + tambahan pada rata-rata saat ini (nilai persediaan dan rata-rata hanya berubah sebesar selisih itu). TIDAK ada jurnal GL; HPP saat ditagih = nilai pergerakan baris SJ. Bypass stok minus butuh capability inventory.negative_stock (tanpa itu 403, tidak diantrikan).",
+      "confirm_template": "Edit penuh Surat Jalan {id} (baris yang tidak berubah tetap memakai biaya lama)?",
       "accessNote": "Risiko direklasifikasi dari write (membalik dan menerapkan ulang pergerakan stok).",
       "errors": [
         "400: SJ sudah masuk invoice — batalkan invoice dulu.",
         "400: SJ sudah dibatalkan.",
         "403: bypass stok minus butuh capability.",
-        "400 STOCK_INSUFFICIENT: setelah stok SJ lama dikembalikan, stok gudang sumber tidak cukup untuk baris baru (dijumlah per item per gudang)",
+        "400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup untuk tambahan qty dan baris baru, sesudah qty yang dikembalikan edit ini (dijumlah per item per gudang; pesan menghitung qty SJ ini di kedua sisi)",
+        "409 REVERSAL_NEEDS_TRUE_UP: qty yang dikembalikan membuat stok item tepat 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
@@ -30283,7 +30287,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; baris lama dibalik persis sebesar nilainya di buku nilai persediaan (rata-rata mengikuti nilai buku, tidak dihitung ulang dari riwayat) dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
+      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; baris lama dibalik sebesar nilainya di buku nilai persediaan, dengan koreksi nilai otomatis bila barangnya sudah keluar sesudahnya dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30382,7 +30386,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Pergerakan lama dibatalkan: stok dan nilainya kembali persis, jurnal lama berstatus Cancelled (saldo akun dikurangi per baris). Pergerakan baru (nomor SM baru) dan jurnal baru diposting sesuai isian (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar dinilai dari nilai persediaan sesudah pembalikan); reverse+settle ulang COGS backfill. Edit stok masuk ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sesudahnya.",
+      "postingEffect": "Pergerakan lama dibatalkan: stok dan nilainya kembali persis, jurnal lama berstatus Cancelled (saldo akun dikurangi per baris). Pergerakan baru (nomor SM baru) dan jurnal baru diposting sesuai isian (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar dinilai dari nilai persediaan sesudah pembalikan); reverse+settle ulang COGS backfill. Bila barang item itu sudah keluar sesudah pergerakan lama, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN bertanggal hari ini, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.",
       "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang.",
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
@@ -30396,7 +30400,9 @@
         "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
         "400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu",
         "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)",
-        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
@@ -30448,7 +30454,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dan nilainya dibalik persis (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; COGS backfill dibalik. Pembatalan stok masuk ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sesudahnya.",
+      "postingEffect": "Stok dan nilainya dibalik persis (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; COGS backfill dibalik. Bila barang item itu sudah keluar sesudah pergerakan lama, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN bertanggal hari ini, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.",
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -30461,7 +30467,9 @@
         "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
         "400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu",
         "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)",
-        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
+        "409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan",
+        "409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan",
+        "400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",

@@ -39,7 +39,8 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 |---|---|---|
 | Inquiry, Penawaran, SO (semua status), SJS | Tidak ada | Tidak ada |
 | `do_create`, `so_generate_do` | Keluar per item/gudang, unitCost = WAC saat kirim (dikunci) | Tidak ada (HPP menunggu invoice) |
-| `do_update` | Balik pergerakan lama + keluar baru | Tidak ada |
+| `do_update` | Hanya selisih qty: baris yang tidak berubah tetap, qty turun kembali pada biaya asli, tambahan dan baris baru pada rata-rata saat ini | Tidak ada |
+| `do_patch` | Tidak ada (header saja: sopir, no. mobil, penerima, catatan) | Tidak ada |
 | `do_cancel` | Stok dikembalikan | Tidak ada |
 | `do_from_invoice` | Tidak ada (stok sudah dipotong invoice) | Tidak ada |
 | `si_create` | Keluar untuk baris inventori (kecuali baris dari DO: HPP-nya seluruh nilai mutasi Keluar SJ) | DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh bila pphPct>0] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran; lalu JV-COGS: DR 5.1 HPP (fallback 5) / CR Persediaan |
@@ -1792,7 +1793,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### do_patch
 
-**Ringkasan:** Mengubah field header Surat Jalan saja (catatan, no. mobil, driver, penerima). Tidak mengubah item/qty. Hanya SJ berstatus Submitted.
+**Ringkasan:** Mengubah field header Surat Jalan saja (catatan, no. mobil, driver, penerima). Tidak mengubah item/qty, pergerakan stok, maupun biayanya. Hanya SJ berstatus Submitted di periode terbuka.
 
 - **Risk / tier:** `write` / Draft/Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1843,6 +1844,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 - 404: SJ tidak ditemukan.
 - 400: hanya SJ Submitted yang bisa diedit.
+- 400 STALE_STATUS: SJ dibatalkan atau ditagih oleh permintaan lain saat diubah; muat ulang lalu periksa statusnya
+- 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
+- 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
 **Tool terkait:** [`do_update`](#do_update)
 
@@ -1892,7 +1896,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 ### do_update
 
-**Ringkasan:** Mengedit penuh Surat Jalan: pergerakan stok lama dibalik lalu baris baru diterapkan (nomor DO tetap). Hanya SJ Submitted yang belum masuk invoice. Butuh capability doc.cancel.
+**Ringkasan:** Mengedit penuh Surat Jalan dengan biaya asli dipertahankan (nomor DO tetap): baris lama dan baru dipasangkan per item dan gudang. Baris yang tidak berubah tetap memakai pergerakan stoknya; qty turun dikembalikan pada nilai satuan asli baris itu; qty naik hanya tambahannya dinilai rata-rata saat ini; baris dihapus dibalik sebesar nilainya; baris baru dinilai rata-rata saat ini. Untuk mengubah header saja (sopir, no. mobil, penerima, catatan) pakai do_patch. Hanya SJ Submitted yang belum masuk invoice. Butuh capability doc.cancel.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1951,15 +1955,15 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
   "kind": "action",
   "status": "pending_approval",
   "approvalId": "<id>",
-  "confirm": "Edit penuh Surat Jalan <id> (stok akan dibalik dan diterapkan ulang)?"
+  "confirm": "Edit penuh Surat Jalan <id> (baris yang tidak berubah tetap memakai biaya lama)?"
 }
 ```
 
 **Isi hasil:** DeliveryOrder setelah diedit.
 
-**Efek pembukuan/stok:** Stok: membalik pergerakan keluar lama dan membuat pergerakan keluar baru (stok & WAC per item berubah). TIDAK ada jurnal GL. Bypass stok minus butuh capability inventory.negative_stock (tanpa itu 403, tidak diantrikan).
+**Efek pembukuan/stok:** Stok: hanya selisih qty yang bergerak; pergerakan baris yang qty-nya berubah (atau tanggalnya pindah dalam bulan yang sama) dibatalkan dan diganti satu pergerakan baru bernilai biaya asli + tambahan pada rata-rata saat ini (nilai persediaan dan rata-rata hanya berubah sebesar selisih itu). TIDAK ada jurnal GL; HPP saat ditagih = nilai pergerakan baris SJ. Bypass stok minus butuh capability inventory.negative_stock (tanpa itu 403, tidak diantrikan).
 
-**Teks konfirmasi:** Edit penuh Surat Jalan {id} (stok akan dibalik dan diterapkan ulang)?
+**Teks konfirmasi:** Edit penuh Surat Jalan {id} (baris yang tidak berubah tetap memakai biaya lama)?
 
 **Prasyarat**
 
@@ -1972,7 +1976,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: SJ sudah masuk invoice — batalkan invoice dulu.
 - 400: SJ sudah dibatalkan.
 - 403: bypass stok minus butuh capability.
-- 400 STOCK_INSUFFICIENT: setelah stok SJ lama dikembalikan, stok gudang sumber tidak cukup untuk baris baru (dijumlah per item per gudang)
+- 400 STOCK_INSUFFICIENT: stok gudang sumber tidak cukup untuk tambahan qty dan baris baru, sesudah qty yang dikembalikan edit ini (dijumlah per item per gudang; pesan menghitung qty SJ ini di kedua sisi)
+- 409 REVERSAL_NEEDS_TRUE_UP: qty yang dikembalikan membuat stok item tepat 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku
