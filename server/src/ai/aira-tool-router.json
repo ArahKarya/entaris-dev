@@ -25121,7 +25121,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang non-bypass: tidak ada efek GL/stok sampai disetujui (ApprovalRequest Pending, notifikasi ke Admin). Cabang bypass/standalone: DR Persediaan (akun persediaan per item) / CR Hutang Usaha (2.1.1), stok masuk + WAC, penyelesaian backfill COGS stok minus; PPN/PPh/potongan/biaya lain dialokasikan (landed cost). Baris tertaut STT (goodsReceiptItemId): stok tidak dibuat ulang; DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1) dan STT.invoiceId diisi.",
+      "postingEffect": "Cabang non-bypass: tidak ada efek GL/stok sampai disetujui (ApprovalRequest Pending, notifikasi ke Admin). Cabang bypass/standalone: DR Persediaan (akun persediaan per item) / CR Hutang Usaha (2.1.1), stok masuk + WAC, penyelesaian backfill COGS stok minus; PPN/PPh/potongan/biaya lain dialokasikan (landed cost). Baris tertaut STT (goodsReceiptItemId): stok tidak dibuat ulang; DR Hutang Belum Tagih (2.1.5) @ biaya STT / CR Hutang Usaha (2.1.1); selisih harga Invoice vs biaya STT menjadi baris Revaluation di buku nilai persediaan (mutasi STT tidak ditimpa): porsi yang terserap stok DR/CR Persediaan, sisanya (stok habis atau penurunan melebihi nilai stok) DR/CR HPP (akun terpetakan COGS); STT.invoiceId diisi.",
       "confirm_template": "Buat Invoice Pembelian dari pemasok {partyId} tanggal {date}, {items} baris. Role non-Admin akan masuk antrian persetujuan. Setujui?",
       "prerequisites": [
         "Pemasok aktif",
@@ -25201,7 +25201,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.",
+      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.",
       "confirm_template": "Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
@@ -25292,7 +25292,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
+      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok, lewat baris Revaluation buku nilai; bagian yang tidak terserap stok ke HPP) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya (rata-rata tidak pernah negatif). Jurnal revisi ikut dibatalkan bila PI dibatalkan. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
       "confirm_template": "Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?",
       "prerequisites": [
         "PI berstatus Submitted/Paid (belum dibatalkan)",
