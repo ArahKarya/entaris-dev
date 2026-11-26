@@ -229,4 +229,7 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Gudang retur untuk '{0}' wajib dipilih.": "Choose the return warehouse for '{0}'.",
   "Nilai satuan \"{0}\" tidak dapat diubah karena stok setelah opname {1}. Kosongkan nilai satuan atau samakan dengan rata-rata.": "The unit cost of \"{0}\" cannot be changed because the stock after the count is {1}. Clear the unit cost or set it equal to the average.",
   "Satu baris invoice hanya boleh muncul sekali dalam satu retur.": "An invoice line can appear only once in one return.",
+  // cancel value (E3-R8): services/inventory/reversalErrors.ts
+  "Pembatalan ditolak: gerakan stok {0} '{1}' tercatat sebelum nilai awal buku nilai, dan barangnya sudah ikut keluar, jadi koreksi nilainya tidak bisa dihitung otomatis. Minta akuntan membuat jurnal koreksi.": "Cancellation refused: stock movement {0} of '{1}' was recorded before the valuation baseline and its goods have gone out since, so its value correction cannot be calculated automatically. Ask the accountant to post a correcting journal.",
+  "Pembatalan ditolak: riwayat gerakan stok '{0}' tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis. Hubungi akuntan.": "Cancellation refused: the stock movement history of '{0}' does not explain its current stock and value, so the value correction cannot be calculated automatically. Contact the accountant.",
 };
