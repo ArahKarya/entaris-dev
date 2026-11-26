@@ -3,7 +3,6 @@
 // downtime for OEE), one draft left open, one posted by staff into the approval queue, a stock
 // transfer to the distribution warehouse and a stock count with small differences.
 
-import { prisma } from '../../../lib/prisma';
 import { DemoApiError } from '../api';
 import { windowDate, ymd, type DemoContext } from '../context';
 
@@ -74,10 +73,7 @@ function runBody(ctx: DemoContext, masters: PlantMasters, date: Date, paddyKg: n
   };
 }
 
-async function systemStock(itemId: string, warehouseId: string): Promise<number> {
-  const row = await prisma.inventoryStock.findFirst({ where: { itemId, warehouseId }, select: { currentStock: true } });
-  return Number(row?.currentStock ?? 0);
-}
+type SystemStock = { items: Array<{ itemId: string; systemStock: number }> };
 
 export function scheduleProduction(ctx: DemoContext): void {
   let masters: PlantMasters | null = null;
@@ -124,12 +120,15 @@ export function scheduleProduction(ctx: DemoContext): void {
   // Month-end count of the distribution warehouse with small differences.
   ctx.schedule(windowDate(ctx, 2, 29), 'Stock opname', async () => {
     const wh = ctx.warehouses.distribution;
+    const date = ymd(windowDate(ctx, 2, 29));
     const diff: Record<string, number> = { minyak: -3, gula: 2, berasPremium: -5 };
-    const items = [];
-    for (const [key, delta] of Object.entries(diff)) {
-      const sys = await systemStock(ctx.items[key].id, wh);
-      items.push({ itemId: ctx.items[key].id, actualStock: Math.max(0, sys + delta), notes: delta < 0 ? 'Selisih kurang saat hitung fisik' : 'Selisih lebih saat hitung fisik' });
-    }
-    await ctx.api.post(ctx.admin, '/stock-opname', { date: ymd(windowDate(ctx, 2, 29)), warehouseId: wh, notes: 'Hitung fisik akhir bulan gudang distribusi', items });
+    // The stock as of the count date, as the form shows it; the count sends it back as its version.
+    const { items: stock } = await ctx.api.get<SystemStock>(ctx.admin, `/stock-opname/system-stock?warehouseId=${wh}&date=${date}`);
+    const items = Object.entries(diff).map(([key, delta]) => {
+      const itemId = ctx.items[key].id;
+      const sys = stock.find((s) => s.itemId === itemId)?.systemStock ?? 0;
+      return { itemId, expectedSystemStock: sys, actualStock: Math.max(0, sys + delta), notes: delta < 0 ? 'Selisih kurang saat hitung fisik' : 'Selisih lebih saat hitung fisik' };
+    });
+    await ctx.api.post(ctx.admin, '/stock-opname', { date, warehouseId: wh, notes: 'Hitung fisik akhir bulan gudang distribusi', items });
   });
 }
