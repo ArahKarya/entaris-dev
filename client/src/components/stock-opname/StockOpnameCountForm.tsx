@@ -1,6 +1,8 @@
 /**
- * Stock opname count entry. All active items are sent (audit trail); blank actual
- * means system stock, blank unit cost means average cost (filled = revaluation).
+ * Stock opname count entry (E3-R11). The system stock is the warehouse stock as of the count date
+ * (GET /stock-opname/system-stock), loaded again right before submit. Only the lines the user filled
+ * in are sent, each with the system stock the form showed; the server answers 409
+ * OPNAME_STOCK_CHANGED when that moved, and the form marks those lines and reloads.
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -8,26 +10,36 @@ import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import api from '@/lib/api';
-import { formatNumber, formatRupiah } from '@/lib/format';
+import { formatNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
-import { Field, LoadingState, PageHeader, StatCard } from '@/components/shared';
+import { EmptyState, Field, LoadingState, PageHeader, StatCard } from '@/components/shared';
 import { WarehouseSelectField } from '@/components/overlays/WarehouseSelectField';
 import { todayLocal } from '@/lib/date';
+import {
+  buildSubmitLines,
+  findStaleLines,
+  parseCount,
+  type StaleLine,
+  type SystemStockRow,
+} from './opnameCount';
 
-interface OpnameItem {
-  id: string;
-  code: string;
-  name: string;
-  unit: string;
-  currentStock: string | number;
-  averageCost: string | number;
-  isDummy?: boolean;
+interface SystemStockResponse {
+  warehouseId: string;
+  date: string;
+  items: SystemStockRow[];
+}
+
+interface OpnameErrorBody {
+  error?: string;
+  code?: string;
+  items?: { itemId: string; expectedSystemStock: string | number; systemStock: string | number }[];
 }
 
 const qty = (v: number) => formatNumber(v, { maxDecimals: 3 });
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface Props {
   breadcrumb: React.ReactNode;
@@ -42,115 +54,110 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
   const [actualStocks, setActualStocks] = useState<Record<string, string>>({});
-  // Nilai satuan manual per item. Kosong = pakai averageCost item apa adanya.
-  const [unitCosts, setUnitCosts] = useState<Record<string, string>>({});
+  // Lines whose system stock moved since the user saw it (reload before submit, or a 409).
+  const [staleLines, setStaleLines] = useState<Record<string, StaleLine>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Load all active items. When a warehouse is picked, the endpoint returns
-  // per-warehouse currentStock — opname compares against that, not the global
-  // total, so counting warehouse B only doesn't accidentally adjust warehouse A.
-  const { data: itemsRaw, isLoading } = useQuery({
-    queryKey: ['inventory-items-opname', warehouseId],
+  const validDate = ISO_DATE.test(date);
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['stock-opname-system-stock', warehouseId, date],
     queryFn: () => api
-      .get('/inventory/items', { params: { limit: 500, isActive: true, ...(warehouseId ? { warehouseId } : {}) } })
+      .get<SystemStockResponse>('/stock-opname/system-stock', { params: { warehouseId, date } })
       .then((r) => r.data),
+    enabled: Boolean(warehouseId) && validDate,
   });
-  const items: OpnameItem[] = useMemo(() => {
-    const raw: OpnameItem[] = Array.isArray(itemsRaw) ? itemsRaw : (itemsRaw?.data ?? []);
-    return raw.filter((i) => !i.isDummy);
-  }, [itemsRaw]);
+  const rows = useMemo(() => data?.items ?? [], [data]);
 
-  const filteredItems = useMemo(() => {
-    if (!search) return items;
+  const filteredRows = useMemo(() => {
+    if (!search) return rows;
     const s = search.toLowerCase();
-    return items.filter((i) => i.name.toLowerCase().includes(s) || i.code.toLowerCase().includes(s));
-  }, [items, search]);
+    return rows.filter((r) => r.name.toLowerCase().includes(s) || r.code.toLowerCase().includes(s));
+  }, [rows, search]);
 
   const handleActualChange = (itemId: string, value: string) => {
     setActualStocks((prev) => ({ ...prev, [itemId]: value }));
-  };
-
-  const getActualStock = (itemId: string, systemStock: number): number => {
-    const val = actualStocks[itemId];
-    if (val === undefined || val === '') return systemStock; // unchanged = same as system
-    return Number(val) || 0;
-  };
-
-  const handleCostChange = (itemId: string, value: string) => {
-    setUnitCosts((prev) => ({ ...prev, [itemId]: value }));
-  };
-
-  // Nilai satuan yang dipakai untuk perhitungan: input manual bila diisi,
-  // kalau tidak pakai HPP rata-rata (averageCost) item.
-  const getUnitCost = (itemId: string, avgCost: number): number => {
-    const val = unitCosts[itemId];
-    if (val === undefined || val === '') return avgCost;
-    return Number(val) || 0;
+    // Editing a marked line means the user checked it again.
+    setStaleLines((prev) => {
+      if (!(itemId in prev)) return prev;
+      const { [itemId]: _checked, ...rest } = prev;
+      return rest;
+    });
   };
 
   const summary = useMemo(() => {
+    let counted = 0;
     let surplus = 0;
     let deficit = 0;
-    let changed = 0;
-    let revalued = 0;
-    for (const item of items) {
-      const systemStock = Number(item.currentStock);
-      const avgCost = Number(item.averageCost);
-      const cost = getUnitCost(item.id, avgCost);
-      const actual = getActualStock(item.id, systemStock);
-      const diff = actual - systemStock;
-      if (diff !== 0) {
-        changed++;
-        const val = Math.abs(diff) * cost;
-        if (diff > 0) surplus += val;
-        else deficit += val;
-      }
-      // Revaluasi: perubahan nilai satuan dikenakan ke SELURUH stok saat ini.
-      if (cost !== avgCost) {
-        revalued++;
-        const delta = systemStock * (cost - avgCost);
-        if (delta > 0) surplus += delta;
-        else deficit += -delta;
-      }
+    for (const row of rows) {
+      const actual = parseCount(actualStocks[row.itemId]);
+      if (actual === null) continue;
+      counted++;
+      if (actual > row.systemStock) surplus++;
+      else if (actual < row.systemStock) deficit++;
     }
-    return { surplus, deficit, changed, revalued };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- unchanged from the original form
-  }, [items, actualStocks, unitCosts]);
+    return { counted, surplus, deficit };
+  }, [rows, actualStocks]);
+
+  /** Marks the lines a 409 listed and reloads the system stock. */
+  const handleStockChanged = (body: OpnameErrorBody) => {
+    const marked: Record<string, StaleLine> = {};
+    for (const line of body.items ?? []) {
+      marked[line.itemId] = { expectedSystemStock: Number(line.expectedSystemStock), systemStock: Number(line.systemStock) };
+    }
+    setStaleLines(marked);
+    toast.error(t('stockOpnameCountForm.toast.stockChanged', { count: Object.keys(marked).length }));
+    void refetch();
+  };
 
   const handleSubmit = async () => {
-    // Build items array — include ALL items (even unchanged for audit trail)
-    const opnameItems = items.map((item) => ({
-      itemId: item.id,
-      actualStock: getActualStock(item.id, Number(item.currentStock)),
-      unitCost: getUnitCost(item.id, Number(item.averageCost)),
-    }));
-
-    if (opnameItems.length === 0) {
-      toast.error(t('stockOpnameCountForm.toast.noItems'));
-      return;
-    }
-
     if (!warehouseId) {
       toast.error(t('stockOpnameCountForm.toast.warehouseRequired'));
+      return;
+    }
+    if (buildSubmitLines(rows, actualStocks).length === 0) {
+      toast.error(t('stockOpnameCountForm.toast.noItems'));
       return;
     }
 
     setSubmitting(true);
     try {
+      // Reload the stock as of the count date right before sending: a line that moved since the form
+      // showed it is marked for the user to check instead of being sent.
+      const fresh = await refetch();
+      if (fresh.isError || !fresh.data) {
+        toast.error(t('stockOpnameCountForm.toast.loadFailed'));
+        return;
+      }
+      const stale = findStaleLines(rows, fresh.data.items, actualStocks);
+      if (Object.keys(stale).length > 0) {
+        setStaleLines(stale);
+        toast.error(t('stockOpnameCountForm.toast.stockChanged', { count: Object.keys(stale).length }));
+        return;
+      }
+
       await api.post('/stock-opname', {
         date,
         warehouseId,
         notes: notes || null,
-        items: opnameItems,
+        items: buildSubmitLines(rows, actualStocks),
       });
       toast.success(t('stockOpnameCountForm.toast.saved'));
       onSuccess();
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
-      toast.error(message || t('stockOpnameCountForm.toast.saveFailed'));
+      const body = (err as { response?: { status?: number; data?: OpnameErrorBody } }).response?.data;
+      if (body?.code === 'OPNAME_STOCK_CHANGED') {
+        handleStockChanged(body);
+        return;
+      }
+      toast.error(body?.error || t('stockOpnameCountForm.toast.saveFailed'));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resetCounts = () => {
+    setActualStocks({});
+    setStaleLines({});
   };
 
   return (
@@ -166,18 +173,25 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
       {/* Header */}
       <div className="grid grid-cols-1 gap-4 rounded-lg border border-border bg-card p-4 md:grid-cols-3">
         <Field label={t('stockOpnameCountForm.fields.date')} required>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              // Counts stay (the physical count does not change); marks were against the old date.
+              setDate(e.target.value);
+              setStaleLines({});
+            }}
+          />
         </Field>
         <WarehouseSelectField
           label={t('stockOpnameCountForm.fields.warehouse')}
           required
-              value={warehouseId}
-              onChange={(id) => {
-                // Reset entered values when switching warehouse — "Stok Sistem"
-                // changes so the existing entries no longer mean the same thing.
-                setWarehouseId(id);
-                setActualStocks({});
-              }}
+          value={warehouseId}
+          onChange={(id) => {
+            // Reset entered values when switching warehouse: they were counted in the other one.
+            setWarehouseId(id);
+            resetCounts();
+          }}
           autoDefault
           placeholder={t('stockOpnameCountForm.fields.warehousePlaceholder')}
         />
@@ -193,9 +207,9 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
 
       {/* Summary */}
       <section aria-label={t('stockOpnameCountForm.summary.label')} className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard label={t('stockOpnameCountForm.summary.changed')} value={formatNumber(summary.changed)} />
-        <StatCard label={t('stockOpnameCountForm.summary.surplus')} value={formatRupiah(summary.surplus)} />
-        <StatCard label={t('stockOpnameCountForm.summary.deficit')} value={formatRupiah(summary.deficit)} />
+        <StatCard label={t('stockOpnameCountForm.summary.counted')} value={formatNumber(summary.counted)} />
+        <StatCard label={t('stockOpnameCountForm.summary.surplus')} value={formatNumber(summary.surplus)} />
+        <StatCard label={t('stockOpnameCountForm.summary.deficit')} value={formatNumber(summary.deficit)} />
       </section>
 
       {/* Search */}
@@ -220,6 +234,17 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
       {/* Items table */}
       {isLoading ? (
         <LoadingState label={t('stockOpnameCountForm.loading')} />
+      ) : isError ? (
+        <EmptyState
+          kind="error"
+          title={t('stockOpnameCountForm.loadError.title')}
+          description={t('stockOpnameCountForm.loadError.description')}
+          action={
+            <Button size="sm" variant="outline" onClick={() => void refetch()}>
+              {t('stockOpnameCountForm.loadError.retry')}
+            </Button>
+          }
+        />
       ) : (
         <div
           className="overflow-x-auto rounded-lg border border-border bg-card"
@@ -229,7 +254,7 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
           tabIndex={0}
         >
-          <table className="w-full min-w-[56rem] text-sm">
+          <table className="w-full min-w-[40rem] text-sm">
             <thead className="border-b border-border bg-muted/50 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th scope="col" className="px-3 py-2">{t('stockOpnameCountForm.table.code')}</th>
@@ -238,42 +263,46 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
                 <th scope="col" className="px-3 py-2 text-right">{t('stockOpnameCountForm.table.systemStock')}</th>
                 <th scope="col" className="w-36 px-3 py-2 text-right">{t('stockOpnameCountForm.table.actualStock')}</th>
                 <th scope="col" className="px-3 py-2 text-right">{t('stockOpnameCountForm.table.difference')}</th>
-                <th scope="col" className="w-40 px-3 py-2 text-right">{t('stockOpnameCountForm.table.unitCost')}</th>
-                <th scope="col" className="px-3 py-2 text-right">{t('stockOpnameCountForm.table.varianceValue')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredItems.map((item) => {
-                const systemStock = Number(item.currentStock);
-                const avgCost = Number(item.averageCost);
-                const actual = getActualStock(item.id, systemStock);
-                const cost = getUnitCost(item.id, avgCost);
-                const diff = actual - systemStock;
-                const costChanged = cost !== avgCost;
-                const val = Math.abs(diff) * cost;
+              {filteredRows.map((row) => {
+                const actual = parseCount(actualStocks[row.itemId]);
+                const diff = actual === null ? 0 : actual - row.systemStock;
+                const stale = staleLines[row.itemId];
 
                 return (
                   <tr
-                    key={item.id}
+                    key={row.itemId}
                     className={cn(
                       diff > 0 && 'bg-success-subtle/40',
                       diff < 0 && 'bg-danger-subtle/40',
-                      diff === 0 && costChanged && 'bg-warning-subtle/40',
+                      stale && 'bg-warning-subtle/60',
                     )}
                   >
-                    <td className="num px-3 py-2 font-mono text-xs">{item.code}</td>
-                    <td className="px-3 py-2 text-foreground">{item.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{item.unit}</td>
-                    <td className="num px-3 py-2 text-right">{qty(systemStock)}</td>
+                    <td className="num px-3 py-2 font-mono text-xs">{row.code}</td>
+                    <td className="px-3 py-2 text-foreground">
+                      {row.name}
+                      {stale && (
+                        <p role="alert" className="text-xs text-warning-text">
+                          {t('stockOpnameCountForm.table.stockChanged', {
+                            from: qty(stale.expectedSystemStock),
+                            to: qty(stale.systemStock),
+                          })}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">{row.unit}</td>
+                    <td className="num px-3 py-2 text-right">{qty(row.systemStock)}</td>
                     <td className="px-3 py-2">
                       <NumberInput
                         step="any"
                         min="0"
-                        className="num text-right"
-                        aria-label={t('stockOpnameCountForm.table.actualStockAria', { name: item.name })}
-                        placeholder={qty(systemStock)}
-                        value={actualStocks[item.id] ?? ''}
-                        onChange={(e) => handleActualChange(item.id, e.target.value)}
+                        className={cn('num text-right', stale && 'border-warning')}
+                        aria-label={t('stockOpnameCountForm.table.actualStockAria', { name: row.name })}
+                        placeholder={qty(row.systemStock)}
+                        value={actualStocks[row.itemId] ?? ''}
+                        onChange={(e) => handleActualChange(row.itemId, e.target.value)}
                       />
                     </td>
                     <td
@@ -284,21 +313,6 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
                       )}
                     >
                       {diff !== 0 ? (diff > 0 ? '+' : '') + qty(diff) : '—'}
-                    </td>
-                    <td className="px-3 py-2">
-                      <NumberInput
-                        step="any"
-                        min="0"
-                        className={cn('num text-right', costChanged && 'border-warning')}
-                        aria-label={t('stockOpnameCountForm.table.unitCostAria', { name: item.name })}
-                        placeholder={qty(avgCost)}
-                        value={unitCosts[item.id] ?? ''}
-                        onChange={(e) => handleCostChange(item.id, e.target.value)}
-                        title={t('stockOpnameCountForm.table.unitCostHint')}
-                      />
-                    </td>
-                    <td className="num px-3 py-2 text-right whitespace-nowrap">
-                      {diff !== 0 ? formatRupiah(val) : costChanged ? formatRupiah(systemStock * (cost - avgCost)) : '—'}
                     </td>
                   </tr>
                 );
@@ -313,7 +327,7 @@ export function StockOpnameCountForm({ breadcrumb, onBack, onSuccess }: Props) {
         <Button variant="outline" onClick={onBack}>
           {t('stockOpnameCountForm.actions.cancel')}
         </Button>
-        <Button onClick={handleSubmit} loading={submitting} disabled={submitting || !warehouseId}>
+        <Button onClick={handleSubmit} loading={submitting} disabled={submitting || !warehouseId || !validDate}>
           {submitting ? t('stockOpnameCountForm.actions.saving') : t('stockOpnameCountForm.actions.submit')}
         </Button>
       </div>

@@ -533,7 +533,7 @@
       "saving": "Menyimpan...",
       "submit": "Simpan & Proses"
     },
-    "description": "Isi stok fisik hasil hitung. Kolom kosong dianggap sama dengan stok sistem.",
+    "description": "Isi stok fisik hasil hitung untuk item yang dihitung. Hanya baris yang diisi yang disimpan; baris kosong tidak ikut opname.",
     "fields": {
       "date": "Tanggal",
       "notes": "Catatan",
@@ -541,17 +541,22 @@
       "warehouse": "Gudang",
       "warehousePlaceholder": "Pilih gudang opname..."
     },
+    "loadError": {
+      "description": "Stok sistem per tanggal untuk gudang ini tidak bisa dimuat.",
+      "retry": "Coba lagi",
+      "title": "Stok sistem gagal dimuat"
+    },
     "loading": "Memuat lembar hitung…",
-    "pickWarehouseHint": "Pilih gudang dulu untuk menampilkan stok sistem per gudang.",
+    "pickWarehouseHint": "Pilih gudang dulu untuk menampilkan stok sistem per tanggal opname di gudang itu.",
     "search": {
       "label": "Cari item",
       "placeholder": "Cari item..."
     },
     "summary": {
-      "changed": "Item Berubah",
-      "deficit": "Defisit",
+      "counted": "Baris Dihitung",
+      "deficit": "Baris Defisit",
       "label": "Ringkasan perubahan",
-      "surplus": "Surplus"
+      "surplus": "Baris Surplus"
     },
     "table": {
       "actualStock": "Stok Aktual",
@@ -560,18 +565,17 @@
       "difference": "Selisih",
       "label": "Daftar item untuk dihitung",
       "name": "Nama Item",
-      "systemStock": "Stok Sistem",
-      "unit": "Satuan",
-      "unitCost": "Nilai/Satuan",
-      "unitCostAria": "Nilai per satuan {{name}}",
-      "unitCostHint": "Kosongkan untuk memakai HPP rata-rata. Diisi = revaluasi nilai persediaan.",
-      "varianceValue": "Nilai Selisih"
+      "stockChanged": "Stok sistem berubah dari {{from}} ke {{to}}. Periksa lagi hitungannya.",
+      "systemStock": "Stok Sistem per Tanggal",
+      "unit": "Satuan"
     },
     "title": "Buat Stok Opname",
     "toast": {
-      "noItems": "Tidak ada item untuk stok opname.",
+      "loadFailed": "Gagal memuat stok sistem per tanggal. Coba lagi.",
+      "noItems": "Isi stok aktual minimal satu item.",
       "saveFailed": "Gagal menyimpan stok opname.",
       "saved": "Stok opname disimpan dan diproses.",
+      "stockChanged": "Stok sistem {{count}} item berubah sejak form dibuka. Baris yang ditandai sudah dimuat ulang; periksa lalu simpan lagi.",
       "warehouseRequired": "Pilih gudang opname terlebih dahulu."
     }
   },
@@ -604,7 +608,7 @@
       "actualStock": "Stok Aktual",
       "difference": "Selisih",
       "item": "Item",
-      "systemStock": "Stok Sistem",
+      "systemStock": "Stok Sistem per Tanggal",
       "unitPrice": "Harga/Unit",
       "varianceValue": "Nilai Selisih"
     }

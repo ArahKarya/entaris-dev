@@ -533,7 +533,7 @@
       "saving": "Saving...",
       "submit": "Save & process"
     },
-    "description": "Enter the physical stock you counted. Blank fields are treated as equal to system stock.",
+    "description": "Enter the physical stock of the items you counted. Only the lines you fill in are saved; blank lines are not part of the count.",
     "fields": {
       "date": "Date",
       "notes": "Notes",
@@ -541,17 +541,22 @@
       "warehouse": "Warehouse",
       "warehousePlaceholder": "Select warehouse to count..."
     },
+    "loadError": {
+      "description": "The system stock as of the date for this warehouse could not be loaded.",
+      "retry": "Try again",
+      "title": "Could not load system stock"
+    },
     "loading": "Loading count sheet…",
-    "pickWarehouseHint": "Select a warehouse first to show system stock for that warehouse.",
+    "pickWarehouseHint": "Select a warehouse first to show its system stock as of the count date.",
     "search": {
       "label": "Search items",
       "placeholder": "Search items..."
     },
     "summary": {
-      "changed": "Items changed",
-      "deficit": "Deficit",
+      "counted": "Lines counted",
+      "deficit": "Deficit lines",
       "label": "Change summary",
-      "surplus": "Surplus"
+      "surplus": "Surplus lines"
     },
     "table": {
       "actualStock": "Actual stock",
@@ -560,18 +565,17 @@
       "difference": "Difference",
       "label": "Items to count",
       "name": "Item name",
-      "systemStock": "System stock",
-      "unit": "Unit",
-      "unitCost": "Value/unit",
-      "unitCostAria": "Value per unit {{name}}",
-      "unitCostHint": "Leave blank to use the average COGS. Filling it in revalues the inventory.",
-      "varianceValue": "Variance value"
+      "stockChanged": "System stock changed from {{from}} to {{to}}. Check the count again.",
+      "systemStock": "System stock as of date",
+      "unit": "Unit"
     },
     "title": "New stock count",
     "toast": {
-      "noItems": "There are no items to count.",
+      "loadFailed": "Could not load the system stock as of the date. Try again.",
+      "noItems": "Enter the actual stock of at least one item.",
       "saveFailed": "Could not save the stock count.",
       "saved": "Stock count saved and processed.",
+      "stockChanged": "The system stock of {{count}} items changed since the form was opened. The marked lines were reloaded; check them and save again.",
       "warehouseRequired": "Select the warehouse to count first."
     }
   },
@@ -604,7 +608,7 @@
       "actualStock": "Actual stock",
       "difference": "Difference",
       "item": "Item",
-      "systemStock": "System stock",
+      "systemStock": "System stock as of date",
       "unitPrice": "Price/unit",
       "varianceValue": "Variance value"
     }
