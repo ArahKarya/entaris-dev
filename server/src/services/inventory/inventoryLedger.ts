@@ -135,6 +135,11 @@ export interface ReverseOptions {
   journalDay?: string;
   /** The reversal undoes a document for an edit: a refusal says so instead of naming a cancel. */
   forEdit?: boolean;
+  /**
+   * Set by reverseDocumentMovements for every row but the last of an item in the document: the state
+   * after it is a step on the way, so the stock-0 residue rule waits for the item's final state.
+   */
+  intermediate?: boolean;
 }
 
 export interface ReverseResult {
@@ -455,7 +460,7 @@ async function reversalSweep(
     && !dec(movement.quantity).isZero() && !next.value.isZero();
   const sweptToZero = next.stock.isZero() && sweepAtZero;
   if ((inboundWithValue || dilutedAverage) && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next, forEdit);
-  if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
+  if (!next.stock.isZero() || next.value.isZero() || opts.intermediate === true) return new Decimal(0);
   if (!sweepAtZero) throw residueAtZero(itemName, next);
   return next.value;
 }
@@ -527,9 +532,9 @@ async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem): 
 }
 
 /** The value to sweep after a replayed reversal: residue at zero stock (sweepAtZero), never stock on hand below 0. */
-function replaySweep(itemName: string, next: ItemState, sweepAtZero: boolean): Decimal {
+function replaySweep(itemName: string, next: ItemState, sweepAtZero: boolean, intermediate: boolean): Decimal {
   if (next.stock.gt(0) && next.value.lt(0)) throw unexplained(itemName);
-  if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
+  if (!next.stock.isZero() || next.value.isZero() || intermediate) return new Decimal(0);
   if (!sweepAtZero) throw residueAtZero(itemName, next);
   return next.value;
 }
@@ -588,7 +593,7 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const trueUp = opts.trueUp === 'replay' ? await replayTrueUp(tx, movement, item) : new Decimal(0);
   const reversed = stateAfter(item, qtyDelta, valueDelta.plus(trueUp));
   const residue = opts.trueUp === 'replay'
-    ? replaySweep(item.name, reversed, sweepAtZero)
+    ? replaySweep(item.name, reversed, sweepAtZero, opts.intermediate === true)
     : await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts);
   // Every guard runs before the first write: a caller that catches a refusal keeps a whole book.
   const period = trueUp.isZero() && residue.isZero() ? null : await sweepPeriod(tx, opts);
@@ -644,8 +649,13 @@ export async function reverseDocumentMovements(tx: Tx, ref: DocumentRef, opts: R
     itemIds: owned.map((r) => r.itemId),
     pairs: owned.flatMap((r) => (r.warehouseId ? [{ itemId: r.itemId, warehouseId: r.warehouseId }] : [])),
   });
+  // The stock-0 residue rule judges an item's state after all of the document's rows for it, not
+  // after each: two Out rows of one item can pass through 0 with value left on the way.
+  const lastOfItem = new Map(owned.map((r, i) => [r.itemId, i]));
   const results: ReverseResult[] = [];
-  for (const row of owned) results.push(await reverseMovement(tx, row.id, opts));
+  for (const [i, row] of owned.entries()) {
+    results.push(await reverseMovement(tx, row.id, { ...opts, intermediate: lastOfItem.get(row.itemId) !== i }));
+  }
   return results;
 }
 

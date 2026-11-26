@@ -54,6 +54,9 @@ export async function cancelDeliveryOrderInTx(
   });
 
   const reversed: ReverseResult[] = [];
+  // The stock-0 residue rule judges an item after all of its lines are back, not after each.
+  const reversible = deliveryOrder.items.filter((line) => line.stockMovement && !line.stockMovement.isCancelled);
+  const lastLineOfItem = new Map(reversible.map((line, i) => [line.stockMovement!.itemId, i]));
   for (const line of deliveryOrder.items) {
     if (!line.stockMovementId) continue;
 
@@ -66,7 +69,9 @@ export async function cancelDeliveryOrderInTx(
       continue;
     }
 
-    reversed.push(await reverseMovement(tx, sm.id, { userId, trueUp: 'replay', sweepAtZero: true }));
+    reversed.push(await reverseMovement(tx, sm.id, {
+      userId, trueUp: 'replay', sweepAtZero: true, intermediate: lastLineOfItem.get(sm.itemId) !== reversible.indexOf(line),
+    }));
   }
   await postReversalValueJournals(tx, reversed, { userId, documentLabel: `Surat Jalan ${deliveryOrder.doNumber}` });
 
