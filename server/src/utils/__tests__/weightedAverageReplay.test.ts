@@ -269,11 +269,11 @@ describe('replayValueRows (value replay, PR-6.5a)', () => {
     expect(r.value.toFixed(2)).toBe('-50.00');
   });
 
-  it('an inbound into replayed stock below 0 settles the window at its price; recorded settlement rows are recomputed (PR-6.6)', () => {
+  it('an inbound that settled a window settles the replayed one at its price; recorded settlement rows are recomputed (PR-6.6)', () => {
     const rows = [
       row('a', 'In', 100, 1_000_000, 1),
       row('s', 'Out', 200, 0, 2), // 1.000.000 + 100 x 10.000 -> −100 / −1.000.000
-      row('c', 'In', 300, 3_600_000, 3),
+      { ...row('c', 'In', 300, 3_600_000, 3), settlesNegative: true },
       { ...row('n', 'Revaluation', 0, -999_999, 4), negativeSettle: true }, // recomputed: −200.000
     ];
     const r = replayValueRows(rows, zero);
@@ -282,5 +282,17 @@ describe('replayValueRows (value replay, PR-6.5a)', () => {
     expect(r.average.toFixed(6)).toBe('12000.000000');
     // Without the sale there is no window: the receipt keeps its whole value.
     expect(replayValueRows(rows.filter((x) => x.id !== 's'), zero).value.toFixed(2)).toBe('4600000.00');
+  });
+
+  it('an inbound the ledger did not settle (before PR-6.6, or a legacy queue open) is not settled in the replay', () => {
+    const rows = [
+      row('a', 'In', 100, 1_000_000, 1),
+      row('s', 'Out', 200, 0, 2), // −100 / −1.000.000
+      row('c', 'In', 300, 3_600_000, 3), // no settlement row adjusts it
+    ];
+    const r = replayValueRows(rows, zero);
+    expect(r.stock.toString()).toBe('200');
+    expect(r.value.toFixed(2)).toBe('2600000.00');
+    expect(r.average.toFixed(6)).toBe('13000.000000');
   });
 });

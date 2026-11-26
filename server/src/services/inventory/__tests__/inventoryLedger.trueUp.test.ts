@@ -54,6 +54,7 @@ import {
   reverseDocumentMovements, reverseMovement,
 } from '../inventoryLedger';
 import { NEGATIVE_STOCK_SETTLE_REFERENCE, VALUATION_BASELINE_REFERENCE } from '../inventoryValueMath';
+import { replayItemValue } from '../../../utils/weightedAverageReplay';
 
 const ITEM = 'item-1';
 const WH = 'wh-1';
@@ -268,6 +269,13 @@ describe('reverseMovement trueUp replay', () => {
     expect(r.trueUp.toFixed(2)).toBe('-250000.00');
     expect(book()).toEqual({ stock: '50', value: '1500000.00', average: '30000.000000' });
     expect(sumActive()).toBe(book().value);
+    // C had no settlement row: the true-up booked one, so a value-0 row records it (no journal of its
+    // own) and the next replay settles C again, reproducing the book.
+    const c = store.movements.find((m) => m.movementType === 'In' && D(m.valueDelta).eq(3_000_000));
+    expect(store.movements.filter((m) => m.referenceType === NEGATIVE_STOCK_SETTLE_REFERENCE)).toEqual([
+      expect.objectContaining({ movementType: 'Revaluation', adjustsMovementId: c.id, referenceId: c.id, valueDelta: D(0), isCancelled: false }),
+    ]);
+    expect((await replayItemValue(tx, ITEM)).value.toFixed(2)).toBe(book().value);
   });
 
   it('a Revaluation that would land at no stock without the row is TRUE_UP_UNEXPLAINED', async () => {
@@ -462,6 +470,58 @@ describe('negative-stock settlement on inbound (E3-R9)', () => {
     // Back to the book before the receipt: the 100 sold past zero at 10.000.
     expect(book()).toEqual({ stock: '-100', value: '-1000000.00', average: '12000.000000' });
     expect(sumActive()).toBe(book().value);
+  });
+
+  /** An inbound into negative stock the ledger did not settle: open legacy queue rows (or posted before PR-6.6). */
+  const receiveUnsettled = async (qty: number, value: number, ref?: { referenceType: string; referenceId: string }) => {
+    store.legacyOpen = true;
+    const posted = await receive(qty, value, ref);
+    store.legacyOpen = false;
+    expect(posted.settlement).toBeNull();
+    return posted;
+  };
+
+  it('cancelling a sale before an unsettled inbound: the replay holds no settlement there, true-up only what later sales took', async () => {
+    await receive(100, 1_000_000);
+    await ship(100); // 0 / 0 at average 10.000
+    await ship(100, { referenceType: 'DeliveryOrder', referenceId: 'sj-1' }); // −100 / −1.000.000
+    await receiveUnsettled(300, 3_600_000); // 200 / 2.600.000, average 13.000
+    const later = await ship(50);
+    expect(later.valueDelta.toFixed(2)).toBe('-650000.00');
+    expect(book()).toMatchObject({ stock: '150', value: '1950000.00' });
+    const [r] = await reverseDocumentMovements(tx, { referenceType: 'DeliveryOrder', referenceId: 'sj-1' }, replay);
+    // Without the first sale the receipt came into stock 0 (average 12.000): the later 50 took
+    // 600.000, not 650.000. A settlement the ledger never posted is not part of the correction.
+    expect(r.valueDelta.toFixed(2)).toBe('1000000.00');
+    expect(r.trueUp.toFixed(2)).toBe('50000.00');
+    expect(book()).toEqual({ stock: '250', value: '3000000.00', average: '12000.000000' });
+    expect(sumActive()).toBe(book().value);
+  });
+
+  it('cancelling an unsettled inbound after a later sale: the true-up leaves the book on the replay', async () => {
+    await receive(100, 1_000_000);
+    await ship(100);
+    await ship(100); // −100 / −1.000.000
+    await receiveUnsettled(300, 3_600_000, { referenceType: 'GoodsReceipt', referenceId: 'stt-u' }); // 200 / 2.600.000
+    await ship(100); // 1.300.000 out -> 100 / 1.300.000
+    const [r] = await reverseDocumentMovements(tx, { referenceType: 'GoodsReceipt', referenceId: 'stt-u' }, replay);
+    // Without the receipt the later 100 go out past zero at 10.000: −200 / −2.000.000.
+    expect(r.trueUp.toFixed(2)).toBe('300000.00');
+    expect(book()).toMatchObject({ stock: '-200', value: '-2000000.00' });
+    expect(sumActive()).toBe(book().value);
+  });
+
+  it('owner decision #6: a cancel whose replay would settle a window at a later inbound of an item with legacy queue rows open is TRUE_UP_UNEXPLAINED', async () => {
+    await receive(100, 1_000_000);
+    await receive(100, 1_000_000, { referenceType: 'GoodsReceipt', referenceId: 'stt-r' });
+    await ship(150); // 50 / 500.000
+    await receive(100, 1_200_000); // into stock 50: no window, no settlement
+    await ship(10);
+    store.legacyOpen = true;
+    const before = JSON.stringify(store.movements);
+    await expect(reverseDocumentMovements(tx, { referenceType: 'GoodsReceipt', referenceId: 'stt-r' }, replay))
+      .rejects.toMatchObject({ code: TRUE_UP_UNEXPLAINED });
+    expect(JSON.stringify(store.movements)).toBe(before);
   });
 
   it('a reversal without trueUp after a settlement is refused (REVERSAL_NEEDS_TRUE_UP), nothing changes', async () => {

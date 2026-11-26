@@ -301,7 +301,10 @@ async function settleNegativeWindow(
 /**
  * Puts `quantity` into the warehouse at `value` (the caller's inventory debit); the average blends it.
  * Into stock below 0 the row also settles the window (settleNegativeWindow): valueDelta stays the
- * caller's debit, the settlement posts its own journal.
+ * caller's debit, the settlement posts its own journal. LOCK ORDER (stockLocks.ts): the row takes an
+ * SM number and the settlement a JV number of the row's month, then the COGS and inventory account
+ * rows; a caller that updates account balances of its own journal before posting stock takes the SM
+ * and JV numbers of that month first, or updates those balances after its postInbound calls.
  */
 export async function postInbound(tx: Tx, i: InboundInput): Promise<PostedInbound> {
   if (!INBOUND_TYPES.has(i.movementType)) throw new Error(`postInbound: ${i.movementType} is not an inbound type`);
@@ -619,32 +622,81 @@ async function writeSettlementRow(
 
 const STOCK_EXPLAINED_TOLERANCE = new Decimal('0.0005');
 
+interface ReplayedTrueUp {
+  trueUp: Decimal;
+  /** Inbound rows without a settlement row that the replay without the row settled (newlySettled). */
+  newlySettled: string[];
+}
+
+/**
+ * Records the settlement a true-up booked at an inbound row that had none (replayTrueUp,
+ * newlySettled): one Revaluation row of value 0 (NEGATIVE_STOCK_SETTLE_REFERENCE, adjusting the
+ * inbound, no journal; the true-up journal carries the value), so every later replay settles that
+ * inbound again as the book now does. Dated the true-up's day, numbered in its SM series.
+ */
+async function writeSettleMarkers(
+  tx: Tx,
+  movement: StockMovement,
+  inboundIds: readonly string[],
+  period: SweepPeriod,
+  userId: string,
+  action: 'pembatalan' | 'edit',
+): Promise<void> {
+  for (const id of inboundIds) {
+    const inbound = await tx.stockMovement.findUniqueOrThrow({ where: { id } });
+    const movementNumber = await generateDocumentNumber(tx, 'SM', period.date, period.fiscalYearId);
+    await insertMovement(tx, {
+      movementNumber, date: period.date, itemId: movement.itemId, warehouseId: null, movementType: 'Revaluation',
+      quantity: 0, unitCost: 0, totalValue: 0, valueDelta: 0,
+      adjustsMovementId: inbound.id, referenceType: NEGATIVE_STOCK_SETTLE_REFERENCE, referenceId: inbound.id,
+      referenceNumber: inbound.referenceNumber ?? inbound.movementNumber,
+      notes: `Penyelesaian stok minus pada ${inbound.movementNumber}, nilainya di koreksi nilai (${action} ${movement.movementNumber})`,
+      fiscalYearId: period.fiscalYearId, createdById: userId,
+    });
+  }
+}
+
 /**
  * Value true-up of taking `movement` out of the item's history (trueUp 'replay'), or of re-posting it
  * at `revised` (reviseOutbound), 2 dp, + into the book. 0 when no goods of the item went out since
  * the row's value entered the book and no negative-stock settlement came after it (settledSince):
- * then the exact reversal already leaves the book the row's absence would have. Otherwise the replay with the row must reproduce current_stock (TRUE_UP_UNEXPLAINED)
- * and the row must lie after the baseline (TRUE_UP_PRE_BASELINE), and without the row (or with the
+ * then the exact reversal already leaves the book the row's absence would have. Otherwise the replay
+ * with the row must reproduce current_stock (TRUE_UP_UNEXPLAINED) and the row must lie after the
+ * baseline (TRUE_UP_PRE_BASELINE), and without the row (or with the
  * revised one) no goods may go out past zero at average 0 (or a Revaluation land at no stock) where
- * they did not with it (addsUncostedWindow, TRUE_UP_UNEXPLAINED). Both replays settle negative-stock
- * windows at the next inbound as postInbound does, so a cancel also takes back or changes the
- * settlements the row caused (PR-6.6). The true-up is what the outbound
- * rows since took differently: replay(other) − (replay(with) − the row's value_delta + the revised
- * row's). Taking the difference of two replays, not of the replay and stock_value, keeps older
- * settlement rows of the book out of it.
+ * they did not with it, nor bring an inbound row the ledger did not settle into stock below 0
+ * (addsUncostedWindow, TRUE_UP_UNEXPLAINED). Both replays settle negative-stock windows at the
+ * inbound rows that settled one when posted, as postInbound did, so a cancel also takes back or
+ * changes the settlements the row caused (PR-6.6); an inbound posted unsettled below 0 (before
+ * PR-6.6, or skipped for open legacy queue rows) stays unsettled in both, as in its stock_value and
+ * GL. An inbound the replay without the row brings below 0 is settled there as postInbound would
+ * (newlySettled; refused with TRUE_UP_UNEXPLAINED while the item has open legacy queue rows, owner
+ * decision #6), and the caller records it (writeSettleMarkers). The true-up is what the outbound rows since took differently: replay(other) − (replay(with) − the
+ * row's value_delta + the revised row's). Taking the difference of two replays, not of the replay
+ * and stock_value, keeps older settlement rows of the book out of it.
  */
-async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem, revised?: Omit<ReplayRevision, 'movementId'>): Promise<Decimal> {
-  if (!(await soldSince(tx, movement)) && !(await settledSince(tx, movement))) return new Decimal(0);
+async function replayTrueUp(
+  tx: Tx,
+  movement: StockMovement,
+  item: LockedItem,
+  revised?: Omit<ReplayRevision, 'movementId'>,
+): Promise<ReplayedTrueUp> {
+  if (!(await soldSince(tx, movement)) && !(await settledSince(tx, movement))) return { trueUp: new Decimal(0), newlySettled: [] };
   try {
     const withRow = await replayItemValue(tx, movement.itemId);
     if (!withRow.replayedIds.has(movement.id)) throw withRow.baselineId ? preBaseline(item.name, movement) : unexplained(item.name);
     if (withRow.stock.minus(item.currentStock).abs().gt(STOCK_EXPLAINED_TOLERANCE)) throw unexplained(item.name);
+    const settleNew = { except: withRow.unsettledInbound };
     const other = await replayItemValue(tx, movement.itemId, revised
-      ? { revise: { movementId: movement.id, ...revised } }
-      : { excludeMovementIds: [movement.id] });
+      ? { revise: { movementId: movement.id, ...revised }, settleNew }
+      : { excludeMovementIds: [movement.id], settleNew });
     if (addsUncostedWindow(withRow, other)) throw pricedPastZero(item.name);
+    if (other.newlySettled.size > 0 && await hasOpenLegacyCogsQueue(tx, movement.itemId)) throw pricedPastZero(item.name);
     const bookChange = dec(revised?.valueDelta ?? 0).minus(dec(movement.valueDelta));
-    return other.value.minus(withRow.value.plus(bookChange)).toDecimalPlaces(VALUE_DP);
+    return {
+      trueUp: other.value.minus(withRow.value.plus(bookChange)).toDecimalPlaces(VALUE_DP),
+      newlySettled: [...other.newlySettled],
+    };
   } catch (e) {
     // A replayed book that values stock on hand below 0 explains nothing either.
     if (e instanceof BusinessError && e.code === INVENTORY_VALUE_NEGATIVE) throw unexplained(item.name);
@@ -711,16 +763,21 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const qtyDelta = inbound ? quantity.negated() : quantity;
   const valueDelta = dec(movement.valueDelta).negated();
   const sweepAtZero = opts.sweepAtZero === true;
-  const trueUp = opts.trueUp === 'replay' ? await replayTrueUp(tx, movement, item) : new Decimal(0);
+  const { trueUp, newlySettled } = opts.trueUp === 'replay'
+    ? await replayTrueUp(tx, movement, item)
+    : { trueUp: new Decimal(0), newlySettled: [] };
   const reversed = stateAfter(item, qtyDelta, valueDelta.plus(trueUp));
   const residue = opts.trueUp === 'replay'
     ? replaySweep(item.name, reversed, sweepAtZero)
     : await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts);
   // Every guard runs before the first write: a caller that catches a refusal keeps a whole book.
-  const period = trueUp.isZero() && residue.isZero() ? null : await sweepPeriod(tx, opts);
+  const period = trueUp.isZero() && residue.isZero() && newlySettled.length === 0 ? null : await sweepPeriod(tx, opts);
 
   await claimReversal(tx, movement.id);
-  const sweep = period ? await writeSettlementRow(tx, movement, { trueUp, residue }, period, opts.userId) : null;
+  const sweep = period && !(trueUp.isZero() && residue.isZero())
+    ? await writeSettlementRow(tx, movement, { trueUp, residue }, period, opts.userId)
+    : null;
+  if (period) await writeSettleMarkers(tx, movement, newlySettled, period, opts.userId, 'pembatalan');
   const next = residue.isZero() ? reversed : { ...reversed, value: reversed.value.minus(residue) };
   await writeStock(tx, movement.itemId, movement.warehouseId, qtyDelta, next);
   if (valueDelta.isZero() && !quantity.isZero()) {
@@ -838,14 +895,18 @@ export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutbou
   if (qtyDelta.lt(0)) assertCostedPastZero(item, qtyDelta.negated());
   const change = oldValue.minus(value);
   const replay = i.trueUp === 'replay' && qtyDelta.gt(0);
-  const trueUp = replay ? await replayTrueUp(tx, movement, item, { quantity, valueDelta: value.negated() }) : new Decimal(0);
+  const { trueUp, newlySettled } = replay
+    ? await replayTrueUp(tx, movement, item, { quantity, valueDelta: value.negated() })
+    : { trueUp: new Decimal(0), newlySettled: [] };
   const next = stateAfter(item, qtyDelta, change.plus(trueUp));
   // Goods handed back that bring stock to exactly 0 with value left: swept with the true-up, refused
   // without it (the same refusal as an exact reversal).
   if (!replay && qtyDelta.gt(0) && next.stock.isZero() && !next.value.isZero()) throw residueAtZero(item.name, next, true);
   const residue = replay ? replaySweep(item.name, next, i.sweepAtZero === true) : new Decimal(0);
   // Every guard runs before the first write, as in reverseMovement.
-  const period = trueUp.isZero() && residue.isZero() ? null : await sweepPeriod(tx, { userId: i.userId, journalDay: i.journalDay });
+  const period = trueUp.isZero() && residue.isZero() && newlySettled.length === 0
+    ? null
+    : await sweepPeriod(tx, { userId: i.userId, journalDay: i.journalDay });
 
   await claimReversal(tx, movement.id);
   const movementNumber = i.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
@@ -863,7 +924,10 @@ export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutbou
     fiscalYearId: i.fiscalYearId, createdById: i.userId, createdAt: movement.createdAt,
   });
   // After the re-posted row: its number is taken but not in the table until then.
-  const sweep = period ? await writeSettlementRow(tx, movement, { trueUp, residue }, period, i.userId, 'edit') : null;
+  const sweep = period && !(trueUp.isZero() && residue.isZero())
+    ? await writeSettlementRow(tx, movement, { trueUp, residue }, period, i.userId, 'edit')
+    : null;
+  if (period) await writeSettleMarkers(tx, movement, newlySettled, period, i.userId, 'edit');
   return {
     movement: posted, previous: { ...movement, isCancelled: true }, change, valueDelta, unitCost, trueUp, toCogs: residue, sweep,
     stockAfter: booked.stock, stockValueAfter: booked.value, averageCostAfter: booked.average,
