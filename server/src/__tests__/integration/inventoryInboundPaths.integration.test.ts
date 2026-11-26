@@ -11,8 +11,9 @@
  *   value 0 into an item that holds none; own goods refused into an item that holds customer goods;
  * - opening stock import: the journal debit and the ledger value are the same 2 dp amount;
  * - manual movements: In at the body cost, Out valued from the book, an edit cancels the row and
- *   posts a new one, a cancel takes the row back exactly; an inbound edit after goods went out is
- *   refused with REVERSAL_NEEDS_TRUE_UP; an In picked as a transfer's batch cannot be edited or cancelled;
+ *   posts a new one, a cancel takes the row back exactly; an inbound edited or cancelled after goods
+ *   went out is taken back with the value true-up against COGS (PR-6.5b); an In picked as a
+ *   transfer's batch cannot be edited or cancelled;
  * - the demo wipe resets stock, stock_value and average together.
  * Every scenario ends with assertLedgerInvariant (warehouses included). Fiscal year 2110.
  */
@@ -24,7 +25,6 @@ import { Pool } from 'pg';
 import { txPrismaProxy, type Tx } from '../helpers/routeHarness';
 import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 import { bookOf, createSalesFlowWorld, deliver, glBalance, receiveStock, type SalesFlowWorld } from '../helpers/salesFlowFixture';
-import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
 import { sourceKeys } from '../../services/ledger/journalSource';
 import { systemAccounts } from '../../services/systemAccounts';
 import { BusinessError } from '../../utils/errors';
@@ -318,19 +318,62 @@ d('manual movements on the value ledger', () => {
     });
   });
 
-  it('an In edited or cancelled after goods went out is refused with REVERSAL_NEEDS_TRUE_UP', async () => {
+  /** stocked() plus 100 kg out at round(72.000.000 x 100 / 11.000, 2) = 654.545,45, against the offset account. */
+  async function soldAfterInbound(tx: Tx, w: SalesFlowWorld) {
+    const stock = await stocked(tx, w);
+    await inRouteTx((t) => createManualMovementInTx(t, {
+      itemId: w.item.id, warehouseId: w.warehouseA.id, movementType: 'Out', quantity: 100, date: DAY, offsetAccountId: stock.offset.id,
+    }, w.userId));
+    expect(await bookOf(tx, w.item.id)).toEqual({ stock: '10900.000', value: '71345454.55', average: '6545.454546' });
+    return stock;
+  }
+
+  /** The true-up journal of taking `movementId` back: [inventory debit, COGS credit]. */
+  async function trueUpLines(tx: Tx, w: SalesFlowWorld, movementId: string) {
+    const je = await tx.journalEntry.findFirstOrThrow({ where: { sourceKey: sourceKeys.inventoryTrueUp(movementId) }, include: { items: true } });
+    expect(je.date.toISOString().slice(0, 10)).toBe(DAY);
+    return [
+      je.items.find((i) => i.accountId === w.accounts.inventory.id)?.debit.toFixed(2),
+      je.items.find((i) => i.accountId === w.accounts.cogs.id)?.credit.toFixed(2),
+    ];
+  }
+
+  // Without the 12.000 inbound the 100 kg went out at 6.000 (600.000), with it at 654.545,45: the
+  // 54.545,45 they took of it comes back to the book against COGS (E3-R8, PR-6.5b).
+  it('an In edited after goods went out is taken back with the value true-up, then posted anew', async () => {
     await inWorld(async (tx, w) => {
-      const { offset, inbound } = await stocked(tx, w);
-      await inRouteTx((t) => createManualMovementInTx(t, {
-        itemId: w.item.id, warehouseId: w.warehouseA.id, movementType: 'Out', quantity: 100, date: DAY, offsetAccountId: offset.id,
-      }, w.userId));
-      const before = await bookOf(tx, w.item.id);
-      expect(await codeOf(inRouteTx((t) => editManualMovementInTx(t, inbound.id, {
-        movementType: 'In', quantity: 1_000, unitCost: 9_000, date: DAY, offsetAccountId: offset.id,
-      }, w.userId)))).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await codeOf(inRouteTx((t) => cancelManualMovementInTx(t, inbound.id, w.userId)))).toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } })).isCancelled).toBe(false);
+      const { offset, inbound } = await soldAfterInbound(tx, w);
+      state.today = DAY;
+      try {
+        const edited = await inRouteTx((t) => editManualMovementInTx(t, inbound.id, {
+          movementType: 'In', quantity: 1_000, unitCost: 9_000, date: DAY, offsetAccountId: offset.id,
+        }, w.userId));
+        expect(money(edited.valueDelta.toString())).toBe('9000000.00');
+      } finally {
+        state.today = null;
+      }
+      expect(await trueUpLines(tx, w, inbound.id)).toEqual(['54545.45', '54545.45']);
+      // 71.345.454,55 − 12.000.000 + 54.545,45 = 59.400.000 on 9.900 kg, then + 9.000.000 on 1.000 kg.
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '10900.000', value: '68400000.00', average: '6275.229358' });
+      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('68400000.00');
+      expect(money(await glBalance(tx, w.accounts.cogs.id))).toBe('-54545.45');
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } })).isCancelled).toBe(true);
+    });
+  });
+
+  it('an In cancelled after goods went out is taken back with the value true-up', async () => {
+    await inWorld(async (tx, w) => {
+      const { inbound } = await soldAfterInbound(tx, w);
+      state.today = DAY;
+      try {
+        await inRouteTx((t) => cancelManualMovementInTx(t, inbound.id, w.userId));
+      } finally {
+        state.today = null;
+      }
+      expect(await trueUpLines(tx, w, inbound.id)).toEqual(['54545.45', '54545.45']);
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '9900.000', value: '59400000.00', average: '6000.000000' });
+      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('59400000.00');
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: inbound.id } })).isCancelled).toBe(true);
     });
   });
 

@@ -10,7 +10,8 @@
  * (varianceAccount.ts). Every offset passes STOCK_OFFSET_RULE. The journal goes through postJournal
  * (SYSTEM_DOC) with the ledger's amount; an edit or cancel voids it through cancelJournalsInTx, so
  * stored balances move per journal line. An edit cancels the row and posts a new one (a ledger row
- * is never rewritten).
+ * is never rewritten). Both take the row back with the value true-up of a cancel (trueUp 'replay',
+ * E3-R8): goods that went out after it get their value corrected against COGS.
  *
  * Lock order (stockLocks.ts): the movement row, lockInventoryRows, the SM and JV numbers, then the
  * account rows (an edit takes both numbers before it voids the old journal, whose balance updates
@@ -39,6 +40,7 @@ import { postJournal } from '../ledger/postJournal';
 import { DOCUMENT_RULE, STOCK_OFFSET_RULE, assertPostableAccounts } from '../ledger/accountGuard';
 import { cancelJournalsInTx } from '../ledger/cancelJournals';
 import { cancelTrail } from '../../utils/cancelClaim';
+import { postReversalValueJournals } from './reversalValueJournal';
 
 type Tx = Prisma.TransactionClient;
 
@@ -332,10 +334,12 @@ async function assertBatchNotConsumed(tx: Tx, movement: StockMovement, action: '
 }
 
 /**
- * Takes the old row back through the value ledger (its own quantity and value_delta) after the
- * per-warehouse check of an inbound reversal (a legacy row without a warehouse is checked against
- * the item total). Refused with REVERSAL_NEEDS_TRUE_UP when goods of the item went out after an
- * inbound row (no value true-up for a manual movement yet: PR-6.5b).
+ * Takes the old row back through the value ledger after the per-warehouse check of an inbound
+ * reversal (a legacy row without a warehouse is checked against the item total), with the value
+ * true-up of a cancel (E3-R8): when goods of the item went out after the row, the value they took
+ * differently comes back against COGS, and value left at zero stock is swept to COGS, in one
+ * journal dated today (postReversalValueJournals). Call it before the row's own journal is voided
+ * (LOCK ORDER of reversalValueJournal.ts).
  */
 async function reverseManualRow(tx: Tx, movement: StockMovement, context: string, userId: string): Promise<void> {
   await lockInventoryRows(tx, {
@@ -347,7 +351,8 @@ async function reverseManualRow(tx: Tx, movement: StockMovement, context: string
       context, userId, reversal: true,
     });
   }
-  await reverseMovement(tx, movement.id, { userId });
+  const reversed = await reverseMovement(tx, movement.id, { userId, trueUp: 'replay', sweepAtZero: true });
+  await postReversalValueJournals(tx, [reversed], { userId, documentLabel: `Mutasi stok ${movement.movementNumber}` });
 }
 
 /**
@@ -369,12 +374,16 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
   const locked = await lockInventoryRows(tx, { itemIds: [oldMov.itemId], pairs: [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId }] });
   const item = locked.items.get(oldMov.itemId);
   if (!item) throw new BusinessError('Item stok tidak ditemukan.');
-  const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
-  const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
+  // Both number series of the new row are locked before any account row (LOCK ORDER); the numbers
+  // themselves are taken after the reversal, whose true-up row and journal may take the next ones.
+  await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
+  await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
 
   // The COGS settlement the row triggered first: it was posted on the book the row left.
   await reverseCogsSettlementsByTrigger(tx, 'StockMovement', oldMov.id);
   await reverseManualRow(tx, oldMov, 'inventory.movement.edit', userId);
+  const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
+  const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
   await voidMovementJournal(tx, oldMov.journalEntryId, userId);
   const newIsIn = isInbound(input.movementType);
   if (!newIsIn) {
