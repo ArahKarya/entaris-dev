@@ -29,6 +29,13 @@ export const INVENTORY_VALUE_NEGATIVE = 'INVENTORY_VALUE_NEGATIVE';
 /** reference_type of the Revaluation rows the value-ledger migration writes per item, with no journal. */
 export const VALUATION_BASELINE_REFERENCE = 'ValuationBaseline';
 
+/**
+ * reference_type of the Revaluation row an inbound row writes when it comes into negative stock
+ * (E3-R9, PR-6.6); reference_id and adjusts_movement_id are that inbound row. It belongs to no
+ * document: a cancel takes it back through the value true-up, not by document reference.
+ */
+export const NEGATIVE_STOCK_SETTLE_REFERENCE = 'NegativeStockSettle';
+
 const round = (v: Decimal) => v.toDecimalPlaces(VALUE_DP);
 
 /** The health check of a posting: stock on hand with a negative stock_value is a broken book. */
@@ -97,6 +104,31 @@ export function revaluationSplit(stock: Decimal.Value, stockValue: Decimal.Value
   if (s.lte(0)) return { toInventory: new Decimal(0), toCogs: d };
   if (d.lt(0) && d.abs().gt(v)) return { toInventory: v.negated(), toCogs: d.plus(v) };
   return { toInventory: d, toCogs: new Decimal(0) };
+}
+
+/**
+ * Settlement of a negative-stock window by an inbound row of `qty` at `value` (E3-R9): the goods
+ * that went out past zero were valued at the average then (outboundValue); the part of the inbound
+ * that covers them re-values them at the inbound's price. Returns the change to stock_value, 2 dp:
+ * − when they cost more at the inbound price (DR COGS / CR inventory), + when less, 0 when stock
+ * is not below 0.
+ * - covered = min(−stock, qty): the short quantity the inbound fills;
+ * - its cost: value x covered / qty (the whole value when the inbound is all covered);
+ * - what the book holds for it: stock_value x covered / −stock (the whole stock_value when the
+ *   inbound covers the whole shortfall, so stock that reaches 0 or above keeps only the inbound's
+ *   value for what is left).
+ */
+export function negativeSettlement(stock: Decimal.Value, stockValue: Decimal.Value, qty: Decimal.Value, value: Decimal.Value): Decimal {
+  const s = new Decimal(stock);
+  if (s.gte(0)) return new Decimal(0);
+  const q = new Decimal(qty);
+  const v = new Decimal(value);
+  const booked = new Decimal(stockValue);
+  const short = s.negated();
+  const covered = Decimal.min(short, q);
+  const cost = covered.eq(q) ? v : round(v.times(covered).div(q));
+  const held = covered.eq(short) ? booked : round(booked.times(covered).div(short));
+  return round(cost.plus(held)).negated();
 }
 
 /** Average cost after a posting: stock_value / stock at UNIT_COST_DP; with no stock the previous average stays. */

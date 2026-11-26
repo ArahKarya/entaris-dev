@@ -1,7 +1,8 @@
 /**
- * Refusals of inventoryLedger.reverseMovement and reviseOutbound (the value ledger, E3-R6 / E3-R8):
- * the train guard of a reversal without a true-up, the two cases a value replay (trueUp 'replay')
- * cannot value, and a raised quantity the replay cannot place.
+ * Refusals of the value ledger (E3-R6 / E3-R8 / E3-R9): of inventoryLedger.reverseMovement and
+ * reviseOutbound, the train guard of a reversal without a true-up, the two cases a value replay
+ * (trueUp 'replay') cannot value and a raised quantity the replay cannot place; of postOutbound and
+ * reviseOutbound, goods past zero stock with no cost to value them at.
  */
 import type { StockMovement } from '@prisma/client';
 import type Decimal from 'decimal.js';
@@ -33,8 +34,9 @@ export const TRUE_UP_PRE_BASELINE = 'TRUE_UP_PRE_BASELINE';
 /**
  * Error code (409) of trueUp 'replay': the replay of the item's rows does not explain its stock (the
  * replayed quantity differs from current_stock, or it values stock on hand below 0), or without the
- * row goods would have gone out past zero where they did not (stock <= 0 windows, PR-6.6). The ledger
- * does not guess a correction.
+ * row goods would have gone out past zero at average 0 where they did not (a row postOutbound now
+ * refuses, NEGATIVE_STOCK_NO_COST), or a Revaluation would have landed at no stock. The ledger does
+ * not guess a correction.
  */
 export const TRUE_UP_UNEXPLAINED = 'TRUE_UP_UNEXPLAINED';
 
@@ -45,6 +47,22 @@ export const TRUE_UP_UNEXPLAINED = 'TRUE_UP_UNEXPLAINED';
  * of its own, posted now at the average now (owner decision #9).
  */
 export const OUTBOUND_INCREASE_AFTER_INBOUND = 'OUTBOUND_INCREASE_AFTER_INBOUND';
+
+/**
+ * Error code (400) of an outbound row that takes the item below zero stock while its average is 0
+ * (it never had a cost): the goods past zero would go out at no value, and the inbound that later
+ * settles the window would post their whole cost to COGS at once. Refused also through the
+ * negative-stock bypass (owner decision #4).
+ */
+export const NEGATIVE_STOCK_NO_COST = 'NEGATIVE_STOCK_NO_COST';
+
+export function negativeStockNoCost(itemName: string): BusinessError {
+  return new BusinessError(
+    `Stok '${itemName}' tidak bisa dikeluarkan sampai minus: item ini belum pernah punya harga (rata-rata 0), `
+      + 'jadi barang yang keluar melewati 0 tidak punya nilai. Catat dulu barang masuk beserta harganya.',
+    NEGATIVE_STOCK_NO_COST,
+  );
+}
 
 export function increaseAfterInbound(itemName: string): BusinessError {
   return new BusinessError(
@@ -110,7 +128,7 @@ export function unexplained(itemName: string): BusinessError {
   );
 }
 
-/** Without the row, goods of the item would have gone out past zero (or a Revaluation landed at no stock). */
+/** Without the row, goods of the item would have gone out past zero at no cost (or a Revaluation landed at no stock). */
 export function pricedPastZero(itemName: string): BusinessError {
   return new BusinessError(
     `Pembatalan ditolak: tanpa gerakan stok ini, barang '${itemName}' yang keluar sesudahnya melebihi stoknya, `

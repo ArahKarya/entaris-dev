@@ -83,6 +83,11 @@ export const sourceKeys = {
    * movement taken back: DR/CR inventory against COGS (services/inventory/reversalValueJournal.ts).
    */
   inventoryTrueUp: (movementId: string): string => `INVENTORY_TRUE_UP:${keyPart(movementId)}`,
+  /**
+   * Settlement of a negative-stock window by the inbound row that comes into it (E3-R9, PR-6.6):
+   * DR/CR COGS against inventory (services/inventory/negativeStockSettle.ts).
+   */
+  inventoryNegativeSettle: (movementId: string): string => `INVENTORY_NEGATIVE_SETTLE:${keyPart(movementId)}`,
 } as const;
 
 /** Prefix of the sourceKeys of a purchase invoice's price revisions (for startsWith queries). */

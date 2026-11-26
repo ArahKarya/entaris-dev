@@ -8,11 +8,12 @@
  * that locked every item of its operation first keeps the LOCK ORDER of stockLocks.ts), then reads
  * stock, stock_value and the average from the locked rows only.
  *
- * The ledger has no permission logic and posts no journal. It decides the value of an outbound row
- * (outboundValue) and returns the signed valueDelta of every posting; the caller posts exactly that
- * amount to inventoryAccountFor(item), so book = GL by construction. Stock availability, the
- * negative-stock gate, the period guard of the caller's document and active-master checks stay with
- * the caller.
+ * The ledger has no permission logic and posts no journal of the caller's document. It decides the
+ * value of an outbound row (outboundValue) and returns the signed valueDelta of every posting; the
+ * caller posts exactly that amount to inventoryAccountFor(item), so book = GL by construction. Stock
+ * availability, the negative-stock gate, the period guard of the caller's document and active-master
+ * checks stay with the caller. The one journal it posts is the negative-stock settlement of an
+ * inbound row (E3-R9, negativeStockSettle.ts): it belongs to the row, whatever path wrote it.
  *
  * Rows it writes: value_delta (signed, 2 dp), total_value = |value_delta|, unit_cost =
  * |value_delta| / quantity (6 dp). A transfer leg carries value_delta 0 (value is per item, I-43);
@@ -31,16 +32,22 @@ import { businessToday } from '../../utils/businessDate';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { logger } from '../../lib/logger';
-import { addsNegativeWindow, replayItemValue, type ReplayRevision } from '../../utils/weightedAverageReplay';
-import { increaseAfterInbound, needsTrueUp, preBaseline, pricedPastZero, residueAtZero, unexplained } from './reversalErrors';
+import { addsUncostedWindow, replayItemValue, type ReplayRevision } from '../../utils/weightedAverageReplay';
+import {
+  increaseAfterInbound, needsTrueUp, negativeStockNoCost, preBaseline, pricedPastZero, residueAtZero, unexplained,
+} from './reversalErrors';
 import { lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
 import {
-  INVENTORY_VALUE_NEGATIVE, UNIT_COST_DP, VALUE_DP, averageAfter, outboundValue, revaluationSplit, revisedOutboundValue,
+  INVENTORY_VALUE_NEGATIVE, NEGATIVE_STOCK_SETTLE_REFERENCE, UNIT_COST_DP, VALUE_DP, averageAfter, negativeSettlement, outboundValue,
+  revaluationSplit, revisedOutboundValue,
 } from './inventoryValueMath';
+import { hasOpenLegacyCogsQueue, postNegativeSettleJournal } from './negativeStockSettle';
 
 type Tx = Prisma.TransactionClient;
 
-export { OUTBOUND_INCREASE_AFTER_INBOUND, REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED } from './reversalErrors';
+export {
+  NEGATIVE_STOCK_NO_COST, OUTBOUND_INCREASE_AFTER_INBOUND, REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED,
+} from './reversalErrors';
 export { assertLedgerInvariant, type LedgerDrift, type LedgerDriftKind } from './ledgerInvariant';
 
 /** Fields of a new movement row; a new movement names its warehouse (OutboundInput has one exception). */
@@ -118,6 +125,19 @@ export interface PostedMovement {
   stockAfter: Decimal;
   stockValueAfter: Decimal;
   averageCostAfter: Decimal;
+}
+
+/** The negative-stock settlement an inbound row wrote (E3-R9): its Revaluation row and journal. */
+export interface NegativeSettlement {
+  movement: StockMovement;
+  /** The change to stock_value (− DR COGS / CR inventory); the journal already posts it. */
+  valueDelta: Decimal;
+  journalEntryId: string;
+}
+
+export interface PostedInbound extends PostedMovement {
+  /** Set when the row came into stock below 0; stockValueAfter / averageCostAfter include it. */
+  settlement: NegativeSettlement | null;
 }
 
 export interface ReverseOptions {
@@ -238,25 +258,84 @@ async function writePosting(
   return { movement, valueDelta: p.valueDelta, unitCost, stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average };
 }
 
-/** Puts `quantity` into the warehouse at `value` (the caller's inventory debit); the average blends it. */
-export async function postInbound(tx: Tx, i: InboundInput): Promise<PostedMovement> {
+/**
+ * The negative-stock settlement of an inbound row (E3-R9): when the item's stock was below 0 before
+ * the row, the goods it covers are re-valued at its price (negativeSettlement) in one Revaluation row
+ * (NEGATIVE_STOCK_SETTLE_REFERENCE, adjusting the row, dated its day) and its journal
+ * (postNegativeSettleJournal). Skipped below half a cent, and for an item with legacy deferred-COGS
+ * rows still open (owner decision #6).
+ */
+async function settleNegativeWindow(
+  tx: Tx,
+  i: InboundInput,
+  before: LockedItem,
+  posted: PostedMovement,
+): Promise<NegativeSettlement | null> {
+  if (!before.currentStock.lt(0)) return null;
+  const quantity = dec(posted.movement.quantity);
+  const delta = negativeSettlement(before.currentStock, before.stockValue, quantity, posted.valueDelta);
+  if (delta.isZero()) return null;
+  if (await hasOpenLegacyCogsQueue(tx, i.itemId)) {
+    logger.warn({ itemId: i.itemId, movementId: posted.movement.id }, 'Negative-stock settlement skipped: legacy COGS queue rows are open');
+    return null;
+  }
+  const covered = Decimal.min(before.currentStock.negated(), quantity);
+  const movementNumber = await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
+  const journalEntryId = await postNegativeSettleJournal(tx, {
+    item: before, amount: delta, inbound: posted.movement, covered, date: i.date, fiscalYearId: i.fiscalYearId, userId: i.createdById,
+  });
+  const value = posted.stockValueAfter.plus(delta);
+  const next = { stock: posted.stockAfter, value, average: averageAfter(posted.stockAfter, value, posted.averageCostAfter) };
+  await writeStock(tx, i.itemId, null, new Decimal(0), next);
+  const movement = await insertMovement(tx, {
+    movementNumber, date: i.date, itemId: i.itemId, warehouseId: null, movementType: 'Revaluation',
+    quantity: 0, unitCost: 0, totalValue: delta.abs().toString(), valueDelta: delta.toString(),
+    adjustsMovementId: posted.movement.id, referenceType: NEGATIVE_STOCK_SETTLE_REFERENCE, referenceId: posted.movement.id,
+    referenceNumber: posted.movement.referenceNumber ?? posted.movement.movementNumber,
+    notes: `Penyelesaian stok minus ${covered.toString()} ${before.unit} pada harga masuk (${posted.movement.movementNumber})`,
+    journalEntryId, fiscalYearId: i.fiscalYearId, createdById: i.createdById,
+  });
+  return { movement, valueDelta: delta, journalEntryId };
+}
+
+/**
+ * Puts `quantity` into the warehouse at `value` (the caller's inventory debit); the average blends it.
+ * Into stock below 0 the row also settles the window (settleNegativeWindow): valueDelta stays the
+ * caller's debit, the settlement posts its own journal.
+ */
+export async function postInbound(tx: Tx, i: InboundInput): Promise<PostedInbound> {
   if (!INBOUND_TYPES.has(i.movementType)) throw new Error(`postInbound: ${i.movementType} is not an inbound type`);
   const quantity = positiveQuantity(i.quantity, 'postInbound');
   const value = new Decimal(i.value).toDecimalPlaces(VALUE_DP);
   if (!value.isFinite() || value.lt(0)) throw new Error('postInbound: value must be 0 or more');
   const item = await lockItem(tx, i.itemId, i.warehouseId);
-  return writePosting(tx, i, { quantity, valueDelta: value, item });
+  const posted = await writePosting(tx, i, { quantity, valueDelta: value, item });
+  const settlement = await settleNegativeWindow(tx, i, item, posted);
+  if (!settlement) return { ...posted, settlement: null };
+  const stockValueAfter = posted.stockValueAfter.plus(settlement.valueDelta);
+  return {
+    ...posted, settlement, stockValueAfter,
+    averageCostAfter: averageAfter(posted.stockAfter, stockValueAfter, posted.averageCostAfter),
+  };
+}
+
+/** Goods taken past zero stock (item total) while the average is 0 have no cost: refused (E3-R9). */
+function assertCostedPastZero(item: LockedItem, quantity: Decimal): void {
+  if (item.currentStock.minus(quantity).gte(0) || item.averageCost.gt(0)) return;
+  throw negativeStockNoCost(item.name);
 }
 
 /**
  * Takes `quantity` out of the warehouse at the value outboundValue decides from the locked book;
  * valueDelta is minus that value (the caller's inventory credit and COGS). The caller checks
- * availability (assertStockAvailable) first; past zero stock the row is valued at the average.
+ * availability (assertStockAvailable) first; past zero stock the row is valued at the average, and
+ * refused when that is 0 (NEGATIVE_STOCK_NO_COST, also through the negative-stock bypass).
  */
 export async function postOutbound(tx: Tx, i: OutboundInput): Promise<PostedMovement> {
   if (!OUTBOUND_TYPES.has(i.movementType)) throw new Error(`postOutbound: ${i.movementType} is not an outbound type`);
   const quantity = positiveQuantity(i.quantity, 'postOutbound');
   const item = await lockItem(tx, i.itemId, i.warehouseId);
+  assertCostedPastZero(item, quantity);
   const value = outboundValue(item.currentStock, item.stockValue, item.averageCost, quantity);
   return writePosting(tx, i, { quantity, valueDelta: value.negated(), item });
 }
@@ -424,6 +503,25 @@ async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
 }
 
 /**
+ * True when an active negative-stock settlement of the item (NEGATIVE_STOCK_SETTLE_REFERENCE) was
+ * written at or after the row's value entered the book (a tie counts, as in soldSince), the row's own
+ * included: it re-valued goods that went out past zero on a book this row was part of (an outbound
+ * row that opened the window, an inbound row that settled it), so taking the row back exactly leaves
+ * the settlement wrong.
+ */
+async function settledSince(tx: Tx, movement: StockMovement): Promise<boolean> {
+  const since = await valueEnteredAt(tx, movement);
+  const later = await tx.stockMovement.findFirst({
+    where: {
+      itemId: movement.itemId, isCancelled: false, movementType: 'Revaluation', referenceType: NEGATIVE_STOCK_SETTLE_REFERENCE,
+      id: { not: movement.id }, createdAt: { gte: since },
+    },
+    select: { id: true },
+  });
+  return later !== null;
+}
+
+/**
  * True when value entered the item's book at or after the row was posted (a tie counts, as in
  * soldSince): an active In / AdjustmentIn, or a Revaluation other than the settlement of a cancelled
  * row of its own document (the rows the replay skips). Goods a raised quantity takes out now at the
@@ -447,7 +545,8 @@ async function valueEnteredAfter(tx: Tx, movement: StockMovement): Promise<boole
  * - an inbound reversal that moves value after goods went out (soldSince), except when the stock
  *   reaches 0 and is swept: then the sweep makes the total COGS exact;
  * - an inbound reversal that moves value and leaves stock_value < 0, or stock > 0 with value <= 0;
- * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise (residueAtZero).
+ * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise (residueAtZero);
+ * - any row a negative-stock settlement came after (settledSince): only a replay re-values it.
  * An inbound row that carries no value (a by-product at NRV 0, an output at HPP 0) still moved the
  * average by its quantity, so taking it back after goods went out is refused the same way while
  * value stays on hand; it moves no value, so the sign rules do not apply to it.
@@ -462,6 +561,7 @@ async function reversalSweep(
 ): Promise<Decimal> {
   const sweepAtZero = opts.sweepAtZero === true;
   const forEdit = opts.forEdit === true;
+  if (await settledSince(tx, movement)) throw needsTrueUp(itemName, next, forEdit);
   // A Revaluation row changed the value of goods on hand like an inbound row, so taking it back has
   // the same exposure to goods that went out since.
   const inboundWithValue = (INBOUND_TYPES.has(movement.movementType) || movement.movementType === 'Revaluation') && !valueDelta.isZero();
@@ -522,17 +622,19 @@ const STOCK_EXPLAINED_TOLERANCE = new Decimal('0.0005');
 /**
  * Value true-up of taking `movement` out of the item's history (trueUp 'replay'), or of re-posting it
  * at `revised` (reviseOutbound), 2 dp, + into the book. 0 when no goods of the item went out since
- * the row's value entered the book: then the exact reversal already leaves the book the row's absence
- * would have. Otherwise the replay with the row must reproduce current_stock (TRUE_UP_UNEXPLAINED)
+ * the row's value entered the book and no negative-stock settlement came after it (settledSince):
+ * then the exact reversal already leaves the book the row's absence would have. Otherwise the replay with the row must reproduce current_stock (TRUE_UP_UNEXPLAINED)
  * and the row must lie after the baseline (TRUE_UP_PRE_BASELINE), and without the row (or with the
- * revised one) no goods may go out past zero (or a Revaluation land at no stock) where they did not
- * with it (addsNegativeWindow, TRUE_UP_UNEXPLAINED until PR-6.6); the true-up is what the outbound
+ * revised one) no goods may go out past zero at average 0 (or a Revaluation land at no stock) where
+ * they did not with it (addsUncostedWindow, TRUE_UP_UNEXPLAINED). Both replays settle negative-stock
+ * windows at the next inbound as postInbound does, so a cancel also takes back or changes the
+ * settlements the row caused (PR-6.6). The true-up is what the outbound
  * rows since took differently: replay(other) − (replay(with) − the row's value_delta + the revised
  * row's). Taking the difference of two replays, not of the replay and stock_value, keeps older
  * settlement rows of the book out of it.
  */
 async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem, revised?: Omit<ReplayRevision, 'movementId'>): Promise<Decimal> {
-  if (!(await soldSince(tx, movement))) return new Decimal(0);
+  if (!(await soldSince(tx, movement)) && !(await settledSince(tx, movement))) return new Decimal(0);
   try {
     const withRow = await replayItemValue(tx, movement.itemId);
     if (!withRow.replayedIds.has(movement.id)) throw withRow.baselineId ? preBaseline(item.name, movement) : unexplained(item.name);
@@ -540,7 +642,7 @@ async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem, r
     const other = await replayItemValue(tx, movement.itemId, revised
       ? { revise: { movementId: movement.id, ...revised } }
       : { excludeMovementIds: [movement.id] });
-    if (addsNegativeWindow(withRow, other)) throw pricedPastZero(item.name);
+    if (addsUncostedWindow(withRow, other)) throw pricedPastZero(item.name);
     const bookChange = dec(revised?.valueDelta ?? 0).minus(dec(movement.valueDelta));
     return other.value.minus(withRow.value.plus(bookChange)).toDecimalPlaces(VALUE_DP);
   } catch (e) {
@@ -733,6 +835,7 @@ export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutbou
   );
   const qtyDelta = oldQty.minus(quantity);
   if (qtyDelta.lt(0) && await valueEnteredAfter(tx, movement)) throw increaseAfterInbound(item.name);
+  if (qtyDelta.lt(0)) assertCostedPastZero(item, qtyDelta.negated());
   const change = oldValue.minus(value);
   const replay = i.trueUp === 'replay' && qtyDelta.gt(0);
   const trueUp = replay ? await replayTrueUp(tx, movement, item, { quantity, valueDelta: value.negated() }) : new Decimal(0);
@@ -791,7 +894,11 @@ export async function batchUnitCosts(db: Tx, rows: readonly BatchRow[]): Promise
   if (rows.length === 0) return costs;
   const adjustments = await db.stockMovement.groupBy({
     by: ['adjustsMovementId'],
-    where: { adjustsMovementId: { in: rows.map((r) => r.id) }, movementType: 'Revaluation', isCancelled: false },
+    // A negative-stock settlement re-values goods that went out before the batch, not the batch.
+    where: {
+      adjustsMovementId: { in: rows.map((r) => r.id) }, movementType: 'Revaluation', isCancelled: false,
+      OR: [{ referenceType: null }, { referenceType: { not: NEGATIVE_STOCK_SETTLE_REFERENCE } }],
+    },
     _sum: { valueDelta: true },
   });
   const adjusted = new Map(adjustments.map((a) => [a.adjustsMovementId, dec(a._sum.valueDelta ?? 0)]));

@@ -2,7 +2,7 @@ import Decimal from 'decimal.js';
 import type { Prisma } from '@prisma/client';
 import { calcWeightedAverage } from './weightedAverage';
 import {
-  UNIT_COST_DP, VALUATION_BASELINE_REFERENCE, averageAfter, outboundValue,
+  NEGATIVE_STOCK_SETTLE_REFERENCE, UNIT_COST_DP, VALUATION_BASELINE_REFERENCE, averageAfter, negativeSettlement, outboundValue,
 } from '../services/inventory/inventoryValueMath';
 
 /**
@@ -124,6 +124,10 @@ export function replayWeightedAverage(
  * and value of the active rows up to and including it (the book as the baseline left it). Rows after
  * it are replayed in processing order (createdAt, then movement number, then id):
  *  - In / AdjustmentIn and Revaluation -> their recorded value_delta (a value that came in);
+ *  - an In / AdjustmentIn into replayed stock below 0 also settles that window at its own price
+ *    (negativeSettlement, as postInbound does since PR-6.6); the recorded settlement rows
+ *    (NEGATIVE_STOCK_SETTLE_REFERENCE) are not replayed by their value but recomputed there, so a
+ *    row taken out of the history changes or removes the settlements after it;
  *  - Out / AdjustmentOut -> the value outboundValue decides from the replayed book, so a row that
  *    is taken out of the history changes what later outbound rows took;
  *  - TransferIn / TransferOut -> nothing (value is per item, I-43; both legs net to zero).
@@ -131,8 +135,9 @@ export function replayWeightedAverage(
  * true-up and zero-stock sweep of an earlier cancel, one row) is not replayed by its value: leaving
  * the cancelled row out recomputes the true-up, and the sweep is replayed where it happened (stock 0
  * -> value 0). Before the baseline it is part of the opening book like any row.
- * The replay also reports where it priced goods without a cost behind them (stock <= 0 windows,
- * settled at the next inbound only from PR-6.6): a true-up compares those of the two replays.
+ * The replay also reports where it priced goods without a cost behind them (past zero at average 0,
+ * which postOutbound refuses since PR-6.6, and Revaluations at no stock): a true-up compares those
+ * of the two replays.
  */
 
 export interface ValueReplayRow {
@@ -148,6 +153,8 @@ export interface ValueReplayRow {
    * cancel refused), so a replayed book at stock 0 drops its value here.
    */
   settlement?: boolean;
+  /** A negative-stock settlement row: recomputed at the inbound it adjusts, its own value is not replayed. */
+  negativeSettle?: boolean;
 }
 
 export interface ValueReplayState {
@@ -156,10 +163,10 @@ export interface ValueReplayState {
   average: Decimal;
 }
 
-/** Where a replay priced goods without a cost behind them (stock <= 0 windows, plan §2.3). */
+/** Where a replay priced goods without a cost behind them (plan §2.3). */
 export interface ValueReplayWindows {
-  /** Out / AdjustmentOut rows that took goods past zero: id -> the quantity past zero. */
-  pastZero: ReadonlyMap<string, Decimal>;
+  /** Out / AdjustmentOut rows that took goods past zero at average 0: id -> the quantity past zero. */
+  uncostedPastZero: ReadonlyMap<string, Decimal>;
   /** Revaluation rows that landed at stock <= 0: value with no goods to carry it. */
   revaluedWithoutStock: ReadonlySet<string>;
 }
@@ -180,12 +187,14 @@ export function sortMovementsForValueReplay<T extends Pick<ValueReplayRow, 'id' 
 /** One row on the replayed book. Pure; throws INVENTORY_VALUE_NEGATIVE where outboundValue does. */
 function applyValueRow(state: ValueReplayState, row: ValueReplayRow): ValueReplayState {
   if (row.settlement) return state.stock.isZero() ? { ...state, value: new Decimal(0) } : state;
+  if (row.negativeSettle) return state;
   const qty = new Decimal(row.quantity);
   let stock = state.stock;
   let value = state.value;
   if (INBOUND_VALUE_TYPES.has(row.movementType)) {
+    const settle = negativeSettlement(stock, value, qty, row.valueDelta);
     stock = stock.plus(qty);
-    value = value.plus(row.valueDelta);
+    value = value.plus(row.valueDelta).plus(settle);
   } else if (OUTBOUND_VALUE_TYPES.has(row.movementType)) {
     value = value.minus(outboundValue(stock, value, state.average, qty));
     stock = stock.minus(qty);
@@ -199,19 +208,20 @@ function applyValueRow(state: ValueReplayState, row: ValueReplayRow): ValueRepla
 
 /** Replays sorted rows from `opening` and notes its stock <= 0 windows. Pure, no mutation of its input. */
 function replayWithWindows(rows: readonly ValueReplayRow[], opening: ValueReplayState): ValueReplayState & ValueReplayWindows {
-  const pastZero = new Map<string, Decimal>();
+  const uncostedPastZero = new Map<string, Decimal>();
   const revaluedWithoutStock = new Set<string>();
   let state = opening;
   for (const row of sortMovementsForValueReplay(rows)) {
     if (OUTBOUND_VALUE_TYPES.has(row.movementType)) {
       const past = new Decimal(row.quantity).minus(Decimal.max(state.stock, 0));
-      if (past.gt(0)) pastZero.set(row.id, past);
-    } else if (row.movementType === 'Revaluation' && !row.settlement && state.stock.lte(0) && !new Decimal(row.valueDelta).isZero()) {
+      if (past.gt(0) && state.average.lte(0)) uncostedPastZero.set(row.id, past);
+    } else if (row.movementType === 'Revaluation' && !row.settlement && !row.negativeSettle
+      && state.stock.lte(0) && !new Decimal(row.valueDelta).isZero()) {
       revaluedWithoutStock.add(row.id);
     }
     state = applyValueRow(state, row);
   }
-  return { ...state, pastZero, revaluedWithoutStock };
+  return { ...state, uncostedPastZero, revaluedWithoutStock };
 }
 
 /** Replays sorted rows from `opening`. Pure, no mutation of its input. */
@@ -221,15 +231,16 @@ export function replayValueRows(rows: readonly ValueReplayRow[], opening: ValueR
 }
 
 /**
- * True when a replay without some rows priced more goods past zero, or landed a Revaluation at no
- * stock, where the replay with them did not. It then values goods that never had a cost (the old
- * average for the missing units, the next inbound's full cost on the units left) and the true-up
- * would be a guess: until PR-6.6 settles stock <= 0 windows, such a cancel is TRUE_UP_UNEXPLAINED.
- * Windows the real history had too stay allowed (a sale past zero that is cancelled).
+ * True when a replay without some rows priced more goods past zero at average 0, or landed a
+ * Revaluation at no stock, where the replay with them did not. Goods past zero at a known average are
+ * explained since PR-6.6 (the next inbound settles them, in the replay as live). Past zero at average
+ * 0 is a row postOutbound refuses (NEGATIVE_STOCK_NO_COST), and a Revaluation at no stock would have
+ * gone to COGS, not to the book: the true-up would be a guess, so such a cancel is
+ * TRUE_UP_UNEXPLAINED. Windows the real history had too stay allowed.
  */
-export function addsNegativeWindow(withRows: ValueReplayWindows, without: ValueReplayWindows): boolean {
-  for (const [id, qty] of without.pastZero) {
-    if (qty.gt(withRows.pastZero.get(id) ?? 0)) return true;
+export function addsUncostedWindow(withRows: ValueReplayWindows, without: ValueReplayWindows): boolean {
+  for (const [id, qty] of without.uncostedPastZero) {
+    if (qty.gt(withRows.uncostedPastZero.get(id) ?? 0)) return true;
   }
   for (const id of without.revaluedWithoutStock) {
     if (!withRows.revaluedWithoutStock.has(id)) return true;
@@ -292,6 +303,7 @@ export async function replayItemValue(
     referenceType: r.referenceType,
     settlement: r.movementType === 'Revaluation' && r.adjustsMovement?.isCancelled === true
       && r.adjustsMovement.referenceType === r.referenceType && r.adjustsMovement.referenceId === r.referenceId,
+    negativeSettle: r.movementType === 'Revaluation' && r.referenceType === NEGATIVE_STOCK_SETTLE_REFERENCE,
   })));
   let baselineAt = -1;
   rows.forEach((r, i) => {

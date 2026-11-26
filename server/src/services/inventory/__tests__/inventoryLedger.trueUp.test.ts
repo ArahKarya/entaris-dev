@@ -1,7 +1,8 @@
 /**
- * Unit: the value true-up of a cancel (reverseMovement with trueUp 'replay', E3-R8, PR-6.5a) on an
- * in-memory book. History is written through the real postInbound / postOutbound, so every row
- * carries the value the ledger decided; only the row locks, numbers and the period guard are stubs.
+ * Unit: the value true-up of a cancel (reverseMovement with trueUp 'replay', E3-R8, PR-6.5a) and the
+ * negative-stock settlement of an inbound row (E3-R9, PR-6.6) on an in-memory book. History is
+ * written through the real postInbound / postOutbound, so every row carries the value the ledger
+ * decided; only the row locks, numbers, the period guard and the settlement journal are stubs.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Decimal from 'decimal.js';
@@ -12,6 +13,8 @@ const store = vi.hoisted(() => ({
   clock: 0,
   seq: 0,
   lockedDay: null as string | null,
+  legacyOpen: false,
+  settleJournals: [] as { amount: string; inboundId: string }[],
 }));
 
 vi.mock('../../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -26,6 +29,13 @@ vi.mock('../../../utils/periodGuard', async () => {
     }),
   };
 });
+vi.mock('../negativeStockSettle', () => ({
+  hasOpenLegacyCogsQueue: vi.fn(async () => store.legacyOpen),
+  postNegativeSettleJournal: vi.fn(async (_tx: unknown, i: { amount: { toFixed(dp: number): string }; inbound: { id: string } }) => {
+    store.settleJournals.push({ amount: i.amount.toFixed(2), inboundId: i.inbound.id });
+    return `je-settle-${store.settleJournals.length}`;
+  }),
+}));
 vi.mock('../stockLocks', () => ({
   stockKey: (itemId: string, warehouseId: string) => `${itemId}::${warehouseId}`,
   lockInventoryRows: vi.fn(async (_tx: unknown, rows: { itemIds: string[]; pairs?: { itemId: string; warehouseId: string }[] }) => {
@@ -40,9 +50,10 @@ vi.mock('../stockLocks', () => ({
 }));
 
 import {
-  TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED, postInbound, postOutbound, postRevaluation, reverseDocumentMovements, reverseMovement,
+  NEGATIVE_STOCK_NO_COST, REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED, postInbound, postOutbound, postRevaluation,
+  reverseDocumentMovements, reverseMovement,
 } from '../inventoryLedger';
-import { VALUATION_BASELINE_REFERENCE } from '../inventoryValueMath';
+import { NEGATIVE_STOCK_SETTLE_REFERENCE, VALUATION_BASELINE_REFERENCE } from '../inventoryValueMath';
 
 const ITEM = 'item-1';
 const WH = 'wh-1';
@@ -120,6 +131,13 @@ beforeEach(() => {
   store.clock = 0;
   store.seq = 0;
   store.lockedDay = null;
+  store.legacyOpen = false;
+  store.settleJournals = [];
+});
+
+/** Value left at zero stock without a window: a legacy COGS settle Revaluation (whole to inventory). */
+const residue = (delta: number) => postRevaluation(tx, {
+  itemId: ITEM, date: new Date('2113-04-01'), fiscalYearId: 'fy-1', createdById: USER, delta, referenceType: 'LegacyCogsSettle', wholeToInventory: true,
 });
 
 describe('reverseMovement trueUp replay', () => {
@@ -140,18 +158,22 @@ describe('reverseMovement trueUp replay', () => {
     expect(sumActive()).toBe('0.00');
   });
 
-  it('negative-stock window (PRD scenario rewritten): sale past zero, receipt, cancel the sale -> true-up 0, book 100 / 1.000.000', async () => {
+  it('negative-stock window (PRD scenario rewritten): sale past zero, receipt settles, cancel the sale -> true-up +100.000, book 100 / 1.000.000', async () => {
     await receive(100, 900_000);
     await ship(100); // stock 0, average 9.000 stays
     const minus = await ship(100);
     expect(minus.valueDelta.toFixed(2)).toBe('-900000.00');
-    await receive(100, 1_000_000);
-    expect(book()).toMatchObject({ stock: '0', value: '100000.00' });
+    const settling = await receive(100, 1_000_000);
+    // PR-6.6: the receipt re-values the 100 sold past zero at 10.000 (DR COGS 100.000).
+    expect(settling.settlement!.valueDelta.toFixed(2)).toBe('-100000.00');
+    expect(book()).toMatchObject({ stock: '0', value: '0.00' });
 
     const r = await reverseMovement(tx, minus.movement.id, replay);
-    expect(r.trueUp.toFixed(2)).toBe('0.00');
-    expect(r.sweep).toBeNull();
+    // Without the sale no window: the settlement comes back (6.5a plan: "+100.000 when 6.6 settle ran").
+    expect(r.trueUp.toFixed(2)).toBe('100000.00');
+    expect(r.sweep!.valueDelta.toFixed(2)).toBe('100000.00');
     expect(book()).toEqual({ stock: '100', value: '1000000.00', average: '10000.000000' });
+    expect(sumActive()).toBe(book().value);
   });
 
   it('nothing went out since the row: no replay, exact reversal', async () => {
@@ -212,27 +234,40 @@ describe('reverseMovement trueUp replay', () => {
     expect(sumActive()).toBe(book().value);
   });
 
-  it('without the row goods would go out past zero where they did not: TRUE_UP_UNEXPLAINED, nothing changes (PR-6.6)', async () => {
+  it('without the row goods go out past zero at a known average: explained since PR-6.6, true-up +100, book −10 / −100', async () => {
     await receive(10, 100);
     const b = await receive(10, 200);
     await ship(10); // 150 out, 10 @ 15 left
     await ship(10); // 150 out, 0
-    const before = JSON.stringify(store.movements);
-    // Without b the second sale goes 10 past zero at the old average: a guess, refused.
-    await expect(reverseMovement(tx, b.movement.id, replay)).rejects.toMatchObject({ code: TRUE_UP_UNEXPLAINED, status: 409 });
-    expect(JSON.stringify(store.movements)).toBe(before);
-    expect(book()).toMatchObject({ stock: '0', value: '0.00' });
+    // Without b the second sale goes 10 past zero at 10 (−100), settled when goods come in.
+    const r = await reverseMovement(tx, b.movement.id, replay);
+    expect(r.trueUp.toFixed(2)).toBe('100.00');
+    expect(book()).toMatchObject({ stock: '-10', value: '-100.00' });
+    expect(sumActive()).toBe(book().value);
   });
 
-  it('a later receipt does not hide the window: A, B, sale 150, C, cancel B is TRUE_UP_UNEXPLAINED', async () => {
+  it('without the row goods go out past zero at average 0: TRUE_UP_UNEXPLAINED, nothing changes', async () => {
+    const b = await receive(10, 200);
+    await ship(10); // 0 / 0, average 20 stays
+    await receive(10, 0); // a zero-value inbound: 10 / 0, average 0
+    await ship(5); // 5 / 0
+    const before = JSON.stringify(store.movements);
+    // Without b the first sale goes 10 past zero at average 0: postOutbound would refuse it.
+    await expect(reverseMovement(tx, b.movement.id, replay)).rejects.toMatchObject({ code: TRUE_UP_UNEXPLAINED, status: 409 });
+    expect(JSON.stringify(store.movements)).toBe(before);
+  });
+
+  it('a later receipt settles the window the cancel opens: A, B, sale 150, C, cancel B -> true-up −250.000, 50 @ 30.000', async () => {
     await receive(100, 1_000_000); // A @10.000
     const b = await receive(100, 2_000_000); // B @20.000, avg 15.000
     await ship(150); // 2.250.000, 50 / 750.000
     await receive(100, 3_000_000); // C @30.000, 150 / 3.750.000
-    // The stock check passes (150 on hand), but without B the sale goes 50 past zero at 10.000 and
-    // C's full cost lands on the 50 left (book 2.500.000 for goods that cost 1.500.000).
-    await expect(reverseMovement(tx, b.movement.id, replay)).rejects.toMatchObject({ code: TRUE_UP_UNEXPLAINED, status: 409 });
-    expect(book()).toMatchObject({ stock: '150', value: '3750000.00' });
+    // Without B the sale goes 50 past zero at 10.000, and C settles them at 30.000 (−1.000.000):
+    // 50 / 1.500.000 left. COGS over the history: 1.000.000 + 50 x 30.000 = 2.500.000.
+    const r = await reverseMovement(tx, b.movement.id, replay);
+    expect(r.trueUp.toFixed(2)).toBe('-250000.00');
+    expect(book()).toEqual({ stock: '50', value: '1500000.00', average: '30000.000000' });
+    expect(sumActive()).toBe(book().value);
   });
 
   it('a Revaluation that would land at no stock without the row is TRUE_UP_UNEXPLAINED', async () => {
@@ -244,22 +279,23 @@ describe('reverseMovement trueUp replay', () => {
     await expect(reverseMovement(tx, b.movement.id, replay)).rejects.toMatchObject({ code: TRUE_UP_UNEXPLAINED, status: 409 });
   });
 
-  it('a window the real history had too stays allowed: the sale after the row was past zero with it as well', async () => {
+  it('a window the real history had too stays allowed: cancelling the receipt that settled half of it takes the settlement back', async () => {
     await receive(10, 100);
     await ship(20); // −10 / −100, average 10
-    const b = await receive(5, 100); // −5 / 0
-    await ship(5); // past zero with b too: 50 at average 10, −10 / −50
+    const b = await receive(5, 100); // covers 5 at 20: settlement −50, −5 / −50
+    expect(b.settlement!.valueDelta.toFixed(2)).toBe('-50.00');
+    await ship(5); // past zero with b too: 50 at average 10, −10 / −100
     const r = await reverseMovement(tx, b.movement.id, replay);
-    // Without b the sale takes the same 50: true-up 0, the window is the real one (PR-6.6 settles it).
-    expect(r.trueUp.toFixed(2)).toBe('0.00');
+    // Without b the sale takes the same 50; the 50 of b's settlement comes back.
+    expect(r.trueUp.toFixed(2)).toBe('50.00');
     expect(book()).toMatchObject({ stock: '-15', value: '-150.00' });
+    expect(sumActive()).toBe(book().value);
   });
 
   it('value left at zero stock is swept to COGS (sweepAtZero) in the same row', async () => {
     await receive(100, 900_000);
-    await ship(100);
-    await ship(100); // −100 / −900.000
-    await receive(100, 1_000_000); // 0 / 100.000 (window residue)
+    await ship(100); // 0 / 0
+    await residue(100_000); // 0 / 100.000
     const late = await receive(10, 120_000);
     const r = await reverseMovement(tx, late.movement.id, replay);
     expect(r.trueUp.isZero()).toBe(true);
@@ -270,9 +306,8 @@ describe('reverseMovement trueUp replay', () => {
 
   it('a swept residue stays swept in later replays: sweep, receipts, sale, cancel -> true-up 0', async () => {
     await receive(100, 900_000);
-    await ship(100);
-    await ship(100); // −100 / −900.000
-    await receive(100, 1_000_000); // 0 / 100.000
+    await ship(100); // 0 / 0
+    await residue(100_000); // 0 / 100.000
     await receive(10, 120_000, { referenceType: 'GoodsReceipt', referenceId: 'stt-l' });
     await reverseDocumentMovements(tx, { referenceType: 'GoodsReceipt', referenceId: 'stt-l' }, replay); // sweeps 100.000
     expect(book()).toMatchObject({ stock: '0', value: '0.00' });
@@ -341,5 +376,102 @@ describe('reverseMovement trueUp replay', () => {
     const b = await receive(100, 2_000_000);
     await ship(50);
     await expect(reverseMovement(tx, b.movement.id, { userId: USER })).rejects.toMatchObject({ code: 'REVERSAL_NEEDS_TRUE_UP' });
+  });
+});
+
+describe('negative-stock settlement on inbound (E3-R9)', () => {
+  const settleRows = () => store.movements.filter((m) => m.referenceType === NEGATIVE_STOCK_SETTLE_REFERENCE);
+
+  it('PRD: average 10.000, stock 0, ship 100 (COGS 1.000.000), in 300 @12.000 -> DR COGS 200.000, average 12.000, stock_value 2.400.000', async () => {
+    await receive(100, 1_000_000);
+    await ship(100);
+    const sale = await ship(100);
+    expect(sale.valueDelta.toFixed(2)).toBe('-1000000.00');
+    const inbound = await receive(300, 3_600_000);
+    expect(inbound.valueDelta.toFixed(2)).toBe('3600000.00'); // the caller's debit is unchanged
+    expect(inbound.settlement!.valueDelta.toFixed(2)).toBe('-200000.00');
+    expect(inbound.settlement!.journalEntryId).toBe('je-settle-1');
+    expect(store.settleJournals).toEqual([{ amount: '-200000.00', inboundId: inbound.movement.id }]);
+    expect(inbound.settlement!.movement).toMatchObject({
+      movementType: 'Revaluation', warehouseId: null, adjustsMovementId: inbound.movement.id,
+      referenceType: NEGATIVE_STOCK_SETTLE_REFERENCE, referenceId: inbound.movement.id, journalEntryId: 'je-settle-1',
+    });
+    expect(inbound.stockValueAfter.toFixed(2)).toBe('2400000.00');
+    expect(book()).toEqual({ stock: '200', value: '2400000.00', average: '12000.000000' });
+    expect(sumActive()).toBe(book().value);
+  });
+
+  it('crossing zero: 100 @10.000, out 150, in 100 @12.000 -> COGS 150 x 10.000 + 50 x 2.000', async () => {
+    await receive(100, 1_000_000);
+    const sale = await ship(150);
+    expect(sale.valueDelta.toFixed(2)).toBe('-1500000.00');
+    const inbound = await receive(100, 1_200_000);
+    expect(inbound.settlement!.valueDelta.toFixed(2)).toBe('-100000.00');
+    expect(D(sale.valueDelta).plus(inbound.settlement!.valueDelta).negated().toFixed(2)).toBe(D(150 * 10_000 + 50 * 2_000).toFixed(2));
+    expect(book()).toEqual({ stock: '50', value: '600000.00', average: '12000.000000' });
+  });
+
+  it('an inbound that covers part of the shortfall settles only that part; the rest keeps the old average', async () => {
+    await receive(100, 1_000_000);
+    await ship(200); // −100 / −1.000.000
+    const inbound = await receive(40, 480_000);
+    expect(inbound.settlement!.valueDelta.toFixed(2)).toBe('-80000.00');
+    expect(book()).toEqual({ stock: '-60', value: '-600000.00', average: '10000.000000' });
+  });
+
+  it('a cheaper inbound credits COGS; no settlement into stock at or above 0', async () => {
+    await receive(100, 1_000_000);
+    await ship(110); // −10 / −100.000
+    const cheaper = await receive(10, 80_000);
+    expect(cheaper.settlement!.valueDelta.toFixed(2)).toBe('20000.00');
+    expect(book()).toMatchObject({ stock: '0', value: '0.00' });
+    const next = await receive(10, 80_000);
+    expect(next.settlement).toBeNull();
+    expect(settleRows()).toHaveLength(1);
+  });
+
+  it('owner decision #6: an item with legacy COGS queue rows open is not settled', async () => {
+    await receive(100, 1_000_000);
+    await ship(200);
+    store.legacyOpen = true;
+    const inbound = await receive(100, 1_200_000);
+    expect(inbound.settlement).toBeNull();
+    expect(store.settleJournals).toEqual([]);
+    expect(book()).toMatchObject({ stock: '0', value: '200000.00' });
+  });
+
+  it('NEGATIVE_STOCK_NO_COST: an item that never had a cost cannot go past zero; up to zero it can', async () => {
+    await expect(ship(10)).rejects.toMatchObject({ code: NEGATIVE_STOCK_NO_COST, status: 400 });
+    expect(store.movements).toEqual([]);
+    await receive(10, 0); // a zero-value inbound: average 0
+    await expect(ship(15)).rejects.toMatchObject({ code: NEGATIVE_STOCK_NO_COST });
+    await ship(10);
+    expect(book()).toMatchObject({ stock: '0', value: '0.00' });
+  });
+
+  it('cancelling the settling receipt takes the settlement back through the true-up', async () => {
+    await receive(100, 1_000_000);
+    await ship(100);
+    await ship(100); // −100 / −1.000.000
+    const inbound = await receive(300, 3_600_000, { referenceType: 'GoodsReceipt', referenceId: 'stt-s' });
+    const [r] = await reverseDocumentMovements(tx, { referenceType: 'GoodsReceipt', referenceId: 'stt-s' }, replay);
+    expect(r.movement.id).toBe(inbound.movement.id);
+    expect(r.valueDelta.toFixed(2)).toBe('-3600000.00');
+    expect(r.trueUp.toFixed(2)).toBe('200000.00');
+    expect(r.sweep).toMatchObject({ adjustsMovementId: inbound.movement.id, referenceType: 'GoodsReceipt', referenceId: 'stt-s' });
+    // Back to the book before the receipt: the 100 sold past zero at 10.000.
+    expect(book()).toEqual({ stock: '-100', value: '-1000000.00', average: '12000.000000' });
+    expect(sumActive()).toBe(book().value);
+  });
+
+  it('a reversal without trueUp after a settlement is refused (REVERSAL_NEEDS_TRUE_UP), nothing changes', async () => {
+    await receive(100, 1_000_000);
+    await ship(100);
+    const sale = await ship(100);
+    const inbound = await receive(100, 1_200_000);
+    const before = JSON.stringify(store.movements);
+    await expect(reverseMovement(tx, sale.movement.id, { userId: USER })).rejects.toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP });
+    await expect(reverseMovement(tx, inbound.movement.id, { userId: USER, sweepAtZero: true })).rejects.toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP });
+    expect(JSON.stringify(store.movements)).toBe(before);
   });
 });

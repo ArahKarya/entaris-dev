@@ -7,6 +7,7 @@ import {
   VALUE_DP,
   averageAfter,
   invariantTolerance,
+  negativeSettlement,
   outboundValue,
   revaluationSplit,
   revisedOutboundValue,
@@ -136,5 +137,34 @@ describe('invariantTolerance', () => {
     expect(invariantTolerance(20_000).toString()).toBe('0.01');
     expect(invariantTolerance(31_990).toString()).toBe('0.015995');
     expect(invariantTolerance(-40_000).toString()).toBe('0.02');
+  });
+});
+
+describe('negativeSettlement (E3-R9)', () => {
+  it('PRD: stock −100 at −1.000.000, in 300 @12.000 -> −200.000 (DR COGS)', () => {
+    expect(str(negativeSettlement(-100, -1_000_000, 300, 3_600_000))).toBe('-200000.00');
+  });
+
+  it('crossing zero: −50 at −500.000 (sold at 10.000), in 100 @12.000 -> −100.000 = 50 x 2.000', () => {
+    expect(str(negativeSettlement(-50, -500_000, 100, 1_200_000))).toBe('-100000.00');
+  });
+
+  it('a partial cover settles only the covered share of the book', () => {
+    expect(str(negativeSettlement(-100, -1_000_000, 40, 480_000))).toBe('-80000.00');
+  });
+
+  it('a cheaper inbound gives a positive change (CR COGS)', () => {
+    expect(str(negativeSettlement(-10, -100_000, 10, 80_000))).toBe('20000.00');
+  });
+
+  it('a full cover takes the whole book, so stock reaching 0 holds no value', () => {
+    // −3 at −10,00: 3 of 3 at 4,00 each -> −(12,00 − 10,00).
+    expect(str(negativeSettlement(-3, '-10.00', 3, '12.00'))).toBe('-2.00');
+    expect(str(negativeSettlement(-3, '-10.00', 5, '20.00'))).toBe('-2.00');
+  });
+
+  it('is 0 when stock is not below 0', () => {
+    expect(str(negativeSettlement(0, 0, 10, 100))).toBe('0.00');
+    expect(str(negativeSettlement(5, 50, 10, 100))).toBe('0.00');
   });
 });

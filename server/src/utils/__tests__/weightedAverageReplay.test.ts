@@ -268,4 +268,19 @@ describe('replayValueRows (value replay, PR-6.5a)', () => {
     expect(r.stock.toString()).toBe('-5');
     expect(r.value.toFixed(2)).toBe('-50.00');
   });
+
+  it('an inbound into replayed stock below 0 settles the window at its price; recorded settlement rows are recomputed (PR-6.6)', () => {
+    const rows = [
+      row('a', 'In', 100, 1_000_000, 1),
+      row('s', 'Out', 200, 0, 2), // 1.000.000 + 100 x 10.000 -> −100 / −1.000.000
+      row('c', 'In', 300, 3_600_000, 3),
+      { ...row('n', 'Revaluation', 0, -999_999, 4), negativeSettle: true }, // recomputed: −200.000
+    ];
+    const r = replayValueRows(rows, zero);
+    expect(r.stock.toString()).toBe('200');
+    expect(r.value.toFixed(2)).toBe('2400000.00');
+    expect(r.average.toFixed(6)).toBe('12000.000000');
+    // Without the sale there is no window: the receipt keeps its whole value.
+    expect(replayValueRows(rows.filter((x) => x.id !== 's'), zero).value.toFixed(2)).toBe('4600000.00');
+  });
 });
