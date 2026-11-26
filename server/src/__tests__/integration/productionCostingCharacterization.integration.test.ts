@@ -8,7 +8,8 @@
  * average are all 6 decimals (UNIT_COST_DP), so the output movement value is round(600 x
  * 10.166,666667, 2) = 6.100.000 and nothing is left for COGS (with a 4 dp HPP and a 2 dp unit_cost
  * the value was 6.100.000,02 and the 0,02 landed in COGS). A later PR that changes a number here
- * changes it on purpose, in its own diff.
+ * changes it on purpose, in its own diff: PR-6.4e (production through the value ledger) changed
+ * only the picked-batch case, and every case now ends with assertLedgerInvariant.
  *
  * Fixture R1: GKP 1.000 kg @ 6.000, conversion 300/kg on input qty, bekatul 100 kg NRV 2.000,
  * beras 600 kg. Everything runs in a rollback transaction on fixtures made here, fiscal year 2101.
@@ -18,6 +19,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { txPrismaProxy, type Tx } from '../helpers/routeHarness';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -67,6 +69,8 @@ async function inWorld(fn: (tx: Tx, world: ProductionWorld) => Promise<void>) {
       try {
         const world = await createProductionWorld(tx, YEAR);
         await fn(tx, world);
+        // Production posts through the value ledger since PR-6.4e (plan rule 11).
+        await assertLedgerInvariant(tx, Object.values(world.items).map((i) => i.id), { warehouses: true });
       } finally {
         state.tx = null;
         systemAccounts.invalidateCache();
@@ -375,18 +379,19 @@ d('production costing characterization - variants', () => {
     });
   });
 
-  it('a picked batch locks its cost: batchUnitCost wins over the item average', async () => {
+  it('a picked batch is traceability only: the input goes out at its ledger value (PR-6.4e)', async () => {
     await inWorld(async (tx, w) => {
       const { movementId } = await seedWorldStock(tx, w, 'gkp', 2000, 6000);
       const run = await submit(tx, w, r1Body(w, {
         inputs: [{ itemId: w.items.gkp.id, quantity: 1000, sourceMovementId: movementId, batchUnitCost: 5000 }],
       }));
 
+      // Before the value ledger the client's batchUnitCost (5.000) valued the input and the HPP was
+      // 8.500 while the book kept 6.000: now the ledger values it, the snapshot stays for display.
       const gkp = (await movementsOf(tx, run.id)).find((m) => m.itemId === w.items.gkp.id)!;
-      expect(gkp).toMatchObject({ unitCost: 5000, totalValue: 5_000_000 });
+      expect(gkp).toMatchObject({ unitCost: 6000, totalValue: 6_000_000 });
       expect(await lineOf(tx, run.id, w.items.gkp.id)).toMatchObject({ batchUnitCost: 5000 });
-      // 5.000.000 + 300.000 - 200.000 = 5.100.000 over 600 kg = 8.500; the item average is unchanged.
-      expect(Number((await runRow(tx, run.id)).computedHpp)).toBe(8500);
+      expect(Number((await runRow(tx, run.id)).computedHpp)).toBe(10166.666667);
       expect((await itemState(tx, w.items.gkp.id)).averageCost).toBe(6000);
       await assertBalancesMatchAle(tx, w);
     });
