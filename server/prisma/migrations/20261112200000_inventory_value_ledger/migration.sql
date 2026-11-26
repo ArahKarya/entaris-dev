@@ -102,14 +102,16 @@ BEGIN
   -- (4) stock_value = stock x average, where it is not already within invariant (b)'s tolerance
   -- (inventoryValueMath.invariantTolerance), so a re-run leaves a value the ledger keeps alone.
   -- Invariant (b) only holds with stock > 0: in a negative-stock window the ledger keeps the previous
-  -- average while inbound value comes in at its own cost, so an item that already has a baseline and
-  -- no stock is left as the ledger keeps it (a re-run must not book that gap as a new baseline).
+  -- average while inbound value comes in at its own cost, so an item without stock is only valued
+  -- while its stock_value is still 0 (the column's default: never valued) and it has no baseline row.
+  -- One the ledger already values (stock_value <> 0, e.g. a residue after a zero crossing, or a
+  -- baseline) is left as it keeps it: a re-run must not book that gap as a new baseline.
   UPDATE "inventory_items" i
      SET "stock_value" = ROUND(i."current_stock" * i."average_cost", 2)
    WHERE ABS(i."stock_value" - ROUND(i."current_stock" * i."average_cost", 2))
          > GREATEST(0.01, ABS(i."current_stock") * 0.0000005)
-     AND (i."current_stock" > 0 OR NOT EXISTS (
-           SELECT 1 FROM "stock_movements" b WHERE b."item_id" = i."id" AND b."reference_type" = 'ValuationBaseline'));
+     AND (i."current_stock" > 0 OR (i."stock_value" = 0 AND NOT EXISTS (
+           SELECT 1 FROM "stock_movements" b WHERE b."item_id" = i."id" AND b."reference_type" = 'ValuationBaseline')));
 
   -- (5) Baseline: one Revaluation 'ValuationBaseline' per item whose stock_value differs from the sum
   -- of its active movements, with no journal (decision #15: the old gap to the GL stays visible in
