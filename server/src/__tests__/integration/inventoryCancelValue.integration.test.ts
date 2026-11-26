@@ -6,9 +6,10 @@
  *   the GL of the item's inventory account 0 after the invoice, COGS 1.000.000;
  * - the negative-stock scenario, rewritten with explicit numbers (the PRD's "stockValue 10.000.000"
  *   is a typo: 100 kg x 10.000 = 1.000.000): average 9.000 at stock 0, a delivery of 100 through the
- *   bypass (stock −100, value −900.000), a receipt 100 @10.000 (stock 0, value 100.000), cancel the
- *   delivery: stock 100, stock_value 1.000.000, true-up 0 (no journal); book = GL (+ the value of
- *   notes not invoiced yet) at every step;
+ *   bypass (stock −100, value −900.000), a receipt 100 @10.000 that settles the window (PR-6.6: DR
+ *   COGS 100.000, stock 0, value 0), cancel the delivery: stock 100, stock_value 1.000.000, the
+ *   settlement back through a true-up of +100.000; book = GL (+ the value of notes not invoiced
+ *   yet) at every step;
  * - a sales return cancelled after the goods were sold again: the true-up comes back against COGS;
  * - the true-up journal is dated the day of the cancel (owner decision #3): a locked day refuses
  *   the cancel with PERIOD_LOCKED and nothing changes (fiscal year 2114).
@@ -107,7 +108,8 @@ const money = (v: Decimal.Value) => new Decimal(v).toFixed(2);
 /** The value of delivery notes not invoiced yet: in the book's outflow, not yet in the GL (no journal). */
 async function uninvoicedNoteValue(tx: Tx, w: SalesFlowWorld): Promise<Decimal> {
   const rows = await tx.stockMovement.findMany({
-    where: { itemId: w.item.id, referenceType: 'DeliveryOrder', isCancelled: false },
+    // The note's own Out rows: a true-up row of a cancelled note carries its journal already.
+    where: { itemId: w.item.id, referenceType: 'DeliveryOrder', movementType: 'Out', isCancelled: false },
     select: { valueDelta: true, referenceId: true },
   });
   const notes = await tx.deliveryOrder.findMany({ where: { id: { in: rows.map((r) => r.referenceId!) } }, select: { id: true, invoiceId: true } });
@@ -162,7 +164,7 @@ d('cancel value true-up (E3-R8)', () => {
     });
   });
 
-  it('negative stock: DO past zero, receipt, cancel the DO -> stock 100, stock_value 1.000.000, true-up 0', async () => {
+  it('negative stock: DO past zero, receipt settles, cancel the DO -> stock 100, stock_value 1.000.000, true-up +100.000', async () => {
     await inWorld(YEAR, `${YEAR}-05-20`, async (tx, w) => {
       await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 9_000, day: `${YEAR}-05-01` });
       const first = await deliver(tx, w, `${YEAR}-05-02`, [{ qty: 100 }]);
@@ -178,15 +180,17 @@ d('cancel value true-up (E3-R8)', () => {
       await expectBookEqualsGl(tx, w);
 
       await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 100, avg: 10_000, day: `${YEAR}-05-04` });
-      expect(await bookOf(tx, w.item.id)).toMatchObject({ stock: '0.000', value: '100000.00' });
+      expect(await bookOf(tx, w.item.id)).toMatchObject({ stock: '0.000', value: '0.00' });
       await expectBookEqualsGl(tx, w);
 
       const minusRow = await tx.stockMovement.findFirstOrThrow({ where: { referenceType: 'DeliveryOrder', referenceId: minus.id } });
       await inRouteTx((t) => cancelDeliveryOrderInTx(t, minus.id, w.userId));
 
       expect(await bookOf(tx, w.item.id)).toEqual({ stock: '100.000', value: '1000000.00', average: '10000.000000' });
-      expect(await trueUpJournal(tx, minusRow.id)).toHaveLength(0);
-      expect(await tx.stockMovement.count({ where: { adjustsMovementId: minusRow.id } })).toBe(0);
+      const [journal, ...more] = await trueUpJournal(tx, minusRow.id);
+      expect(more).toHaveLength(0);
+      expect(money(journal.items.find((i) => i.accountId === w.accounts.inventory.id)!.debit.toString())).toBe('100000.00');
+      expect(await tx.stockMovement.count({ where: { adjustsMovementId: minusRow.id } })).toBe(1);
       await expectBookEqualsGl(tx, w);
     });
   });

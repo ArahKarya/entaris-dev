@@ -4,8 +4,9 @@
  * - goods receipt cancel: STT of 10.000 kg, 8.000 kg leave by a manual "Penyesuaian Stok -"
  *   (no sourceMovementId, so the consumed-batch guard does not fire). A forced cancel by a doc.cancel
  *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes, but
- *   without the receipt the 8.000 kg would have gone out past zero with no cost, so the value replay
- *   refuses it (TRUE_UP_UNEXPLAINED, until PR-6.6) and nothing changes;
+ *   without the receipt the 8.000 kg would have gone out past zero at average 0 (a row postOutbound
+ *   refuses, NEGATIVE_STOCK_NO_COST), so the value replay refuses it (TRUE_UP_UNEXPLAINED) and
+ *   nothing changes;
  * - production run cancel: the same through the body and through ?allowNegativeStock=true (the
  *   output went out since, so with the capability the value ledger refuses it too, until PR-6.12);
  * - production run resubmit with the bypass: 403 and the request stays in NeedsRevision without the
@@ -171,8 +172,8 @@ d('goods receipt cancel with the negative-stock bypass', () => {
       expect(plain.body.code).toBe('GR_CANCEL_INSUFFICIENT_STOCK');
 
       // The bypass passes the stock check, but 8.000 kg of the receipt went out since. Without the
-      // receipt the item never had a cost, so the replay would value them at average 0 past zero: a
-      // guess, refused until PR-6.6 settles stock <= 0 windows, and nothing changes.
+      // receipt the item never had a cost, so the replay would value them at average 0 past zero, a
+      // row postOutbound refuses (NEGATIVE_STOCK_NO_COST): a guess, refused, and nothing changes.
       const refused = await cancel(admin);
       expect(refused.status, JSON.stringify(refused.body)).toBe(409);
       expect(refused.body.code).toBe(TRUE_UP_UNEXPLAINED);

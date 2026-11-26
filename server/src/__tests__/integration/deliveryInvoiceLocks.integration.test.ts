@@ -19,8 +19,8 @@
  * - a delivery note with two lines of one item, 60 + 60, from 100 -> 400 STOCK_INSUFFICIENT;
  * - sales return cancel whose returned goods were sold again -> 400 STOCK_INSUFFICIENT; the
  *   bypass needs inventory.negative_stock and a reason; without the return the goods sold again
- *   would have gone out past zero, so the value replay refuses it (409 TRUE_UP_UNEXPLAINED) until
- *   PR-6.6 settles stock <= 0 windows;
+ *   would have gone out past zero at the average (PR-6.6 settles that window when goods come in),
+ *   so the cancel goes through with a true-up of 0 and leaves stock −30 at −150.000;
  * - purchase invoice cancel of a legacy PI-owned stock movement already used -> 400 likewise; with
  *   the bypass it is cancelled the same way (PR-6.5a).
  */
@@ -91,7 +91,6 @@ import { invalidatePermissionCache } from '../../services/permissionService';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
 import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
-import { TRUE_UP_UNEXPLAINED } from '../../services/inventory/inventoryLedger';
 import { NEGATIVE_STOCK_FORBIDDEN } from '../../utils/negativeStockGate';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -552,14 +551,17 @@ d('stock checks of delivery notes and legacy reversals', () => {
       expect(noReason.status).toBe(400);
 
       // The bypass passes the stock check; goods of the item went out since, so the value ledger
-      // replays the item (PR-6.5a). Without the return the 30 delivered again would have gone out
-      // past zero, where they did not: valuing them is a guess until PR-6.6, so it is refused.
+      // replays the item (PR-6.5a). Without the return the 30 delivered again go out past zero at
+      // the average 5.000, the window the next receipt settles (PR-6.6): the same 150.000 they took
+      // with it, so the true-up is 0 and the book keeps −30 at −150.000.
       const admin = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']);
       const forced = await cancel(admin, bypass);
-      expect(forced.status, JSON.stringify(forced.body)).toBe(409);
-      expect(forced.body.code).toBe(TRUE_UP_UNEXPLAINED);
-      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: 10, warehouse: 10 });
-      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Submitted');
+      expect(forced.status, JSON.stringify(forced.body)).toBe(200);
+      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: -30, warehouse: -30 });
+      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Cancelled');
+      const book = await tx.inventoryItem.findUniqueOrThrow({ where: { id: beras.id } });
+      expect(book.stockValue.toFixed(2)).toBe('-150000.00');
+      expect(await tx.stockMovement.count({ where: { itemId: beras.id, movementType: 'Revaluation', adjustsMovementId: { not: null } } })).toBe(0);
       await assertLedgerInvariant(tx, [beras.id], { warehouses: true });
     });
   });
