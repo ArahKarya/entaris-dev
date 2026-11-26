@@ -1,25 +1,14 @@
-// Per-warehouse stock as of the end of a date. Forward-summing movements is wrong (opening
-// balances and some adjustments have no StockMovement row), so this anchors on live
-// inventory_stocks and walks backward: qty_asof(X) = live - sum(signed movements after X).
-// Value uses the item's current averageCost (no running cost per movement), so far-past dates
-// are approximate; see `valuationNote`.
+// Per-warehouse stock as of the end of a date. The quantity comes from the one as-of walk in
+// services/inventory/stockAsOf.ts (live inventory_stocks minus the active movements after the
+// business day, WIB). Value uses the item's current averageCost (no running cost per movement), so
+// far-past dates are approximate; see `valuationNote`.
 
 import Decimal from 'decimal.js';
-import { StockMovementType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { UNIT_COST_DP } from './inventory/inventoryValueMath';
-
-const IN_TYPES: StockMovementType[] = [
-  StockMovementType.In,
-  StockMovementType.AdjustmentIn,
-  StockMovementType.TransferIn,
-];
-// Listed, not "not inbound": a Revaluation row moves value only and stays out of the qty walk.
-const OUT_TYPES: StockMovementType[] = [
-  StockMovementType.Out,
-  StockMovementType.AdjustmentOut,
-  StockMovementType.TransferOut,
-];
+import { qtyAsOfByWarehouse } from './inventory/stockAsOf';
+import { stockKey } from './inventory/stockLocks';
+import { businessDayOf } from '../utils/businessDate';
 
 export interface SnapshotItem {
   itemId: string;
@@ -59,8 +48,8 @@ export async function buildStockSnapshot(
   dateStr: string,
   warehouseIds?: string[],
 ): Promise<StockSnapshot> {
-  const dayEnd = new Date(dateStr);
-  dayEnd.setHours(23, 59, 59, 999);
+  // A full timestamp is read as the business day it falls on.
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : businessDayOf(new Date(dateStr));
 
   const warehouses = await prisma.warehouse.findMany({
     where: warehouseIds && warehouseIds.length > 0
@@ -71,81 +60,24 @@ export async function buildStockSnapshot(
   if (warehouses.length === 0) {
     return { asOfDate: dateStr, warehouses: [], grandTotalValue: 0, valuationNote: NOTE };
   }
-  const whIds = warehouses.map((w) => w.id);
 
-  // Anchor: live per-warehouse stock (source of truth).
-  const liveStocks = await prisma.inventoryStock.findMany({
-    where: { warehouseId: { in: whIds } },
-    include: { item: { select: { id: true, code: true, name: true, unit: true, averageCost: true, category: true } } },
+  // Also covers an item with no live row but movements after the day (fully consumed since).
+  const qtyMap = await qtyAsOfByWarehouse(prisma, { warehouseIds: warehouses.map((w) => w.id), day });
+  const itemIds = [...new Set([...qtyMap.entries()].filter(([, q]) => !q.isZero()).map(([k]) => k.split('::')[0]!))];
+  const items = itemIds.length === 0 ? [] : await prisma.inventoryItem.findMany({
+    where: { id: { in: itemIds } },
+    select: { id: true, code: true, name: true, unit: true, averageCost: true, category: true },
   });
-
-  // key = `${warehouseId}|${itemId}` → qty as-of (Decimal). Seed with live.
-  const qtyMap = new Map<string, Decimal>();
-  const itemMap = new Map<string, { id: string; code: string; name: string; unit: string; category: string | null; averageCost: Decimal }>();
-  for (const ls of liveStocks) {
-    const k = `${ls.warehouseId}|${ls.itemId}`;
-    qtyMap.set(k, new Decimal(ls.currentStock.toString()));
-    itemMap.set(ls.itemId, {
-      id: ls.item.id, code: ls.item.code, name: ls.item.name, unit: ls.item.unit,
-      category: (ls.item as any).category ?? null,
-      averageCost: new Decimal((ls.item.averageCost ?? 0).toString()),
-    });
-  }
-
-  // groupBy cannot sign conditionally, so In and Out are fetched separately (date > dayEnd).
-  const afterFilter = { warehouseId: { in: whIds }, isCancelled: false, date: { gt: dayEnd } };
-  const [inAfter, outAfter] = await Promise.all([
-    prisma.stockMovement.groupBy({
-      by: ['warehouseId', 'itemId'],
-      where: { ...afterFilter, movementType: { in: IN_TYPES } },
-      _sum: { quantity: true },
-    }),
-    prisma.stockMovement.groupBy({
-      by: ['warehouseId', 'itemId'],
-      where: { ...afterFilter, movementType: { in: OUT_TYPES } },
-      _sum: { quantity: true },
-    }),
-  ]);
-
-  const adjust = (whId: string | null, itemId: string, delta: Decimal) => {
-    if (!whId) return;
-    const k = `${whId}|${itemId}`;
-    qtyMap.set(k, (qtyMap.get(k) ?? new Decimal(0)).plus(delta));
-  };
-  // Reverse a future IN (it added stock after X → subtract it to go back).
-  for (const r of inAfter) adjust(r.warehouseId, r.itemId, new Decimal((r._sum?.quantity ?? 0).toString()).negated());
-  // Reverse a future OUT (it removed stock after X → add it back).
-  for (const r of outAfter) adjust(r.warehouseId, r.itemId, new Decimal((r._sum?.quantity ?? 0).toString()));
-
-  // An item with no live row but movements after X (fully consumed since) —
-  // resolve its metadata so it still appears in the historical snapshot.
-  const missingItemIds = [...new Set(
-    [...inAfter, ...outAfter]
-      .map((r) => r.itemId)
-      .filter((id) => !itemMap.has(id)),
-  )];
-  if (missingItemIds.length > 0) {
-    const extra = await prisma.inventoryItem.findMany({
-      where: { id: { in: missingItemIds } },
-      select: { id: true, code: true, name: true, unit: true, averageCost: true, category: true },
-    });
-    for (const it of extra) {
-      itemMap.set(it.id, {
-        id: it.id, code: it.code, name: it.name, unit: it.unit,
-        category: it.category ?? null,
-        averageCost: new Decimal((it.averageCost ?? 0).toString()),
-      });
-    }
-  }
+  const itemMap = new Map(items.map((it) => [it.id, {
+    ...it, category: it.category ?? null, averageCost: new Decimal((it.averageCost ?? 0).toString()),
+  }]));
 
   const result: SnapshotWarehouse[] = warehouses.map((w) => {
     const whItems: SnapshotItem[] = [];
-    for (const [k, qtyDec] of qtyMap.entries()) {
-      const [whId, itemId] = k.split('|') as [string, string];
-      if (whId !== w.id) continue;
-      if (qtyDec.isZero()) continue;
-      const meta = itemMap.get(itemId);
-      if (!meta) continue;
+    for (const meta of itemMap.values()) {
+      const qtyDec = qtyMap.get(stockKey(meta.id, w.id));
+      if (!qtyDec || qtyDec.isZero()) continue;
+      const itemId = meta.id;
       const avg = meta.averageCost;
       const qty = qtyDec.toDecimalPlaces(3).toNumber();
       whItems.push({
