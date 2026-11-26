@@ -1548,8 +1548,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
-- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini tercatat sebelum nilai awal buku nilai dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
-- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis; hubungi akuntan
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan
 - 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 ### do_create
@@ -3865,8 +3865,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
-- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini tercatat sebelum nilai awal buku nilai dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
-- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis; hubungi akuntan
+- 409 REVERSAL_NEEDS_TRUE_UP: penyelesaian HPP menyusul lama (antrean COGS backfill) invoice ini tidak bisa dibalik karena barang item itu sudah keluar sesudahnya; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan
 - 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 ### si_create
@@ -4699,8 +4700,8 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 - 400: alasan pembatalan maksimal 500 karakter
-- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini tercatat sebelum nilai awal buku nilai dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
-- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis; hubungi akuntan
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan
 - 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 ### sret_create

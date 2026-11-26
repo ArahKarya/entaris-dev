@@ -31,8 +31,9 @@ export const TRUE_UP_PRE_BASELINE = 'TRUE_UP_PRE_BASELINE';
 
 /**
  * Error code (409) of trueUp 'replay': the replay of the item's rows does not explain its stock (the
- * replayed quantity differs from current_stock, or it values stock on hand below 0). The ledger does
- * not guess a correction.
+ * replayed quantity differs from current_stock, or it values stock on hand below 0), or without the
+ * row goods would have gone out past zero where they did not (stock <= 0 windows, PR-6.6). The ledger
+ * does not guess a correction.
  */
 export const TRUE_UP_UNEXPLAINED = 'TRUE_UP_UNEXPLAINED';
 
@@ -55,10 +56,14 @@ export function residueAtZero(itemName: string, next: BookState): BusinessError 
   );
 }
 
-/** Owner decision #20: the row predates the baseline and goods went out since. */
+/**
+ * Owner decision #20: the row predates the baseline and goods went out since. "Before" is processing
+ * order: the baseline row was written when the value ledger was deployed, so a row entered before
+ * that is in its opening value even when dated on or after the baseline date.
+ */
 export function preBaseline(itemName: string, movement: StockMovement): BusinessError {
   return new BusinessError(
-    `Pembatalan ditolak: gerakan stok ${movement.movementNumber} '${itemName}' tercatat sebelum nilai awal buku nilai, `
+    `Pembatalan ditolak: gerakan stok ${movement.movementNumber} '${itemName}' dicatat sebelum buku nilai dirilis (sudah termasuk nilai awalnya), `
       + 'dan barangnya sudah ikut keluar, jadi koreksi nilainya tidak bisa dihitung otomatis. Minta akuntan membuat jurnal koreksi.',
     TRUE_UP_PRE_BASELINE,
     409,
@@ -70,6 +75,16 @@ export function unexplained(itemName: string): BusinessError {
   return new BusinessError(
     `Pembatalan ditolak: riwayat gerakan stok '${itemName}' tidak menjelaskan stok dan nilainya saat ini, `
       + 'jadi koreksi nilai tidak bisa dihitung otomatis. Hubungi akuntan.',
+    TRUE_UP_UNEXPLAINED,
+    409,
+  );
+}
+
+/** Without the row, goods of the item would have gone out past zero (or a Revaluation landed at no stock). */
+export function pricedPastZero(itemName: string): BusinessError {
+  return new BusinessError(
+    `Pembatalan ditolak: tanpa gerakan stok ini, barang '${itemName}' yang keluar sesudahnya melebihi stoknya, `
+      + 'jadi koreksi nilainya tidak bisa dihitung otomatis. Hubungi akuntan.',
     TRUE_UP_UNEXPLAINED,
     409,
   );

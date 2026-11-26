@@ -31,8 +31,8 @@ import { businessToday } from '../../utils/businessDate';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { logger } from '../../lib/logger';
-import { replayItemValue } from '../../utils/weightedAverageReplay';
-import { needsTrueUp, preBaseline, residueAtZero, unexplained } from './reversalErrors';
+import { addsNegativeWindow, replayItemValue } from '../../utils/weightedAverageReplay';
+import { needsTrueUp, preBaseline, pricedPastZero, residueAtZero, unexplained } from './reversalErrors';
 import { lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
 import {
   INVENTORY_VALUE_NEGATIVE, UNIT_COST_DP, VALUE_DP, averageAfter, invariantTolerance, outboundValue, revaluationSplit,
@@ -494,7 +494,9 @@ const STOCK_EXPLAINED_TOLERANCE = new Decimal('0.0005');
  * book. 0 when no goods of the item went out since the row's value entered the book: then the exact
  * reversal already leaves the book the row's absence would have. Otherwise the replay with the row
  * must reproduce current_stock (TRUE_UP_UNEXPLAINED) and the row must lie after the baseline
- * (TRUE_UP_PRE_BASELINE); the true-up is what the outbound rows since took differently without it:
+ * (TRUE_UP_PRE_BASELINE), and without the row no goods may go out past zero (or a Revaluation land
+ * at no stock) where they did not with it (addsNegativeWindow, TRUE_UP_UNEXPLAINED until PR-6.6);
+ * the true-up is what the outbound rows since took differently without it:
  * replay(without) − (replay(with) − the row's value_delta). Taking the difference of two replays,
  * not of the replay and stock_value, keeps older settlement rows of the book out of it.
  */
@@ -505,6 +507,7 @@ async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem): 
     if (!withRow.replayedIds.has(movement.id)) throw withRow.baselineId ? preBaseline(item.name, movement) : unexplained(item.name);
     if (withRow.stock.minus(item.currentStock).abs().gt(STOCK_EXPLAINED_TOLERANCE)) throw unexplained(item.name);
     const without = await replayItemValue(tx, movement.itemId, { excludeMovementIds: [movement.id] });
+    if (addsNegativeWindow(withRow, without)) throw pricedPastZero(item.name);
     return without.value.minus(withRow.value.minus(dec(movement.valueDelta))).toDecimalPlaces(VALUE_DP);
   } catch (e) {
     // A replayed book that values stock on hand below 0 explains nothing either.

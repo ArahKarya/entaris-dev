@@ -18,8 +18,9 @@
  * Stock checks (rollback transaction, same year):
  * - a delivery note with two lines of one item, 60 + 60, from 100 -> 400 STOCK_INSUFFICIENT;
  * - sales return cancel whose returned goods were sold again -> 400 STOCK_INSUFFICIENT; the
- *   bypass needs inventory.negative_stock and a reason, then the return comes back through the
- *   value ledger's true-up (PR-6.5a; all at one cost, so the true-up is 0) and the stock goes below 0;
+ *   bypass needs inventory.negative_stock and a reason; without the return the goods sold again
+ *   would have gone out past zero, so the value replay refuses it (409 TRUE_UP_UNEXPLAINED) until
+ *   PR-6.6 settles stock <= 0 windows;
  * - purchase invoice cancel of a legacy PI-owned stock movement already used -> 400 likewise; with
  *   the bypass it is cancelled the same way (PR-6.5a).
  */
@@ -90,6 +91,7 @@ import { invalidatePermissionCache } from '../../services/permissionService';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
 import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
+import { TRUE_UP_UNEXPLAINED } from '../../services/inventory/inventoryLedger';
 import { NEGATIVE_STOCK_FORBIDDEN } from '../../utils/negativeStockGate';
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -550,14 +552,14 @@ d('stock checks of delivery notes and legacy reversals', () => {
       expect(noReason.status).toBe(400);
 
       // The bypass passes the stock check; goods of the item went out since, so the value ledger
-      // replays the item (PR-6.5a). Everything moved at 5.000, so the exact reversal is already
-      // right: true-up 0, no journal, and the 30 delivered again leave the stock at −30.
+      // replays the item (PR-6.5a). Without the return the 30 delivered again would have gone out
+      // past zero, where they did not: valuing them is a guess until PR-6.6, so it is refused.
       const admin = await createCapUser(tx, ['doc.cancel', 'inventory.negative_stock']);
       const forced = await cancel(admin, bypass);
-      expect(forced.status, JSON.stringify(forced.body)).toBe(200);
-      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: -30, warehouse: -30 });
-      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Cancelled');
-      expect((await tx.inventoryItem.findUniqueOrThrow({ where: { id: beras.id } })).stockValue.toFixed(2)).toBe('-150000.00');
+      expect(forced.status, JSON.stringify(forced.body)).toBe(409);
+      expect(forced.body.code).toBe(TRUE_UP_UNEXPLAINED);
+      expect(await stockOf(tx, beras.id, s.whA)).toEqual({ item: 10, warehouse: 10 });
+      expect((await tx.salesReturn.findUniqueOrThrow({ where: { id: ret!.id } })).status).toBe('Submitted');
       await assertLedgerInvariant(tx, [beras.id], { warehouses: true });
     });
   });
