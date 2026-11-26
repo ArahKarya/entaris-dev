@@ -11,7 +11,7 @@ Entaris memakai pembukuan double-entry otomatis: setiap transaksi (faktur, pemba
 5. **Akun sistem**: `sysacct_get`/`sysacct_update` memetakan peran akun (Piutang, Hutang, Persediaan, HPP, Uang Muka Karyawan, Laba Ditahan, dst.) ke akun COA konkret. Semua auto-posting membaca pemetaan ini.
 6. **Pajak**: `tax_get_config` dan tiga tool tulisnya mengelola tarif (PPN penjualan/pembelian, PPh potong). `tax_report` meringkas PPN keluaran, PPN masukan, dan PPh per bulan dari faktur berstatus Submitted/Paid/PartiallyPaid/Overdue.
 7. **Aset tetap**: aset dicatat (`fa_create`, nomor `FA-NNNN`) beserta jadwal penyusutan garis lurus bulanan. Penyusutan diposting per baris (`fa_depreciate`) atau massal per bulan (`fa_depreciate_bulk`, selalu coba `dryRun=true` dulu). Pelepasan (`fa_dispose`) hanya mengubah status.
-8. **Backfill HPP**: bila penjualan terjadi sebelum stok/HPP ada, HPP diposting sementara dan antriannya (`cogs_backfill_list`/`cogs_backfill_summary`) dituntaskan saat stok masuk. Hanya baca.
+8. **Backfill HPP (antrean lama)**: antrean HPP susulan dari mekanisme lama (`cogs_backfill_list`/`cogs_backfill_summary`) hanya dibaca; baris yang masih terbuka dituntaskan hanya oleh output produksi, tidak lagi oleh stok masuk manual, STT, atau retur. Stok minus yang baru diselesaikan saat barang masuk: bagian yang menutup minus dinilai ulang pada harga masuk, dengan baris Revaluation "Penyelesaian Stok Minus" dan jurnal HPP lawan Persediaan. Item yang masih punya antrean lama terbuka dilewati penyelesaian ini sampai antreannya tuntas.
 
 ### Aturan posting
 
