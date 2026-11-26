@@ -82,7 +82,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 3. **Urutan pembatalan**: Pembayaran/aplikasi uang muka -> Retur -> Invoice -> DO -> SO. `si_cancel` ditolak bila ada pembayaran teralokasi, aplikasi uang muka aktif, atau retur aktif (`INVOICE_HAS_ACTIVE_RETURNS`; batalkan returnya dulu dengan `sret_cancel`); `do_cancel` ditolak bila DO sudah masuk invoice; `so_cancel` ditolak bila masih ada DO aktif; `tdn_cancel` ditolak bila SJS sudah Linked.
 4. **Stok minus**: `allowNegativeStock` tidak otomatis diizinkan; butuh capability `inventory.negative_stock`. Pada `do_create` tanpa capability hasilnya 202 (antrian approval), pada `so_generate_do`/`do_update`/invoice hasilnya error.
 5. **Status invoice mengikuti sisa tagihan**: Paid bila sisa <= Rp 0,01, Submitted bila belum ada yang dilunasi, selain itu PartiallyPaid. Invoice yang diretur penuh berstatus Paid dan tidak menerima alokasi pembayaran. Status `Overdue` tidak pernah disimpan; jatuh tempo dibaca dari `dueDate`.
-6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak. `sret_cancel` juga ditolak (`STOCK_INSUFFICIENT`) bila barang retur sudah keluar lagi dari gudang retur; dengan `allowNegativeStock` + `negativeStockReason` dan capability `inventory.negative_stock` pembatalan tetap ditolak `REVERSAL_NEEDS_TRUE_UP` (409) karena barang item itu sudah keluar sejak retur; nilai persediaannya perlu dikoreksi akuntan.
+6. **Retur melebihi sisa**: qty retur dibatasi sisa baris invoice (`remaining` dari `sret_eligible`). Retur ke invoice Draft/Cancelled ditolak. Retur dengan kelebihan nilai menjadi kredit pelanggan (deposit) — jika kredit itu sudah dipakai, `sret_cancel` ditolak. `sret_cancel` juga ditolak (`STOCK_INSUFFICIENT`) bila barang retur sudah keluar lagi dari gudang retur; dengan `allowNegativeStock` + `negativeStockReason` dan capability `inventory.negative_stock` pembatalan tetap jalan, dan karena barang item itu sudah keluar sejak retur, selisih nilai yang ikut keluar dikoreksi otomatis (true-up): satu jurnal bertanggal hari pembatalan, Persediaan lawan COGS. Hal yang sama berlaku untuk `do_cancel` dan `si_cancel`. Ditolak 409 `TRUE_UP_PRE_BASELINE` bila gerakannya dari sebelum nilai awal buku nilai (koreksi lewat jurnal manual akuntan), dan 409 `TRUE_UP_UNEXPLAINED` bila riwayat gerakan stok item tidak menjelaskan stoknya.
 7. **Baris invoice dari DO**: baris dengan `deliveryOrderItemId` tidak memotong stok lagi dan HPP-nya seluruh nilai mutasi Keluar SJ; DO yang sudah Cancelled atau sudah di invoice lain ditolak. `si_create`, `do_update` dan `do_cancel` atas DO yang sama berjalan berurutan: yang menunggu melihat hasil yang lain (dua invoice atas satu DO: yang kedua ditolak; DO yang sudah diedit: baris lamanya "tidak ditemukan", ambil ulang barisnya). `do_create`/`do_update` menjumlah baris item yang sama per gudang dan menjawab `STOCK_INSUFFICIENT`; `STOCK_BUSY` (409) berarti stok sedang diproses transaksi lain, ulangi sebentar lagi.
 8. **`do_list` status**: gunakan `Submitted` untuk "belum ditagih", `Invoiced` untuk "sudah ditagih". `do_pending` mewajibkan `partyId`.
 9. **Paging opsional**: `cdep_list` dan `svc_list` berperilaku berbeda dengan/tanpa `page` (tanpa page = semua baris `{data}` tanpa total).
@@ -1532,7 +1532,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Stok: mengembalikan stok & pergerakan keluar dibatalkan. Tidak ada jurnal GL.
+**Efek pembukuan/stok:** Stok: mengembalikan stok & pergerakan keluar dibatalkan (nilai persediaan kembali sebesar nilai keluarnya). Tidak ada jurnal GL dokumen. Bila barang item itu sudah keluar sesudah surat jalan ini, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.
 
 **Teks konfirmasi:** Batalkan Surat Jalan {id} (stok dikembalikan)?
 
@@ -1548,6 +1548,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini tercatat sebelum nilai awal buku nilai dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis; hubungi akuntan
+- 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 ### do_create
 
@@ -3843,7 +3846,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.
+**Efek pembukuan/stok:** Membalik semua jurnal invoice (piutang/pendapatan/PPN/PPh dan HPP) dan stok keluar (stok & pergerakan dikembalikan beserta nilainya; Bila barang item itu sudah keluar sesudah invoice ini, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama); outstanding=0, status Cancelled. Antrian COGS backfill terkait dibalik.
 
 **Teks konfirmasi:** Batalkan Invoice Penjualan {id} (jurnal & stok dibalik)?
 
@@ -3862,6 +3865,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini tercatat sebelum nilai awal buku nilai dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis; hubungi akuntan
+- 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 ### si_create
 
@@ -4673,7 +4679,7 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak retur diterima.
+**Efek pembukuan/stok:** Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Bila barang item itu sudah keluar sejak nilainya masuk, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.
 
 **Teks konfirmasi:** Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?
 
@@ -4686,7 +4692,6 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.
 - 400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)
 - 400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)
-- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak retur diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
@@ -4694,6 +4699,9 @@ Tool `crm_*` (modul `crm`) membantu sales yang sibuk agar tidak ada prospek atau
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 INVOICE_OUTSTANDING_RANGE: sisa tagihan Invoice penjualan akan keluar dari rentang 0 sampai grand total, atau Invoice berstatus Draft/Cancelled. Tanda data lama rusak; jangan diulang, minta akuntan memeriksa Invoice itu (laporan skrip e4-sales-invoice-audit)
 - 400: alasan pembatalan maksimal 500 karakter
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini tercatat sebelum nilai awal buku nilai dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, jadi koreksi nilai tidak bisa dihitung otomatis; hubungi akuntan
+- 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 ### sret_create
 
