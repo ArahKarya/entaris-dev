@@ -26544,7 +26544,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).",
+      "postingEffect": "Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk lewat buku nilai persediaan dan ikut rata-rata, bernilai porsi nilai yang dikeluarkan Surat Jalan asal (qty retur / qty SJ x nilai mutasi SJ; total retur satu baris tidak pernah melebihi nilai itu, retur terakhir mengambil sisanya) + JV-COGS-RN sebesar nilai yang sama: DR Persediaan (akun item atau INVENTORY) / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).",
       "confirm_template": "Buat Retur Penjualan untuk invoice {salesInvoiceId} tanggal {date}?",
       "accessNote": "Role tanpa approval.bypass hanya mengantrikan approval; keputusan oleh Admin/pemegang approval.decide.",
       "prerequisites": [
@@ -26554,7 +26554,9 @@
       ],
       "errors": [
         "400: qty retur melebihi sisa yang bisa diretur.",
+        "400 SALES_RETURN_DUPLICATE_LINE: satu baris invoice muncul lebih dari sekali dalam items; gabungkan qty-nya dalam satu baris",
         "400: invoice sudah dibatalkan.",
+        "400: gudang retur wajib dipilih untuk baris restock (bila baris Invoice dan Surat Jalan asal juga tanpa gudang).",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
@@ -26623,12 +26625,13 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.",
+      "postingEffect": "Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak retur diterima.",
       "confirm_template": "Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak retur diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
@@ -27119,7 +27122,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok gudang & total disesuaikan sebesar selisih (SM AdjustmentIn/Out per item berselisih). GL: surplus = DR Persediaan (akun item atau 1.4.0) / CR Selisih Persediaan (INVENTORY_VARIANCE, default 6.38); defisit = DR Selisih Persediaan / CR Persediaan. Revaluasi unitCost: averageCost item diganti dan selisih nilai dijurnal ke akun yang sama.",
+      "postingEffect": "Stok gudang & total disesuaikan sebesar selisih (SM AdjustmentIn/Out per item berselisih). GL: surplus = DR Persediaan (akun item atau 1.4.0) / CR Selisih Persediaan (INVENTORY_VARIANCE, default 6.38); defisit = DR Selisih Persediaan / CR Persediaan. Lewat buku nilai persediaan: surplus bernilai qty x biaya baris (ikut rata-rata), defisit dinilai dari buku nilai (bukan unitCost yang diketik). Revaluasi unitCost (sesudah penyesuaian qty): stok terhitung dinilai ulang ke biaya itu (baris Revaluation, selisih nilai ke Selisih Persediaan; porsi yang tidak terserap persediaan ke HPP); tanpa stok tersisa sesudah opname, unitCost yang berbeda dari WAC ditolak (400 OPNAME_REVALUATION_NO_STOCK).",
       "confirm_template": "Finalkan stok opname tanggal {date} gudang {warehouseId}? Stok dan jurnal selisih akan langsung diposting.",
       "prerequisites": [
         "Tahun fiskal aktif untuk tanggal opname.",
@@ -27130,6 +27133,7 @@
         "400: masih ada stok opname Draft",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: stok aktual tidak boleh negatif",
+        "400 OPNAME_REVALUATION_NO_STOCK: unitCost berbeda dari WAC padahal stok item sesudah opname 0 atau minus; kosongkan unitCost atau samakan dengan WAC",
         "400: item tidak ditemukan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
@@ -34084,7 +34088,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.",
+      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Semua baris opname (termasuk Revaluation) dibalik persis sebesar nilainya di buku nilai persediaan. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item surplus/revaluasi sudah keluar sejak opname, dan 409 OPNAME_LEGACY_REVALUATION untuk opname lama yang revaluasinya dijurnal tanpa baris Revaluation.",
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -34095,6 +34099,8 @@
         "400: stok opname sudah dibatalkan",
         "400 STOCK_INSUFFICIENT: stok gudang opname tidak cukup untuk membalik surplus (dijumlah per item per gudang)",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan opname ini lebih dulu; tidak ada yang dibalik dua kali",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item surplus atau revaluasi sudah keluar sejak opname; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
+        "409 OPNAME_LEGACY_REVALUATION: opname lama berisi revaluasi nilai dari sebelum buku nilai persediaan; minta akuntan membuat jurnal koreksi",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan",

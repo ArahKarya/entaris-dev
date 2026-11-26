@@ -2,7 +2,7 @@
  * Inventory value ledger (E3-R6). With services/inventory/inventoryValueMath.ts this is the one
  * value-ledger module: after the train (PR-6.4e) it is the only writer of current_stock,
  * stock_value, average_cost, inventory_stocks and stock_movements. Paths move behind it one train
- * PR at a time; postRevaluation (6.4c2) arrives with its first caller.
+ * PR at a time.
  *
  * Every call locks its rows through lockInventoryRows (idempotent in the transaction, so a caller
  * that locked every item of its operation first keeps the LOCK ORDER of stockLocks.ts), then reads
@@ -32,7 +32,7 @@ import { generateDocumentNumber } from '../../utils/documentNumber';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { logger } from '../../lib/logger';
 import { lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
-import { UNIT_COST_DP, VALUE_DP, averageAfter, invariantTolerance, outboundValue } from './inventoryValueMath';
+import { UNIT_COST_DP, VALUE_DP, averageAfter, invariantTolerance, outboundValue, revaluationSplit } from './inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 
@@ -247,6 +247,64 @@ export async function postOutbound(tx: Tx, i: OutboundInput): Promise<PostedMove
   const item = await lockItem(tx, i.itemId, i.warehouseId);
   const value = outboundValue(item.currentStock, item.stockValue, item.averageCost, quantity);
   return writePosting(tx, i, { quantity, valueDelta: value.negated(), item });
+}
+
+/**
+ * A value change of one item with no quantity (a Revaluation row: quantity 0, no warehouse). The
+ * row belongs to its document (referenceType / referenceId), so reverseDocumentMovements takes it
+ * back with the document.
+ */
+export interface RevaluationInput {
+  itemId: string;
+  date: Date;
+  fiscalYearId: string;
+  createdById: string;
+  /** The value change the caller journals against its counter account: + raises, − lowers (2 dp, not 0). */
+  delta: Decimal.Value;
+  referenceType: string;
+  referenceId?: string | null;
+  referenceNumber?: string | null;
+  notes?: string | null;
+  /** The movement whose value this row adjusts (e.g. a receipt a purchase invoice reprices). */
+  adjustsMovementId?: string | null;
+  journalEntryId?: string | null;
+  /** Taken by the caller after lockInventoryRows; the ledger takes an 'SM' number otherwise. */
+  movementNumber?: string;
+}
+
+export interface PostedRevaluation extends PostedMovement {
+  /**
+   * The part of delta stock could not absorb (revaluationSplit): the caller posts it to COGS
+   * (cogsAccountFor) in the same journal. valueDelta (+ toCogs = delta) goes to inventory.
+   */
+  toCogs: Decimal;
+}
+
+/**
+ * Changes the value of the item's stock by `delta` through revaluationSplit: the part stock can
+ * absorb moves stock_value (valueDelta, the caller's inventory amount), the rest is returned as
+ * toCogs (no stock on hand, or a decrease larger than stock_value). The row is written even when
+ * valueDelta is 0 (all to COGS) so the document owns a trace of its journal line.
+ */
+export async function postRevaluation(tx: Tx, i: RevaluationInput): Promise<PostedRevaluation> {
+  const delta = new Decimal(i.delta).toDecimalPlaces(VALUE_DP);
+  if (!delta.isFinite() || delta.isZero()) throw new Error('postRevaluation: delta must be a non-zero amount');
+  const item = await lockItem(tx, i.itemId, null);
+  const { toInventory, toCogs } = revaluationSplit(item.currentStock, item.stockValue, delta);
+  const next = stateAfter(item, new Decimal(0), toInventory);
+  const movementNumber = i.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
+  await writeStock(tx, i.itemId, null, new Decimal(0), next);
+  const movement = await insertMovement(tx, {
+    movementNumber, date: i.date, itemId: i.itemId, warehouseId: null, movementType: 'Revaluation',
+    quantity: 0, unitCost: 0, totalValue: toInventory.abs().toString(), valueDelta: toInventory.toString(),
+    adjustsMovementId: i.adjustsMovementId ?? null, notes: i.notes ?? null, referenceType: i.referenceType,
+    referenceId: i.referenceId ?? null, referenceNumber: i.referenceNumber ?? null,
+    journalEntryId: i.journalEntryId ?? null, fiscalYearId: i.fiscalYearId, createdById: i.createdById,
+  });
+  return {
+    movement, valueDelta: toInventory, unitCost: new Decimal(0), toCogs,
+    stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average,
+  };
 }
 
 /**
@@ -468,23 +526,31 @@ export interface DocumentRef {
 }
 
 /**
- * Reverses every active row a document owns (reference_type / reference_id), in id order, after
- * one lockInventoryRows call for all their items and warehouses (LOCK ORDER of stockLocks.ts). A
- * sweep row an earlier reversal of the document wrote (a Revaluation adjusting a cancelled row of
- * the same document) is already the settlement of that row and is left alone. A refusal of any
- * row is thrown after earlier rows were written: the caller's transaction rolls back as a whole.
+ * Reverses every active row a document owns (reference_type / reference_id) after one
+ * lockInventoryRows call for all their items and warehouses (LOCK ORDER of stockLocks.ts): its
+ * Out / AdjustmentOut rows first, then the others, each group in id order. The document's own
+ * outbound rows are not goods that went out after its inbound or Revaluation rows (a stock count
+ * writes both for one item in one transaction), so they are back before reversalSweep looks for
+ * sales since. A sweep row an earlier reversal of the document wrote (a Revaluation adjusting a
+ * cancelled row of the same document) is already the settlement of that row and is left alone. A
+ * refusal of any row is thrown after earlier rows were written: the caller's transaction rolls
+ * back as a whole.
  */
 export async function reverseDocumentMovements(tx: Tx, ref: DocumentRef, opts: ReverseOptions): Promise<ReverseResult[]> {
   const rows = await tx.stockMovement.findMany({
     where: { referenceType: ref.referenceType, referenceId: ref.referenceId, isCancelled: false },
     orderBy: { id: 'asc' },
     select: {
-      id: true, itemId: true, warehouseId: true,
+      id: true, itemId: true, warehouseId: true, movementType: true,
       adjustsMovement: { select: { isCancelled: true, referenceType: true, referenceId: true } },
     },
   });
-  const owned = rows.filter((r) => !(r.adjustsMovement?.isCancelled
+  const settled = rows.filter((r) => !(r.adjustsMovement?.isCancelled
     && r.adjustsMovement.referenceType === ref.referenceType && r.adjustsMovement.referenceId === ref.referenceId));
+  const owned = [
+    ...settled.filter((r) => OUTBOUND_TYPES.has(r.movementType)),
+    ...settled.filter((r) => !OUTBOUND_TYPES.has(r.movementType)),
+  ];
   await lockInventoryRows(tx, {
     itemIds: owned.map((r) => r.itemId),
     pairs: owned.flatMap((r) => (r.warehouseId ? [{ itemId: r.itemId, warehouseId: r.warehouseId }] : [])),

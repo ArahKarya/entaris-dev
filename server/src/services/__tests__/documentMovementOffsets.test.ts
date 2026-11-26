@@ -176,10 +176,15 @@ describe('sales return restock movements', () => {
       }),
       'account.findUnique': ({ where }) => ({ id: where.id, accountNumber: where.id, name: where.id, rootType: 'EXPENSE', isGroup: false, isActive: true }),
       'journalEntry.create': ({ data }) => ({ id: `je-${data.entryNumber}` }),
+      // lockInventoryRows reads the item and its warehouse row back; the item posts to the INVENTORY mapping.
+      'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, averageCost: '7000', currentStock: '10', stockValue: '70000' }],
+      'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
+      'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '10' }],
+      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
     });
     await submitSalesReturnInTx(tx, { salesInvoiceId: 'si-1', date: '2026-10-10', items: [{ salesInvoiceItemId: 'sii-1', quantity: 2 }] }, 'u1');
 
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'SalesReturn', totalValue: 14000, offsetAccountId: 'acc-COGS' });
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'SalesReturn', totalValue: '14000', offsetAccountId: 'acc-COGS' });
     const cogsJe = fn('journalEntry.create').mock.calls.map((c) => c[0].data).find((d) => d.entryNumber.startsWith('JV-COGS-'));
     expect(cogsJe.items.create.find((l: any) => l.credit > 0).accountId).toBe('acc-COGS');
   });

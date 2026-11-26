@@ -224,4 +224,9 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Barang milik perusahaan tidak dapat diterima ke item '{0}' karena item ini berisi barang titipan Customer. Gunakan item terpisah untuk barang titipan.": "Company-owned goods cannot be received into item '{0}' because it holds customer-owned goods. Use a separate item for customer-owned goods.",
   "Akun persediaan item '{0}' tidak ditemukan.": "The inventory account of item '{0}' was not found.",
   "Gerakan stok tanpa gudang tidak dapat diedit. Batalkan lalu catat ulang.": "A stock movement without a warehouse cannot be edited. Cancel it and record it again.",
+  // value ledger (E3-R6), stock count and sales return: routes/stockOpname.ts, services/salesReturnSubmit.ts
+  "Stok opname {0} berisi revaluasi nilai dari sebelum buku nilai persediaan, jadi tidak dapat dibatalkan otomatis. Minta akuntan membuat jurnal koreksi.": "Stock count {0} holds a value revaluation from before the inventory value ledger, so it cannot be cancelled automatically. Ask the accountant to post a correcting journal.",
+  "Gudang retur untuk '{0}' wajib dipilih.": "Choose the return warehouse for '{0}'.",
+  "Nilai satuan \"{0}\" tidak dapat diubah karena stok setelah opname {1}. Kosongkan nilai satuan atau samakan dengan rata-rata.": "The unit cost of \"{0}\" cannot be changed because the stock after the count is {1}. Clear the unit cost or set it equal to the average.",
+  "Satu baris invoice hanya boleh muncul sekali dalam satu retur.": "An invoice line can appear only once in one return.",
 };
