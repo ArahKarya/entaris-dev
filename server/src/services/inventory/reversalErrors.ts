@@ -55,10 +55,14 @@ export function needsTrueUp(itemName: string, next: BookState, forEdit = false):
 }
 
 /** Stock 0 with value left and no sweep asked: nothing needs to have gone out for this one. */
-export function residueAtZero(itemName: string, next: BookState): BusinessError {
+export function residueAtZero(itemName: string, next: BookState, forEdit = false): BusinessError {
+  const value = next.value.toFixed(VALUE_DP);
   return new BusinessError(
-    `Pembatalan ditolak: stok '${itemName}' menjadi 0 tetapi nilai persediaannya masih ${next.value.toFixed(VALUE_DP)}, `
-      + 'jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.',
+    forEdit
+      ? `Edit ditolak: stok '${itemName}' menjadi 0 tetapi nilai persediaannya masih ${value}, `
+        + 'jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.'
+      : `Pembatalan ditolak: stok '${itemName}' menjadi 0 tetapi nilai persediaannya masih ${value}, `
+        + 'jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.',
     REVERSAL_NEEDS_TRUE_UP,
     409,
   );

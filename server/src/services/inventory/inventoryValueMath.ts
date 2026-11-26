@@ -62,6 +62,26 @@ export function outboundValue(stock: Decimal.Value, stockValue: Decimal.Value, a
 }
 
 /**
+ * Value of an outbound row whose quantity a document edit changes from `old.qty` to `newQty` (> 0)
+ * while the row keeps the cost it was posted at (owner decision #9); positive, 2 dp:
+ * - newQty <= old.qty: the old value less the part handed back at the row's own unit value,
+ *   round(old.value x (old.qty − newQty) / old.qty, 2); an unchanged quantity keeps the old value;
+ * - newQty > old.qty: the old value plus the extra quantity valued from the book now
+ *   (outboundValue of the extra on the book that still holds the row).
+ */
+export function revisedOutboundValue(
+  old: { qty: Decimal.Value; value: Decimal.Value },
+  newQty: Decimal.Value,
+  book: { stock: Decimal.Value; stockValue: Decimal.Value; avg: Decimal.Value },
+): Decimal {
+  const oldQty = new Decimal(old.qty);
+  const oldValue = new Decimal(old.value);
+  const q = new Decimal(newQty);
+  if (q.lte(oldQty)) return oldValue.minus(round(oldValue.times(oldQty.minus(q)).div(oldQty)));
+  return oldValue.plus(outboundValue(book.stock, book.stockValue, book.avg, q.minus(oldQty)));
+}
+
+/**
  * Where a value change (Revaluation) lands: the part stock can absorb goes to inventory, the rest
  * to COGS, posted by the caller in the same journal (until E3-PR7 splits purchase price variance).
  * - stock <= 0: the goods are gone, everything to COGS;

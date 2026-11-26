@@ -9,6 +9,7 @@ import {
   invariantTolerance,
   outboundValue,
   revaluationSplit,
+  revisedOutboundValue,
 } from '../inventoryValueMath';
 
 const str = (v: Decimal) => v.toFixed(2);
@@ -56,6 +57,28 @@ describe('outboundValue', () => {
 
   it('allows a zero value with stock on hand (legacy zero-cost rows), valued at 0', () => {
     expect(str(outboundValue(10, 0, 0, 4))).toBe('0.00');
+  });
+});
+
+describe('revisedOutboundValue', () => {
+  const book = { stock: 880, stockValue: '9680000.00', avg: 11_000 };
+
+  it('keeps the old value when the quantity does not change, whatever the average is now', () => {
+    expect(str(revisedOutboundValue({ qty: 100, value: '1000000.00' }, 100, book))).toBe('1000000.00');
+  });
+
+  it('hands a lower quantity back at the row\'s own unit value', () => {
+    expect(str(revisedOutboundValue({ qty: 100, value: '1000000.00' }, 80, book))).toBe('800000.00');
+    // 100.00 over 3 units: one unit back is round(33.333.., 2) = 33.33, the row keeps 66.67.
+    expect(str(revisedOutboundValue({ qty: 3, value: '100.00' }, 2, book))).toBe('66.67');
+  });
+
+  it('values only the extra quantity from the book now', () => {
+    // 100 @10.000 kept, 20 more at round(9.680.000 x 20 / 880, 2) = 220.000.
+    expect(str(revisedOutboundValue({ qty: 100, value: '1000000.00' }, 120, book))).toBe('1220000.00');
+    // Past zero stock the extra is valued at the average (outboundValue).
+    expect(str(revisedOutboundValue({ qty: 100, value: '1000000.00' }, 150, { stock: 10, stockValue: '110000.00', avg: 11_000 })))
+      .toBe('1550000.00');
   });
 });
 

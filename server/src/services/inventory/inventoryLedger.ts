@@ -24,7 +24,7 @@
  * caller only learns the amount from postOutbound, so it posts the journal of −valueDelta after it
  * and links it with linkMovementJournal; no path writes stock_movements outside this module.
  */
-import { Prisma, type PrismaClient, type StockMovement } from '@prisma/client';
+import { Prisma, type StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../utils/errors';
 import { businessToday } from '../../utils/businessDate';
@@ -35,12 +35,13 @@ import { addsNegativeWindow, replayItemValue } from '../../utils/weightedAverage
 import { needsTrueUp, preBaseline, pricedPastZero, residueAtZero, unexplained } from './reversalErrors';
 import { lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
 import {
-  INVENTORY_VALUE_NEGATIVE, UNIT_COST_DP, VALUE_DP, averageAfter, invariantTolerance, outboundValue, revaluationSplit,
+  INVENTORY_VALUE_NEGATIVE, UNIT_COST_DP, VALUE_DP, averageAfter, outboundValue, revaluationSplit, revisedOutboundValue,
 } from './inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 
 export { REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED } from './reversalErrors';
+export { assertLedgerInvariant, type LedgerDrift, type LedgerDriftKind } from './ledgerInvariant';
 
 /** Fields of a new movement row; a new movement names its warehouse (OutboundInput has one exception). */
 interface MovementBase {
@@ -456,7 +457,7 @@ async function reversalSweep(
   const sweptToZero = next.stock.isZero() && sweepAtZero;
   if ((inboundWithValue || dilutedAverage) && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next, forEdit);
   if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
-  if (!sweepAtZero) throw residueAtZero(itemName, next);
+  if (!sweepAtZero) throw residueAtZero(itemName, next, forEdit);
   return next.value;
 }
 
@@ -649,6 +650,73 @@ export async function reverseDocumentMovements(tx: Tx, ref: DocumentRef, opts: R
   return results;
 }
 
+/** A document edit of one outbound row: its new quantity and day; the cost is decided here. */
+export interface ReviseOutboundInput {
+  quantity: Decimal.Value;
+  date: Date;
+  fiscalYearId: string;
+  userId: string;
+  notes?: string | null;
+  /** Taken by the caller after lockInventoryRows; the ledger takes an 'SM' number otherwise. */
+  movementNumber?: string;
+}
+
+export interface RevisedOutbound extends PostedMovement {
+  /** The edited row, now cancelled. */
+  previous: StockMovement;
+  /** What the edit moved into stock_value: + value handed back (lower quantity), − the extra taken out. */
+  change: Decimal;
+}
+
+/**
+ * Re-posts an Out / AdjustmentOut row of a document edit at a new quantity and day, keeping the cost
+ * it was posted at (owner decision #9, revisedOutboundValue): an unchanged quantity keeps its value,
+ * a lower one hands the difference back at the row's own unit value, a higher one takes only the
+ * extra out at the book's value now. The row is cancelled and a new one written (a row is never
+ * rewritten) on the same warehouse and document, with the old row's createdAt: in processing order
+ * (replay, sales since) it stands where the goods it kept went out. Only the difference moves stock,
+ * stock_value and the average. The caller checks the stock the extra needs (assertStockAvailable).
+ */
+export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutboundInput): Promise<RevisedOutbound> {
+  const ref = await tx.stockMovement.findUnique({ where: { id: movementId }, select: { itemId: true, warehouseId: true } });
+  if (!ref) throw new BusinessError('Gerakan stok tidak ditemukan.');
+  if (!ref.warehouseId) throw new Error(`reviseOutbound: movement ${movementId} has no warehouse`);
+  const item = await lockItem(tx, ref.itemId, ref.warehouseId);
+  const movement = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
+  if (movement.isCancelled) throw new BusinessError('Gerakan stok sudah dibatalkan.');
+  if (!OUTBOUND_TYPES.has(movement.movementType)) throw new Error(`reviseOutbound: ${movement.movementType} is not an outbound type`);
+  const quantity = positiveQuantity(i.quantity, 'reviseOutbound');
+  const oldQty = dec(movement.quantity);
+  const oldValue = dec(movement.valueDelta).negated();
+  const value = revisedOutboundValue(
+    { qty: oldQty, value: oldValue }, quantity, { stock: item.currentStock, stockValue: item.stockValue, avg: item.averageCost },
+  );
+  const qtyDelta = oldQty.minus(quantity);
+  const change = oldValue.minus(value);
+  const next = stateAfter(item, qtyDelta, change);
+  // Goods handed back that bring stock to exactly 0 with value left: the same refusal as an exact reversal.
+  if (qtyDelta.gt(0) && next.stock.isZero() && !next.value.isZero()) throw residueAtZero(item.name, next, true);
+
+  await claimReversal(tx, movement.id);
+  const movementNumber = i.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
+  await writeStock(tx, movement.itemId, movement.warehouseId, qtyDelta, next);
+  const unitCost = value.div(quantity).toDecimalPlaces(UNIT_COST_DP);
+  const valueDelta = value.negated();
+  const posted = await insertMovement(tx, {
+    movementNumber, date: i.date, itemId: movement.itemId, warehouseId: movement.warehouseId, movementType: movement.movementType,
+    quantity: quantity.toString(), unitCost: unitCost.toString(), totalValue: value.toString(), valueDelta: valueDelta.toString(),
+    notes: i.notes ?? movement.notes, referenceType: movement.referenceType, referenceId: movement.referenceId,
+    referenceNumber: movement.referenceNumber, offsetAccountId: value.isZero() ? null : movement.offsetAccountId,
+    sourceMovementId: movement.sourceMovementId,
+    unitCostLoaded: movement.unitCostLoaded == null ? null : movement.unitCostLoaded.toString(),
+    fiscalYearId: i.fiscalYearId, createdById: i.userId, createdAt: movement.createdAt,
+  });
+  return {
+    movement: posted, previous: { ...movement, isCancelled: true }, change, valueDelta, unitCost,
+    stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average,
+  };
+}
+
 /** The fields of an inbound row its batch cost is computed from. */
 export interface BatchRow {
   id: string;
@@ -698,73 +766,4 @@ export async function refreshAverageCost(tx: Tx, itemId: string): Promise<Decima
     await tx.inventoryItem.update({ where: { id: itemId }, data: { averageCost: average.toString() } });
   }
   return average;
-}
-
-/**
- * Which invariant an item breaks: valueSum (a) stock_value vs Σ active value_delta, average (b)
- * stock > 0 and |stock x average − stock_value| over invariantTolerance, warehouseSum (c, report
- * only) current_stock vs Σ inventory_stocks.
- */
-export type LedgerDriftKind = 'valueSum' | 'average' | 'warehouseSum';
-
-export interface LedgerDrift {
-  itemId: string;
-  code: string;
-  kind: LedgerDriftKind;
-  /** (c) is reported, it does not fail the check. */
-  reportOnly: boolean;
-  /** stock_value for (a) and (b), current_stock for (c). */
-  actual: Decimal;
-  /** Σ active value_delta (a), stock x average (b), Σ inventory_stocks (c). */
-  expected: Decimal;
-  difference: Decimal;
-}
-
-interface InvariantRow {
-  id: string;
-  code: string;
-  stock: string;
-  stock_value: string;
-  average_cost: string;
-  movement_value: string;
-  warehouse_stock: string;
-}
-
-const VALUE_SUM_TOLERANCE = new Decimal('0.005');
-const WAREHOUSE_SUM_TOLERANCE = new Decimal('0.0005');
-
-function driftsOf(r: InvariantRow): LedgerDrift[] {
-  const stock = new Decimal(r.stock);
-  const value = new Decimal(r.stock_value);
-  const drift = (kind: LedgerDriftKind, actual: Decimal, expected: Decimal): LedgerDrift => ({
-    itemId: r.id, code: r.code, kind, reportOnly: kind === 'warehouseSum', actual, expected, difference: actual.minus(expected),
-  });
-  const found: LedgerDrift[] = [];
-  const movementValue = new Decimal(r.movement_value);
-  if (value.minus(movementValue).abs().gt(VALUE_SUM_TOLERANCE)) found.push(drift('valueSum', value, movementValue));
-  const atAverage = stock.times(r.average_cost);
-  if (stock.gt(0) && value.minus(atAverage).abs().gt(invariantTolerance(stock))) found.push(drift('average', value, atAverage));
-  const warehouseStock = new Decimal(r.warehouse_stock);
-  if (stock.minus(warehouseStock).abs().gt(WAREHOUSE_SUM_TOLERANCE)) found.push(drift('warehouseSum', stock, warehouseStock));
-  return found;
-}
-
-/**
- * The value-ledger invariants of the given items (all items when omitted), by item code. Returns the
- * breaks instead of throwing: tests assert through __tests__/helpers/ledgerInvariant.ts, and the
- * health check (PR-6.13a) reports them. Reads only; take lockInventoryRows first for a stable read.
- */
-export async function assertLedgerInvariant(db: Tx | PrismaClient, itemIds?: readonly string[]): Promise<LedgerDrift[]> {
-  if (itemIds && itemIds.length === 0) return [];
-  const filter = itemIds ? Prisma.sql`WHERE i.id = ANY(${[...itemIds]}::text[])` : Prisma.empty;
-  const rows = await db.$queryRaw<InvariantRow[]>`
-    SELECT i.id, i.code, i.current_stock::text AS stock, i.stock_value::text AS stock_value,
-           i.average_cost::text AS average_cost,
-           COALESCE((SELECT SUM(m.value_delta) FROM stock_movements m
-                     WHERE m.item_id = i.id AND m.is_cancelled = false), 0)::text AS movement_value,
-           COALESCE((SELECT SUM(s.current_stock) FROM inventory_stocks s WHERE s.item_id = i.id), 0)::text AS warehouse_stock
-    FROM inventory_items i
-    ${filter}
-    ORDER BY i.code`;
-  return rows.flatMap(driftsOf);
 }
