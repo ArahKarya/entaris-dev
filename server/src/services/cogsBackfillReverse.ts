@@ -4,10 +4,32 @@ import { recalculateAccountBalances } from '../utils/accountBalance';
 import { logger } from '../lib/logger';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { cancelTrailData, type CancelTrail } from '../utils/cancelClaim';
+import { lockInventoryRows } from './inventory/stockLocks';
+import { reverseMovement } from './inventory/inventoryLedger';
+import { LEGACY_COGS_SETTLE } from './cogsBackfillService';
 
 type Tx = Prisma.TransactionClient;
 
 const NEAR_ZERO_QTY = 0.0005;
+
+/**
+ * Takes back exactly the settlement Revaluation rows (LEGACY_COGS_SETTLE) that `where` selects, under
+ * one lock of their items, while the caller voids their journals: the voided journal reverses the
+ * same inventory amount. Refused with REVERSAL_NEEDS_TRUE_UP when goods of the item went out since
+ * (true-up, PR-6.5a). A settlement journal from before the value ledger has no row: voiding it moves
+ * the GL alone, its differential sits in the valuation baseline.
+ */
+async function reverseSettleRows(tx: Tx, where: Prisma.StockMovementWhereInput, trail?: CancelTrail): Promise<void> {
+  const rows = await tx.stockMovement.findMany({
+    where: { ...where, referenceType: LEGACY_COGS_SETTLE, movementType: 'Revaluation', isCancelled: false },
+    orderBy: [{ createdAt: 'desc' }, { movementNumber: 'desc' }],
+    select: { id: true, itemId: true, createdById: true },
+  });
+  if (rows.length === 0) return;
+  await lockInventoryRows(tx, { itemIds: rows.map((r) => r.itemId) });
+  // Latest first: a later settlement was posted on the book the earlier one left.
+  for (const row of rows) await reverseMovement(tx, row.id, { userId: trail?.cancelledById ?? row.createdById });
+}
 
 /**
  * Close the COGS backfill queue of a sales invoice being cancelled: the invoice's own COGS JV is
@@ -29,18 +51,20 @@ export async function closeCogsBackfillForSalesInvoice(
 
   const settlements = queues.flatMap((q) => q.settlements);
   const jeIds = [...new Set(settlements.map((s) => s.journalEntryId).filter((x): x is string => !!x))];
-  const affectedAccountIds = new Set<string>();
-  let journalsCancelled = 0;
+  // A batch JV may also cover settlements of other (still valid) invoices: cancelling it whole would
+  // drop their differential too, so only reverse JVs whose settlements all belong to this invoice.
+  const ownJeIds: string[] = [];
   for (const jeId of jeIds) {
-    // A batch JV may also cover settlements of other (still valid) invoices: cancelling it whole would
-    // drop their differential too, so only reverse JVs whose settlements all belong to this invoice.
     const foreign = await tx.cogsBackfillSettlement.count({
       where: { journalEntryId: jeId, queue: { salesInvoiceId: { not: salesInvoiceId } } },
     });
-    if (foreign > 0) {
-      logger.warn({ salesInvoiceId, jeId }, 'COGS backfill JV shared with another invoice; left active');
-      continue;
-    }
+    if (foreign > 0) logger.warn({ salesInvoiceId, jeId }, 'COGS backfill JV shared with another invoice; left active');
+    else ownJeIds.push(jeId);
+  }
+  await reverseSettleRows(tx, { journalEntryId: { in: ownJeIds } }, trail);
+  const affectedAccountIds = new Set<string>();
+  let journalsCancelled = 0;
+  for (const jeId of ownJeIds) {
     const je = await tx.journalEntry.findUnique({ where: { id: jeId }, include: { items: true } });
     if (!je || je.status === 'Cancelled') continue;
     // The auto-settle JV is dated at settle time and may sit in another (closed) fiscal year.
@@ -86,6 +110,10 @@ export async function reverseCogsSettlementsByTrigger(
     orderBy: { createdAt: 'desc' },
   });
   if (settlements.length === 0) return { reversed: 0, journalsCancelled: 0 };
+
+  // The settlement rows of the trigger (one per settled item, those of an invoice cancelled since
+  // already reversed), before their journals are voided.
+  await reverseSettleRows(tx, { referenceId: triggerRefId }, trail);
 
   // One auto-settle JV can cover many settlements in a batch.
   const jeIds = [...new Set(settlements.map((s) => s.journalEntryId).filter((x): x is string => !!x))];

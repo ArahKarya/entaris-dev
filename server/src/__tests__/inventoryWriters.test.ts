@@ -12,7 +12,8 @@ import path from 'node:path';
  * added (PR-6.4b2) and the only one left after PR-6.4e besides wipe and seed (PR-6.4d moved the
  * delivery order, invoice cancellation and transfer writers behind it, PR-6.4c1 the goods receipt,
  * opening stock import and manual movement writers, PR-6.4c2 the stock count and sales return
- * writers; the drift repair's warehouse placement is left). Write stock fields
+ * writers, PR-6.4c3 the purchase invoice landed cost and price revision and the legacy COGS
+ * settlement; the drift repair's warehouse placement is left). Write stock fields
  * inline in the call (not through a data variable built earlier) so the guard sees them.
  *
  * Every allowlisted file must also call lockInventoryRows (services/inventory/stockLocks.ts) before
@@ -36,14 +37,11 @@ const ALLOWLIST: Record<string, Counts> = {
   'scripts/fixLandedCost.ts': { 'stockMovement.updateMany': 1 },
   'scripts/fixPotonganAllocation.ts': { 'stockMovement.update': 1 },
   'services/averageCostRecompute.ts': { 'inventoryItem.update(stock)': 1 },
-  'services/cogsBackfillService.ts': { 'inventoryItem.update(stock)': 1 },
   'services/demoData/wipe.ts': { 'sql:UPDATE inventory_items': 1 },
   'services/inventory/inventoryLedger.ts': { 'inventoryStock.update': 1, 'inventoryItem.update(stock)': 2, 'stockMovement.create': 1, 'stockMovement.updateMany': 2 },
   'services/inventory/manualMovement.ts': { 'inventoryStock.upsert': 1 },
   'services/inventory/stockLocks.ts': { 'inventoryStock.createMany': 1 },
   'services/production/productionPosting.ts': { 'stockMovement.create': 2, 'stockMovement.update': 1, 'inventoryItem.update(stock)': 3, adjustWarehouseStock: 3 },
-  'services/purchaseInvoiceRevise.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
-  'services/purchaseInvoiceSubmit.ts': { 'stockMovement.update': 1, 'inventoryItem.update(stock)': 1 },
   'utils/warehouseStock.ts': { 'inventoryStock.upsert': 1 },
 };
 
