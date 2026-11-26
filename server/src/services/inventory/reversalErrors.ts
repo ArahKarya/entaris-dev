@@ -1,6 +1,7 @@
 /**
- * Refusals of inventoryLedger.reverseMovement (the value ledger, E3-R6 / E3-R8): the train guard of
- * a reversal without a true-up, and the two cases a value replay (trueUp 'replay') cannot value.
+ * Refusals of inventoryLedger.reverseMovement and reviseOutbound (the value ledger, E3-R6 / E3-R8):
+ * the train guard of a reversal without a true-up, the two cases a value replay (trueUp 'replay')
+ * cannot value, and a raised quantity the replay cannot place.
  */
 import type { StockMovement } from '@prisma/client';
 import type Decimal from 'decimal.js';
@@ -36,6 +37,23 @@ export const TRUE_UP_PRE_BASELINE = 'TRUE_UP_PRE_BASELINE';
  * does not guess a correction.
  */
 export const TRUE_UP_UNEXPLAINED = 'TRUE_UP_UNEXPLAINED';
+
+/**
+ * Error code (409) of a document edit that raises an outbound row's quantity after value entered the
+ * item's book (reviseOutbound): the row keeps its place in processing order, so the extra taken out
+ * at the average now would stand before that inbound in every later replay. The extra goes on a line
+ * of its own, posted now at the average now (owner decision #9).
+ */
+export const OUTBOUND_INCREASE_AFTER_INBOUND = 'OUTBOUND_INCREASE_AFTER_INBOUND';
+
+export function increaseAfterInbound(itemName: string): BusinessError {
+  return new BusinessError(
+    `Qty '${itemName}' tidak bisa dinaikkan di baris yang sama: sudah ada barang masuk atau koreksi nilai sesudah baris ini dicatat. `
+      + 'Biarkan qty baris ini, lalu tambahkan selisihnya sebagai baris baru (dinilai rata-rata saat ini).',
+    OUTBOUND_INCREASE_AFTER_INBOUND,
+    409,
+  );
+}
 
 export function needsTrueUp(itemName: string, next: BookState, forEdit = false): BusinessError {
   if (forEdit) {

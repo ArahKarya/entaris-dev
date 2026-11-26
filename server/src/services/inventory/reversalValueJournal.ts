@@ -2,7 +2,8 @@
  * Journals of the value true-up and the zero-stock sweep of a cancel (E3-R8, PR-6.5a). The value
  * ledger posts no journal (inventoryLedger.ts): reverseMovement / reverseDocumentMovements with
  * trueUp 'replay' write one Revaluation row per reversed movement whose value_delta is
- * trueUp − toCogs, and the caller posts that amount here, so book = GL.
+ * trueUp − toCogs, and the caller posts that amount here, so book = GL. A document edit's
+ * reviseOutbound writes the same row for the row it re-posts (`movement` = the row taken back).
  *
  * One journal per such row, through postJournal: DR the item's inventory account / CR COGS for a
  * value that comes back to the book, the mirror for one that leaves it. Dated the row's day (the day
@@ -35,7 +36,7 @@ export interface ReversalJournalContext {
 /** Posts the journal of every reversal that wrote a true-up / sweep row; returns their journal ids. */
 export async function postReversalValueJournals(
   tx: Tx,
-  results: readonly ReverseResult[],
+  results: readonly Pick<ReverseResult, 'movement' | 'sweep'>[],
   ctx: ReversalJournalContext,
 ): Promise<string[]> {
   const settled = results.filter((r) => r.sweep && !new Decimal(r.sweep.valueDelta.toString()).isZero());

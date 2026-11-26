@@ -31,8 +31,8 @@ import { businessToday } from '../../utils/businessDate';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { logger } from '../../lib/logger';
-import { addsNegativeWindow, replayItemValue } from '../../utils/weightedAverageReplay';
-import { needsTrueUp, preBaseline, pricedPastZero, residueAtZero, unexplained } from './reversalErrors';
+import { addsNegativeWindow, replayItemValue, type ReplayRevision } from '../../utils/weightedAverageReplay';
+import { increaseAfterInbound, needsTrueUp, preBaseline, pricedPastZero, residueAtZero, unexplained } from './reversalErrors';
 import { lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
 import {
   INVENTORY_VALUE_NEGATIVE, UNIT_COST_DP, VALUE_DP, averageAfter, outboundValue, revaluationSplit, revisedOutboundValue,
@@ -40,7 +40,7 @@ import {
 
 type Tx = Prisma.TransactionClient;
 
-export { REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED } from './reversalErrors';
+export { OUTBOUND_INCREASE_AFTER_INBOUND, REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED } from './reversalErrors';
 export { assertLedgerInvariant, type LedgerDrift, type LedgerDriftKind } from './ledgerInvariant';
 
 /** Fields of a new movement row; a new movement names its warehouse (OutboundInput has one exception). */
@@ -424,6 +424,24 @@ async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
 }
 
 /**
+ * True when value entered the item's book at or after the row was posted (a tie counts, as in
+ * soldSince): an active In / AdjustmentIn, or a Revaluation other than the settlement of a cancelled
+ * row of its own document (the rows the replay skips). Goods a raised quantity takes out now at the
+ * average now would stand before that value when the row keeps its createdAt.
+ */
+async function valueEnteredAfter(tx: Tx, movement: StockMovement): Promise<boolean> {
+  const after = { itemId: movement.itemId, isCancelled: false, id: { not: movement.id }, createdAt: { gte: movement.createdAt } };
+  const inbound = await tx.stockMovement.findFirst({ where: { ...after, movementType: { in: ['In', 'AdjustmentIn'] } }, select: { id: true } });
+  if (inbound) return true;
+  const revaluations = await tx.stockMovement.findMany({
+    where: { ...after, movementType: 'Revaluation' },
+    select: { referenceType: true, referenceId: true, adjustsMovement: { select: { isCancelled: true, referenceType: true, referenceId: true } } },
+  });
+  return revaluations.some((r) => !(r.adjustsMovement?.isCancelled
+    && r.adjustsMovement.referenceType === r.referenceType && r.adjustsMovement.referenceId === r.referenceId));
+}
+
+/**
  * The value to sweep after a reversal without trueUp 'replay', or a refusal (train guard); a Revaluation row
  * counts as inbound here:
  * - an inbound reversal that moves value after goods went out (soldSince), except when the stock
@@ -483,13 +501,14 @@ async function writeSettlementRow(
   amounts: { trueUp: Decimal; residue: Decimal },
   period: SweepPeriod,
   userId: string,
+  action: 'pembatalan' | 'edit' = 'pembatalan',
 ): Promise<StockMovement> {
   const { date, fiscalYearId } = period;
   const valueDelta = amounts.trueUp.minus(amounts.residue);
   const movementNumber = await generateDocumentNumber(tx, 'SM', date, fiscalYearId);
   const notes = amounts.trueUp.isZero()
-    ? `Sisa nilai saat stok 0 (pembatalan ${movement.movementNumber})`
-    : `Koreksi nilai persediaan (pembatalan ${movement.movementNumber})`;
+    ? `Sisa nilai saat stok 0 (${action} ${movement.movementNumber})`
+    : `Koreksi nilai persediaan (${action} ${movement.movementNumber})`;
   return insertMovement(tx, {
     movementNumber, date, itemId: movement.itemId, warehouseId: null, movementType: 'Revaluation',
     quantity: 0, unitCost: 0, totalValue: valueDelta.abs().toString(), valueDelta: valueDelta.toString(),
@@ -501,25 +520,29 @@ async function writeSettlementRow(
 const STOCK_EXPLAINED_TOLERANCE = new Decimal('0.0005');
 
 /**
- * Value true-up of taking `movement` out of the item's history (trueUp 'replay'), 2 dp, + into the
- * book. 0 when no goods of the item went out since the row's value entered the book: then the exact
- * reversal already leaves the book the row's absence would have. Otherwise the replay with the row
- * must reproduce current_stock (TRUE_UP_UNEXPLAINED) and the row must lie after the baseline
- * (TRUE_UP_PRE_BASELINE), and without the row no goods may go out past zero (or a Revaluation land
- * at no stock) where they did not with it (addsNegativeWindow, TRUE_UP_UNEXPLAINED until PR-6.6);
- * the true-up is what the outbound rows since took differently without it:
- * replay(without) − (replay(with) − the row's value_delta). Taking the difference of two replays,
- * not of the replay and stock_value, keeps older settlement rows of the book out of it.
+ * Value true-up of taking `movement` out of the item's history (trueUp 'replay'), or of re-posting it
+ * at `revised` (reviseOutbound), 2 dp, + into the book. 0 when no goods of the item went out since
+ * the row's value entered the book: then the exact reversal already leaves the book the row's absence
+ * would have. Otherwise the replay with the row must reproduce current_stock (TRUE_UP_UNEXPLAINED)
+ * and the row must lie after the baseline (TRUE_UP_PRE_BASELINE), and without the row (or with the
+ * revised one) no goods may go out past zero (or a Revaluation land at no stock) where they did not
+ * with it (addsNegativeWindow, TRUE_UP_UNEXPLAINED until PR-6.6); the true-up is what the outbound
+ * rows since took differently: replay(other) − (replay(with) − the row's value_delta + the revised
+ * row's). Taking the difference of two replays, not of the replay and stock_value, keeps older
+ * settlement rows of the book out of it.
  */
-async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem): Promise<Decimal> {
+async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem, revised?: Omit<ReplayRevision, 'movementId'>): Promise<Decimal> {
   if (!(await soldSince(tx, movement))) return new Decimal(0);
   try {
     const withRow = await replayItemValue(tx, movement.itemId);
     if (!withRow.replayedIds.has(movement.id)) throw withRow.baselineId ? preBaseline(item.name, movement) : unexplained(item.name);
     if (withRow.stock.minus(item.currentStock).abs().gt(STOCK_EXPLAINED_TOLERANCE)) throw unexplained(item.name);
-    const without = await replayItemValue(tx, movement.itemId, { excludeMovementIds: [movement.id] });
-    if (addsNegativeWindow(withRow, without)) throw pricedPastZero(item.name);
-    return without.value.minus(withRow.value.minus(dec(movement.valueDelta))).toDecimalPlaces(VALUE_DP);
+    const other = await replayItemValue(tx, movement.itemId, revised
+      ? { revise: { movementId: movement.id, ...revised } }
+      : { excludeMovementIds: [movement.id] });
+    if (addsNegativeWindow(withRow, other)) throw pricedPastZero(item.name);
+    const bookChange = dec(revised?.valueDelta ?? 0).minus(dec(movement.valueDelta));
+    return other.value.minus(withRow.value.plus(bookChange)).toDecimalPlaces(VALUE_DP);
   } catch (e) {
     // A replayed book that values stock on hand below 0 explains nothing either.
     if (e instanceof BusinessError && e.code === INVENTORY_VALUE_NEGATIVE) throw unexplained(item.name);
@@ -659,6 +682,13 @@ export interface ReviseOutboundInput {
   notes?: string | null;
   /** Taken by the caller after lockInventoryRows; the ledger takes an 'SM' number otherwise. */
   movementNumber?: string;
+  /**
+   * 'replay': a lower quantity also trues up what the outbound rows since took (ReverseOptions.trueUp),
+   * so the edit leaves the book a cancel and a new note would; sweepAtZero and journalDay as there.
+   */
+  trueUp?: 'none' | 'replay';
+  sweepAtZero?: boolean;
+  journalDay?: string;
 }
 
 export interface RevisedOutbound extends PostedMovement {
@@ -666,6 +696,10 @@ export interface RevisedOutbound extends PostedMovement {
   previous: StockMovement;
   /** What the edit moved into stock_value: + value handed back (lower quantity), − the extra taken out. */
   change: Decimal;
+  /** As ReverseResult: the value true-up, the zero-stock sweep and their Revaluation row (postReversalValueJournals). */
+  trueUp: Decimal;
+  toCogs: Decimal;
+  sweep: StockMovement | null;
 }
 
 /**
@@ -676,6 +710,12 @@ export interface RevisedOutbound extends PostedMovement {
  * rewritten) on the same warehouse and document, with the old row's createdAt: in processing order
  * (replay, sales since) it stands where the goods it kept went out. Only the difference moves stock,
  * stock_value and the average. The caller checks the stock the extra needs (assertStockAvailable).
+ * A higher quantity is refused once value entered the book after the row (valueEnteredAfter,
+ * OUTBOUND_INCREASE_AFTER_INBOUND): at the row's place the replay would value the extra at the
+ * average before that value, so the extra goes on a row of its own posted now. With trueUp 'replay'
+ * a lower quantity is trued up like a cancel (replayTrueUp of the revised row) and value left at zero
+ * stock swept (sweepAtZero), in one Revaluation row dated journalDay whose journal the caller posts
+ * with postReversalValueJournals.
  */
 export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutboundInput): Promise<RevisedOutbound> {
   const ref = await tx.stockMovement.findUnique({ where: { id: movementId }, select: { itemId: true, warehouseId: true } });
@@ -692,14 +732,22 @@ export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutbou
     { qty: oldQty, value: oldValue }, quantity, { stock: item.currentStock, stockValue: item.stockValue, avg: item.averageCost },
   );
   const qtyDelta = oldQty.minus(quantity);
+  if (qtyDelta.lt(0) && await valueEnteredAfter(tx, movement)) throw increaseAfterInbound(item.name);
   const change = oldValue.minus(value);
-  const next = stateAfter(item, qtyDelta, change);
-  // Goods handed back that bring stock to exactly 0 with value left: the same refusal as an exact reversal.
-  if (qtyDelta.gt(0) && next.stock.isZero() && !next.value.isZero()) throw residueAtZero(item.name, next, true);
+  const replay = i.trueUp === 'replay' && qtyDelta.gt(0);
+  const trueUp = replay ? await replayTrueUp(tx, movement, item, { quantity, valueDelta: value.negated() }) : new Decimal(0);
+  const next = stateAfter(item, qtyDelta, change.plus(trueUp));
+  // Goods handed back that bring stock to exactly 0 with value left: swept with the true-up, refused
+  // without it (the same refusal as an exact reversal).
+  if (!replay && qtyDelta.gt(0) && next.stock.isZero() && !next.value.isZero()) throw residueAtZero(item.name, next, true);
+  const residue = replay ? replaySweep(item.name, next, i.sweepAtZero === true) : new Decimal(0);
+  // Every guard runs before the first write, as in reverseMovement.
+  const period = trueUp.isZero() && residue.isZero() ? null : await sweepPeriod(tx, { userId: i.userId, journalDay: i.journalDay });
 
   await claimReversal(tx, movement.id);
   const movementNumber = i.movementNumber ?? await generateDocumentNumber(tx, 'SM', i.date, i.fiscalYearId);
-  await writeStock(tx, movement.itemId, movement.warehouseId, qtyDelta, next);
+  const booked = residue.isZero() ? next : { ...next, value: next.value.minus(residue) };
+  await writeStock(tx, movement.itemId, movement.warehouseId, qtyDelta, booked);
   const unitCost = value.div(quantity).toDecimalPlaces(UNIT_COST_DP);
   const valueDelta = value.negated();
   const posted = await insertMovement(tx, {
@@ -711,9 +759,11 @@ export async function reviseOutbound(tx: Tx, movementId: string, i: ReviseOutbou
     unitCostLoaded: movement.unitCostLoaded == null ? null : movement.unitCostLoaded.toString(),
     fiscalYearId: i.fiscalYearId, createdById: i.userId, createdAt: movement.createdAt,
   });
+  // After the re-posted row: its number is taken but not in the table until then.
+  const sweep = period ? await writeSettlementRow(tx, movement, { trueUp, residue }, period, i.userId, 'edit') : null;
   return {
-    movement: posted, previous: { ...movement, isCancelled: true }, change, valueDelta, unitCost,
-    stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average,
+    movement: posted, previous: { ...movement, isCancelled: true }, change, valueDelta, unitCost, trueUp, toCogs: residue, sweep,
+    stockAfter: booked.stock, stockValueAfter: booked.value, averageCostAfter: booked.average,
   };
 }
 

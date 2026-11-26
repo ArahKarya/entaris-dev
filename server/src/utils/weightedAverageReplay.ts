@@ -258,15 +258,23 @@ export interface ItemValueReplay extends ValueReplayState, ValueReplayWindows {
 
 type Tx = Prisma.TransactionClient;
 
+/** A row replayed at another quantity and value_delta in its place (a document edit, reviseOutbound). */
+export interface ReplayRevision {
+  movementId: string;
+  quantity: Decimal.Value;
+  valueDelta: Decimal.Value;
+}
+
 /**
  * Loads the item's active rows and replays them from its last ValuationBaseline, leaving out
- * `excludeMovementIds` (the row a cancel takes out of the history). Reads only; the caller holds
- * the item lock (lockInventoryRows) so the rows cannot change under it.
+ * `excludeMovementIds` (the row a cancel takes out of the history) and replaying `revise` at its
+ * new quantity in its place (the row an edit re-posts). Reads only; the caller holds the item lock
+ * (lockInventoryRows) so the rows cannot change under it.
  */
 export async function replayItemValue(
   tx: Tx,
   itemId: string,
-  opts: { excludeMovementIds?: readonly string[] } = {},
+  opts: { excludeMovementIds?: readonly string[]; revise?: ReplayRevision } = {},
 ): Promise<ItemValueReplay> {
   const found = await tx.stockMovement.findMany({
     where: { itemId, isCancelled: false },
@@ -276,9 +284,12 @@ export async function replayItemValue(
       adjustsMovement: { select: { isCancelled: true, referenceType: true, referenceId: true } },
     },
   });
+  const revised = (r: { id: string }) => opts.revise?.movementId === r.id;
   const rows: (ValueReplayRow & { referenceType: string | null })[] = sortMovementsForValueReplay(found.map((r) => ({
     id: r.id, movementNumber: r.movementNumber, movementType: r.movementType, createdAt: r.createdAt,
-    quantity: r.quantity.toString(), valueDelta: r.valueDelta.toString(), referenceType: r.referenceType,
+    quantity: revised(r) ? new Decimal(opts.revise!.quantity).toString() : r.quantity.toString(),
+    valueDelta: revised(r) ? new Decimal(opts.revise!.valueDelta).toString() : r.valueDelta.toString(),
+    referenceType: r.referenceType,
     settlement: r.movementType === 'Revaluation' && r.adjustsMovement?.isCancelled === true
       && r.adjustsMovement.referenceType === r.referenceType && r.adjustsMovement.referenceId === r.referenceId,
   })));

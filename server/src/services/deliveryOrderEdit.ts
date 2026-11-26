@@ -8,7 +8,8 @@ import { recomputeDeliveredQtyInTx, relinkDoItemsToSOInTx } from './salesOrderDe
 import { logger } from '../lib/logger';
 import { STALE_STATUS } from '../utils/cancelClaim';
 import { assertStockAvailable, lockInventoryRows, STOCK_INSUFFICIENT, type StockNeed } from './inventory/stockLocks';
-import { postOutbound, reverseMovement, reviseOutbound } from './inventory/inventoryLedger';
+import { postOutbound, reverseMovement, reviseOutbound, type ReverseResult, type RevisedOutbound } from './inventory/inventoryLedger';
+import { postReversalValueJournals } from './inventory/reversalValueJournal';
 import { planDeliveryOrderEdit, type DeliveryOrderEditPlan, type EditNewLine, type EditOldLine, type EditPairedLine } from './deliveryOrderEditPlan';
 import { resolveCogsAccountId } from './cogsAccount';
 import type { SubmitDeliveryOrderInput } from './deliveryOrderSubmit';
@@ -54,7 +55,11 @@ function heldQuantity(lines: readonly EditNewLine[], needs: readonly StockNeed[]
  * unchanged line keeps its movement (only the header changes), a lower quantity hands the
  * difference back at the row's own unit value, a higher one takes only the extra out at the book's
  * value now (inventoryLedger.reviseOutbound); a removed line is reversed at its own value and a new
- * line is posted at the book's value now. doNumber is kept so printouts stay valid.
+ * line is posted at the book's value now. Goods handed back are trued up as a cancel of the note
+ * trues them up (trueUp 'replay', sweepAtZero): what outbound rows since took differently comes back
+ * against COGS in one journal per row, dated today (postReversalValueJournals). A higher quantity
+ * after an inbound of the item is refused (OUTBOUND_INCREASE_AFTER_INBOUND): the extra goes on a new
+ * line. doNumber is kept so printouts stay valid.
  */
 export async function editDeliveryOrderInTx(
   tx: Tx,
@@ -138,17 +143,26 @@ export async function editDeliveryOrderInTx(
     if (!inv.isActive) throw new BusinessError(`Item '${inv.name}' tidak aktif.`);
   }
   const notes = `Auto dari ${oldDo.doNumber} (edited)`;
-  const revise = (p: EditPairedLine) => reviseOutbound(tx, p.movementId, {
-    quantity: p.newQuantity, date: txDate, fiscalYearId: fiscalYear.id, userId, notes,
-  });
+  // Value true-ups of the goods handed back; their journals are posted after every SM number of the
+  // edit is taken (LOCK ORDER of reversalValueJournal.ts).
+  const settlements: (ReverseResult | RevisedOutbound)[] = [];
+  const revise = async (p: EditPairedLine) => {
+    const revised = await reviseOutbound(tx, p.movementId, {
+      quantity: p.newQuantity, date: txDate, fiscalYearId: fiscalYear.id, userId, notes, trueUp: 'replay', sweepAtZero: true,
+    });
+    settlements.push(revised);
+    return revised;
+  };
   const movementByLine = new Map<number, string>();
 
   // Stock handed back first: old rows no line keeps go back at their own value (an Out reversal
   // puts stock back and needs no stock check), and lower quantities hand the difference back at
   // the row's own unit value.
+  // A true-up row of an earlier edit (a Revaluation adjusting a row it took back) is that row's
+  // settlement and stays.
   const kept = new Set(plan.paired.map((p) => p.movementId));
-  for (const m of oldMovements.filter((row) => !kept.has(row.id))) {
-    await reverseMovement(tx, m.id, { userId, forEdit: true });
+  for (const m of oldMovements.filter((row) => !kept.has(row.id) && !row.adjustsMovementId)) {
+    settlements.push(await reverseMovement(tx, m.id, { userId, trueUp: 'replay', sweepAtZero: true, forEdit: true }));
   }
   for (const p of plan.paired.filter((row) => row.newQuantity.lt(row.oldQuantity))) {
     movementByLine.set(p.index, (await revise(p)).movement.id);
@@ -211,6 +225,9 @@ export async function editDeliveryOrderInTx(
     });
     movementByLine.set(index, movement.id);
   }
+  await postReversalValueJournals(tx, settlements.map((r) => ({ movement: 'previous' in r ? r.previous : r.movement, sweep: r.sweep })), {
+    userId, documentLabel: `Surat Jalan ${oldDo.doNumber} (edit)`,
+  });
 
   // Header is reused (preserves doNumber); the lines are written again in body order.
   await tx.deliveryOrderItem.deleteMany({ where: { deliveryOrderId: doId } });

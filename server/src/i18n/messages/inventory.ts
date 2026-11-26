@@ -237,4 +237,5 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   // edit keeps cost (E3-R8): services/inventory/reversalErrors.ts, services/deliveryOrderEdit.ts
   "Edit ditolak: stok '{0}' menjadi 0 tetapi nilai persediaannya masih {1}, jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.": "Edit refused: the stock of '{0}' becomes 0 but its inventory value is still {1}, so that remaining value needs a correction. Automatic value correction is not available yet; contact the accountant.",
   "Status surat jalan sudah berubah. Muat ulang halaman lalu coba lagi.": "The delivery order status has changed. Reload the page and try again.",
+  "Qty '{0}' tidak bisa dinaikkan di baris yang sama: sudah ada barang masuk atau koreksi nilai sesudah baris ini dicatat. Biarkan qty baris ini, lalu tambahkan selisihnya sebagai baris baru (dinilai rata-rata saat ini).": "The quantity of '{0}' cannot be raised on the same line: goods came in or a value correction was posted after this line was recorded. Keep this line's quantity and add the difference as a new line (valued at the current average).",
 };
