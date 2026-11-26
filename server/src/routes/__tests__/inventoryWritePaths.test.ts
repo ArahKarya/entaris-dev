@@ -241,7 +241,7 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
     expect(capOf('/:id/cancel')).toBe('doc.cancel');
   });
 
-  it('PUT moving a movement into the next year books the movement, journal and auto-settle in that year', async () => {
+  it('PUT moving a movement into the next year books the movement and journal in that year; no legacy auto-settle', async () => {
     current = movementTx([]);
     const res = await send('PUT', '/movements/sm-1', {
       movementType: 'In', quantity: 10, unitCost: 1000, date: '2027-01-05', offsetAccountId: 'acc-offset',
@@ -249,8 +249,8 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
     expect(res.status).toBe(200);
     expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({ fiscalYearId: 'fy-2027', date: new Date('2027-01-05') });
     expect(posted()).toMatchObject({ date: new Date('2027-01-05'), expectFiscalYearId: 'fy-2027' });
-    expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).toMatchObject({ settleDate: new Date('2027-01-05') });
-    expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).not.toHaveProperty('fiscalYearId');
+    // Owner decision #6 (PR-6.6): a manual inbound no longer runs the legacy COGS auto-settle.
+    expect(settleCogsBackfillForItem).not.toHaveBeenCalled();
   });
 
   it('PUT out of a closed year is rejected with PERIOD_CLOSED before any stock is reversed', async () => {

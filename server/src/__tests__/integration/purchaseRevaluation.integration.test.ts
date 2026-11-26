@@ -368,14 +368,25 @@ d('legacy COGS settlement on the value ledger (PR-6.4c3, decision #6)', () => {
     return { invoice, cogsBefore: await glBalance(tx, w.accounts.cogs.id) };
   }
 
-  /** A manual stock-in of `qty` @10.000 through the real service, which settles the queue. */
+  /**
+   * A manual stock-in of `qty` @10.000 through the real service, then the legacy settle the way the
+   * one path that still runs it does (production output, until PR-6.12): since PR-6.6 a manual
+   * stock-in no longer settles the queue (owner decision #6), and an item with open queue rows is
+   * left out of the negative-stock settlement, so the queue alone re-values the oversold kg.
+   */
   async function stockIn(tx: Tx, w: SalesFlowWorld, qty: number) {
     const code = `IT-PRV-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const offset = await tx.account.create({ data: { name: `Beban uji ${code}`, accountNumber: code, accountType: 'EXPENSE', rootType: 'EXPENSE' } });
-    return inRouteTx((t) => createManualMovementInTx(t, {
+    const movement = await inRouteTx((t) => createManualMovementInTx(t, {
       itemId: w.item.id, warehouseId: w.warehouseA.id, movementType: 'AdjustmentIn', quantity: qty, unitCost: 10_000,
       date: DAY, offsetAccountId: offset.id,
     }, w.userId));
+    expect(await tx.stockMovement.count({ where: { adjustsMovementId: movement.id, movementType: 'Revaluation' } })).toBe(0);
+    await settleCogsBackfillForItem(tx, {
+      itemId: w.item.id, qtyAvailable: qty, unitCostNow: 10_000, userId: w.userId, settleDate: new Date(DAY),
+      source: { type: 'StockMovement', refId: movement.id, refNo: movement.movementNumber },
+    });
+    return movement;
   }
 
   it('a stock-in that brings stock exactly to 0 moves the whole differential: stock_value 0 = GL', async () => {

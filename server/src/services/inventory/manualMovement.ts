@@ -32,7 +32,6 @@ import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { businessToday } from '../../utils/businessDate';
 import { mappedAccount } from '../systemAccounts';
-import { settleCogsBackfillForItem } from '../cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../cogsBackfillReverse';
 import { resolveWarehouseId } from '../../utils/warehouseStock';
 import { assertStockAvailable, lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
@@ -257,7 +256,11 @@ async function postManualRow(tx: Tx, p: PostInput, numbers: { movementNumber: st
   return { posted, unitCost: posted.unitCost };
 }
 
-/** Posts a new manual movement: stock, book value, journal and the COGS auto-settle of an inbound row. */
+/**
+ * Posts a new manual movement: stock, book value and journal. An inbound row into negative stock
+ * settles the window in the ledger (postInbound, E3-R9); the legacy COGS auto-settle no longer runs
+ * here (owner decision #6). Its reversal on edit and cancel stays for settlements made before.
+ */
 export async function createManualMovementInTx(tx: Tx, input: ManualMovementCreate, userId: string) {
   const movementDate = new Date(input.date);
   const fiscalYear = await getOpenFiscalYear(tx, movementDate);
@@ -278,18 +281,11 @@ export async function createManualMovementInTx(tx: Tx, input: ManualMovementCrea
     : null;
 
   const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
-  const { posted, unitCost } = await postManualRow(tx, {
+  const { posted } = await postManualRow(tx, {
     type: input.movementType, item, warehouseId, quantity: input.quantity, unitCost: input.unitCost,
     offsetAccountId: input.offsetAccountId, sourceMovementId, movementDate, fiscalYearId: fiscalYear.id,
     notes: input.notes, referenceNumber: input.referenceNumber, userId,
   }, { movementNumber });
-
-  if (inbound) {
-    await settleCogsBackfillForItem(tx, {
-      itemId: item.id, qtyAvailable: input.quantity, unitCostNow: unitCost.toNumber(), userId, settleDate: movementDate,
-      source: { type: 'StockMovement', refId: posted.movement.id, refNo: movementNumber },
-    });
-  }
   return withItem(tx, posted.movement.id);
 }
 
@@ -405,7 +401,7 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
       context: 'inventory.movement.edit', userId,
     });
   }
-  const { posted, unitCost } = await postManualRow(tx, {
+  const { posted } = await postManualRow(tx, {
     type: input.movementType, item, warehouseId: oldMov.warehouseId, quantity: input.quantity, unitCost: input.unitCost,
     offsetAccountId: input.offsetAccountId,
     // An inbound row consumes no batch.
@@ -413,13 +409,6 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
     movementDate, fiscalYearId: fiscalYear.id, notes: input.notes, referenceNumber: input.referenceNumber,
     referenceType: oldMov.referenceType, edit: true, userId,
   }, { movementNumber, entryNumber });
-
-  if (newIsIn) {
-    await settleCogsBackfillForItem(tx, {
-      itemId: oldMov.itemId, qtyAvailable: input.quantity, unitCostNow: unitCost.toNumber(), userId,
-      settleDate: movementDate, source: { type: 'StockMovement', refId: posted.movement.id, refNo: movementNumber },
-    });
-  }
   return withItem(tx, posted.movement.id);
 }
 
