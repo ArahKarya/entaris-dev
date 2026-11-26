@@ -5,13 +5,13 @@ import Decimal from 'decimal.js';
  * edit share it). Every line carries the production warehouse the run's
  * stock movements used, so the PDF "Gudang Produksi" and the edit prefill
  * can read it from the lines. Prices and yields come from computeProductionCosting: an input line's
- * unit_price is the unit cost the value ledger took it out at; batch_unit_cost stays the batch
- * snapshot the form picked, which no longer values anything (PR-6.4e).
+ * unit_price is the unit cost the value ledger took it out at, and a line that picked a batch
+ * stores that same cost in batch_unit_cost: the batch traces the quantity, it never values it
+ * (E6-R3, PR-6.9).
  */
 
 export interface RunLineBatchSnapshot {
   sourceMovementId: string | null;
-  batchUnitCost: number | null;
 }
 
 export interface RunLineOutputCosting {
@@ -35,23 +35,24 @@ export interface BuildRunLinesArgs {
   outputCosting: ReadonlyArray<RunLineOutputCosting>;
 }
 
-const NO_BATCH: RunLineBatchSnapshot = { sourceMovementId: null, batchUnitCost: null };
+const NO_BATCH: RunLineBatchSnapshot = { sourceMovementId: null };
 
 export function buildProductionRunLineItems(args: BuildRunLinesArgs) {
   const { runId, warehouseId } = args;
   const inputLines = args.inputs.map((inp, idx) => {
     const snapshot = args.batchSnapshots[idx] ?? NO_BATCH;
+    const unitCost = args.inputCosting[idx]?.unitCost ?? null;
     return {
       productionRunId: runId,
       itemId: inp.itemId,
       warehouseId,
       lineType: 'Input',
       quantity: inp.quantity,
-      unitPrice: args.inputCosting[idx]?.unitCost ?? null,
+      unitPrice: unitCost,
       yieldPct: null as number | null,
       isByProduct: false,
       sourceMovementId: snapshot.sourceMovementId,
-      batchUnitCost: snapshot.batchUnitCost,
+      batchUnitCost: snapshot.sourceMovementId ? unitCost : null,
     };
   });
   const outputLines = args.outputs.map((o, idx) => {

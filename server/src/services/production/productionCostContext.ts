@@ -1,6 +1,7 @@
 import type { InventoryItem, Prisma } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
 import { assertBatchSource } from '../inventory/batchSource';
+import { assertBatchQuantities, type BatchNeed } from '../inventory/batchAvailability';
 import { assertStockAvailable, STOCK_INSUFFICIENT } from '../inventory/stockLocks';
 
 type Tx = Prisma.TransactionClient;
@@ -9,7 +10,8 @@ type Tx = Prisma.TransactionClient;
  * Read-only loader for production costing (E6-R1): the run's items with their validation, the
  * input stock check at the production warehouse and the picked batches through assertBatchSource.
  * It decides no cost: each input is valued by the ledger row that takes it out (postOutbound in
- * productionPosting.ts, E3-R6), and a picked batch is traceability only (E6-R3). Submit and edit
+ * productionPosting.ts, E3-R6), and a picked batch is traceability only (E6-R3): its remaining
+ * quantity and warehouse are checked (batchAvailability.ts), its cost is not used. Submit and edit
  * call it once, under lockProductionStockInTx and at the point where the stock they check is current
  * (edit: after its old movements are reversed).
  */
@@ -18,6 +20,7 @@ export interface ContextInputLine {
   itemId: string;
   quantity: number;
   sourceMovementId?: string | null;
+  /** Sent by old drafts and forms; ignored (E6-R3). */
   batchUnitCost?: number | null;
 }
 
@@ -38,11 +41,6 @@ export interface ProductionCostContextInput {
 export interface CostedInput {
   /** The picked batch, null without one. */
   sourceMovementId: string | null;
-  /**
-   * Unit cost snapshot of the picked batch for production_run_items, null without one. Display
-   * only: it never values the input (the ledger does).
-   */
-  batchUnitCost: number | null;
 }
 
 /** Where the inputs are taken from, and who takes them (for the bypass log). */
@@ -51,6 +49,8 @@ export interface ProductionStockScope {
   /** Log context of the stock check, e.g. 'productionRun.submit'. */
   context: string;
   userId?: string;
+  /** Batches the edited run already took from: kept even outside the production warehouse (old runs). */
+  keepBatchIds?: ReadonlySet<string>;
 }
 
 export interface ProductionCostContext {
@@ -106,31 +106,36 @@ async function assertInputStock(tx: Tx, body: ProductionCostContextInput, stock:
 }
 
 /**
- * Batch link + snapshot per input. The batch must be an active inbound movement of the same item;
- * the snapshot is the client's `batchUnitCost` (>= 0) captured at pick time, else the batch cost.
- * Neither values the input. Per-batch remaining qty is not enforced yet (E6-PR3).
+ * Batch link per input. The batch must be an active inbound movement of the same item
+ * (assertBatchSource), sit in the production warehouse and still hold what the run's lines on it
+ * ask for (assertBatchQuantities). The client's batchUnitCost is ignored: the batch never values
+ * the input.
  */
-async function batchInputs(tx: Tx, inputs: ReadonlyArray<ContextInputLine>, itemMap: Map<string, InventoryItem>): Promise<CostedInput[]> {
+async function batchInputs(
+  tx: Tx,
+  inputs: ReadonlyArray<ContextInputLine>,
+  itemMap: Map<string, InventoryItem>,
+  stock: ProductionStockScope,
+): Promise<CostedInput[]> {
   const out: CostedInput[] = [];
+  const needs: BatchNeed[] = [];
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i]!;
     const item = itemMap.get(input.itemId)!;
-    let sourceMovementId: string | null = null;
-    let batchUnitCost: number | null = null;
-    if (input.sourceMovementId) {
-      const batch = await assertBatchSource(tx, {
-        sourceMovementId: input.sourceMovementId,
-        inventoryItemId: input.itemId,
-        itemName: item.name,
-        inputLine: i + 1,
-      });
-      sourceMovementId = batch.id;
-      batchUnitCost = input.batchUnitCost != null && input.batchUnitCost >= 0
-        ? Number(input.batchUnitCost)
-        : Number(batch.unitCost);
+    if (!input.sourceMovementId) {
+      out.push({ sourceMovementId: null });
+      continue;
     }
-    out.push({ sourceMovementId, batchUnitCost });
+    const batch = await assertBatchSource(tx, {
+      sourceMovementId: input.sourceMovementId,
+      inventoryItemId: input.itemId,
+      itemName: item.name,
+      inputLine: i + 1,
+    });
+    out.push({ sourceMovementId: batch.id });
+    needs.push({ inputLine: i + 1, sourceMovementId: batch.id, quantity: input.quantity });
   }
+  await assertBatchQuantities(tx, needs, { warehouseId: stock.warehouseId, keepBatchIds: stock.keepBatchIds });
   return out;
 }
 
@@ -148,5 +153,5 @@ export async function loadProductionCostContext(
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   validateItems(body, itemMap);
   await assertInputStock(tx, body, stock);
-  return { itemMap, inputs: await batchInputs(tx, body.inputs, itemMap) };
+  return { itemMap, inputs: await batchInputs(tx, body.inputs, itemMap, stock) };
 }

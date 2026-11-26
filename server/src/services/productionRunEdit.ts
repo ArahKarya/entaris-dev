@@ -43,6 +43,13 @@ export async function editProductionRunInTx(
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { itemId: true, lineType: true, isByProduct: true, unitPrice: true, priceIsManual: true },
   });
+  // Batches the run already took from stay pickable outside the production warehouse (runs from
+  // before owner decision #10).
+  const oldBatchLines = await tx.productionRunItem.findMany({
+    where: { productionRunId: runId, lineType: 'Input', sourceMovementId: { not: null } },
+    select: { sourceMovementId: true },
+  });
+  const keepBatchIds = new Set(oldBatchLines.map((l) => l.sourceMovementId!));
   const body: SubmitProductionRunInput = {
     ...submitted,
     outputs: dropBackfilledOutputPrices(
@@ -78,12 +85,13 @@ export async function editProductionRunInTx(
   });
   await clearProductionRunDetails(tx, runId);
 
-  // Loaded after the reversal, so inputs are checked against the restored stock; the ledger then
-  // values them from the restored book.
+  // Loaded after the reversal, so inputs and batches are checked against the restored stock (the
+  // run's own consumption is back in its batches); the ledger then values them from the restored book.
   const { itemMap, inputs: costedInputs } = await loadProductionCostContext(tx, body, {
     warehouseId: productionWarehouseId,
     context: 'productionRun.edit',
     userId,
+    keepBatchIds,
   });
 
   await tx.productionRun.update({
