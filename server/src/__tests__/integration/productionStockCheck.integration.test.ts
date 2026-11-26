@@ -49,6 +49,7 @@ import { cancelProductionRunInTx } from '../../services/productionRunCancel';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { seedStock } from '../helpers/inventoryFixture';
 import { createProductionWorld, seedWorldStock, worldDate, type ProductionWorld } from '../helpers/productionFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -83,7 +84,9 @@ async function inWorld(fn: (tx: Tx, world: ProductionWorld) => Promise<void>) {
       state.tx = tx;
       systemAccounts.invalidateCache();
       try {
-        await fn(tx, await createProductionWorld(tx, YEAR));
+        const world = await createProductionWorld(tx, YEAR);
+        await fn(tx, world);
+        await assertLedgerInvariant(tx, Object.values(world.items).map((i) => i.id), { warehouses: true });
       } finally {
         state.tx = null;
         systemAccounts.invalidateCache();
@@ -335,6 +338,7 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       const totals = await prisma.inventoryItem.findMany({ where: { id: { in: [f.gkp, f.beras] } }, select: { id: true, currentStock: true } });
       expect(Object.fromEntries(totals.map((t) => [t.id, Number(t.currentStock)]))).toEqual({ [f.gkp]: 1000, [f.beras]: 0 });
       expect(await prisma.stockMovement.count({ where: { referenceId: f.runId, isCancelled: false } })).toBe(0);
+      await assertLedgerInvariant(prisma as unknown as Tx, [f.gkp, f.beras], { warehouses: true });
     } finally {
       await f.cleanup();
     }
@@ -353,6 +357,7 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       const db = prisma as unknown as Tx;
       expect(await stockAt(db, f.gkp, f.wh)).toBe(1000);
       expect(await stockAt(db, f.beras, f.wh)).toBe(0);
+      await assertLedgerInvariant(prisma as unknown as Tx, [f.gkp, f.beras], { warehouses: true });
     } finally {
       await f.cleanup();
     }
@@ -381,6 +386,7 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       const db = prisma as unknown as Tx;
       expect(await stockAt(db, f.gkp, f.wh)).toBe(400);
       expect(await stockAt(db, f.beras, f.wh)).toBe(300);
+      await assertLedgerInvariant(prisma as unknown as Tx, [f.gkp, f.beras], { warehouses: true });
     } finally {
       await prisma.$executeRaw`UPDATE period_lock SET lock_date = ${lock?.lock_date ?? null}::date WHERE id = 1`;
       await f.cleanup();

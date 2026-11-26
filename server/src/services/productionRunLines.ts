@@ -4,7 +4,9 @@ import Decimal from 'decimal.js';
  * Build the production_run_items rows persisted for a posted run (submit and
  * edit share it). Every line carries the production warehouse the run's
  * stock movements used, so the PDF "Gudang Produksi" and the edit prefill
- * can read it from the lines. Prices and yields come from computeProductionCosting.
+ * can read it from the lines. Prices and yields come from computeProductionCosting: an input line's
+ * unit_price is the unit cost the value ledger took it out at; batch_unit_cost stays the batch
+ * snapshot the form picked, which no longer values anything (PR-6.4e).
  */
 
 export interface RunLineBatchSnapshot {
@@ -27,6 +29,8 @@ export interface BuildRunLinesArgs {
   outputs: ReadonlyArray<{ itemId: string; quantity: number; isByProduct?: boolean }>;
   /** Batch picked per input, same order as `inputs`. */
   batchSnapshots: ReadonlyArray<RunLineBatchSnapshot>;
+  /** Ledger cost per input, same order as `inputs` (costing.inputLines). */
+  inputCosting: ReadonlyArray<{ unitCost: number }>;
   /** Costing per output, same order as `outputs`. */
   outputCosting: ReadonlyArray<RunLineOutputCosting>;
 }
@@ -43,7 +47,7 @@ export function buildProductionRunLineItems(args: BuildRunLinesArgs) {
       warehouseId,
       lineType: 'Input',
       quantity: inp.quantity,
-      unitPrice: null as number | null,
+      unitPrice: args.inputCosting[idx]?.unitCost ?? null,
       yieldPct: null as number | null,
       isByProduct: false,
       sourceMovementId: snapshot.sourceMovementId,
