@@ -5,7 +5,8 @@
  *   (no sourceMovementId, so the consumed-batch guard does not fire). A forced cancel by a doc.cancel
  *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes, but the
  *   value ledger refuses the reversal (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a) and nothing changes;
- * - production run cancel: the same through the body and through ?allowNegativeStock=true;
+ * - production run cancel: the same through the body and through ?allowNegativeStock=true (the
+ *   output went out since, so with the capability the value ledger refuses it too, until PR-6.5a);
  * - production run resubmit with the bypass: 403 and the request stays in NeedsRevision without the
  *   capability, Pending with it.
  *
@@ -211,17 +212,20 @@ d('production run cancel with the negative-stock bypass', () => {
     });
   });
 
-  it('lets a holder of inventory.negative_stock cancel into negative stock', async () => {
+  it('lets a holder of inventory.negative_stock past the stock check; the value ledger then refuses', async () => {
     await inRollback(async (tx) => {
       const { warehouseId, clerk, admin } = await setup(tx);
       const { run, output } = await usedRun(tx, warehouseId, clerk);
 
+      // 50 kg of the output went out since: on the value ledger taking its value back needs a value
+      // true-up (PR-6.5a / PR-6.12), so the cancel is refused until then and nothing changes.
       const r = await callRoute(productionRunsRouter, 'put', '/:id/cancel', {
         params: { id: run.id }, query: { allowNegativeStock: 'true' }, body: { negativeStockReason: REASON }, userId: admin.userId, role: admin.role,
       });
-      expect(r.status, JSON.stringify(r.body)).toBe(200);
-      expect((await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } })).isCancelled).toBe(true);
-      expect(await stockOf(tx, output.id, warehouseId)).toEqual({ item: -50, warehouse: -50 });
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect(r.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect((await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } })).isCancelled).toBe(false);
+      expect(await stockOf(tx, output.id, warehouseId)).toEqual({ item: 10, warehouse: 10 });
     });
   });
 });

@@ -38,6 +38,7 @@ import { decideApproval } from '../../services/approvalDecision';
 import movementsRouter from '../../routes/inventory/movements';
 import stockOpnameRouter from '../../routes/stockOpname';
 import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -387,6 +388,7 @@ d('closed fiscal year: production runs', () => {
       expect((e as BusinessError).message).toMatch(/; produksi di periode ini/);
       expect(await snapshot(tx, itemIds, jeIds)).toEqual(before);
       expect((await tx.productionRun.findUniqueOrThrow({ where: { id: pr.id } })).isCancelled).toBe(false);
+      await assertLedgerInvariant(tx, itemIds, { warehouses: true });
     });
   });
 
@@ -407,6 +409,7 @@ d('closed fiscal year: production runs', () => {
       expect((e as BusinessError).message).toMatch(/; produksi di periode ini/);
       expect(await snapshot(tx, itemIds, jeIds)).toEqual(before);
       expect((await tx.productionRun.findUniqueOrThrow({ where: { id: pr.id } })).isCancelled).toBe(false);
+      await assertLedgerInvariant(tx, itemIds, { warehouses: true });
     });
   });
 
@@ -421,6 +424,7 @@ d('closed fiscal year: production runs', () => {
       expect(await codeOf(inRouteTx((t) => editProductionRunInTx(t, pr.id, body, userId)))).toBe(PERIOD_CLOSED);
       expect(await codeOf(inRouteTx((t) => editProductionRunInTx(t, pr.id, { ...body, date: `${Y + 1}-01-05` }, userId)))).toBe(PERIOD_CLOSED);
       expect(await snapshot(tx, itemIds, jeIds)).toEqual(before);
+      await assertLedgerInvariant(tx, itemIds, { warehouses: true });
     });
   });
 
@@ -452,6 +456,7 @@ d('closed fiscal year: production runs', () => {
       expect(decided).toMatchObject({ ok: false, code: PERIOD_CLOSED });
       expect((await tx.approvalRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe('Pending');
       expect(await snapshot(tx, itemIds, jeIds)).toEqual(before);
+      await assertLedgerInvariant(tx, itemIds, { warehouses: true });
     });
   });
 });

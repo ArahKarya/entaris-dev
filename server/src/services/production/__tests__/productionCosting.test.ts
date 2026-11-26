@@ -4,7 +4,7 @@ import { computeProductionCosting, type ProductionCostingInput } from '../produc
 // PRD R1: GKP 1.000 kg @6.000, conversion 300/kg on input qty, bekatul 100 kg at NRV 2.000, beras 600 kg.
 function r1(overrides: Partial<ProductionCostingInput> = {}): ProductionCostingInput {
   return {
-    inputs: [{ quantity: 1000, unitCost: 6000 }],
+    inputs: [{ quantity: 1000, value: 6_000_000 }],
     outputs: [
       { quantity: 600, unitPrice: null },
       { quantity: 100, unitPrice: 2000, isByProduct: true },
@@ -85,7 +85,7 @@ describe('computeProductionCosting', () => {
 
   it('clamps a negative numerator (NRV above total cost) to 0 and flags it', () => {
     const c = computeProductionCosting({
-      inputs: [{ quantity: 100, unitCost: 1000 }],
+      inputs: [{ quantity: 100, value: 100_000 }],
       outputs: [{ quantity: 60 }, { quantity: 100, unitPrice: 2000, isByProduct: true }],
     });
     expect(c.computedHpp?.toNumber()).toBe(0);
@@ -118,7 +118,7 @@ describe('computeProductionCosting', () => {
   });
 
   it('zero-cost inputs leave no credit line; the HPP carries the conversion only', () => {
-    const c = computeProductionCosting(r1({ inputs: [{ quantity: 1000, unitCost: 0 }] }));
+    const c = computeProductionCosting(r1({ inputs: [{ quantity: 1000, value: 0 }] }));
     expect(c.inputLines).toEqual([{ unitCost: 0, totalValue: 0 }]);
     expect(c.totalMaterialCost.toNumber()).toBe(0);
     // (0 + 300.000 − 200.000) / 600
@@ -129,7 +129,7 @@ describe('computeProductionCosting', () => {
 
   it('a run with only by-products has no HPP and no yield', () => {
     const c = computeProductionCosting({
-      inputs: [{ quantity: 100, unitCost: 1000 }],
+      inputs: [{ quantity: 100, value: 100_000 }],
       outputs: [{ quantity: 50, unitPrice: 1500, isByProduct: true }],
     });
     expect(c.computedHpp).toBeNull();
@@ -138,9 +138,30 @@ describe('computeProductionCosting', () => {
     expect(c.journalPlan).toMatchObject({ diff: -25_000, loss: 25_000, toConversion: 0, toCogs: 0 });
   });
 
+  it('takes each input at the value the ledger took out, not quantity x an average', () => {
+    // Two lines of one item, the second taking the rest of the book (30.000 kg worth 100.000,00):
+    // 33.333,33 and 66.666,67, where 20.000 x 3,333333 would be 66.666,66.
+    const c = computeProductionCosting({
+      inputs: [{ quantity: 10_000, value: '33333.33' }, { quantity: 20_000, value: '66666.67' }],
+      outputs: [{ quantity: 20_000 }],
+    });
+    expect(c.inputLines).toEqual([{ unitCost: 3.333333, totalValue: 33_333.33 }, { unitCost: 3.333334, totalValue: 66_666.67 }]);
+    expect(c.totalMaterialCost.toNumber()).toBe(100_000);
+    expect(c.computedHpp?.toNumber()).toBe(5);
+    expect(c.outputLines[0]).toMatchObject({ unitCost: 5, totalValue: 100_000 });
+    expect(c.journalPlan).toEqual({
+      diff: 0,
+      inputCredits: [{ index: 0, amount: 33_333.33 }, { index: 1, amount: 66_666.67 }],
+      outputDebits: [{ index: 0, amount: 100_000 }],
+      toConversion: 0,
+      toCogs: 0,
+      loss: 0,
+    });
+  });
+
   it('a balanced run plans no difference lines', () => {
     const c = computeProductionCosting({
-      inputs: [{ quantity: 100, unitCost: 1000 }],
+      inputs: [{ quantity: 100, value: 100_000 }],
       outputs: [{ quantity: 50 }],
     });
     expect(c.computedHpp?.toNumber()).toBe(2000);

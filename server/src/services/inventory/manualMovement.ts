@@ -23,7 +23,7 @@ import type { Prisma, StockMovement } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../utils/errors';
 import { UNIT_COST_DP, outboundValue } from './inventoryValueMath';
-import { linkMovementJournal, postInbound, postOutbound, reverseMovement } from './inventoryLedger';
+import { linkMovementJournal, placeUnplacedStock, postInbound, postOutbound, reverseMovement } from './inventoryLedger';
 import { MOVEMENT_DOCUMENT_LOCKED, STOCK_DRIFT_REFERENCE, documentMovementLockMessage } from '../documentMovementLock';
 import { assertBatchSource } from './batchSource';
 import { generateDocumentNumber } from '../../utils/documentNumber';
@@ -460,11 +460,7 @@ export async function placeUnplacedStockInTx(
     : quantity.lt(0) && quantity.gte(unplaced) && held.plus(quantity).gte(0);
   if (!fits) throw driftExceeded(item, unplaced, quantity);
   // Only the warehouse row moves: the item total, book value and average stay (no ledger row).
-  await tx.inventoryStock.upsert({
-    where: { itemId_warehouseId: { itemId: item.id, warehouseId: input.warehouseId } },
-    create: { itemId: item.id, warehouseId: input.warehouseId, currentStock: quantity.toString() },
-    update: { currentStock: { increment: quantity.toString() } },
-  });
+  await placeUnplacedStock(tx, { itemId: item.id, warehouseId: input.warehouseId, quantity });
 }
 
 /**

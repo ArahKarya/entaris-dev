@@ -25,8 +25,6 @@ const ALLOWLIST: Record<string, Counts> = {
   'routes/settings/dummyData.ts': { 'accountingLedgerEntry.deleteMany': 1, 'journalItem.deleteMany': 1, 'journalEntry.deleteMany': 1 },
   'routes/stockOpname.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'routes/vendorDeposits.ts': { 'journalEntry.create': 3, 'accountingLedgerEntry.createMany': 3 },
-  'scripts/fixLandedCost.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
-  'scripts/fixPotonganAllocation.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },
   'scripts/repair/e1-journal-source-backfill.ts': { 'journalEntry.updateMany': 2 },
   'services/cogsBackfillReverse.ts': { 'journalEntry.update': 2, 'accountingLedgerEntry.updateMany': 2 },
   'services/cogsBackfillService.ts': { 'journalEntry.create': 1, 'accountingLedgerEntry.createMany': 1 },

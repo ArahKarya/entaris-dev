@@ -1,15 +1,12 @@
 import type { Prisma } from '@prisma/client';
+import Decimal from 'decimal.js';
 import { BusinessError } from '../../utils/errors';
-import { generateDocumentNumber } from '../../utils/documentNumber';
-import { calcWeightedAverage } from '../../utils/weightedAverage';
-import { adjustWarehouseStock } from '../../utils/warehouseStock';
 import { journalFamilyWhere } from '../../utils/journalFamily';
 import type { CancelTrail } from '../../utils/cancelClaim';
 import type { JournalLineInput } from '../../utils/journalLineRules';
 import { systemAccounts } from '../systemAccounts';
 import { settleCogsBackfillForItem } from '../cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../cogsBackfillReverse';
-import { recomputeAverageCostFromReplay } from '../averageCostRecompute';
 import { persistOeeInTx } from '../oee';
 import { buildProductionRunLineItems } from '../productionRunLines';
 import { DOCUMENT_RULE } from '../ledger/accountGuard';
@@ -17,15 +14,26 @@ import { cancelJournalsInTx, findDocumentJournals } from '../ledger/cancelJourna
 import { postJournal } from '../ledger/postJournal';
 import { productionDiffAccounts } from '../ledger/systemRoleAccounts';
 import { assertStockAvailable, lockInventoryRows, STOCK_INSUFFICIENT, type StockShortage } from '../inventory/stockLocks';
-import type { ProductionCosting, ProductionJournalPlan } from './productionCosting';
+import { postInbound, postOutbound, reverseDocumentMovements } from '../inventory/inventoryLedger';
+import {
+  computeProductionCosting,
+  type CostingCostLine,
+  type CostingOutputLine,
+  type ProductionCosting,
+  type ProductionJournalPlan,
+} from './productionCosting';
 import type { CostedInput } from './productionCostContext';
 
 /**
  * Production posting (E6-R1): the one place a run's effects are written and undone. Submit and edit
  * post through postProductionEffectsInTx, edit and cancel undo through reverseProductionEffectsInTx,
  * and the journal goes through postJournal (owner decision #14: source SYSTEM_DOC, the document
- * account rule, balances applied per line). Stock moves through three thin primitives
- * (consumeInput / receiveOutput / reverseRunMovements) that the inventory ledger replaces (PR-6.4e).
+ * account rule, balances applied per line). Stock and value move through the inventory value ledger
+ * (E3-R6, PR-6.4e) in a fixed order: every input out through postOutbound (the ledger decides its
+ * value), the actual values into computeProductionCosting, every output in through postInbound at its
+ * line value (a by-product at NRV 0 included: it dilutes the average), then the journal of the same
+ * amounts; the rounding rest of the plan goes to COGS. Reversal takes every row back at its own
+ * value (reverseDocumentMovements).
  *
  * Lock order (services/inventory/stockLocks.ts): the run (submit: its PR number; edit: the run row;
  * cancel: the cancel claim), then lockProductionStockInTx once with every item of the run, old and
@@ -47,6 +55,8 @@ interface MovementContext {
   notes: string | null;
   userId: string;
 }
+
+const PRODUCTION_REFERENCE = 'ProductionRun';
 
 /** Journal base number of a run; edits post `<base>-R<n>` revisions under it. */
 export const productionJournalBase = (runNumber: string): string => `JV-${runNumber}`;
@@ -70,91 +80,53 @@ export async function nextRevisionNumber(tx: Tx, base: string): Promise<string> 
 }
 
 // ---------------------------------------------------------------------------------------------
-// Stock primitives
+// Stock through the value ledger
 // ---------------------------------------------------------------------------------------------
 
-/** Stock out of one input line at its costed value, with its batch back-link. */
-export async function consumeInput(
+const movementFields = (ctx: MovementContext) => ({
+  warehouseId: ctx.warehouseId,
+  date: ctx.date,
+  fiscalYearId: ctx.fiscalYearId,
+  createdById: ctx.userId,
+  referenceType: PRODUCTION_REFERENCE,
+  referenceId: ctx.run.id,
+  referenceNumber: ctx.run.runNumber,
+  notes: ctx.notes,
+});
+
+/**
+ * Takes every input out through postOutbound, in item id order (lines of one item in line order:
+ * a later line takes the value the earlier one left, the last one up to the whole remainder), and
+ * returns the value each line took out (−valueDelta), in line order. The picked batch is stored as
+ * the row's back-link only.
+ */
+async function consumeInputs(
   tx: Tx,
   ctx: MovementContext,
-  line: { itemId: string; quantity: number; unitCost: number; totalValue: number; sourceMovementId: string | null },
-): Promise<void> {
-  await tx.inventoryItem.update({
-    where: { id: line.itemId },
-    data: { currentStock: { decrement: line.quantity } },
-  });
-  await adjustWarehouseStock(tx, line.itemId, ctx.warehouseId, -line.quantity);
-
-  const movementNumber = await generateDocumentNumber(tx, 'SM', ctx.date, ctx.fiscalYearId);
-  await tx.stockMovement.create({
-    data: {
-      movementNumber,
-      date: ctx.date,
+  lines: ReadonlyArray<{ itemId: string; quantity: number; sourceMovementId: string | null }>,
+): Promise<Decimal[]> {
+  const order = lines.map((line, index) => ({ line, index }))
+    .sort((a, b) => (a.line.itemId < b.line.itemId ? -1 : a.line.itemId > b.line.itemId ? 1 : a.index - b.index));
+  const values: Decimal[] = new Array(lines.length);
+  for (const { line, index } of order) {
+    const posted = await postOutbound(tx, {
+      ...movementFields(ctx),
       itemId: line.itemId,
-      warehouseId: ctx.warehouseId,
       movementType: 'Out',
       quantity: line.quantity,
-      unitCost: line.unitCost,
-      totalValue: line.totalValue,
       // Batch back-link so /items/:id/batches can sum consumption from every source.
       sourceMovementId: line.sourceMovementId,
-      referenceType: 'ProductionRun',
-      referenceId: ctx.run.id,
-      referenceNumber: ctx.run.runNumber,
-      notes: ctx.notes,
-      fiscalYearId: ctx.fiscalYearId,
-      createdById: ctx.userId,
-    },
-  });
-}
-
-/** Stock in of one output line; a priced line (unit cost > 0) is blended into the item's WAC. */
-export async function receiveOutput(
-  tx: Tx,
-  ctx: MovementContext,
-  line: { itemId: string; quantity: number; unitCost: number; totalValue: number; unitCostLoaded: number | null },
-): Promise<void> {
-  const item = await tx.inventoryItem.findUnique({ where: { id: line.itemId } });
-  const newAvgCost = item && line.unitCost > 0
-    ? calcWeightedAverage(item.currentStock, item.averageCost, line.quantity, line.unitCost)
-    : undefined;
-
-  await tx.inventoryItem.update({
-    where: { id: line.itemId },
-    data: {
-      currentStock: { increment: line.quantity },
-      ...(newAvgCost !== undefined ? { averageCost: newAvgCost } : {}),
-    },
-  });
-  await adjustWarehouseStock(tx, line.itemId, ctx.warehouseId, line.quantity);
-
-  const movementNumber = await generateDocumentNumber(tx, 'SM', ctx.date, ctx.fiscalYearId);
-  await tx.stockMovement.create({
-    data: {
-      movementNumber,
-      date: ctx.date,
-      itemId: line.itemId,
-      warehouseId: ctx.warehouseId,
-      movementType: 'In',
-      quantity: line.quantity,
-      unitCost: line.unitCost,
-      totalValue: line.totalValue,
-      unitCostLoaded: line.unitCostLoaded,
-      referenceType: 'ProductionRun',
-      referenceId: ctx.run.id,
-      referenceNumber: ctx.run.runNumber,
-      notes: ctx.notes,
-      fiscalYearId: ctx.fiscalYearId,
-      createdById: ctx.userId,
-    },
-  });
+    });
+    values[index] = posted.valueDelta.negated();
+  }
+  return values;
 }
 
 /**
  * Locks every item a production transaction touches, once and before its first stock write or SM/JV
  * number (stockLocks.ts LOCK ORDER): the items of the run's active movements (an edit or cancel
  * reverses them; their rows at the movement warehouse) and the new input and output lines at the
- * production warehouse. The cost context reads stock and WAC only after this.
+ * production warehouse. The cost context and the ledger read stock and value only after this.
  */
 export async function lockProductionStockInTx(
   tx: Tx,
@@ -169,7 +141,7 @@ export async function lockProductionStockInTx(
 ): Promise<void> {
   const old = args.runId
     ? await tx.stockMovement.findMany({
-      where: { referenceType: 'ProductionRun', referenceId: args.runId, isCancelled: false },
+      where: { referenceType: PRODUCTION_REFERENCE, referenceId: args.runId, isCancelled: false },
       select: { itemId: true, warehouseId: true },
     })
     : [];
@@ -192,8 +164,8 @@ export interface ReverseRunOptions {
   /** Skip the guard that an output's stock still covers its reversal; logged instead. */
   allowNegativeStock?: boolean;
   negativeStockReason?: string | null;
-  /** The user editing or cancelling, for the bypass log. */
-  userId?: string;
+  /** The user editing or cancelling, for the bypass log and the ledger reversal. */
+  userId: string;
 }
 
 function outputUsedError(mode: ProductionReversalMode, s: StockShortage): BusinessError {
@@ -209,13 +181,18 @@ function outputUsedError(mode: ProductionReversalMode, s: StockShortage): Busine
 }
 
 /**
- * Reverses the run's active stock movements (restores stock, marks them cancelled). Reversing the
- * outputs must not drive stock negative at the movement's warehouse (lines of one item summed)
- * unless bypassed, which is logged. Call it under lockProductionStockInTx. Returns the items touched.
+ * Takes the run's active stock movements back through the value ledger, each at its own quantity
+ * and value_delta (reverseDocumentMovements): the inputs return the value they took out, the outputs
+ * take back the value they put in, which is what the voided journal carried, so book = GL.
+ * Reversing the outputs must not drive stock negative at the movement's warehouse (lines of one item
+ * summed) unless bypassed, which is logged. An output whose item went out since it was received is
+ * refused with REVERSAL_NEEDS_TRUE_UP (value true-up, PR-6.5a / PR-6.12), also one received at value
+ * 0 (a by-product at NRV 0) that diluted the average the later sales were valued at; an edit is
+ * refused in its own words. Call it under lockProductionStockInTx.
  */
-export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRunOptions): Promise<Set<string>> {
+export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRunOptions): Promise<void> {
   const movements = await tx.stockMovement.findMany({
-    where: { referenceType: 'ProductionRun', referenceId: runId, isCancelled: false },
+    where: { referenceType: PRODUCTION_REFERENCE, referenceId: runId, isCancelled: false },
   });
   const isIn = (type: string) => type === 'In' || type === 'AdjustmentIn';
   await assertStockAvailable(
@@ -230,21 +207,7 @@ export async function reverseRunMovements(tx: Tx, runId: string, opts: ReverseRu
       error: (s) => outputUsedError(opts.mode, s),
     },
   );
-
-  const affectedItemIds = new Set<string>();
-  for (const mov of movements) {
-    affectedItemIds.add(mov.itemId);
-    const qty = Number(mov.quantity);
-    const isOut = mov.movementType === 'Out' || mov.movementType === 'AdjustmentOut';
-    const reverseDelta = isOut ? qty : -qty;
-    await tx.inventoryItem.update({
-      where: { id: mov.itemId },
-      data: { currentStock: { increment: reverseDelta } },
-    });
-    await adjustWarehouseStock(tx, mov.itemId, mov.warehouseId, reverseDelta);
-    await tx.stockMovement.update({ where: { id: mov.id }, data: { isCancelled: true } });
-  }
-  return affectedItemIds;
+  await reverseDocumentMovements(tx, { referenceType: PRODUCTION_REFERENCE, referenceId: runId }, { userId: opts.userId, forEdit: opts.mode === 'edit' });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -335,20 +298,48 @@ export interface ProductionEffectsInput {
   notes: string | null;
   userId: string;
   inputs: ReadonlyArray<{ itemId: string; quantity: number }>;
-  outputs: ReadonlyArray<{ itemId: string; quantity: number }>;
+  outputs: ReadonlyArray<CostingOutputLine & { itemId: string }>;
+  costs?: ReadonlyArray<CostingCostLine>;
+  hppOverride?: number | null;
+  /** The batch link per input (same order), from the cost context. */
   costedInputs: ReadonlyArray<CostedInput>;
-  costing: ProductionCosting;
   itemMap: ReadonlyMap<string, { name: string; accountId: string | null }>;
   /** true for an edit: the journal is the next `-R<n>` revision. */
   revision: boolean;
 }
 
+/** Puts every output into stock through postInbound at its line value, then settles earlier negative-stock sales of it. */
+async function receiveOutputs(tx: Tx, ctx: MovementContext, input: ProductionEffectsInput, costing: ProductionCosting): Promise<void> {
+  for (let i = 0; i < input.outputs.length; i++) {
+    const output = input.outputs[i]!;
+    const { totalValue, unitCostLoaded } = costing.outputLines[i]!;
+    const posted = await postInbound(tx, {
+      ...movementFields(ctx),
+      itemId: output.itemId,
+      movementType: 'In',
+      quantity: output.quantity,
+      value: totalValue,
+      unitCostLoaded,
+    });
+    await settleCogsBackfillForItem(tx, {
+      itemId: output.itemId,
+      qtyAvailable: output.quantity,
+      unitCostNow: posted.unitCost.toNumber(),
+      userId: input.userId,
+      settleDate: input.date,
+      source: { type: PRODUCTION_REFERENCE, refId: ctx.run.id, refNo: ctx.run.runNumber },
+    });
+  }
+}
+
 /**
- * Posts a run's effects: inputs out, outputs in (settling earlier negative-stock sales of the
- * output), then one journal through postJournal. A plan with no value posts no journal.
+ * Posts a run's effects in the ledger order of the header: inputs out (valued by the ledger), the
+ * costing of those values, outputs in at their line values (settling earlier negative-stock sales of
+ * the output), then one journal through postJournal of the same amounts. A plan with no value posts
+ * no journal. Returns the costing, which the caller persists.
  */
-export async function postProductionEffectsInTx(tx: Tx, input: ProductionEffectsInput): Promise<void> {
-  const { run, costing } = input;
+export async function postProductionEffectsInTx(tx: Tx, input: ProductionEffectsInput): Promise<ProductionCosting> {
+  const { run } = input;
   const ctx: MovementContext = {
     run,
     date: input.date,
@@ -358,30 +349,18 @@ export async function postProductionEffectsInTx(tx: Tx, input: ProductionEffects
     userId: input.userId,
   };
 
-  for (let i = 0; i < input.inputs.length; i++) {
-    const line = costing.inputLines[i]!;
-    await consumeInput(tx, ctx, {
-      itemId: input.inputs[i]!.itemId,
-      quantity: input.inputs[i]!.quantity,
-      unitCost: line.unitCost,
-      totalValue: line.totalValue,
-      sourceMovementId: input.costedInputs[i]!.sourceMovementId,
-    });
-  }
-
-  for (let i = 0; i < input.outputs.length; i++) {
-    const output = input.outputs[i]!;
-    const { unitCost, totalValue, unitCostLoaded } = costing.outputLines[i]!;
-    await receiveOutput(tx, ctx, { itemId: output.itemId, quantity: output.quantity, unitCost, totalValue, unitCostLoaded });
-    await settleCogsBackfillForItem(tx, {
-      itemId: output.itemId,
-      qtyAvailable: output.quantity,
-      unitCostNow: unitCost,
-      userId: input.userId,
-      settleDate: input.date,
-      source: { type: 'ProductionRun', refId: run.id, refNo: run.runNumber },
-    });
-  }
+  const consumed = await consumeInputs(tx, ctx, input.inputs.map((line, i) => ({
+    itemId: line.itemId,
+    quantity: line.quantity,
+    sourceMovementId: input.costedInputs[i]!.sourceMovementId,
+  })));
+  const costing = computeProductionCosting({
+    inputs: input.inputs.map((line, i) => ({ quantity: line.quantity, value: consumed[i]! })),
+    outputs: input.outputs,
+    costs: input.costs,
+    hppOverride: input.hppOverride,
+  });
+  await receiveOutputs(tx, ctx, input, costing);
 
   const nameOf = (line: { itemId: string }) => input.itemMap.get(line.itemId)?.name || '';
   const inputNames = input.inputs.map(nameOf);
@@ -393,7 +372,7 @@ export async function postProductionEffectsInTx(tx: Tx, input: ProductionEffects
     itemMap: input.itemMap,
   });
   const lines = productionJournalLines({ plan: costing.journalPlan, accounts, inputNames, outputNames, runNumber: run.runNumber });
-  if (lines.length === 0) return;
+  if (lines.length === 0) return costing;
 
   const base = productionJournalBase(run.runNumber);
   await postJournal(tx, {
@@ -407,6 +386,7 @@ export async function postProductionEffectsInTx(tx: Tx, input: ProductionEffects
     partyRule: 'off',
     expectFiscalYearId: input.fiscalYearId,
   });
+  return costing;
 }
 
 export interface ReverseProductionOptions extends ReverseRunOptions {
@@ -415,18 +395,15 @@ export interface ReverseProductionOptions extends ReverseRunOptions {
 }
 
 /**
- * Undoes a run's effects for an edit or a cancel: reverse its movements, replay the WAC of every
- * touched item (inputs too: restored stock changes the base later inbound moves were blended
- * against; historical COGS stays), void its journals (JV-<run> and its revisions, balances
- * reversed per line), after reversing the COGS auto-settlements it triggered.
+ * Undoes a run's effects for an edit or a cancel: reverse the COGS auto-settlements it triggered,
+ * take its movements back at their own values through the ledger (the averages follow from the
+ * restored stock_value; no replay), then void its journals (JV-<run> and its revisions, balances
+ * reversed per line).
  */
 export async function reverseProductionEffectsInTx(tx: Tx, run: RunRef, opts: ReverseProductionOptions): Promise<void> {
   // The COGS settlements the run triggered first: they were posted on the book its outputs left.
-  await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', run.id);
-  const affectedItemIds = await reverseRunMovements(tx, run.id, opts);
-  for (const itemId of affectedItemIds) {
-    await recomputeAverageCostFromReplay(tx, itemId);
-  }
+  await reverseCogsSettlementsByTrigger(tx, PRODUCTION_REFERENCE, run.id);
+  await reverseRunMovements(tx, run.id, opts);
   await cancelJournalsInTx(tx, await findDocumentJournals(tx, productionJournalBase(run.runNumber)), {
     label: 'produksi',
     trail: opts.trail,
@@ -460,8 +437,8 @@ export async function clearProductionRunDetails(tx: Tx, runId: string): Promise<
 
 /**
  * Persists what the run records besides its stock and journal: line items, cost component
- * snapshots, OEE rows (quality/output derived from the item lines), the HPP breakdown on the run,
- * and the selected processes.
+ * snapshots, OEE rows (quality/output derived from the item lines), the yield and HPP breakdown on
+ * the run, and the selected processes.
  */
 export async function persistProductionRunDetails(
   tx: Tx,
@@ -481,6 +458,7 @@ export async function persistProductionRunDetails(
       inputs: body.inputs,
       outputs: body.outputs,
       batchSnapshots: args.costedInputs,
+      inputCosting: costing.inputLines,
       outputCosting: costing.outputLines,
     }),
   });
@@ -516,6 +494,7 @@ export async function persistProductionRunDetails(
   await tx.productionRun.update({
     where: { id: runId },
     data: {
+      yieldPct: costing.yieldPct,
       totalMaterialCost: costing.totalMaterialCost.toDecimalPlaces(4).toNumber(),
       totalCostInputSide: costing.totalCostInputSide.toDecimalPlaces(4).toNumber(),
       totalCostOutputSide: costing.totalCostOutputSide.toDecimalPlaces(4).toNumber(),

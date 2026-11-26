@@ -129,6 +129,8 @@ export interface ReverseOptions {
   sweepAtZero?: boolean;
   /** Business day (YYYY-MM-DD) of the sweep row and of the caller's COGS journal; default today (WIB). */
   journalDay?: string;
+  /** The reversal undoes a document for an edit: a refusal says so instead of naming a cancel. */
+  forEdit?: boolean;
 }
 
 export interface ReverseResult {
@@ -349,6 +351,19 @@ export async function postTransfer(tx: Tx, i: TransferInput): Promise<PostedTran
 }
 
 /**
+ * Item vs warehouse drift repair `assign` (PR-6.3d): books `quantity` of stock that no warehouse
+ * holds into `warehouseId`; a negative quantity takes a warehouse's excess over the item total back
+ * out of it. Only the warehouse row moves: the item total, stock_value and average stay, and no
+ * movement row is written. The caller checks under the lock that the quantity fits the drift.
+ */
+export async function placeUnplacedStock(tx: Tx, i: { itemId: string; warehouseId: string; quantity: Decimal.Value }): Promise<void> {
+  const quantity = new Decimal(i.quantity);
+  if (!quantity.isFinite() || quantity.isZero()) throw new Error('placeUnplacedStock: quantity must be a non-zero amount');
+  await lockItem(tx, i.itemId, i.warehouseId);
+  await writeStock(tx, i.itemId, i.warehouseId, quantity, null);
+}
+
+/**
  * Links the journal the caller posted for a ledger row (the outbound pattern in the header). Only an
  * empty journal_entry_id is filled; a row that is cancelled or already linked is refused.
  */
@@ -398,7 +413,15 @@ async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
   return later !== null;
 }
 
-function needsTrueUp(itemName: string, next: ItemState): BusinessError {
+function needsTrueUp(itemName: string, next: ItemState, forEdit: boolean): BusinessError {
+  if (forEdit) {
+    return new BusinessError(
+      `Edit ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
+        + `(stok sesudahnya ${next.stock.toString()}, nilai ${next.value.toFixed(VALUE_DP)}). Koreksi nilai otomatis belum tersedia; hubungi akuntan.`,
+      REVERSAL_NEEDS_TRUE_UP,
+      409,
+    );
+  }
   return new BusinessError(
     `Pembatalan ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
       + `(stok sesudahnya ${next.stock.toString()}, nilai ${next.value.toFixed(VALUE_DP)}). Koreksi nilai otomatis belum tersedia; hubungi akuntan.`,
@@ -424,7 +447,9 @@ function residueAtZero(itemName: string, next: ItemState): BusinessError {
  *   reaches 0 and is swept: then the sweep makes the total COGS exact;
  * - an inbound reversal that moves value and leaves stock_value < 0, or stock > 0 with value <= 0;
  * - stock 0 with value left: swept when opts.sweepAtZero, refused otherwise (residueAtZero).
- * A row that carries no value moves none, so it never trips the first two rules.
+ * An inbound row that carries no value (a by-product at NRV 0, an output at HPP 0) still moved the
+ * average by its quantity, so taking it back after goods went out is refused the same way while
+ * value stays on hand; it moves no value, so the sign rules do not apply to it.
  */
 async function reversalSweep(
   tx: Tx,
@@ -432,16 +457,22 @@ async function reversalSweep(
   itemName: string,
   next: ItemState,
   valueDelta: Decimal,
-  sweepAtZero: boolean,
+  opts: ReverseOptions,
 ): Promise<Decimal> {
+  const sweepAtZero = opts.sweepAtZero === true;
+  const forEdit = opts.forEdit === true;
   // A Revaluation row changed the value of goods on hand like an inbound row, so taking it back has
   // the same exposure to goods that went out since.
   const inboundWithValue = (INBOUND_TYPES.has(movement.movementType) || movement.movementType === 'Revaluation') && !valueDelta.isZero();
   if (inboundWithValue && (next.value.lt(0) || (next.stock.gt(0) && next.value.lte(0)))) {
-    throw needsTrueUp(itemName, next);
+    throw needsTrueUp(itemName, next, forEdit);
   }
+  // A zero-value inbound row diluted the average the later outbound rows were valued at; taking its
+  // quantity back raises the average of what is left unless no value is left to spread.
+  const dilutedAverage = INBOUND_TYPES.has(movement.movementType) && valueDelta.isZero()
+    && !dec(movement.quantity).isZero() && !next.value.isZero();
   const sweptToZero = next.stock.isZero() && sweepAtZero;
-  if (inboundWithValue && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next);
+  if ((inboundWithValue || dilutedAverage) && !sweptToZero && await soldSince(tx, movement)) throw needsTrueUp(itemName, next, forEdit);
   if (!next.stock.isZero() || next.value.isZero()) return new Decimal(0);
   if (!sweepAtZero) throw residueAtZero(itemName, next);
   return next.value;
@@ -520,7 +551,7 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const qtyDelta = inbound ? quantity.negated() : quantity;
   const valueDelta = dec(movement.valueDelta).negated();
   const reversed = stateAfter(item, qtyDelta, valueDelta);
-  const residue = await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts.sweepAtZero === true);
+  const residue = await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts);
   // Every guard runs before the first write: a caller that catches a refusal keeps a whole book.
   const period = residue.isZero() ? null : await sweepPeriod(tx, opts);
 

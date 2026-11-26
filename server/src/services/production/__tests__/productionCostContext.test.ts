@@ -46,7 +46,7 @@ const body = (over: Partial<ProductionCostContextInput> = {}): ProductionCostCon
 const opts = { warehouseId: 'wh-a', context: 'test' };
 
 describe('loadProductionCostContext', () => {
-  it('costs an unpicked input at WAC and a picked one at the client snapshot, else the batch cost', async () => {
+  it('links a picked batch with its snapshot (the client snapshot, else the batch cost) and decides no cost', async () => {
     const ctx = await loadProductionCostContext(txWith(), body({
       inputs: [
         { itemId: 'gkp', quantity: 400 },
@@ -54,18 +54,13 @@ describe('loadProductionCostContext', () => {
         { itemId: 'gkp', quantity: 300, sourceMovementId: 'sm-batch' },
       ],
     }), opts);
+    // The ledger values every input when it posts it (E3-R6); the snapshot is display only (E6-R3).
     expect(ctx.inputs).toEqual([
-      { sourceMovementId: null, batchUnitCost: null, unitCost: 6000 },
-      { sourceMovementId: 'sm-batch', batchUnitCost: 5900, unitCost: 5900 },
-      { sourceMovementId: 'sm-batch', batchUnitCost: 5800, unitCost: 5800 },
+      { sourceMovementId: null, batchUnitCost: null },
+      { sourceMovementId: 'sm-batch', batchUnitCost: 5900 },
+      { sourceMovementId: 'sm-batch', batchUnitCost: 5800 },
     ]);
     expect(ctx.itemMap.get('beras')?.name).toBe('Beras');
-  });
-
-  it('costs an input with a non-positive WAC at 0', async () => {
-    const list = items.map((i) => (i.id === 'gkp' ? { ...i, averageCost: -5 } : i));
-    const ctx = await loadProductionCostContext(txWith(list), body(), opts);
-    expect(ctx.inputs[0]!.unitCost).toBe(0);
   });
 
   it('rejects short stock at the production warehouse, lines of one item summed, unless bypassed', async () => {

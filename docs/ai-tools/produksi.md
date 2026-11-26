@@ -43,10 +43,10 @@ Master pendukung: `Machine` (kapasitas ideal per jam untuk OEE), `ProductionProc
 
 Saat sebuah run diposting (langsung oleh Admin, atau setelah disetujui):
 
-1. **Input**: stok bahan keluar (SM `Out` per baris input) di gudang run. Batch sumber boleh dipilih (`sourceMovementId`, biaya batch dikunci); tanpa batch dipakai WAC item.
-2. **Output**: stok produk masuk (SM `In`) dan WAC item output dihitung ulang (rata-rata tertimbang). Output **utama** dan **produk samping** (`isByProduct=true`) sama-sama masuk stok.
+1. **Input**: stok bahan keluar (SM `Out` per baris input) di gudang run, dinilai dari **buku nilai persediaan** (bagian nilai sebanding qty; baris yang menghabiskan stok membawa sisa nilainya). Batch sumber boleh dipilih (`sourceMovementId`), tetapi hanya untuk penelusuran: `batchUnitCost` dan biaya batch tidak menentukan nilai.
+2. **Output**: stok produk masuk (SM `In`) sebesar nilai barisnya dan rata-rata item output mengikuti nilai buku. Output **utama** dan **produk samping** (`isByProduct=true`) sama-sama masuk stok; produk samping NRV 0 ikut menurunkan rata-rata (mis. sekam 500 kg senilai 100.000 + 1.000 kg NRV 0 -> rata-rata 66,666667).
 3. **HPP terbebani per kg output utama**:
-   `(nilai bahan input + biaya sisi input + biaya sisi output - nilai produk samping) / qty output utama`.
+   `(nilai bahan input + biaya sisi input + biaya sisi output - nilai produk samping) / qty output utama`, dengan nilai bahan = nilai yang benar-benar keluar dari buku nilai.
    - Nilai produk samping = qty x NRV (`unitPrice` produk samping **wajib** diisi, >= 0).
    - Bila pembilang negatif (NRV samping > biaya) HPP dikunci 0 dan dicatat peringatan.
    - `hppOverride` (>= 0) mengunci HPP per kg secara manual.
@@ -59,7 +59,7 @@ Saat sebuah run diposting (langsung oleh Admin, atau setelah disetujui):
 5. **COGS backfill**: penjualan yang sebelumnya keluar saat stok minus diselesaikan terhadap output baru.
 6. **Yield** = qty output utama / qty total input x 100 (%); disimpan di run. Bila data mesin/waktu diisi, metrik OEE dihitung per mesin.
 
-Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang, semua jurnal berawalan `JV-<nomor>` dibatalkan), lalu efek baru diterapkan dengan **nomor run yang sama** dan jurnal revisi `JV-<nomor>-R<n>`. Pembatalan (`prod_run_cancel`): stok dibalik, WAC output dihitung ulang dari pergerakan masuk yang tersisa, jurnal (termasuk revisi) dibatalkan.
+Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesar nilainya di buku nilai, semua jurnal berawalan `JV-<nomor>` dibatalkan), lalu efek baru diterapkan dengan **nomor run yang sama** dan jurnal revisi `JV-<nomor>-R<n>`. Pembatalan (`prod_run_cancel`): stok dan nilai dibalik persis, jurnal (termasuk revisi) dibatalkan. Keduanya ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila output run sudah keluar sejak diterima (koreksi nilai otomatis belum tersedia).
 
 ### Persetujuan
 
@@ -782,7 +782,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 | `inputs` | body | `array<object>` | ya | Baris bahan input: [{itemId, quantity, sourceMovementId?(batch), batchUnitCost?}]. |
 | `inputs[].itemId` | body | `string` | ya |  |
 | `inputs[].quantity` | body | `number` | ya |  |
-| `inputs[].sourceMovementId` | body | `uuid` | tidak | fall back to WAC-based costing (legacy behavior). |
+| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch). |
 | `inputs[].batchUnitCost` | body | `number` | tidak |  |
 | `outputs` | body | `array<object>` | ya | Baris output: [{itemId, quantity, unitPrice?, isByProduct}]. Output utama tanpa unitPrice diisi HPP terhitung; produk samping WAJIB unitPrice (NRV). |
 | `outputs[].itemId` | body | `string` | ya |  |
@@ -1065,7 +1065,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 **Isi hasil:** Bypass: 201 production run yang dibuat. Non-bypass: 202 {pendingApproval:true, request, message}.
 
-**Efek pembukuan/stok:** Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).
+**Efek pembukuan/stok:** Cabang bypass: stok input keluar (SM Out, dinilai dari buku nilai persediaan; batch terpilih hanya penelusuran, tidak menentukan nilai) & output masuk (SM In) sebesar nilai baris, termasuk produk samping NRV 0 yang ikut menurunkan rata-rata; COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).
 
 **Teks konfirmasi:** Posting draft produksi {id} menjadi Data Produksi? Stok, WAC, dan jurnal akan terbentuk (non-Admin: masuk antrian persetujuan).
 
@@ -1112,7 +1112,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 | `inputs` | body | `array<object>` | ya | Daftar bahan baku/input produksi (array objek). |
 | `inputs[].itemId` | body | `string` | ya |  |
 | `inputs[].quantity` | body | `number` | ya |  |
-| `inputs[].sourceMovementId` | body | `uuid` | tidak | fall back to WAC-based costing (legacy behavior). |
+| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch). |
 | `inputs[].batchUnitCost` | body | `number` | tidak |  |
 | `outputs` | body | `array<object>` | ya | Daftar hasil/output produksi (array objek). |
 | `outputs[].itemId` | body | `string` | ya |  |
@@ -1397,7 +1397,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 ### prod_run_cancel
 
-**Ringkasan:** Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.
+**Ringkasan:** Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, tiap baris persis sebesar nilainya di buku nilai persediaan (rata-rata mengikuti nilai buku, tidak dihitung ulang dari riwayat; ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output, juga produk samping bernilai 0, sudah keluar sejak diterima), jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.
 
 - **Risk / tier:** `critical` / Wajib-Approve
 - **Draft-capable:** tidak (efek langsung)
@@ -1439,7 +1439,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 **Isi hasil:** {message: 'Proses produksi berhasil dibatalkan.'}
 
-**Efek pembukuan/stok:** Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal.
+**Efek pembukuan/stok:** Stok input dikembalikan dan stok output dikurangi, masing-masing persis sebesar nilainya di buku nilai persediaan (ditolak bila stok output tidak cukup kecuali allowNegativeStock); rata-rata mengikuti nilai buku; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output (juga produk samping bernilai 0, yang ikut menurunkan rata-rata) sudah keluar sejak diterima, juga lewat bypass stok minus.
 
 **Teks konfirmasi:** Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.
 
@@ -1459,6 +1459,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan
 - 400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
+- 409 REVERSAL_NEEDS_TRUE_UP: output run ini (juga produk samping bernilai 0) sudah keluar sejak diterima, dari gudang dan dokumen mana pun (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get)
 
@@ -1624,7 +1625,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 | `inputs` | body | `array<object>` | ya | Baris input baru (menggantikan semua baris lama). |
 | `inputs[].itemId` | body | `string` | ya |  |
 | `inputs[].quantity` | body | `number` | ya |  |
-| `inputs[].sourceMovementId` | body | `uuid` | tidak | fall back to WAC-based costing (legacy behavior). |
+| `inputs[].sourceMovementId` | body | `uuid` | tidak | Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch). |
 | `inputs[].batchUnitCost` | body | `number` | tidak |  |
 | `outputs` | body | `array<object>` | ya | Baris output baru (menggantikan semua baris lama). |
 | `outputs[].itemId` | body | `string` | ya |  |
@@ -1702,7 +1703,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 
 **Isi hasil:** Bypass: run hasil edit (200). Non-bypass: 202 {pendingApproval, request}.
 
-**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.
+**Efek pembukuan/stok:** Cabang bypass (Admin): stok input/output lama dibalik persis sebesar nilainya di buku nilai persediaan (ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output, juga produk samping bernilai 0, sudah keluar sejak diterima; berlaku juga untuk edit header saja seperti mesin, shift, atau catatan), jurnal lama dibatalkan, stok & jurnal baru diposting (input dinilai dari buku nilai) (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.
 
 **Teks konfirmasi:** Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).
 
@@ -1723,6 +1724,7 @@ Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang
 - 400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)
 - 400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama (juga saat disetujui; pengajuan tetap Pending)
 - 400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal revisi tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem (juga saat disetujui; pengajuan tetap Pending)
+- 409 REVERSAL_NEEDS_TRUE_UP: output run ini (juga produk samping bernilai 0) sudah keluar sejak diterima, dari gudang dan dokumen mana pun; edit ditolak (juga edit header saja: mesin, shift, catatan) sampai koreksi nilai otomatis tersedia, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)
 
 **Tool terkait:** [`prod_run_get`](#prod_run_get), [`prod_run_cancel`](#prod_run_cancel)
 

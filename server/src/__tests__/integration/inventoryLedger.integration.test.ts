@@ -7,7 +7,8 @@
  * - reversing a row that carries no value (as the backfill left a legacy zero-cost row): the
  *   quantity comes back, the value does not move, and it is logged;
  * - reversing an inbound row after the goods were sold: REVERSAL_NEEDS_TRUE_UP, nothing changes,
- *   also when stock and value both stay positive;
+ *   also when stock and value both stay positive, and for a row received at value 0 (it diluted the
+ *   average the sale was valued at);
  * - stock that reaches 0 with value left: refused without sweepAtZero, swept to toCogs with it; a
  *   closed sweep period refuses before the row is claimed;
  * - linkMovementJournal fills an empty journal link once;
@@ -210,6 +211,23 @@ d('inventoryLedger (PR-6.4b2)', () => {
       expect(await itemState(tx, w)).toEqual(before);
       expect(before).toEqual({ stock: '150.000', value: '2250000.00', average: '15000.000000', warehouse: '150.000' });
       expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: a.movement.id } })).isCancelled).toBe(false);
+    });
+  });
+
+  it('refuses to reverse a value-0 inbound row after a sale at the average it diluted', async () => {
+    await inWorld(async (tx, w) => {
+      await stockIn(tx, w, 500, 100_000);
+      const free = await stockIn(tx, w, 1_000, 0); // average 66,666667
+      await stockOut(tx, w, 300); // 20.000 out; 1.200 left at 80.000
+      const before = await itemState(tx, w);
+
+      // Taken back it would leave 200 at 80.000 (average 400): the sale was valued at a third of that.
+      const err = await refusal(() => reverseMovement(tx, free.movement.id, { userId: w.userId, sweepAtZero: true }));
+
+      expect(err).toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP, status: 409 });
+      expect(await itemState(tx, w)).toEqual(before);
+      expect(before).toEqual({ stock: '1200.000', value: '80000.00', average: '66.666667', warehouse: '1200.000' });
+      expect((await tx.stockMovement.findUniqueOrThrow({ where: { id: free.movement.id } })).isCancelled).toBe(false);
     });
   });
 
