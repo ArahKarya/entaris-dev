@@ -29,7 +29,7 @@ Hanya langkah berikut yang menyentuh stok/GL; semuanya dikerjakan dalam satu tra
 |---|---|---|
 | Inquiry, Penawaran, SO (semua status), SJS | Tidak ada | Tidak ada |
 | `do_create`, `so_generate_do` | Keluar per item/gudang, unitCost = WAC saat kirim (dikunci) | Tidak ada (HPP menunggu invoice) |
-| `do_update` | Hanya selisih qty: baris yang tidak berubah tetap, qty turun kembali pada biaya asli, tambahan dan baris baru pada rata-rata saat ini | Tidak ada |
+| `do_update` | Hanya selisih qty: baris yang tidak berubah tetap, qty turun kembali pada biaya asli, tambahan dan baris baru pada rata-rata saat ini (tambahan qty di baris yang sama ditolak bila sudah ada barang masuk sesudahnya: pakai baris baru) | Tidak ada; bila barang sudah keluar sesudah SJ, qty yang dikembalikan dikoreksi nilainya seperti `do_cancel` (DR/CR Persediaan lawan COGS) |
 | `do_patch` | Tidak ada (header saja: sopir, no. mobil, penerima, catatan) | Tidak ada |
 | `do_cancel` | Stok dikembalikan | Tidak ada |
 | `do_from_invoice` | Tidak ada (stok sudah dipotong invoice) | Tidak ada |
