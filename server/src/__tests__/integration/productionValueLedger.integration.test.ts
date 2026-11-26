@@ -10,7 +10,10 @@
  *   back at its own value;
  * - two input lines of one item, the second taking the rest of the book: the credits are the
  *   ledger values (33.333,33 + 66.666,67, not 20.000 x 3,333333 = 66.666,66), and the output is
- *   debited exactly that total.
+ *   debited exactly that total;
+ * - the NRV 0 by-product partly sold (300 of 1.500 kg at the diluted average): cancelling or editing
+ *   the run is refused with REVERSAL_NEEDS_TRUE_UP and nothing moves (taken back, the 0-value row
+ *   would leave 200 kg worth 80.000 instead of 40.000) until the true-up of PR-6.5a / PR-6.12.
  * In every scenario the inventory amount of the run's journal equals Σ value_delta of its rows
  * (book = GL), and each ends with assertLedgerInvariant (warehouses included).
  */
@@ -29,6 +32,8 @@ vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
 import { systemAccounts } from '../../services/systemAccounts';
 import { submitProductionRunInTx, type SubmitProductionRunInput } from '../../services/productionRunSubmit';
 import { cancelProductionRunInTx } from '../../services/productionRunCancel';
+import { editProductionRunInTx } from '../../services/productionRunEdit';
+import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
 import { submitDeliveryOrderInTx } from '../../services/deliveryOrderSubmit';
 import { submitSalesInvoiceInTx } from '../../services/salesInvoiceSubmit';
 import {
@@ -93,6 +98,21 @@ async function inWorld(fn: (tx: Tx, world: World) => Promise<void>) {
 }
 
 const money = (v: Decimal.Value) => new Decimal(v).toFixed(2);
+
+let savepointSeq = 0;
+
+/** The refusal `fn` throws, inside a savepoint so whatever it wrote before the refusal is rolled back as a route's transaction would be. */
+async function refusalOf(tx: Tx, fn: () => Promise<unknown>): Promise<Error & { code?: string; status?: number }> {
+  const name = `pvl_${++savepointSeq}`;
+  await tx.$executeRawUnsafe(`SAVEPOINT ${name}`);
+  try {
+    await fn();
+  } catch (e) {
+    await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${name}`);
+    return e as Error & { code?: string; status?: number };
+  }
+  throw new Error('expected a refusal');
+}
 
 /** `qty` at `avg` into warehouse A (seedStock), for an item outside the world's set or an avg with more decimals. */
 function seedAt(tx: Tx, w: World, itemId: string, qty: number, avg: Decimal.Value) {
@@ -212,6 +232,8 @@ d('production on the value ledger (PR-6.4e)', () => {
       expect(gkpOut).toMatchObject({ type: 'Out', valueDelta: '-6000000.00', unitCost: '6000.000000', sourceMovementId: batch });
       const line = await tx.productionRunItem.findFirstOrThrow({ where: { productionRunId: run.id, itemId: w.items.gkp.id } });
       expect(Number(line.batchUnitCost)).toBe(7_000);
+      // The line's unit_price is the ledger cost the PDF and detail drawer show.
+      expect(Number(line.unitPrice)).toBe(6_000);
       const stored = await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } });
       // (6.000.000 + 300.000 − 200.000) / 600, not (7.000.000 + 300.000 − 200.000) / 600.
       expect(Number(stored.computedHpp)).toBe(10166.666667);
@@ -259,6 +281,46 @@ d('production on the value ledger (PR-6.4e)', () => {
       expect(jv.lines.cogs).toBeUndefined();
       expect(jv.lines.conversion).toBeUndefined();
       await expectJournalMatchesRows(tx, w, run.id, `JV-${run.runNumber}`);
+    });
+  });
+
+  it('a partly sold NRV 0 by-product: cancel and edit are refused with REVERSAL_NEEDS_TRUE_UP and nothing moves', async () => {
+    await inWorld(async (tx, w) => {
+      await seedWorldStock(tx, w, 'gkp', 1_000, 6_000);
+      await seedAt(tx, w, w.sekam.id, 500, 200);
+      const body = runBody(w, {
+        inputs: [{ itemId: w.items.gkp.id, quantity: 1_000 }],
+        outputs: [
+          { itemId: w.items.beras.id, quantity: 600 },
+          { itemId: w.sekam.id, quantity: 1_000, unitPrice: 0, isByProduct: true },
+        ],
+      });
+      const run = await submit(tx, w, body);
+      expect(await bookOf(tx, w.sekam.id)).toEqual({ stock: '1500.000', value: '100000.00', average: '66.666667' });
+
+      const customer = await tx.party.create({ data: { name: `IT-6.4e Customer ${Date.now()}`, partyType: 'Customer', isActive: true } });
+      await submitDeliveryOrderInTx(tx, {
+        date: worldDate(w, '03-20'),
+        partyId: customer.id,
+        items: [{ inventoryItemId: w.sekam.id, warehouseId: w.warehouseA.id, itemName: w.sekam.name, quantity: 300, unit: 'Kg' }],
+      }, w.userId);
+      // round(100.000 x 300 / 1.500) out; taken back, the 0-value row would leave 200 kg at 80.000 (average 400).
+      const before = await bookOf(tx, w.sekam.id);
+      expect(before).toEqual({ stock: '1200.000', value: '80000.00', average: '66.666667' });
+      const rowsBefore = await rowsOf(tx, run.id);
+
+      const cancel = await refusalOf(tx, () => cancelProductionRunInTx(tx, run.id, { userId: w.userId, reason: 'IT 6.4e batal' }));
+      expect(cancel).toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP, status: 409 });
+      expect(cancel.message).toMatch(/^Pembatalan ditolak: 'IT-6\.4e SEKAM'/);
+
+      const edit = await refusalOf(tx, () => editProductionRunInTx(tx, run.id, { ...body, notes: 'IT 6.4e edit' }, w.userId));
+      expect(edit).toMatchObject({ code: REVERSAL_NEEDS_TRUE_UP, status: 409 });
+      expect(edit.message).toMatch(/^Edit ditolak: 'IT-6\.4e SEKAM'/);
+
+      expect(await bookOf(tx, w.sekam.id)).toEqual(before);
+      expect(await rowsOf(tx, run.id)).toEqual(rowsBefore);
+      expect((await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } })).isCancelled).toBe(false);
+      expect((await journalLinesByRole(tx, w, `JV-${run.runNumber}`)).status).not.toBe('Cancelled');
     });
   });
 });

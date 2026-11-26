@@ -223,7 +223,8 @@
     },
     "inputs": {
       "batch": "Batch:",
-      "lockedCost": "Locked cost:",
+      "batchCost": "Batch price when picked:",
+      "ledgerCost": "Material cost (value ledger):",
       "title": "Input materials ({{count}})"
     },
     "journal": {

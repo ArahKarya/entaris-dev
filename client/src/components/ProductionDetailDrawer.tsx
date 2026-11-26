@@ -11,7 +11,7 @@ import { formatRupiah, formatDate } from '../lib/formatters';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { LoadingState, StatusBadge } from '@/components/shared';
-import { buildPdfProps } from './production/run-pdf-props';
+import { buildPdfProps, runLineUnitCost } from './production/run-pdf-props';
 import PDFDownloadButton from './PDFDownloadButton';
 import ProductionRunPDF from '../lib/pdf/ProductionRunPDF';
 import { useCompanyPDF } from '../lib/pdf/useCompanyPDF';
@@ -70,10 +70,7 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
   const oeeYieldPct = totalInputQty > 0
     ? Math.max(0, Math.min(1, (produkQty + sampingQty) / totalInputQty)) * 100
     : null;
-  const totalInputValue = inputLines.reduce((s: number, i: any) => {
-    const avg = Number(i.item?.averageCost ?? 0);
-    return s + Number(i.quantity) * avg;
-  }, 0);
+  const totalInputValue = inputLines.reduce((s: number, i: any) => s + Number(i.quantity) * runLineUnitCost(i), 0);
   const totalOutputValue = outputLines.reduce((s: number, o: any) => {
     return s + Number(o.quantity) * Number(o.unitPrice ?? 0);
   }, 0);
@@ -360,7 +357,7 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                 </h3>
                 <div className="space-y-1.5">
                   {inputLines.map((line: any) => {
-                    const lockedCost = line.batchUnitCost != null ? Number(line.batchUnitCost) : null;
+                    const batchCost = line.batchUnitCost != null ? Number(line.batchUnitCost) : null;
                     return (
                       <div key={line.id} className="bg-info-subtle/50 border border-info/30 rounded-lg px-3 py-2">
                         <div className="flex items-center justify-between">
@@ -372,6 +369,12 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                             {fmtNum(Number(line.quantity))} {line.item?.unit}
                           </span>
                         </div>
+                        {line.unitPrice != null && (
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            {t('productionDetailDrawer.inputs.ledgerCost')}{' '}
+                            <span className="font-mono">Rp {fmtRupiah4(Number(line.unitPrice))}/{line.item?.unit}</span>
+                          </div>
+                        )}
                         {/* Batch info if linked */}
                         {line.sourceMovement && (
                           <div className="mt-1 text-[11px] text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
@@ -381,10 +384,10 @@ export default function ProductionDetailDrawer({ runId, onClose, onCancel, canCa
                               {' '}
                               ({formatDate(line.sourceMovement.date)})
                             </span>
-                            {lockedCost != null && (
+                            {batchCost != null && (
                               <span>
-                                <span className="text-muted-foreground">{t('productionDetailDrawer.inputs.lockedCost')}</span>{' '}
-                                <span className="font-mono">Rp {fmtRupiah4(lockedCost)}/{line.item?.unit}</span>
+                                <span className="text-muted-foreground">{t('productionDetailDrawer.inputs.batchCost')}</span>{' '}
+                                <span className="font-mono">Rp {fmtRupiah4(batchCost)}/{line.item?.unit}</span>
                               </span>
                             )}
                           </div>

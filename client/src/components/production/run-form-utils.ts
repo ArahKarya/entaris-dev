@@ -5,8 +5,8 @@ import { LOCALE } from '@/lib/format';
 export interface LineItem {
   itemId: string;
   quantity: string;
-  // When sourceMovementId is set the server locks the cost to batchUnitCost;
-  // empty string falls back to WAC.
+  // sourceMovementId is the picked batch (a back-link); batchUnitCost is a display snapshot only:
+  // the server costs every input from the value ledger.
   sourceMovementId: string;
   batchUnitCost: string;
 }
