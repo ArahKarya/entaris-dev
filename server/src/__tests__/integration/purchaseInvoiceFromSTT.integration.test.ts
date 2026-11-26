@@ -19,6 +19,7 @@ import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit'
 import { cancelPurchaseInvoiceInTx } from '../../services/invoiceCancellation';
 import { revisePurchaseInvoiceInTx } from '../../services/purchaseInvoiceRevise';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
+import { batchUnitCosts } from '../../services/inventory/inventoryLedger';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -129,11 +130,12 @@ d('PI from STT — Phase 3 flow', () => {
         const stockAfter = Number((await tx.inventoryItem.findUnique({ where: { id: item.id } }))!.currentStock);
         expect(stockAfter).toBe(100);
 
-        // No PI-owned SM exists
+        // No PI-owned stock row exists; the landed-cost delta is one Revaluation on the STT movement.
         const piSMs = await tx.stockMovement.findMany({
           where: { referenceType: 'PurchaseInvoice', referenceId: pi.id, isCancelled: false },
         });
-        expect(piSMs.length).toBe(0);
+        expect(piSMs.map((m) => [m.movementType, Number(m.quantity), Number(m.valueDelta), m.adjustsMovementId]))
+          .toEqual([['Revaluation', 0, 100_000, grItem!.stockMovementId]]);
 
         // STT marked invoiced
         const sttAfter = await tx.goodsReceipt.findUnique({ where: { id: stt.id } });
@@ -205,7 +207,7 @@ d('PI from STT — Phase 3 flow', () => {
         expect(await avgOf(tx, item.id)).toBe(9_333.333333);
         const grItem = await tx.goodsReceiptItem.findFirstOrThrow({ where: { goodsReceiptId: stt.id } });
 
-        // PI at 10.400 for that 1 kg: landed +400 on 3 kg in stock -> (3 x 9.333,333333 + 400) / 3.
+        // PI at 10.400 for that 1 kg: landed +400 on 3 kg in stock -> stock_value 28.400 / 3.
         const pi = await submitPurchaseInvoiceInTx(tx, {
           date: today,
           partyId: supplierId,
@@ -214,19 +216,21 @@ d('PI from STT — Phase 3 flow', () => {
             rate: 10_400, taxPct: 0, pphPct: 0, goodsReceiptItemId: grItem.id,
           }],
         }, userId);
-        expect(await avgOf(tx, item.id)).toBe(9_466.666666);
+        expect(await avgOf(tx, item.id)).toBe(9_466.666667);
+        // The STT movement keeps its locked cost; the batch cost adds the invoice's Revaluation.
         const sttMove = await tx.stockMovement.findUniqueOrThrow({ where: { id: grItem.stockMovementId! } });
-        expect(Number(sttMove.unitCost)).toBe(10_400);
-        expect(Number(sttMove.totalValue)).toBe(10_400);
+        expect(Number(sttMove.unitCost)).toBe(10_000);
+        expect(Number(sttMove.totalValue)).toBe(10_000);
+        expect((await batchUnitCosts(tx, [sttMove])).get(sttMove.id)!.toNumber()).toBe(10_400);
 
-        // Revision to 10.450,50: +50,50 still in stock -> (3 x 9.466,666666 + 50,5) / 3 = 9.483,499999.
+        // Revision to 10.450,50: +50,50 still in stock -> stock_value 28.450,50 / 3 = 9.483,5.
         const piItem = await tx.purchaseInvoiceItem.findFirstOrThrow({ where: { purchaseInvoiceId: pi.id } });
         await revisePurchaseInvoiceInTx(tx, { invoiceId: pi.id, lines: [{ itemId: piItem.id, newRate: 10_450.5 }], reason: 'Revisi harga uji presisi' }, userId);
-        expect(await avgOf(tx, item.id)).toBe(9_483.499999);
-        // The rupiah value of the batch stays at 2 dp.
+        expect(await avgOf(tx, item.id)).toBe(9_483.5);
+        // The rupiah value of the batch stays at 2 dp; the row itself is not rewritten.
         const revised = await tx.stockMovement.findUniqueOrThrow({ where: { id: grItem.stockMovementId! } });
-        expect(Number(revised.unitCost)).toBe(10_450.5);
-        expect(Number(revised.totalValue)).toBe(10_450.5);
+        expect(Number(revised.totalValue)).toBe(10_000);
+        expect((await batchUnitCosts(tx, [revised])).get(revised.id)!.toNumber()).toBe(10_450.5);
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });

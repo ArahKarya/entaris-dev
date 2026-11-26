@@ -418,9 +418,11 @@ export interface ReverseProductionOptions extends ReverseRunOptions {
  * Undoes a run's effects for an edit or a cancel: reverse its movements, replay the WAC of every
  * touched item (inputs too: restored stock changes the base later inbound moves were blended
  * against; historical COGS stays), void its journals (JV-<run> and its revisions, balances
- * reversed per line) and reverse the COGS auto-settlements it triggered.
+ * reversed per line), after reversing the COGS auto-settlements it triggered.
  */
 export async function reverseProductionEffectsInTx(tx: Tx, run: RunRef, opts: ReverseProductionOptions): Promise<void> {
+  // The COGS settlements the run triggered first: they were posted on the book its outputs left.
+  await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', run.id);
   const affectedItemIds = await reverseRunMovements(tx, run.id, opts);
   for (const itemId of affectedItemIds) {
     await recomputeAverageCostFromReplay(tx, itemId);
@@ -429,7 +431,6 @@ export async function reverseProductionEffectsInTx(tx: Tx, run: RunRef, opts: Re
     label: 'produksi',
     trail: opts.trail,
   });
-  await reverseCogsSettlementsByTrigger(tx, 'ProductionRun', run.id);
 }
 
 // ---------------------------------------------------------------------------------------------

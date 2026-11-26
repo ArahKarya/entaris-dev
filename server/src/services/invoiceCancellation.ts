@@ -3,12 +3,13 @@ import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
 import { updateAccountBalance, recalcPartyOutstanding } from '../utils/accountBalance';
 import { systemAccounts } from './systemAccounts';
-import { cancelDocumentJournals } from '../utils/journalCancel';
+import { cancelDocumentJournals, voidJournalInTx } from '../utils/journalCancel';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
 import { reverseDocumentMovements } from './inventory/inventoryLedger';
+import { purchaseRevisionPrefix } from './ledger/journalSource';
 import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
 type Tx = Prisma.TransactionClient;
@@ -92,8 +93,14 @@ export async function cancelSalesInvoiceInTx(
   const stockMovements = await tx.stockMovement.findMany({
     where: { referenceType: 'SalesInvoice', referenceId: invoice.id, isCancelled: false },
   });
+  // The items of its COGS backfill queue too (a from-DO invoice owns no rows of them): closing the
+  // queue reverses their settlement rows after the journals below have locked accounts.
+  const queueItems = await tx.cogsBackfillQueue.findMany({
+    where: { salesInvoiceId: invoice.id, status: { not: 'Cancelled' } },
+    select: { inventoryItemId: true },
+  });
   await lockInventoryRows(tx, {
-    itemIds: stockMovements.map((sm) => sm.itemId),
+    itemIds: [...stockMovements.map((sm) => sm.itemId), ...queueItems.map((q) => q.inventoryItemId)],
     pairs: stockMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
   });
 
@@ -132,11 +139,12 @@ export async function cancelSalesInvoiceInTx(
  * Mirror of cancelSalesInvoiceInTx for purchase invoices. The invoice's own rows are reversed through
  * the value ledger: a legacy PI-owned receipt (quantity and value back out; a warehouse that no
  * longer holds the goods is rejected with STOCK_INSUFFICIENT unless opts allows negative stock), and
- * a Revaluation row that carries the invoice's price delta on an STT receipt (the value-ledger
- * backfill; PR-6.4c3 posts them), taken back by its value_delta while the voided journal reverses
- * the same amount in inventory. Either is refused with REVERSAL_NEEDS_TRUE_UP when goods of the
- * item went out since its value entered the book, or when a receipt leaves stock 0 with value left
- * (value true-up, PR-6.5a).
+ * a Revaluation row that carries the invoice's landed-cost delta ('PurchaseInvoice', posted at
+ * submit or by the value-ledger backfill) or a price revision ('PurchaseRevision') on an STT
+ * receipt, taken back by its value_delta while the voided journal (JV-<no>, or the revision journal
+ * keyed sourceKeys.purchaseRevision) reverses the same amount in inventory. Either is refused with
+ * REVERSAL_NEEDS_TRUE_UP when goods of the item went out since its value entered the book, or when a
+ * receipt leaves stock 0 with value left (value true-up, PR-6.5a).
  */
 export async function cancelPurchaseInvoiceInTx(
   tx: Tx,
@@ -200,6 +208,14 @@ export async function cancelPurchaseInvoiceInTx(
   const jvNumber = `JV-${invoice.invoiceNumber}`;
   const mainExisted = await tx.journalEntry.count({ where: { entryNumber: jvNumber } });
   await cancelDocumentJournals(tx, [jvNumber], trail);
+  // Price revisions on the value ledger carry a key (their 'PurchaseRevision' rows are reversed
+  // below). An older revision journal has none and stays: its delta sits in the valuation baseline.
+  const revisionJournals = await tx.journalEntry.findMany({
+    where: { status: { not: 'Cancelled' }, sourceKey: { startsWith: purchaseRevisionPrefix(invoice.id) } },
+    include: { items: true },
+    orderBy: [{ date: 'asc' }, { entryNumber: 'asc' }],
+  });
+  for (const journal of revisionJournals) await voidJournalInTx(tx, journal, 'jurnal', trail);
   if (mainExisted === 0) {
     // Legacy fallback for invoices created before per-item JE rows existed.
     const apAccount = await systemAccounts.getAccount('AP');
@@ -210,9 +226,12 @@ export async function cancelPurchaseInvoiceInTx(
 
   await recalcPartyOutstanding(tx, invoice.partyId);
 
-  for (const referenceType of PURCHASE_INVOICE_ROW_TYPES) {
-    await reverseDocumentMovements(tx, { referenceType, referenceId: invoice.id }, { userId: trail?.cancelledById ?? invoice.createdBy });
-  }
+  // Both types in one pass, newest first: a revision was posted on the book the landed cost left.
+  await reverseDocumentMovements(
+    tx,
+    { referenceType: PURCHASE_INVOICE_ROW_TYPES, referenceId: invoice.id },
+    { userId: trail?.cancelledById ?? invoice.createdBy },
+  );
 
   await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', invoice.id, trail);
 

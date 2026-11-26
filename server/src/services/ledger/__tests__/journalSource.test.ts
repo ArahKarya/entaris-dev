@@ -9,6 +9,7 @@ import {
   parseRemapSourceKey,
   recurringNarrations,
   sourceKeys,
+  purchaseRevisionPrefix,
   type LegacyJournalFacts,
 } from '../journalSource';
 
@@ -159,6 +160,8 @@ describe('sourceKeys', () => {
     expect(sourceKeys.remap('AR', 'acc-old', 'acc-new', '2170-03-31')).toBe('REMAP:AR:acc-old:acc-new:21700331');
     expect(sourceKeys.openingAccount('acc-1')).toBe('OPENING:ACCOUNT:acc-1');
     expect(sourceKeys.openingParty('p-1', 'VDEP')).toBe('OPENING:PARTY:p-1:VDEP');
+    expect(sourceKeys.purchaseRevision('pi-1', 'JV-217202-0001')).toBe('PURCHASE_REVISION:pi-1:JV-217202-0001');
+    expect(sourceKeys.purchaseRevision('pi-1', 'JV-217202-0001').startsWith(purchaseRevisionPrefix('pi-1'))).toBe(true);
   });
 
   it('takes the business (WIB) day of a Date, not the UTC day', () => {

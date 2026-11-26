@@ -7,7 +7,7 @@ import { cogsAccountFor } from './ledger/systemRoleAccounts';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
-import { UNIT_COST_DP } from './inventory/inventoryValueMath';
+import { linkMovementJournal, postRevaluation } from './inventory/inventoryLedger';
 
 type Tx = Prisma.TransactionClient;
 
@@ -28,9 +28,19 @@ const NEAR_ZERO_QTY = 0.0005;
 const NEAR_ZERO_AMT = 0.005;
 
 /**
- * After a stock-in event, settle pending COGS backfill entries for the item (FIFO).
- * Posts a single differential JV (DR HPP / CR Persediaan, or reverse) for the batch.
- * Safe to call when no pending entries exist — returns null without DB writes.
+ * reference_type of the Revaluation row a settlement writes (owner decision #6): reference_id is
+ * the triggering stock-in document, journal_entry_id its differential journal (when one is posted).
+ */
+export const LEGACY_COGS_SETTLE = 'LegacyCogsSettle';
+
+/**
+ * After a stock-in event, settle pending COGS backfill entries for the item (FIFO). The batch's
+ * differential moves value between inventory and COGS through the value ledger: one Revaluation of
+ * −differential (postRevaluation, LEGACY_COGS_SETTLE, wholeToInventory) and a single JV of the same
+ * amount (DR HPP / CR Persediaan, or reverse), linked to that row. The whole differential moves
+ * stock_value, also when the stock-in leaves stock at or below 0: it re-values the oversold units
+ * the stock-in covered, which a split to COGS would leave in the book at zero quantity. Safe to
+ * call when no pending entries exist — returns null without DB writes.
  */
 export async function settleCogsBackfillForItem(
   tx: Tx,
@@ -86,69 +96,20 @@ export async function settleCogsBackfillForItem(
   if (Math.abs(diffNum) >= NEAR_ZERO_AMT) {
     const item = await tx.inventoryItem.findUnique({ where: { id: itemId } });
     if (!item) throw new Error(`Inventory item ${itemId} not found during COGS backfill settle.`);
-
-    let invAccountId = item.accountId;
-    if (!invAccountId) {
-      const def = await systemAccounts.getAccount('INVENTORY');
-      invAccountId = def.id;
-    }
-
-    const cogsAccount = await cogsAccountFor(tx);
-
-    const isPositive = diffNum > 0;
-    const debitAccountId = isPositive ? cogsAccount.id : invAccountId;
-    const creditAccountId = isPositive ? invAccountId : cogsAccount.id;
-    const amt = Math.abs(diffNum);
-
-    // The settlement journal belongs to the year of its own date, never to the triggering document's year.
+    // The settlement belongs to the year of its own date, never to the triggering document's year.
     const fiscalYearId = (await resolveJournalFiscalYear(tx, settleDate)).id;
-    const entryNumber = await generateDocumentNumber(tx, 'JV', settleDate, fiscalYearId);
-    const narration = `Auto-settle COGS ${item.name}: ${settlements.length} entry, trigger ${source.type}${source.refNo ? ' ' + source.refNo : ''}`;
-
-    const je = await tx.journalEntry.create({
-      data: {
-        entryNumber,
-        date: settleDate,
-        status: 'Submitted',
-        submittedAt: settleDate,
-        narration,
-        fiscalYearId,
-        createdBy: userId,
-        items: {
-          create: [
-            { accountId: debitAccountId, debit: amt, credit: 0, description: `${isPositive ? 'DR HPP' : 'DR Persediaan'} ${item.name}` },
-            { accountId: creditAccountId, debit: 0, credit: amt, description: `${isPositive ? 'CR Persediaan' : 'CR HPP'} ${item.name}` },
-          ],
-        },
-      },
+    const reval = await postRevaluation(tx, {
+      itemId, date: settleDate, fiscalYearId, createdById: userId, delta: totalDifferential.negated(),
+      referenceType: LEGACY_COGS_SETTLE, referenceId: source.refId, referenceNumber: source.refNo ?? null,
+      notes: `Auto-settle HPP ${settlements.length} entri, pemicu ${source.type}${source.refNo ? ' ' + source.refNo : ''}`,
+      wholeToInventory: true,
     });
-    journalEntryId = je.id;
-
-    await tx.accountingLedgerEntry.createMany({
-      data: [
-        { date: settleDate, accountId: debitAccountId, debit: amt, credit: 0, description: narration, referenceType: 'JournalEntry', referenceId: je.id, fiscalYearId },
-        { date: settleDate, accountId: creditAccountId, debit: 0, credit: amt, description: narration, referenceType: 'JournalEntry', referenceId: je.id, fiscalYearId },
-      ],
+    // > 0: inventory down, DR HPP / CR Persediaan.
+    journalEntryId = await postSettleJournal(tx, {
+      item, amount: reval.valueDelta.negated(), fiscalYearId, settleDate, userId,
+      narration: `Auto-settle COGS ${item.name}: ${settlements.length} entry, trigger ${source.type}${source.refNo ? ' ' + source.refNo : ''}`,
     });
-
-    await updateAccountBalance(tx, debitAccountId, amt, 0);
-    await updateAccountBalance(tx, creditAccountId, 0, amt);
-
-    // Realign averageCost: after settling deficit at the new unit_cost, the
-    // average should reflect the inflow's cost (the deficit batch is now
-    // accounted for at unit_cost). Skip if currentStock is zero to avoid /0.
-    const fresh = await tx.inventoryItem.findUnique({ where: { id: itemId }, select: { currentStock: true, averageCost: true } });
-    if (fresh && Math.abs(Number(fresh.currentStock)) > NEAR_ZERO_QTY) {
-      const stockDec = new Decimal(fresh.currentStock.toString());
-      const oldAvg = new Decimal(fresh.averageCost.toString());
-      const oldGlValue = stockDec.mul(oldAvg);
-      const newGlValue = oldGlValue.minus(totalDifferential);
-      const newAvg = newGlValue.div(stockDec).toDecimalPlaces(UNIT_COST_DP);
-      await tx.inventoryItem.update({
-        where: { id: itemId },
-        data: { averageCost: newAvg.toNumber() < 0 ? 0 : newAvg.toNumber() },
-      });
-    }
+    await linkMovementJournal(tx, reval.movement.id, journalEntryId);
   }
 
   // Persist queue updates + settlement records
@@ -198,4 +159,48 @@ export async function settleCogsBackfillForItem(
     totalDifferential: diffNum,
     journalEntryId,
   };
+}
+
+/** The differential journal of a settlement: `amount` > 0 DR HPP / CR Persediaan, < 0 the reverse. */
+async function postSettleJournal(
+  tx: Tx,
+  i: { item: { id: string; name: string; accountId: string | null }; amount: Decimal; fiscalYearId: string; settleDate: Date; userId: string; narration: string },
+): Promise<string> {
+  const invAccountId = i.item.accountId ?? (await systemAccounts.getAccount('INVENTORY')).id;
+  const cogsAccount = await cogsAccountFor(tx);
+  const isPositive = i.amount.gt(0);
+  const debitAccountId = isPositive ? cogsAccount.id : invAccountId;
+  const creditAccountId = isPositive ? invAccountId : cogsAccount.id;
+  const amt = i.amount.abs().toNumber();
+  const { settleDate, fiscalYearId, narration } = i;
+  const entryNumber = await generateDocumentNumber(tx, 'JV', settleDate, fiscalYearId);
+
+  const je = await tx.journalEntry.create({
+    data: {
+      entryNumber,
+      date: settleDate,
+      status: 'Submitted',
+      submittedAt: settleDate,
+      narration,
+      fiscalYearId,
+      createdBy: i.userId,
+      items: {
+        create: [
+          { accountId: debitAccountId, debit: amt, credit: 0, description: `${isPositive ? 'DR HPP' : 'DR Persediaan'} ${i.item.name}` },
+          { accountId: creditAccountId, debit: 0, credit: amt, description: `${isPositive ? 'CR Persediaan' : 'CR HPP'} ${i.item.name}` },
+        ],
+      },
+    },
+  });
+
+  await tx.accountingLedgerEntry.createMany({
+    data: [
+      { date: settleDate, accountId: debitAccountId, debit: amt, credit: 0, description: narration, referenceType: 'JournalEntry', referenceId: je.id, fiscalYearId },
+      { date: settleDate, accountId: creditAccountId, debit: 0, credit: amt, description: narration, referenceType: 'JournalEntry', referenceId: je.id, fiscalYearId },
+    ],
+  });
+
+  await updateAccountBalance(tx, debitAccountId, amt, 0);
+  await updateAccountBalance(tx, creditAccountId, 0, amt);
+  return je.id;
 }

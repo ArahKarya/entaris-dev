@@ -121,7 +121,11 @@ async function assertSelfCheck(tx: Tx, itemIds: string[]) {
   }
 }
 
-/** STT 100 kg at a locked 10.000, then a purchase invoice at 11.000 (landed delta +100.000). */
+/**
+ * STT 100 kg at a locked 10.000, then a purchase invoice at 11.000 (landed delta +100.000), left in
+ * the shape the landed-cost code before PR-6.4c3 wrote: the STT row rewritten to the invoice value
+ * and no Revaluation row (the live service's row is removed), stock_value and average at 11.000.
+ */
 async function sttWithInvoice(tx: Tx, w: World, itemId: string) {
   const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: itemId } });
   const stt = await submitGoodsReceiptInTx(tx, {
@@ -139,8 +143,10 @@ async function sttWithInvoice(tx: Tx, w: World, itemId: string) {
     }],
   }, w.userId);
   const movementId = grItem.stockMovementId!;
+  expect(await tx.stockMovement.deleteMany({ where: { referenceId: pi.id, movementType: 'Revaluation' } })).toEqual({ count: 1 });
+  await tx.stockMovement.update({ where: { id: movementId }, data: { unitCost: 11_000, totalValue: 1_100_000 } });
   const mv = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
-  expect(Number(mv.totalValue)).toBe(1_100_000); // the invoice overwrote the STT value
+  expect(Number(mv.totalValue)).toBe(1_100_000); // the legacy invoice overwrote the STT value
   return { movementId, pi };
 }
 

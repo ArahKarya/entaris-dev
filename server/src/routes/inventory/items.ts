@@ -19,6 +19,7 @@ import {
 } from '../../services/inventoryItemList';
 import { logger } from '../../lib/logger';
 import { assertItemAccountValid, assertItemChangeAllowed, itemHoldsStock, ITEM_HAS_STOCK } from '../../services/inventory/itemMasterGuard';
+import { batchUnitCosts } from '../../services/inventory/inventoryLedger';
 
 const router = Router();
 
@@ -146,7 +147,7 @@ router.get('/:id/batches', async (req, res) => {
       where: inboundFilter,
       orderBy: { date: 'asc' },
       select: {
-        id: true, movementNumber: true, date: true, quantity: true, unitCost: true,
+        id: true, movementNumber: true, date: true, quantity: true, unitCost: true, totalValue: true, valueDelta: true,
         referenceType: true, referenceId: true, referenceNumber: true,
         warehouseId: true,
       },
@@ -173,6 +174,9 @@ router.get('/:id/batches', async (req, res) => {
       }
     }
 
+    // Batch cost includes the purchase invoice Revaluations that adjust the row (never rewritten).
+    const batchCosts = await batchUnitCosts(prisma, inbound);
+
     // Availability from explicit tracking only.
     const rawBatches = inbound.map((m) => {
       const qtyConsumedTracked = consumedMap.get(m.id) ?? 0;
@@ -181,7 +185,7 @@ router.get('/:id/batches', async (req, res) => {
         movementNumber: m.movementNumber,
         date: m.date,
         qtyInbound: Number(m.quantity),
-        unitCost: Number(m.unitCost),
+        unitCost: Number(batchCosts.get(m.id) ?? m.unitCost),
         qtyConsumedTracked,
         qtyAvailableTracked: Number(m.quantity) - qtyConsumedTracked,
         sourceType: m.referenceType ?? 'Other',

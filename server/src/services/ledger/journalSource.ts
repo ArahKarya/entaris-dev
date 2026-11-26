@@ -73,7 +73,17 @@ export const sourceKeys = {
   openingAccount: (accountId: string): string => `OPENING:ACCOUNT:${keyPart(accountId)}`,
   /** Opening balance of one subledger of a party. */
   openingParty: (partyId: string, kind: OpeningPartyKind): string => `OPENING:PARTY:${keyPart(partyId)}:${kind}`,
+  /**
+   * One price revision of a purchase invoice, by its journal number (an invoice is revised many
+   * times); cancelling the invoice voids every journal under purchaseRevisionPrefix(invoiceId).
+   */
+  purchaseRevision: (invoiceId: string, entryNumber: string): string => `${purchaseRevisionPrefix(invoiceId)}${keyPart(entryNumber)}`,
 } as const;
+
+/** Prefix of the sourceKeys of a purchase invoice's price revisions (for startsWith queries). */
+export function purchaseRevisionPrefix(invoiceId: string): string {
+  return `PURCHASE_REVISION:${keyPart(invoiceId)}:`;
+}
 
 /** sourceKey of a deposit refund journal: the deposit payment it refunds. */
 export function depositRefundSourceKey(depositId: string): string {

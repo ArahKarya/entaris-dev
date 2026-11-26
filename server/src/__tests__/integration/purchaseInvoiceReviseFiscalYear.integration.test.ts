@@ -221,7 +221,7 @@ d('purchase invoice revision: current behaviour owned by E5 (characterisation)',
     });
   });
 
-  it('rewrites the cost of a receipt movement dated in a closed year without a period check', async () => {
+  it('revalues a receipt dated in a closed year by a Revaluation in the revision year; the receipt row is not rewritten', async () => {
     await inRollback(async (tx) => {
       const y1 = await createFiscalYear(tx, { year: 2171, isClosed: true });
       const y2 = await createFiscalYear(tx, { year: 2172 });
@@ -251,9 +251,12 @@ d('purchase invoice revision: current behaviour owned by E5 (characterisation)',
       await revise(tx, invoice.id, piLine.id, 1_300_000);
 
       const sm = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
-      expect(Number(sm.unitCost)).toBe(1_300_000);
-      expect(Number(sm.totalValue)).toBe(13_000_000);
+      expect(Number(sm.unitCost)).toBe(1_000_000);
+      expect(Number(sm.totalValue)).toBe(10_000_000);
       expect(sm.fiscalYearId).toBe(y1.id);
+      const reval = await tx.stockMovement.findFirstOrThrow({ where: { adjustsMovementId: movementId, isCancelled: false } });
+      expect([reval.movementType, reval.referenceType, Number(reval.valueDelta), reval.fiscalYearId])
+        .toEqual(['Revaluation', 'PurchaseRevision', 3_000_000, y2.id]);
       expect(await journalsOf(tx, [y2.id])).toHaveLength(1);
     });
   });

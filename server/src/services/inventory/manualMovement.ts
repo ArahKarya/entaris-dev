@@ -372,9 +372,10 @@ export async function editManualMovementInTx(tx: Tx, id: string, input: ManualMo
   const movementNumber = await generateDocumentNumber(tx, 'SM', movementDate, fiscalYear.id);
   const entryNumber = await generateDocumentNumber(tx, 'JV', movementDate, fiscalYear.id);
 
+  // The COGS settlement the row triggered first: it was posted on the book the row left.
+  await reverseCogsSettlementsByTrigger(tx, 'StockMovement', oldMov.id);
   await reverseManualRow(tx, oldMov, 'inventory.movement.edit', userId);
   await voidMovementJournal(tx, oldMov.journalEntryId, userId);
-  await reverseCogsSettlementsByTrigger(tx, 'StockMovement', oldMov.id);
   const newIsIn = isInbound(input.movementType);
   if (!newIsIn) {
     await assertStockAvailable(tx, [{ itemId: oldMov.itemId, warehouseId: oldMov.warehouseId, quantity: input.quantity }], {
@@ -404,9 +405,15 @@ export async function cancelManualMovementInTx(tx: Tx, id: string, userId: strin
   const movement = await lockManualMovement(tx, id, 'cancel');
   // By date only, as on edit: the journal and auto-settle journals check their own year.
   await assertPeriodOpen(tx, { date: movement.date }, 'mutasi stok');
+  // Item and warehouse before the settlement journals lock accounts (LOCK ORDER of stockLocks.ts).
+  await lockInventoryRows(tx, {
+    itemIds: [movement.itemId],
+    pairs: movement.warehouseId ? [{ itemId: movement.itemId, warehouseId: movement.warehouseId }] : [],
+  });
+  // The COGS settlement the row triggered first: it was posted on the book the row left.
+  await reverseCogsSettlementsByTrigger(tx, 'StockMovement', id);
   await reverseManualRow(tx, movement, 'inventory.movement.cancel', userId);
   await voidMovementJournal(tx, movement.journalEntryId, userId);
-  await reverseCogsSettlementsByTrigger(tx, 'StockMovement', id);
 }
 
 // Item vs warehouse drift repair (owner decision #18, PR-6.3d; driven by stockDriftRepair.ts).

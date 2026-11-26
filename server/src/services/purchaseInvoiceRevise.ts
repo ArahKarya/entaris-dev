@@ -1,7 +1,10 @@
 // Price revision of a Submitted/Paid purchase invoice whose goods may already be consumed
 // (cancel + recreate could drive stock negative). Delta = (new rate - old rate) x qty, split by
-// qty: still in stock -> Persediaan + WAC correction; already out -> 5.11 variance (old COGS
-// untouched). Counter entry is always the mapped AP account: delta > 0 CRs it, delta < 0 DRs it.
+// qty: still in stock -> a Revaluation of the item through the value ledger (postRevaluation,
+// reference 'PurchaseRevision', adjusting the STT movement, which is never rewritten), whose part
+// stock cannot absorb goes to COGS; already out -> 5.11 variance (old COGS untouched). Counter
+// entry is always the mapped AP account: delta > 0 CRs it, delta < 0 DRs it. The journal carries
+// sourceKeys.purchaseRevision, so cancelling the invoice voids it with its Revaluation rows.
 
 import type { Prisma } from '@prisma/client';
 import Decimal from 'decimal.js';
@@ -12,7 +15,10 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { resolveJournalFiscalYear } from '../utils/periodGuard';
 import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
-import { UNIT_COST_DP } from './inventory/inventoryValueMath';
+import { postRevaluation } from './inventory/inventoryLedger';
+import { inventoryAccountFor } from './inventory/itemAccount';
+import { cogsAccountFor } from './ledger/systemRoleAccounts';
+import { sourceKeys } from './ledger/journalSource';
 
 type Tx = Prisma.TransactionClient;
 
@@ -79,7 +85,7 @@ export async function revisePurchaseInvoiceInTx(
       items: {
         include: {
           goodsReceiptItem: { select: { stockMovementId: true } },
-          inventoryItem: { select: { id: true, name: true, currentStock: true, averageCost: true } },
+          inventoryItem: { select: { id: true, name: true, currentStock: true, accountId: true } },
         },
       },
     },
@@ -144,22 +150,22 @@ export async function revisePurchaseInvoiceInTx(
     const deltaInStock = deltaPerUnit.mul(qtyInStock).toDecimalPlaces(2);
     const deltaConsumed = lineDelta.minus(deltaInStock); // sisa → variance (hindari rounding leak)
 
-    const invAccId = item.inventoryItem ? (await resolveItemInvAccount(tx, invItemId, defaultInv.id)) : defaultInv.id;
-
-    // Porsi masih-di-stok → Persediaan + koreksi WAC.
+    // Porsi masih-di-stok → Revaluation item (value ledger) + Persediaan; bagian yang tidak bisa
+    // diserap stok (stok <= 0, atau penurunan melebihi stock_value) → HPP.
     if (!deltaInStock.isZero() && invItemId && item.inventoryItem) {
-      if (lineDelta.gt(0)) addDR(invAccId, deltaInStock);
-      else addCR(invAccId, deltaInStock.abs());
-
-      // Koreksi WAC: tambahkan deltaInStock ke total nilai stok terkini.
-      const stock = new Decimal(item.inventoryItem.currentStock.toString());
-      if (stock.gt(0)) {
-        const oldAvg = new Decimal(item.inventoryItem.averageCost.toString());
-        const newAvg = stock.mul(oldAvg).plus(deltaInStock).div(stock).toDecimalPlaces(UNIT_COST_DP);
-        await tx.inventoryItem.update({
-          where: { id: invItemId },
-          data: { averageCost: Decimal.max(newAvg, new Decimal(0)).toNumber() },
-        });
+      const reval = await postRevaluation(tx, {
+        itemId: invItemId, date: now, fiscalYearId: journalFy.id, createdById: userId, delta: deltaInStock,
+        referenceType: 'PurchaseRevision', referenceId: invoice.id, referenceNumber: invoice.invoiceNumber,
+        adjustsMovementId: inboundMovId,
+        notes: `Revisi harga Invoice pembelian ${invoice.invoiceNumber}: ${item.itemName}`,
+      });
+      const invAccId = (await inventoryAccountFor(tx, item.inventoryItem)) ?? defaultInv.id;
+      if (reval.valueDelta.gt(0)) addDR(invAccId, reval.valueDelta);
+      else if (reval.valueDelta.lt(0)) addCR(invAccId, reval.valueDelta.abs());
+      if (!reval.toCogs.isZero()) {
+        const cogsId = (await cogsAccountFor(tx)).id;
+        if (reval.toCogs.gt(0)) addDR(cogsId, reval.toCogs);
+        else addCR(cogsId, reval.toCogs.abs());
       }
     } else if (!deltaInStock.isZero()) {
       // Tidak ada item inventori (jasa/biaya) → masuk variance juga.
@@ -181,18 +187,6 @@ export async function revisePurchaseInvoiceInTx(
       where: { id: item.id },
       data: { rate: newRate.toNumber(), amount: newAmount.toNumber() },
     });
-
-    // Update juga stockMovement.unitCost/totalValue untuk porsi (jejak cost
-    // batch). unitCost baru = newRate (mencerminkan harga revisi).
-    if (inboundMovId) {
-      await tx.stockMovement.update({
-        where: { id: inboundMovId },
-        data: {
-          unitCost: newRate.toNumber(),
-          totalValue: newRate.mul(qty).toDecimalPlaces(2).toNumber(),
-        },
-      });
-    }
 
     perLineLog.push({
       itemName: item.itemName,
@@ -236,6 +230,8 @@ export async function revisePurchaseInvoiceInTx(
   const je = await tx.journalEntry.create({
     data: {
       entryNumber,
+      sourceType: 'SYSTEM_DOC',
+      sourceKey: sourceKeys.purchaseRevision(invoice.id, entryNumber),
       date: now,
       narration: reviseJournalNarration(invoice.invoiceNumber, invoice.supplier.name, input.reason.trim()),
       status: 'Submitted',
@@ -295,10 +291,4 @@ export async function revisePurchaseInvoiceInTx(
     where: { id: invoice.id },
     include: { items: true, supplier: { select: { name: true } } },
   });
-}
-
-async function resolveItemInvAccount(tx: Tx, invItemId: string | null, fallback: string): Promise<string> {
-  if (!invItemId) return fallback;
-  const it = await tx.inventoryItem.findUnique({ where: { id: invItemId }, select: { accountId: true } });
-  return it?.accountId ?? fallback;
 }
