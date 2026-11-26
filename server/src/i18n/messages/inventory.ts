@@ -241,4 +241,5 @@ export const INVENTORY_MESSAGES: MessageDictionary = {
   "Gudang opname tidak ditemukan.": "The stock count warehouse was not found.",
   "Stok sistem {0} item berubah sejak form dibuka ({1}). Muat ulang stok sistem lalu periksa lagi barisnya.": "The system stock of {0} items changed since the form was opened ({1}). Reload the system stock and check those lines again.",
   "Gagal mengambil stok sistem per tanggal.": "Failed to load the system stock as of the date.",
+  "'{0}' sudah dihitung di stok opname {1} yang bertanggal sesudahnya. Batalkan stok opname itu dulu, lalu hitung ulang.": "'{0}' was already counted in stock count {1}, dated later. Cancel that stock count first, then count again.",
 };

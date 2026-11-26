@@ -11,6 +11,8 @@
  *   moved to a month end: one fixture year), physical 8.000: variance 0; a deficit on that date
  *   is dated 30 Jun;
  * - no warehouse: 400 (and a unit cost on a line: 400, owner decision #8).
+ * Plus: a count dated before a later active count of the same item and warehouse is refused (409
+ * OPNAME_LATER_COUNT_EXISTS): it would book the later count's difference again.
  * Plus: GET /system-stock as of a day; a cancel takes the count back and a second cancel moves
  * nothing; a surplus cancelled after goods of the item went out at a blended average gets the
  * value true-up against COGS (trueUp 'replay', PR-6.5a's rule, opted into here); a legacy count
@@ -38,7 +40,7 @@ vi.mock('../../utils/businessDate', async (importOriginal) => {
   return { ...actual, businessToday: (...args: Parameters<typeof actual.businessToday>) => state.today ?? actual.businessToday(...args) };
 });
 
-import stockOpnameRouter, { OPNAME_STOCK_CHANGED } from '../../routes/stockOpname';
+import stockOpnameRouter, { OPNAME_LATER_COUNT_EXISTS, OPNAME_STOCK_CHANGED } from '../../routes/stockOpname';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -114,8 +116,8 @@ async function receiveBran(tx: Tx, w: World, qty: number, avg: number, on: strin
 
 interface CountLine { itemId: string; actualStock: number; expectedSystemStock?: number; unitCost?: number }
 
-function postCount(w: World, on: string, items: CountLine[], opts: { noWarehouse?: boolean } = {}) {
-  const warehouseId = opts.noWarehouse ? undefined : w.warehouseA.id;
+function postCount(w: World, on: string, items: CountLine[], opts: { noWarehouse?: boolean; warehouseId?: string } = {}) {
+  const warehouseId = opts.noWarehouse ? undefined : opts.warehouseId ?? w.warehouseA.id;
   return callRoute(stockOpnameRouter, 'post', '/', { userId: w.userId, body: { date: on, warehouseId, items } });
 }
 
@@ -209,6 +211,44 @@ d('stock count as of its date (E3-R11, PR-6.8a)', () => {
       expect(await bookOf(tx, w.item.id)).toEqual({ stock: '9500.000', value: '57000000.00', average: '6000.000000' });
       expect((await systemStock(w, day('06-30')))(w.item.id)).toBe(7_500);
       expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('57000000.00');
+    });
+  });
+
+  it('a count dated 1 Jul entered after a 5 Jul count of the same item is refused 409 until the later count is cancelled', async () => {
+    await inWorld(async (tx, w) => {
+      await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 10_000, avg: 6_000, day: day('06-10') });
+      await receiveStock(tx, w, { warehouseId: w.warehouseB.id, qty: 100, avg: 6_000, day: day('06-10') });
+      await receiveBran(tx, w, 50, 2_000, day('06-10'));
+      const later = await postCount(w, day('07-05'), [{ itemId: w.item.id, actualStock: 9_500, expectedSystemStock: 10_000 }]);
+      expect(later.status, JSON.stringify(later.body)).toBe(201);
+      // Without the refusal the 1 Jul count would see 10.000 (the 5 Jul deficit added back) and book the 500 again.
+      expect((await systemStock(w, day('07-01')))(w.item.id)).toBe(10_000);
+
+      const refused = await postCount(w, day('07-01'), [
+        { itemId: w.bran.id, actualStock: 48, expectedSystemStock: 50 },
+        { itemId: w.item.id, actualStock: 9_500, expectedSystemStock: 10_000 },
+      ]);
+      expect([refused.status, refused.body.code]).toEqual([409, OPNAME_LATER_COUNT_EXISTS]);
+      expect(refused.body.error).toContain(later.body.opnameNumber);
+      expect(await tx.stockOpname.count({ where: { fiscalYearId: w.fyId } })).toBe(1);
+      // 9.500 in A + 100 in B.
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '9600.000', value: '57600000.00', average: '6000.000000' });
+
+      // Another item, the same item in another warehouse and a count on the same day still post.
+      const bran = await postCount(w, day('07-01'), [{ itemId: w.bran.id, actualStock: 48, expectedSystemStock: 50 }]);
+      expect(bran.status, JSON.stringify(bran.body)).toBe(201);
+      const otherWarehouse = await postCount(w, day('07-01'), [{ itemId: w.item.id, actualStock: 100, expectedSystemStock: 100 }], { warehouseId: w.warehouseB.id });
+      expect(otherWarehouse.status, JSON.stringify(otherWarehouse.body)).toBe(201);
+      const sameDay = await postCount(w, day('07-05'), [{ itemId: w.item.id, actualStock: 9_500, expectedSystemStock: 9_500 }]);
+      expect(sameDay.status, JSON.stringify(sameDay.body)).toBe(201);
+
+      // Once the later counts are cancelled the 1 Jul count posts its deficit once.
+      expect((await cancelCount(tx, sameDay.body.id)).status).toBe(200);
+      expect((await cancelCount(tx, later.body.id)).status).toBe(200);
+      const res = await postCount(w, day('07-01'), [{ itemId: w.item.id, actualStock: 9_500, expectedSystemStock: 10_000 }]);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '9600.000', value: '57600000.00', average: '6000.000000' });
+      expect(money(await glBalance(tx, w.variance.id))).toBe('3004000.00');
     });
   });
 

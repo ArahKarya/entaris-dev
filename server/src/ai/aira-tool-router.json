@@ -27204,6 +27204,7 @@
         "400: satu item hanya boleh muncul sekali dalam satu stok opname",
         "400: item tidak ditemukan",
         "409 OPNAME_STOCK_CHANGED: stok sistem per tanggal opname berubah sejak baris diisi; respons memuat items [{itemId, itemName, expectedSystemStock, systemStock}], ambil ulang lewat opn_system_stock lalu periksa barisnya",
+        "409 OPNAME_LATER_COUNT_EXISTS: item sudah dihitung di stok opname aktif gudang yang sama bertanggal sesudahnya; batalkan stok opname itu dulu (nomornya ada di pesan), lalu hitung ulang",
         "400 STOCK_INSUFFICIENT: opname bertanggal mundur yang defisitnya melebihi stok gudang saat ini",
         "400 INVENTORY_VARIANCE_UNSAFE: akun Selisih Persediaan dipetakan ke akun grup atau sama dengan akun Pembulatan",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",

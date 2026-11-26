@@ -8,7 +8,7 @@ import { BusinessError, handleRouteError } from '../utils/errors';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { assertPeriodsOpen } from '../utils/periodGuard';
-import { businessToday, parseDateParam } from '../utils/businessDate';
+import { businessDayRange, businessToday, parseDateParam } from '../utils/businessDate';
 import { cancelTrail, claimCancel } from '../utils/cancelClaim';
 import { cancelJournalsInTx, findDocumentJournals } from '../services/ledger/cancelJournals';
 import { postJournal } from '../services/ledger/postJournal';
@@ -52,7 +52,14 @@ export const OPNAME_LEGACY_REVALUATION = 'OPNAME_LEGACY_REVALUATION';
  */
 export const OPNAME_STOCK_CHANGED = 'OPNAME_STOCK_CHANGED';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * Error code (409): a later active count of the same warehouse already counted one of the items, so
+ * a count dated before it would book the same difference again (E3-R11). The user cancels the later
+ * count first.
+ */
+export const OPNAME_LATER_COUNT_EXISTS = 'OPNAME_LATER_COUNT_EXISTS';
+
+const UUID_RE =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** |expected − as of| above this is a changed stock (quantities are stored to 3 decimals). */
 const OPNAME_VERSION_TOLERANCE = new Decimal('0.0005');
@@ -77,6 +84,34 @@ export class OpnameStockChangedError extends BusinessError {
     );
     this.name = 'OpnameStockChangedError';
   }
+}
+
+/**
+ * Refuses a count of an item a later active count of the same warehouse already counted: the stock
+ * as of this date adds that count's own adjustment back, so this count would book the same
+ * difference again and leave the later count's actual stock wrong. The user cancels the later count
+ * first (409 OPNAME_LATER_COUNT_EXISTS). Runs after the item locks, so no later count commits in
+ * between. "Later" is the as-of rule's next business day (stockAsOf.ts).
+ */
+async function assertNoLaterCount(
+  tx: Prisma.TransactionClient,
+  q: { warehouseId: string; itemIds: string[]; day: string },
+): Promise<void> {
+  const later = await tx.stockOpnameItem.findFirst({
+    where: {
+      itemId: { in: q.itemIds },
+      OR: [{ warehouseId: q.warehouseId }, { warehouseId: null, stockOpname: { warehouseId: q.warehouseId } }],
+      stockOpname: { status: 'Submitted', date: { gte: businessDayRange(q.day).lt } },
+    },
+    orderBy: { stockOpname: { date: 'desc' } },
+    select: { item: { select: { name: true } }, stockOpname: { select: { opnameNumber: true } } },
+  });
+  if (!later) return;
+  throw new BusinessError(
+    `'${later.item.name}' sudah dihitung di stok opname ${later.stockOpname.opnameNumber} yang bertanggal sesudahnya. Batalkan stok opname itu dulu, lalu hitung ulang.`,
+    OPNAME_LATER_COUNT_EXISTS,
+    409,
+  );
 }
 
 interface OpnameLine { itemId: string; difference: Decimal; totalValue: Decimal }
@@ -347,6 +382,7 @@ router.post('/', async (req: AuthRequest, res) => {
       });
       const missing = itemIds.find((id) => !locked.items.has(id));
       if (missing) throw new BusinessError(`Item dengan ID ${missing} tidak ditemukan.`);
+      await assertNoLaterCount(tx, { warehouseId, itemIds, day: body.date });
 
       const systemStock = await qtyAsOf(tx, { warehouseId, itemIds, day: body.date });
       const changed = body.items.filter((l) => systemStock.get(l.itemId)!.minus(l.expectedSystemStock).abs().gt(OPNAME_VERSION_TOLERANCE));
