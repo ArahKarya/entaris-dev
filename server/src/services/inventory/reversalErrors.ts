@@ -38,8 +38,16 @@ export const TRUE_UP_PRE_BASELINE = 'TRUE_UP_PRE_BASELINE';
 export const TRUE_UP_UNEXPLAINED = 'TRUE_UP_UNEXPLAINED';
 
 export function needsTrueUp(itemName: string, next: BookState, forEdit = false): BusinessError {
+  if (forEdit) {
+    return new BusinessError(
+      `Edit ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
+        + `(stok sesudahnya ${next.stock.toString()}, nilai ${next.value.toFixed(VALUE_DP)}). Koreksi nilai otomatis belum tersedia; hubungi akuntan.`,
+      REVERSAL_NEEDS_TRUE_UP,
+      409,
+    );
+  }
   return new BusinessError(
-    `${forEdit ? 'Edit' : 'Pembatalan'} ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
+    `Pembatalan ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
       + `(stok sesudahnya ${next.stock.toString()}, nilai ${next.value.toFixed(VALUE_DP)}). Koreksi nilai otomatis belum tersedia; hubungi akuntan.`,
     REVERSAL_NEEDS_TRUE_UP,
     409,
