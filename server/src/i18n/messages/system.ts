@@ -131,6 +131,12 @@ export const SYSTEM_MESSAGES: MessageDictionary = {
   "Akun Selisih Persediaan dipetakan ke akun grup; mutasi stok keluar tanpa akun lawan ditolak": "The Inventory Variance account is mapped to a group account; a stock out without an offset account is refused",
   "Akun Selisih Persediaan sama dengan akun Pembulatan; mutasi stok keluar tanpa akun lawan ditolak": "The Inventory Variance account is the same as the Rounding account; a stock out without an offset account is refused",
   "Akun Selisih Persediaan adalah akun rinci tersendiri": "The Inventory Variance account is a separate detail account",
+  // inventory vs GL (E3-R15): routes/health/inventoryChecks.ts, services/inventory/inventoryGlCheck.ts
+  "{0} akun persediaan: saldo Buku Besar berbeda dengan nilai buku persediaan, atau ada nilai stok tanpa stok gudang": "{0} inventory accounts: the General Ledger balance differs from the inventory book value, or value sits on stock no warehouse holds",
+  "{0} akun persediaan cocok dengan nilai buku setelah pos rekonsiliasi (Surat Jalan belum ditagih, baris Buku Besar di luar jurnal)": "{0} inventory accounts match the book value after reconciliation items (delivery notes not yet invoiced, General Ledger rows outside a journal)",
+  "Saldo Buku Besar setiap akun persediaan sama dengan nilai buku persediaan": "The General Ledger balance of every inventory account matches the inventory book value",
+  "{0} item: nilai buku persediaan tidak sama dengan jumlah nilai mutasinya atau stok x rata-rata": "{0} items: the inventory book value differs from the sum of its movement values or from stock x average",
+  "Nilai buku persediaan setiap item sama dengan jumlah nilai mutasinya dan stok x rata-rata": "The inventory book value of every item matches the sum of its movement values and stock x average",
   "Gagal menjalankan health check": "Failed to run the health check",
   "Gagal membuat preview": "Failed to create the preview",
   "Gagal memperbaiki masalah": "Failed to fix the issue",

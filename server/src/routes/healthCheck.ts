@@ -20,7 +20,7 @@ import { checkRequiredTriggers } from './health/schemaGuards';
 import { checkApSubledgerVsGl, checkArSubledgerVsGl, checkCustomerDepositVsGl } from './health/arChecks';
 import { checkAleFiscalYear } from './health/fiscalYearChecks';
 import { checkFormerRoleAccounts } from './health/formerRoleAccountChecks';
-import { checkInventoryVarianceAccount } from './health/inventoryChecks';
+import { checkInventoryVarianceAccount, checkInventoryVsGl, checkStockValueInvariant } from './health/inventoryChecks';
 import { FIX_ACTION, previewAccountBalanceDrift, fixAccountBalanceDrift } from './health/fixes';
 
 const router = Router();
@@ -38,6 +38,8 @@ router.get('/', async (_req, res) => {
       checkStockMovementMismatch(),
       checkWarehouseStockDrift(),
       checkInventoryVarianceAccount(),
+      checkInventoryVsGl(),
+      checkStockValueInvariant(),
       checkRequiredTriggers(),
       checkArSubledgerVsGl(),
       checkCustomerDepositVsGl(),
