@@ -6,14 +6,17 @@ import { recomputeDeliveredQtyInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
 import { claimCancel } from '../utils/cancelClaim';
 import { lockInventoryRows } from './inventory/stockLocks';
-import { reverseMovement } from './inventory/inventoryLedger';
+import { reverseMovement, type ReverseResult } from './inventory/inventoryLedger';
+import { postReversalValueJournals } from './inventory/reversalValueJournal';
 
 type Tx = Prisma.TransactionClient;
 
 /**
  * Cancel a submitted delivery order: rejected if already invoiced (cancel the invoice first);
- * each line's Out is taken back exactly through the value ledger (quantity and value). No GL
- * impact: the note has no journal until it is invoiced. Caller owns the transaction.
+ * each line's Out is taken back through the value ledger (quantity and value). The note has no
+ * journal until it is invoiced; when goods of the item went out after the line, the value they
+ * took differently comes back as a true-up against COGS (E3-R8), the only journal of a cancel.
+ * Caller owns the transaction.
  */
 export async function cancelDeliveryOrderInTx(
   tx: Tx,
@@ -50,6 +53,10 @@ export async function cancelDeliveryOrderInTx(
     pairs: returning.flatMap((line) => (line.warehouseId ? [{ itemId: line.inventoryItemId!, warehouseId: line.warehouseId }] : [])),
   });
 
+  const reversed: ReverseResult[] = [];
+  // The stock-0 residue rule judges an item after all of its lines are back, not after each.
+  const reversible = deliveryOrder.items.filter((line) => line.stockMovement && !line.stockMovement.isCancelled);
+  const lastLineOfItem = new Map(reversible.map((line, i) => [line.stockMovement!.itemId, i]));
   for (const line of deliveryOrder.items) {
     if (!line.stockMovementId) continue;
 
@@ -62,8 +69,11 @@ export async function cancelDeliveryOrderInTx(
       continue;
     }
 
-    await reverseMovement(tx, sm.id, { userId });
+    reversed.push(await reverseMovement(tx, sm.id, {
+      userId, trueUp: 'replay', sweepAtZero: true, intermediate: lastLineOfItem.get(sm.itemId) !== reversible.indexOf(line),
+    }));
   }
+  await postReversalValueJournals(tx, reversed, { userId, documentLabel: `Surat Jalan ${deliveryOrder.doNumber}` });
 
   // Surat Jalan Sementara yang tertaut ke DO ini kembali Terbuka
   await unlinkTemporaryNotesFromDoInTx(tx, doId);

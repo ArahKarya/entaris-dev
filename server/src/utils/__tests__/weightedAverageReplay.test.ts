@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import Decimal from 'decimal.js';
 import { calcWeightedAverage } from '../weightedAverage';
 import {
+  replayValueRows,
   replayWeightedAverage,
   sortMovementsForReplay,
+  sortMovementsForValueReplay,
   type ReplayMovement,
   type ReplayMovementType,
 } from '../weightedAverageReplay';
@@ -232,5 +235,37 @@ describe('fixture: dev DB "Beras Premium" (production cancel jumped 2330.15 -> 1
   it('with no opening base and only the AdjustmentIn left, replay returns 11500 (data, not a logic jump)', () => {
     const r = replayWeightedAverage([adj], { fallbackAverageCost: 2330.15 });
     expect(r.averageCost).toBe(11500);
+  });
+});
+
+describe('replayValueRows (value replay, PR-6.5a)', () => {
+  const at = (s: number) => new Date(Date.UTC(2113, 0, 1, 0, 0, s));
+  const zero = { stock: new Decimal(0), value: new Decimal(0), average: new Decimal(0) };
+  const row = (id: string, movementType: ReplayMovementType, quantity: number, valueDelta: number, s: number, movementNumber = id) =>
+    ({ id, movementNumber, movementType, quantity, valueDelta, createdAt: at(s) });
+
+  it('inbound and Revaluation rows add their value, outbound rows are re-valued on the replayed book', () => {
+    const r = replayValueRows([
+      row('a', 'In', 100, 1_000_000, 1),
+      row('b', 'In', 100, 2_000_000, 2),
+      row('s', 'Out', 100, -9_999_999, 3), // recorded value is ignored: 1.500.000 on this book
+      row('v', 'Revaluation', 0, 10_000, 4),
+      row('t', 'TransferOut', 40, 0, 5),
+    ], zero);
+    expect(r.stock.toString()).toBe('100');
+    expect(r.value.toFixed(2)).toBe('1510000.00');
+    expect(r.average.toFixed(6)).toBe('15100.000000');
+  });
+
+  it('orders by createdAt, then movement number (rows of one transaction)', () => {
+    const rows = [row('2', 'Out', 50, 0, 1, 'SM-0002'), row('1', 'In', 100, 1_000_000, 1, 'SM-0001')];
+    expect(sortMovementsForValueReplay(rows).map((r) => r.id)).toEqual(['1', '2']);
+    expect(replayValueRows(rows, zero).value.toFixed(2)).toBe('500000.00');
+  });
+
+  it('past zero an outbound row goes out at the replayed average', () => {
+    const r = replayValueRows([row('a', 'In', 10, 100, 1), row('b', 'Out', 15, 0, 2)], zero);
+    expect(r.stock.toString()).toBe('-5');
+    expect(r.value.toFixed(2)).toBe('-50.00');
   });
 });

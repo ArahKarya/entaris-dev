@@ -58,11 +58,11 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 |---|---|
 | PO (buat/ubah/ajukan/tutup/batal) | Tidak ada GL, stok, WAC |
 | STT submit (`gr_create`) | DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar qty x harga. Stok dan nilai persediaan masuk, rata-rata dari nilai. Titipan pelanggan: nilai dan GL nol |
-| STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dan nilainya dibalik sebesar debit Persediaan jurnal STT; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`), dan 409 `REVERSAL_NEEDS_TRUE_UP` bila barang item itu sudah keluar sejak STT diterima |
+| STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dan nilainya dibalik sebesar debit Persediaan jurnal STT; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`), bila barang item itu sudah keluar sejak STT diterima, selisih nilai yang ikut keluar dikoreksi otomatis (true-up): satu jurnal bertanggal hari pembatalan, Persediaan lawan COGS (409 `TRUE_UP_PRE_BASELINE` untuk gerakan dari sebelum nilai awal buku nilai) |
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
 | PI dari STT | DR Hutang Belum Tagih (2.1.5) @ biaya STT / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang. Selisih harga PI vs biaya STT = baris Revaluation buku nilai (mutasi STT tidak ditimpa; biaya batch = nilai STT + Revaluation-nya): porsi terserap stok DR/CR Persediaan, sisanya (stok habis atau penurunan melebihi nilai stok) DR/CR HPP |
 | Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> baris Revaluation buku nilai + Persediaan (bagian yang tidak terserap stok -> HPP; rata-rata tidak pernah negatif); porsi sudah keluar -> akun Selisih Harga Pembelian terpetakan (bawaan 5.11). Lawan selalu Hutang Usaha (akun AP terpetakan, bawaan 2.1.1). Jurnal revisi ikut dibatalkan bila PI dibatalkan |
-| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), Revaluation selisih harga milik PI (landed cost dan revisi) dibalik sebesar nilainya dan jurnal revisinya dibatalkan (ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila barangnya sudah keluar sejak itu atau stok jadi 0 dengan sisa nilai), STT dilepas (`invoiceId` dikosongkan) |
+| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), Revaluation selisih harga milik PI (landed cost dan revisi) dibalik sebesar nilainya dan jurnal revisinya dibatalkan (bila barangnya sudah keluar sejak itu, bagian selisih yang ikut keluar dikoreksi otomatis ke COGS; sisa nilai saat stok 0 disapu ke COGS), STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
 | Batal refund uang muka (`vdep_refund_cancel`) | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pemasok pulih |
@@ -82,7 +82,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **STT tidak punya harga wajib.** Jangan menyimpulkan nilai persediaan dari STT; nilai aktual ada di PI. Selisih antara harga provisional STT dan harga PI masuk ke 5.11.
 - **Membatalkan STT yang sudah ditagih** ditolak sampai PI-nya dibatalkan; PI yang sudah punya pembayaran teralokasi atau uang muka aktif juga tidak bisa dibatalkan (batalkan pembayaran/aplikasi dulu). Urutan pembatalan: pembayaran/aplikasi uang muka -> PI -> STT.
-- `gr_cancel` menolak bila stok tidak cukup untuk dibalikkan (barang sudah dipakai/dijual). Opsi `allowNegativeStock` + `negativeStockReason` (min 10 karakter) hanya untuk override Admin, dan selama koreksi nilai otomatis belum ada pembatalan setelah barang item itu keluar tetap ditolak 409 `REVERSAL_NEEDS_TRUE_UP`.
+- `gr_cancel` menolak bila stok tidak cukup untuk dibalikkan (barang sudah dipakai/dijual). Opsi `allowNegativeStock` + `negativeStockReason` (min 10 karakter) hanya untuk override Admin, dan bila barang item itu sudah keluar, selisih nilainya dikoreksi otomatis (true-up) ke COGS pada hari pembatalan.
 - STT titipan pelanggan tidak muncul di `gr_pending` dan tidak bisa ditagih; jangan menaut ke PO.
 - PO Draft tidak dibatalkan, tetapi dihapus; PO Submitted tidak dihapus, tetapi dibatalkan atau ditutup.
 - `po_close` tidak mengubah `status` (tetap `Submitted`); gunakan `receiptStatus=closed` atau `closedAt` untuk mengenalinya.
@@ -194,7 +194,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** STT dengan status Cancelled.
 
-**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, nilai persediaan berkurang sebesar nilai baris STT = debit Persediaan jurnal STT). Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak STT diterima, atau stok jadi 0 dengan sisa nilai. Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.
+**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, nilai persediaan berkurang sebesar nilai baris STT = debit Persediaan jurnal STT). Bila barang item itu sudah keluar sejak nilainya masuk, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama. Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.
 
 **Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.
 
@@ -211,7 +211,6 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: ada PI Paid / PI belum dibatalkan
 - 400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu
 - 400 GR_CANCEL_INSUFFICIENT_STOCK: stok gudang penerimaan tidak cukup untuk dibalikkan (baris item yang sama dijumlah per gudang)
-- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak STT diterima (juga lewat bypass stok minus), atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
@@ -219,6 +218,9 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan
+- 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 **Tool terkait:** [`pi_cancel`](#pi_cancel), [`gr_get`](#gr_get)
 
@@ -496,7 +498,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.
+**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Bila barang item itu sudah keluar sejak nilainya masuk, selisih nilai yang ikut keluar dikoreksi otomatis (true-up, hasil replay gerakan stok item sejak nilai awal buku nilai): satu jurnal JV-YYYYMM-NNNN per gerakan yang dibalik, bertanggal hari pembatalan, DR/CR Persediaan item lawan akun terpetakan COGS, plus baris Revaluation di dokumen ini; sisa nilai saat stok jadi 0 ikut disapu ke COGS di jurnal yang sama.
 
 **Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.
 
@@ -511,14 +513,17 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
 - 400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)
-- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak nilai PI masuk, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
+- 409 REVERSAL_NEEDS_TRUE_UP: penyelesaian HPP menyusul lama (antrean COGS backfill) invoice ini tidak bisa dibalik karena barang item itu sudah keluar sesudahnya; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
 - 400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 - 400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan dokumen ini lebih dulu; tidak ada yang dibalik dua kali. Muat ulang lalu periksa statusnya.
 - 400: alasan pembatalan maksimal 500 karakter
+- 409 TRUE_UP_PRE_BASELINE: gerakan stok dokumen ini dicatat sebelum buku nilai dirilis (termasuk nilai awalnya, walau bertanggal sesudahnya) dan barangnya sudah ikut keluar; koreksi nilainya lewat jurnal manual akuntan
+- 409 TRUE_UP_UNEXPLAINED: riwayat gerakan stok item tidak menjelaskan stok dan nilainya saat ini, atau tanpa gerakan dokumen ini barang yang keluar sesudahnya melebihi stok (stok minus); koreksi nilai tidak bisa dihitung otomatis, hubungi akuntan
+- 400 PERIOD_LOCKED / PERIOD_CLOSED: hari pembatalan (tanggal jurnal koreksi nilai) di periode terkunci atau tahun buku tertutup, bila pembatalan butuh koreksi nilai
 
 **Tool terkait:** [`pay_cancel`](kas-bank.md#pay_cancel), [`vdep_apply_cancel`](#vdep_apply_cancel), [`gr_cancel`](#gr_cancel)
 

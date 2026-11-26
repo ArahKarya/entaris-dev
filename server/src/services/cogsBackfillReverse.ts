@@ -5,7 +5,8 @@ import { logger } from '../lib/logger';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { cancelTrailData, type CancelTrail } from '../utils/cancelClaim';
 import { lockInventoryRows } from './inventory/stockLocks';
-import { reverseMovement } from './inventory/inventoryLedger';
+import { REVERSAL_NEEDS_TRUE_UP, reverseMovement } from './inventory/inventoryLedger';
+import { BusinessError } from '../utils/errors';
 import { LEGACY_COGS_SETTLE } from './cogsBackfillService';
 
 type Tx = Prisma.TransactionClient;
@@ -16,8 +17,9 @@ const NEAR_ZERO_QTY = 0.0005;
  * Takes back exactly the settlement Revaluation rows (LEGACY_COGS_SETTLE) that `where` selects, under
  * one lock of their items, while the caller voids their journals: the voided journal reverses the
  * same inventory amount. Refused with REVERSAL_NEEDS_TRUE_UP when goods of the item went out since
- * (true-up, PR-6.5a). A settlement journal from before the value ledger has no row: voiding it moves
- * the GL alone, its differential sits in the valuation baseline.
+ * (no true-up: the legacy queue is owner decision #6, PR-6.6). A settlement journal from before the
+ * value ledger has no row: voiding it would move the GL alone (its differential sits in the
+ * valuation baseline), so assertSettlementsBacked refuses it first.
  */
 async function reverseSettleRows(tx: Tx, where: Prisma.StockMovementWhereInput, trail?: CancelTrail): Promise<void> {
   const rows = await tx.stockMovement.findMany({
@@ -29,6 +31,30 @@ async function reverseSettleRows(tx: Tx, where: Prisma.StockMovementWhereInput, 
   await lockInventoryRows(tx, { itemIds: rows.map((r) => r.itemId) });
   // Latest first: a later settlement was posted on the book the earlier one left.
   for (const row of rows) await reverseMovement(tx, row.id, { userId: trail?.cancelledById ?? row.createdById });
+}
+
+/**
+ * Refuses (REVERSAL_NEEDS_TRUE_UP, 409) when a still-active settlement journal in `jeIds` has no
+ * LegacyCogsSettle row: it was posted before the value ledger, its differential is in the valuation
+ * baseline, and voiding it would leave book ≠ GL. Runs before anything is written.
+ */
+async function assertSettlementsBacked(tx: Tx, jeIds: readonly string[]): Promise<void> {
+  for (const jeId of jeIds) {
+    const je = await tx.journalEntry.findUnique({ where: { id: jeId }, select: { entryNumber: true, status: true, fiscalYearId: true, date: true } });
+    if (!je || je.status === 'Cancelled') continue;
+    // A closed period refuses first, whatever the journal is backed by.
+    await assertPeriodOpen(tx, { fiscalYearId: je.fiscalYearId, date: je.date }, 'jurnal');
+    const backed = await tx.stockMovement.count({
+      where: { journalEntryId: jeId, referenceType: LEGACY_COGS_SETTLE, movementType: 'Revaluation', isCancelled: false },
+    });
+    if (backed > 0) continue;
+    throw new BusinessError(
+      `Pembatalan ditolak: jurnal penyelesaian HPP ${je.entryNumber} dibuat sebelum buku nilai persediaan, jadi nilainya tidak dapat dibalik otomatis. `
+        + 'Minta akuntan membuat jurnal koreksi.',
+      REVERSAL_NEEDS_TRUE_UP,
+      409,
+    );
+  }
 }
 
 /**
@@ -61,6 +87,7 @@ export async function closeCogsBackfillForSalesInvoice(
     if (foreign > 0) logger.warn({ salesInvoiceId, jeId }, 'COGS backfill JV shared with another invoice; left active');
     else ownJeIds.push(jeId);
   }
+  await assertSettlementsBacked(tx, ownJeIds);
   await reverseSettleRows(tx, { journalEntryId: { in: ownJeIds } }, trail);
   const affectedAccountIds = new Set<string>();
   let journalsCancelled = 0;
@@ -111,12 +138,13 @@ export async function reverseCogsSettlementsByTrigger(
   });
   if (settlements.length === 0) return { reversed: 0, journalsCancelled: 0 };
 
+  // One auto-settle JV can cover many settlements in a batch.
+  const jeIds = [...new Set(settlements.map((s) => s.journalEntryId).filter((x): x is string => !!x))];
+  await assertSettlementsBacked(tx, jeIds);
   // The settlement rows of the trigger (one per settled item, those of an invoice cancelled since
   // already reversed), before their journals are voided.
   await reverseSettleRows(tx, { referenceId: triggerRefId }, trail);
 
-  // One auto-settle JV can cover many settlements in a batch.
-  const jeIds = [...new Set(settlements.map((s) => s.journalEntryId).filter((x): x is string => !!x))];
   const affectedAccountIds = new Set<string>();
   let journalsCancelled = 0;
   for (const jeId of jeIds) {

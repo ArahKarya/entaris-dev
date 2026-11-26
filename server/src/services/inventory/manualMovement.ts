@@ -335,7 +335,7 @@ async function assertBatchNotConsumed(tx: Tx, movement: StockMovement, action: '
  * Takes the old row back through the value ledger (its own quantity and value_delta) after the
  * per-warehouse check of an inbound reversal (a legacy row without a warehouse is checked against
  * the item total). Refused with REVERSAL_NEEDS_TRUE_UP when goods of the item went out after an
- * inbound row (value true-up, PR-6.5a).
+ * inbound row (no value true-up for a manual movement yet: PR-6.5b).
  */
 async function reverseManualRow(tx: Tx, movement: StockMovement, context: string, userId: string): Promise<void> {
   await lockInventoryRows(tx, {

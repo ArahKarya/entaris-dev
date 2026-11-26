@@ -3,10 +3,11 @@
  * accepts it (E3-R1), not only doc.cancel or ownership of an approval request:
  * - goods receipt cancel: STT of 10.000 kg, 8.000 kg leave by a manual "Penyesuaian Stok -"
  *   (no sourceMovementId, so the consumed-batch guard does not fire). A forced cancel by a doc.cancel
- *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes, but the
- *   value ledger refuses the reversal (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a) and nothing changes;
+ *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes, but
+ *   without the receipt the 8.000 kg would have gone out past zero with no cost, so the value replay
+ *   refuses it (TRUE_UP_UNEXPLAINED, until PR-6.6) and nothing changes;
  * - production run cancel: the same through the body and through ?allowNegativeStock=true (the
- *   output went out since, so with the capability the value ledger refuses it too, until PR-6.5a);
+ *   output went out since, so with the capability the value ledger refuses it too, until PR-6.12);
  * - production run resubmit with the bypass: 403 and the request stays in NeedsRevision without the
  *   capability, Pending with it.
  *
@@ -22,7 +23,7 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { systemAccounts } from '../../services/systemAccounts';
-import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
+import { REVERSAL_NEEDS_TRUE_UP, TRUE_UP_UNEXPLAINED } from '../../services/inventory/inventoryLedger';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -35,6 +36,7 @@ import productionRunsRouter from '../../routes/inventory/productionRuns';
 import movementsRouter from '../../routes/inventory/movements';
 import approvalsRouter from '../../routes/approvals';
 import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -168,13 +170,16 @@ d('goods receipt cancel with the negative-stock bypass', () => {
       expect(plain.status).toBe(400);
       expect(plain.body.code).toBe('GR_CANCEL_INSUFFICIENT_STOCK');
 
-      // The bypass passes the stock check, but 8.000 kg of the receipt went out since: on the value
-      // ledger taking its value back needs a value true-up (PR-6.5a), so it is refused until then.
+      // The bypass passes the stock check, but 8.000 kg of the receipt went out since. Without the
+      // receipt the item never had a cost, so the replay would value them at average 0 past zero: a
+      // guess, refused until PR-6.6 settles stock <= 0 windows, and nothing changes.
       const refused = await cancel(admin);
       expect(refused.status, JSON.stringify(refused.body)).toBe(409);
-      expect(refused.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(refused.body.code).toBe(TRUE_UP_UNEXPLAINED);
       expect(await stockOf(tx, item.id, warehouseId)).toEqual({ item: 2_000, warehouse: 2_000 });
+      expect(await tx.stockMovement.count({ where: { itemId: item.id, movementType: 'Revaluation' } })).toBe(0);
       expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } })).status).not.toBe('Cancelled');
+      await assertLedgerInvariant(tx, [item.id], { warehouses: true });
     });
   });
 });
@@ -218,7 +223,7 @@ d('production run cancel with the negative-stock bypass', () => {
       const { run, output } = await usedRun(tx, warehouseId, clerk);
 
       // 50 kg of the output went out since: on the value ledger taking its value back needs a value
-      // true-up (PR-6.5a / PR-6.12), so the cancel is refused until then and nothing changes.
+      // true-up (PR-6.12), so the cancel is refused until then and nothing changes.
       const r = await callRoute(productionRunsRouter, 'put', '/:id/cancel', {
         params: { id: run.id }, query: { allowNegativeStock: 'true' }, body: { negativeStockReason: REASON }, userId: admin.userId, role: admin.role,
       });

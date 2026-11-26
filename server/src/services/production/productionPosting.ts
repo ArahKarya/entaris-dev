@@ -186,7 +186,7 @@ function outputUsedError(mode: ProductionReversalMode, s: StockShortage): Busine
  * take back the value they put in, which is what the voided journal carried, so book = GL.
  * Reversing the outputs must not drive stock negative at the movement's warehouse (lines of one item
  * summed) unless bypassed, which is logged. An output whose item went out since it was received is
- * refused with REVERSAL_NEEDS_TRUE_UP (value true-up, PR-6.5a / PR-6.12), also one received at value
+ * refused with REVERSAL_NEEDS_TRUE_UP (value true-up of a run, PR-6.12), also one received at value
  * 0 (a by-product at NRV 0) that diluted the average the later sales were valued at; an edit is
  * refused in its own words. Call it under lockProductionStockInTx.
  */
