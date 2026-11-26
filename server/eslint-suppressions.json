@@ -91,7 +91,7 @@
   },
   "src/routes/inventory/items.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 5
+      "count": 4
     }
   },
   "src/routes/inventory/machines.ts": {
