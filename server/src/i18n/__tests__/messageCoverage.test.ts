@@ -23,6 +23,17 @@ const IGNORED = new Set<string>([
   'No Admin user available to attribute public inquiry to',
   'Inventory item {0} not found during COGS backfill settle.',
   'HTTP {0}',
+  // Programming errors of the value ledger's callers (services/inventory/inventoryLedger.ts), never reach a client.
+  '{0}: quantity must be above 0',
+  'postInbound: {0} is not an inbound type',
+  'postOutbound: {0} is not an outbound type',
+  'postInbound: value must be 0 or more',
+  'reverseMovement: {0} rows are not reversed by this function',
+  'linkMovementJournal: movement {0} is missing, cancelled or already linked',
+  'postTransfer: source and destination are the same warehouse',
+  'reverseMovement: transfer leg {0} has no warehouse',
+  'postRevaluation: delta must be a non-zero amount',
+  'placeUnplacedStock: quantity must be a non-zero amount',
   // Programming error at module load (duplicate year-close check id), never reaches a client.
   'Close check {0} is already registered',
   // Programming errors of the sourceKey builders (services/ledger/journalSource.ts sourceKeys), never reach a client.
@@ -64,6 +75,10 @@ const IGNORED = new Set<string>([
   'Unknown warehouse_code: {0}. Nothing was applied.',
   'The plan is stale; nothing was applied. {0}',
   'Drift left after the repair on {0}; nothing was applied.',
+  // Reader of the value-ledger migration's data part (services/inventory/valueBaselineSql.ts, run by
+  // scripts/repair/e3-value-baseline.ts), CLI and tests only.
+  'Value-ledger data markers not found in {0}',
+  'Value-ledger data part of {0} is not a single DO block',
 ]);
 
 /** Machine-readable error codes (`engine_busy`, `turn_in_progress`) are mapped to text by the client. */

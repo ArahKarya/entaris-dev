@@ -1,22 +1,24 @@
 import { unlinkTemporaryNotesFromDoInTx } from './temporaryDeliveryNote';
 import type { Prisma } from '@prisma/client';
 import { BusinessError } from '../utils/errors';
-import { adjustWarehouseStock } from '../utils/warehouseStock';
 import { assertPeriodOpen } from '../utils/periodGuard';
 import { recomputeDeliveredQtyInTx } from './salesOrderDelivery';
 import { logger } from '../lib/logger';
 import { claimCancel } from '../utils/cancelClaim';
 import { lockInventoryRows } from './inventory/stockLocks';
+import { reverseMovement } from './inventory/inventoryLedger';
 
 type Tx = Prisma.TransactionClient;
 
 /**
  * Cancel a submitted delivery order: rejected if already invoiced (cancel the invoice first);
- * restores item and per-warehouse stock. No GL impact. Caller owns the transaction.
+ * each line's Out is taken back exactly through the value ledger (quantity and value). No GL
+ * impact: the note has no journal until it is invoiced. Caller owns the transaction.
  */
 export async function cancelDeliveryOrderInTx(
   tx: Tx,
   doId: string,
+  userId: string,
 ): Promise<{ id: string; status: 'Cancelled' }> {
   const current = await tx.deliveryOrder.findUnique({ where: { id: doId }, select: { status: true } });
   if (!current) throw new BusinessError('Surat jalan tidak ditemukan.');
@@ -48,6 +50,9 @@ export async function cancelDeliveryOrderInTx(
     pairs: returning.flatMap((line) => (line.warehouseId ? [{ itemId: line.inventoryItemId!, warehouseId: line.warehouseId }] : [])),
   });
 
+  // The stock-0 residue rule judges an item after all of its lines are back, not after each.
+  const reversible = deliveryOrder.items.filter((line) => line.stockMovement && !line.stockMovement.isCancelled);
+  const lastLineOfItem = new Map(reversible.map((line, i) => [line.stockMovement!.itemId, i]));
   for (const line of deliveryOrder.items) {
     if (!line.stockMovementId) continue;
 
@@ -60,20 +65,7 @@ export async function cancelDeliveryOrderInTx(
       continue;
     }
 
-    const qty = Number(line.quantity);
-
-    if (line.inventoryItemId) {
-      await tx.inventoryItem.update({
-        where: { id: line.inventoryItemId },
-        data: { currentStock: { increment: qty } },
-      });
-      await adjustWarehouseStock(tx, line.inventoryItemId, line.warehouseId, qty);
-    }
-
-    await tx.stockMovement.update({
-      where: { id: sm.id },
-      data: { isCancelled: true },
-    });
+    await reverseMovement(tx, sm.id, { userId, intermediate: lastLineOfItem.get(sm.itemId) !== reversible.indexOf(line) });
   }
 
   // Surat Jalan Sementara yang tertaut ke DO ini kembali Terbuka

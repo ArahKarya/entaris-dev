@@ -16,6 +16,7 @@ import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { cancelGoodsReceiptInTx } from '../../services/goodsReceiptCancel';
 import { seedStock } from '../helpers/inventoryFixture';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -131,6 +132,7 @@ d('submitGoodsReceiptInTx', () => {
         expect(accrualLine).toBeDefined();
         expect(accrualLine!.account.accountNumber).toBe(await systemAccountNumber(prisma, 'ACCRUED_PAYABLE'));
         expect(accrualLine!.partyId).toBe(supplierId);
+        await assertLedgerInvariant(tx, [item.id]);
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });
@@ -182,6 +184,7 @@ d('submitGoodsReceiptInTx', () => {
         });
         const totalCr = jv!.items.reduce((s, i) => s + Number(i.credit), 0);
         expect(totalCr).toBe(750_000);
+        await assertLedgerInvariant(tx, [item.id]);
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });
@@ -264,6 +267,7 @@ d('cancelGoodsReceiptInTx', () => {
         // STT marked Cancelled
         const sttAfter = await tx.goodsReceipt.findUnique({ where: { id: stt.id } });
         expect(sttAfter!.status).toBe('Cancelled');
+        await assertLedgerInvariant(tx, [item.id]);
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });

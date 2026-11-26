@@ -68,7 +68,7 @@ router.get('/summary', async (req, res) => {
       by: ['movementType', 'isCancelled'],
       where: filter.where,
       _count: { _all: true },
-      _sum: { quantity: true, totalValue: true },
+      _sum: { quantity: true, totalValue: true, valueDelta: true },
     });
     return res.json(summarizeStockMovements(groups));
   } catch (error) {
@@ -76,8 +76,9 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-// POST /api/inventory/movements: manual movement (services/inventory/manualMovement.ts). Outbound
-// rows are valued at the average cost; inbound rows need a unit cost > 0 and an offset account.
+// POST /api/inventory/movements: manual movement (services/inventory/manualMovement.ts) through the
+// value ledger. Outbound rows are valued from the book; inbound rows need a unit cost > 0 and an
+// offset account.
 router.post('/', async (req: AuthRequest, res) => {
   const body = validateBody(CreateStockMovementSchema, req.body, res);
   if (!body) return;
@@ -110,7 +111,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT /api/inventory/movements/:id — edit movement (reverse old + re-post)
+// PUT /api/inventory/movements/:id — edit movement: the old row is cancelled and a new row is
+// posted; the response is the new row.
 router.put('/:id', requireCap('doc.cancel'), async (req: AuthRequest, res) => {
   const id = req.params.id as string;
   const body = validateBody(UpdateStockMovementSchema, req.body, res);

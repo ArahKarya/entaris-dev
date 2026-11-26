@@ -219,7 +219,7 @@ d('cancelDeliveryOrderInTx', () => {
         let itemAfter = await tx.inventoryItem.findUnique({ where: { id: item.id } });
         expect(Number(itemAfter!.currentStock)).toBe(30);
 
-        const cancelled = await cancelDeliveryOrderInTx(tx, result.id);
+        const cancelled = await cancelDeliveryOrderInTx(tx, result.id, userId);
         expect(cancelled.status).toBe('Cancelled');
 
         // After cancel: back to 50
@@ -310,7 +310,7 @@ d('cancelDeliveryOrderInTx', () => {
           data: { invoiceId: invoice.id, invoicedAt: new Date() },
         });
 
-        await expect(cancelDeliveryOrderInTx(tx, doResult.id))
+        await expect(cancelDeliveryOrderInTx(tx, doResult.id, userId))
           .rejects.toThrow(/invoice/i);
 
         throw new RollbackSentinel();

@@ -50,10 +50,6 @@ vi.mock('../../services/ledger/accountGuard', async (importActual) => ({
 }));
 vi.mock('../../services/cogsBackfillService', () => ({ settleCogsBackfillForItem: vi.fn(async () => undefined) }));
 vi.mock('../../services/cogsBackfillReverse', () => ({ reverseCogsSettlementsByTrigger: vi.fn(async () => undefined) }));
-vi.mock('../../services/averageCostRecompute', () => ({
-  recomputeAverageCostFromReplay: vi.fn(async () => 9000),
-  replayAverageCost: vi.fn(async () => ({ averageCost: 9000, explained: true })),
-}));
 
 import movementsRouter from '../inventory/movements';
 import stockOpnameRouter from '../stockOpname';
@@ -88,7 +84,7 @@ const send = (method: string, path: string, body: unknown) =>
   fetch(`${base}${path}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 const ITEM_ID = '0b8a3f0e-0000-4000-8000-0000000000a1';
-const ITEM = { id: ITEM_ID, name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '50', averageCost: '9000' };
+const ITEM = { id: ITEM_ID, name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '50', averageCost: '9000', stockValue: '450000' };
 const WH = '0b8a3f0e-0000-4000-8000-000000000001';
 
 const FY_2026 = { id: 'fy-2026', name: '2026', isClosed: false };
@@ -118,6 +114,10 @@ const journalHandlers = {
   'inventoryItem.findUnique': () => ITEM,
   'inventoryItem.findUniqueOrThrow': () => ITEM,
   'warehouse.findUnique': () => ({ isActive: true }),
+  // The value ledger claims a reversed row and links an outbound row's journal with updateMany.
+  'stockMovement.updateMany': () => ({ count: 1 }),
+  // reverseMovement and the route's read-back see the test's movement.
+  'stockMovement.findUniqueOrThrow': (args: unknown) => current.fn('stockMovement.findUnique')(args),
 };
 
 /** The input of the n-th postJournal call. */
@@ -125,7 +125,8 @@ const posted = (n = 0) => vi.mocked(postJournal).mock.calls[n]![1];
 
 const OLD_MOVEMENT = {
   id: 'sm-1', itemId: ITEM_ID, warehouseId: WH, movementType: 'In', quantity: '10', isCancelled: false, date: new Date('2026-12-20'),
-  referenceType: null, journalEntryId: null, fiscalYearId: 'fy-2026', movementNumber: 'SM-1', item: ITEM,
+  unitCost: '9000', totalValue: '90000', valueDelta: '90000', createdAt: new Date('2026-12-20'), sourceMovementId: null,
+  adjustsMovementId: null, referenceType: null, journalEntryId: null, fiscalYearId: 'fy-2026', movementNumber: 'SM-1', item: ITEM,
 };
 
 describe('manual stock movement GL descriptions', () => {
@@ -161,7 +162,9 @@ describe('manual stock movement GL descriptions', () => {
       { accountId: 'acc-var', debit: '36000', credit: 0, description: narration },
       { accountId: 'acc-inv', debit: 0, credit: '36000', description: narration },
     ]);
-    expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ unitCost: '9000', totalValue: '36000', offsetAccountId: 'acc-var' });
+    // The old row is cancelled through the ledger and a new row carries the edit.
+    expect(current.fn('stockMovement.updateMany').mock.calls[0]![0]).toMatchObject({ where: { id: 'sm-1', isCancelled: false }, data: { isCancelled: true } });
+    expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({ unitCost: '9000', totalValue: '36000', offsetAccountId: 'acc-var' });
   });
 
   it('PUT takes the new JV number before voiding the old journal (number before account rows)', async () => {
@@ -214,6 +217,7 @@ describe('stock opname header warehouse', () => {
       ...lockHandlers(),
       'inventoryItem.findMany': () => [{ ...ITEM, currentStock: '10' }],
       'warehouse.findFirst': () => ({ id: 'wh-default' }),
+      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
       'stockOpname.create': ({ data }: any) => ({ id: 'so-1', ...data }),
     });
     const res = await send('POST', '/stock-opname', { date: '2026-10-10', items: [{ itemId: ITEM_ID, actualStock: 12 }] });
@@ -243,7 +247,7 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
       movementType: 'In', quantity: 10, unitCost: 1000, date: '2027-01-05', offsetAccountId: 'acc-offset',
     });
     expect(res.status).toBe(200);
-    expect(current.fn('stockMovement.update').mock.calls[0]![0].data).toMatchObject({ fiscalYearId: 'fy-2027', date: new Date('2027-01-05') });
+    expect(current.fn('stockMovement.create').mock.calls[0]![0].data).toMatchObject({ fiscalYearId: 'fy-2027', date: new Date('2027-01-05') });
     expect(posted()).toMatchObject({ date: new Date('2027-01-05'), expectFiscalYearId: 'fy-2027' });
     expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).toMatchObject({ settleDate: new Date('2027-01-05') });
     expect(vi.mocked(settleCogsBackfillForItem).mock.calls[0]![1]).not.toHaveProperty('fiscalYearId');
@@ -290,6 +294,7 @@ describe('closed fiscal year on movement edit/cancel and opname cancel', () => {
     expect((await res.json()).code).toBe('PERIOD_CLOSED');
     expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
     expect(current.fn('stockMovement.update')).not.toHaveBeenCalled();
+    expect(current.fn('stockMovement.updateMany')).not.toHaveBeenCalled();
   });
 
   it('opname cancel in a closed year is rejected with PERIOD_CLOSED', async () => {
@@ -334,7 +339,7 @@ describe('document movement lock and references (E3-R2)', () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe('MOVEMENT_SOURCE_BATCH_INVALID');
-    expect(current.fn('inventoryStock.upsert')).not.toHaveBeenCalled();
+    expect(current.fn('inventoryStock.update')).not.toHaveBeenCalled();
     expect(current.fn('stockMovement.create')).not.toHaveBeenCalled();
   });
 
@@ -344,8 +349,8 @@ describe('document movement lock and references (E3-R2)', () => {
       movementType: 'In', quantity: 4, unitCost: 500, date: '2026-10-10', offsetAccountId: 'acc-offset', referenceType: 'GoodsReceipt',
     });
     expect(res.status).toBe(200);
-    const data = current.fn('stockMovement.update').mock.calls[0]![0].data;
-    expect(data).not.toHaveProperty('referenceType');
+    const data = current.fn('stockMovement.create').mock.calls[0]![0].data;
+    expect(data.referenceType).toBeNull();
     expect(data.sourceMovementId).toBeNull();
   });
 
@@ -362,30 +367,34 @@ describe('document movement lock and references (E3-R2)', () => {
     expect((await edit.json()).code).toBe('MOVEMENT_DOCUMENT_LOCKED');
     expect(current.fn('inventoryItem.update')).not.toHaveBeenCalled();
     expect(current.fn('stockMovement.update')).not.toHaveBeenCalled();
+    expect(current.fn('stockMovement.updateMany')).not.toHaveBeenCalled();
   });
 
-  it('opname cancel skips a line whose movement was already cancelled', async () => {
+  it('opname cancel reverses only the count\'s active rows, through the value ledger', async () => {
+    const live = {
+      id: 'm-live', movementNumber: 'SM-1', itemId: ITEM_ID, warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn',
+      quantity: '2', valueDelta: '18000', referenceType: 'StockOpname', referenceId: 'so-1', createdAt: new Date('2026-10-10'),
+      adjustsMovementId: null, adjustsMovement: null,
+    };
+    const dead = { ...live, id: 'm-dead', isCancelled: true, movementType: 'AdjustmentOut', quantity: '3', valueDelta: '-27000' };
     current = makeAutoTx({
       ...fiscalYearHandlers(),
       ...lockHandlers(),
       'stockOpname.updateMany': () => ({ count: 1 }),
       'stockMovement.findMany': ({ where }: any) =>
-        [
-          { id: 'm-live', itemId: ITEM_ID, warehouseId: WH, isCancelled: false, movementType: 'AdjustmentIn', quantity: '2' },
-          { id: 'm-dead', itemId: ITEM_ID, warehouseId: WH, isCancelled: true, movementType: 'AdjustmentOut', quantity: '3' },
-        ].filter((m) => (where.id.in as string[]).includes(m.id) && m.isCancelled === where.isCancelled),
+        [live, dead].filter((m) => (where.referenceType?.in ?? [where.referenceType]).includes(m.referenceType) && m.referenceId === where.referenceId && m.isCancelled === where.isCancelled),
+      'stockMovement.findUnique': ({ where }: any) => [live, dead].find((m) => m.id === where.id) ?? null,
+      'stockMovement.findUniqueOrThrow': ({ where }: any) => [live, dead].find((m) => m.id === where.id),
+      'stockMovement.updateMany': () => ({ count: 1 }),
       'stockOpname.findUnique': () => ({
         id: 'so-1', opnameNumber: 'SO-1', status: 'Submitted', date: new Date('2026-10-10'), fiscalYearId: 'fy-2026',
-        items: [
-          { itemId: ITEM_ID, difference: '2', movementId: 'm-live', item: ITEM },
-          { itemId: ITEM_ID, difference: '-3', movementId: 'm-dead', item: ITEM },
-        ],
       }),
     });
     const res = await send('PUT', '/stock-opname/so-1/cancel', {});
     expect(res.status).toBe(200);
-    expect(current.fn('inventoryItem.update').mock.calls.map((c) => c[0].data.currentStock.increment)).toEqual([-2]);
-    expect(current.fn('stockMovement.update').mock.calls.map((c) => c[0].where.id)).toEqual(['m-live']);
+    expect(current.fn('stockMovement.updateMany').mock.calls.map((c) => c[0].where.id)).toEqual(['m-live']);
+    expect(current.fn('inventoryStock.update').mock.calls.map((c) => c[0].data.currentStock.increment)).toEqual(['-2']);
+    expect(current.fn('inventoryItem.update').mock.calls.map((c) => [c[0].data.currentStock, c[0].data.stockValue])).toEqual([['48', '432000']]);
   });
 });
 
@@ -410,7 +419,7 @@ describe('manual movement cost and offset (E3-R4)', () => {
     const res = await post({ movementType: 'AdjustmentIn', quantity: 5, offsetAccountId: 'acc-offset', ...extra });
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe('MANUAL_IN_ZERO_COST');
-    expect(current.fn('inventoryStock.upsert')).not.toHaveBeenCalled();
+    expect(current.fn('inventoryStock.update')).not.toHaveBeenCalled();
     expect(postJournal).not.toHaveBeenCalled();
   });
 
@@ -419,7 +428,7 @@ describe('manual movement cost and offset (E3-R4)', () => {
     const res = await post({ movementType: 'In', quantity: 5, unitCost: 1000 });
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe('OFFSET_REQUIRED');
-    expect(current.fn('inventoryStock.upsert')).not.toHaveBeenCalled();
+    expect(current.fn('inventoryStock.update')).not.toHaveBeenCalled();
   });
 
   it('an inactive warehouse is refused', async () => {

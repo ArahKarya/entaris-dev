@@ -213,6 +213,7 @@
       "editFromDocument": "Movements from a {{doc}} can only be changed or cancelled on the {{page}} page.",
       "openingBalance": "Opening balance movements cannot be changed per row. Correct opening stock with a stock adjustment.",
       "stockDriftRepair": "Warehouse drift repair movements cannot be changed per row. Correct them with a stock adjustment.",
+      "revaluation": "Revaluation movements cannot be changed per row. Their value is part of the inventory value ledger.",
       "page": {
         "GoodsReceipt": "goods receipt",
         "DeliveryOrder": "Delivery Order",
@@ -243,7 +244,8 @@
       "SalesReturn": "Sales Return",
       "StockDriftRepair": "Warehouse drift repair",
       "StockOpname": "Stock Count",
-      "StockTransfer": "Stock Transfer"
+      "StockTransfer": "Stock Transfer",
+      "ValuationBaseline": "Valuation baseline"
     }
   },
   "invoiceItemsSection": {

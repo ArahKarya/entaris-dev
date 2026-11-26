@@ -3,15 +3,15 @@ import type { Prisma } from '@prisma/client';
 import { loadProductionCostContext, type ProductionCostContextInput } from '../productionCostContext';
 import { STOCK_INSUFFICIENT } from '../../inventory/stockLocks';
 
-type Item = { id: string; name: string; unit: string; isActive: boolean; currentStock: number; averageCost: number };
-type Batch = { id: string; itemId: string; isCancelled: boolean; movementType: string; unitCost: number };
+type Item = { id: string; name: string; unit: string; isActive: boolean; currentStock: number; averageCost: number; stockValue: number };
+type Batch = { id: string; itemId: string; isCancelled: boolean; movementType: string; unitCost: number; quantity: number; totalValue: number; valueDelta: number };
 
 const items: Item[] = [
-  { id: 'gkp', name: 'GKP', unit: 'Kg', isActive: true, currentStock: 1000, averageCost: 6000 },
-  { id: 'beras', name: 'Beras', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0 },
-  { id: 'bekatul', name: 'Bekatul', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0 },
+  { id: 'gkp', name: 'GKP', unit: 'Kg', isActive: true, currentStock: 1000, averageCost: 6000, stockValue: 6000000 },
+  { id: 'beras', name: 'Beras', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0, stockValue: 0 },
+  { id: 'bekatul', name: 'Bekatul', unit: 'Kg', isActive: true, currentStock: 0, averageCost: 0, stockValue: 0 },
 ];
-const batches: Batch[] = [{ id: 'sm-batch', itemId: 'gkp', isCancelled: false, movementType: 'In', unitCost: 5800 }];
+const batches: Batch[] = [{ id: 'sm-batch', itemId: 'gkp', isCancelled: false, movementType: 'In', unitCost: 5800, quantity: 100, totalValue: 580000, valueDelta: 580000 }];
 
 /** Stock per warehouse: GKP holds 1.000 at A and 5.000 at B; the run takes from A. */
 const stocks = [
@@ -31,7 +31,10 @@ function txWith(list: Item[] = items) {
         stocks.filter((r) => where.OR!.some((p) => p.itemId === r.itemId && p.warehouseId === r.warehouseId)),
     },
     warehouse: { findUnique: async ({ where }: { where: { id: string } }) => ({ name: where.id === 'wh-a' ? 'A' : 'B' }) },
-    stockMovement: { findUnique: async ({ where }: { where: { id: string } }) => batches.find((b) => b.id === where.id) ?? null },
+    stockMovement: {
+      findUnique: async ({ where }: { where: { id: string } }) => batches.find((b) => b.id === where.id) ?? null,
+      groupBy: async () => [],
+    },
   } as unknown as Prisma.TransactionClient;
 }
 
@@ -43,7 +46,7 @@ const body = (over: Partial<ProductionCostContextInput> = {}): ProductionCostCon
 const opts = { warehouseId: 'wh-a', context: 'test' };
 
 describe('loadProductionCostContext', () => {
-  it('costs an unpicked input at WAC and a picked one at the client snapshot, else the batch cost', async () => {
+  it('links a picked batch with its snapshot (the client snapshot, else the batch cost) and decides no cost', async () => {
     const ctx = await loadProductionCostContext(txWith(), body({
       inputs: [
         { itemId: 'gkp', quantity: 400 },
@@ -51,18 +54,13 @@ describe('loadProductionCostContext', () => {
         { itemId: 'gkp', quantity: 300, sourceMovementId: 'sm-batch' },
       ],
     }), opts);
+    // The ledger values every input when it posts it (E3-R6); the snapshot is display only (E6-R3).
     expect(ctx.inputs).toEqual([
-      { sourceMovementId: null, batchUnitCost: null, unitCost: 6000 },
-      { sourceMovementId: 'sm-batch', batchUnitCost: 5900, unitCost: 5900 },
-      { sourceMovementId: 'sm-batch', batchUnitCost: 5800, unitCost: 5800 },
+      { sourceMovementId: null, batchUnitCost: null },
+      { sourceMovementId: 'sm-batch', batchUnitCost: 5900 },
+      { sourceMovementId: 'sm-batch', batchUnitCost: 5800 },
     ]);
     expect(ctx.itemMap.get('beras')?.name).toBe('Beras');
-  });
-
-  it('costs an input with a non-positive WAC at 0', async () => {
-    const list = items.map((i) => (i.id === 'gkp' ? { ...i, averageCost: -5 } : i));
-    const ctx = await loadProductionCostContext(txWith(list), body(), opts);
-    expect(ctx.inputs[0]!.unitCost).toBe(0);
   });
 
   it('rejects short stock at the production warehouse, lines of one item summed, unless bypassed', async () => {

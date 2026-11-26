@@ -33,10 +33,10 @@ Master pendukung: `Machine` (kapasitas ideal per jam untuk OEE), `ProductionProc
 
 Saat sebuah run diposting (langsung oleh Admin, atau setelah disetujui):
 
-1. **Input**: stok bahan keluar (SM `Out` per baris input) di gudang run. Batch sumber boleh dipilih (`sourceMovementId`, biaya batch dikunci); tanpa batch dipakai WAC item.
-2. **Output**: stok produk masuk (SM `In`) dan WAC item output dihitung ulang (rata-rata tertimbang). Output **utama** dan **produk samping** (`isByProduct=true`) sama-sama masuk stok.
+1. **Input**: stok bahan keluar (SM `Out` per baris input) di gudang run, dinilai dari **buku nilai persediaan** (bagian nilai sebanding qty; baris yang menghabiskan stok membawa sisa nilainya). Batch sumber boleh dipilih (`sourceMovementId`), tetapi hanya untuk penelusuran: `batchUnitCost` dan biaya batch tidak menentukan nilai.
+2. **Output**: stok produk masuk (SM `In`) sebesar nilai barisnya dan rata-rata item output mengikuti nilai buku. Output **utama** dan **produk samping** (`isByProduct=true`) sama-sama masuk stok; produk samping NRV 0 ikut menurunkan rata-rata (mis. sekam 500 kg senilai 100.000 + 1.000 kg NRV 0 -> rata-rata 66,666667).
 3. **HPP terbebani per kg output utama**:
-   `(nilai bahan input + biaya sisi input + biaya sisi output - nilai produk samping) / qty output utama`.
+   `(nilai bahan input + biaya sisi input + biaya sisi output - nilai produk samping) / qty output utama`, dengan nilai bahan = nilai yang benar-benar keluar dari buku nilai.
    - Nilai produk samping = qty x NRV (`unitPrice` produk samping **wajib** diisi, >= 0).
    - Bila pembilang negatif (NRV samping > biaya) HPP dikunci 0 dan dicatat peringatan.
    - `hppOverride` (>= 0) mengunci HPP per kg secara manual.
@@ -49,7 +49,7 @@ Saat sebuah run diposting (langsung oleh Admin, atau setelah disetujui):
 5. **COGS backfill**: penjualan yang sebelumnya keluar saat stok minus diselesaikan terhadap output baru.
 6. **Yield** = qty output utama / qty total input x 100 (%); disimpan di run. Bila data mesin/waktu diisi, metrik OEE dihitung per mesin.
 
-Edit run (`prod_run_update`): efek lama dibalik (stok, WAC output dihitung ulang, semua jurnal berawalan `JV-<nomor>` dibatalkan), lalu efek baru diterapkan dengan **nomor run yang sama** dan jurnal revisi `JV-<nomor>-R<n>`. Pembatalan (`prod_run_cancel`): stok dibalik, WAC output dihitung ulang dari pergerakan masuk yang tersisa, jurnal (termasuk revisi) dibatalkan.
+Edit run (`prod_run_update`): efek lama dibalik (setiap baris stok persis sebesar nilainya di buku nilai, semua jurnal berawalan `JV-<nomor>` dibatalkan), lalu efek baru diterapkan dengan **nomor run yang sama** dan jurnal revisi `JV-<nomor>-R<n>`. Pembatalan (`prod_run_cancel`): stok dan nilai dibalik persis, jurnal (termasuk revisi) dibatalkan. Keduanya ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila output run sudah keluar sejak diterima (koreksi nilai otomatis belum tersedia).
 
 ### Persetujuan
 

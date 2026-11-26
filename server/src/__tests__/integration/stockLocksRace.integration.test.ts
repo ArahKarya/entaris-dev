@@ -16,7 +16,7 @@
  *   warehouse holds the item; an edit to Penyesuaian Stok - is checked like Stok Keluar;
  * - stock opname adds no empty warehouse row for a counted item without a difference;
  * - stock opname cancel whose surplus already left its warehouse -> 400, and the cancel claims the
- *   opname first (a second cancel cannot reverse twice).
+ *   opname first (a second cancel cannot reverse twice) once the Out is taken back.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
@@ -476,10 +476,13 @@ d('aggregate stock checks per warehouse', () => {
       expect(refused.body.code).toBe(STOCK_INSUFFICIENT);
       expect((await tx.stockOpname.findUniqueOrThrow({ where: { id: opname.body.id } })).status).toBe('Submitted');
 
-      // Put the stock back; the cancel then goes through once.
-      const back = await postMovement(s, { itemId: gabah.id, warehouseId: s.whA, movementType: 'In', quantity: 350, unitCost: 6000 });
-      expect(back.status, JSON.stringify(back.body)).toBe(201);
-      expect((await cancel()).status).toBe(200);
+      // Take the Out back (a new In would not do: the value ledger refuses to reverse the surplus
+      // after goods of the item went out, REVERSAL_NEEDS_TRUE_UP until PR-6.5a); the cancel then
+      // goes through once.
+      const back = await callRoute(movementsRouter, 'put', '/:id/cancel', { params: { id: out.body.id }, userId: s.actor.userId, role: s.actor.role });
+      expect(back.status, JSON.stringify(back.body)).toBe(200);
+      const done = await cancel();
+      expect(done.status, JSON.stringify(done.body)).toBe(200);
       expect(await stockOf(tx, gabah.id, s.whA)).toMatchObject({ item: 1100, warehouse: 100 });
       const again = await cancel();
       expect(again.status).toBe(400);

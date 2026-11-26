@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeftRight } from 'lucide-react';
 import api from '../../lib/api';
-import { formatDate, formatNumber, formatRupiah } from '@/lib/format';
+import { formatDate, formatNumber } from '@/lib/format';
+import { movementValueText } from '@/components/inventory/inventory-rows';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { WidgetCard } from '../dashboard-kit/WidgetCard';
 import { MiniTable } from '../dashboard-kit/MiniTable';
@@ -14,6 +15,8 @@ interface RecentMovement {
   movementType: 'In' | 'Out' | 'AdjustmentIn' | 'AdjustmentOut' | 'Revaluation';
   quantity: number;
   totalValue: number | null;
+  /** Signed value (value ledger); shown for Revaluation rows, whose totalValue is only the amount. */
+  valueDelta?: number | null;
 }
 
 type MovementLabelKey = 'widgetsShared.in' | 'widgetsShared.out' | 'recentMovements.adjIn' | 'recentMovements.adjOut' | 'recentMovements.revaluation';
@@ -71,7 +74,7 @@ export default function RecentMovements() {
             case 'qty':
               return r.movementType === 'Revaluation' ? '—' : formatNumber(r.quantity);
             default:
-              return <span className="text-muted-foreground">{r.totalValue != null ? formatRupiah(Number(r.totalValue)) : '—'}</span>;
+              return <span className="text-muted-foreground">{movementValueText(r)}</span>;
           }
         }}
       />

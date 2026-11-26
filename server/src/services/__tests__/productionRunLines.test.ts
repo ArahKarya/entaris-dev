@@ -11,6 +11,7 @@ describe('buildProductionRunLineItems', () => {
       { itemId: 'dedak', quantity: 100, isByProduct: true },
     ],
     batchSnapshots: [{ sourceMovementId: 'sm-batch', batchUnitCost: 6000 }],
+    inputCosting: [{ unitCost: 5800.5 }],
     outputCosting: [
       { persistedUnitPrice: 9500, priceIsManual: true, yieldPct: 60 },
       { persistedUnitPrice: 1500, priceIsManual: false, yieldPct: null },
@@ -24,9 +25,9 @@ describe('buildProductionRunLineItems', () => {
     expect(lines.every((l) => l.productionRunId === 'run-1')).toBe(true);
   });
 
-  it('keeps batch, yield and resolved price semantics', () => {
+  it('keeps batch, yield and resolved price semantics; an input is priced at its ledger cost', () => {
     const [input, main, byProduct] = buildProductionRunLineItems(base);
-    expect(input).toMatchObject({ lineType: 'Input', sourceMovementId: 'sm-batch', batchUnitCost: 6000, unitPrice: null });
+    expect(input).toMatchObject({ lineType: 'Input', sourceMovementId: 'sm-batch', batchUnitCost: 6000, unitPrice: 5800.5 });
     expect(main).toMatchObject({ lineType: 'Output', unitPrice: 9500, yieldPct: 60, isByProduct: false });
     expect(byProduct).toMatchObject({ lineType: 'ByProduct', unitPrice: 1500, yieldPct: null, isByProduct: true });
   });
@@ -40,7 +41,7 @@ describe('buildProductionRunLineItems', () => {
 describe('buildProductionRunLineItems price_is_manual', () => {
   it('flags typed main output prices only, never by-products', () => {
     const lines = buildProductionRunLineItems({
-      runId: 'r', warehouseId: 'w', inputs: [], batchSnapshots: [],
+      runId: 'r', warehouseId: 'w', inputs: [], batchSnapshots: [], inputCosting: [],
       outputs: [{ itemId: 'a', quantity: 1 }, { itemId: 'b', quantity: 1 }, { itemId: 'c', quantity: 1, isByProduct: true }],
       outputCosting: [
         { persistedUnitPrice: 5, priceIsManual: true, yieldPct: 10 },

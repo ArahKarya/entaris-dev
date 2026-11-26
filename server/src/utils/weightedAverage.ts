@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { UNIT_COST_DP } from './costPrecision';
+import { UNIT_COST_DP } from '../services/inventory/inventoryValueMath';
 
 /**
  * Recalculate weighted average cost after a stock-in movement.

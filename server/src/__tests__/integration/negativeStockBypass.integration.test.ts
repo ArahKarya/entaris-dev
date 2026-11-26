@@ -3,8 +3,10 @@
  * accepts it (E3-R1), not only doc.cancel or ownership of an approval request:
  * - goods receipt cancel: STT of 10.000 kg, 8.000 kg leave by a manual "Penyesuaian Stok -"
  *   (no sourceMovementId, so the consumed-batch guard does not fire). A forced cancel by a doc.cancel
- *   holder is 403 and changes nothing; with inventory.negative_stock the stock goes to -8.000;
- * - production run cancel: the same through the body and through ?allowNegativeStock=true;
+ *   holder is 403 and changes nothing; with inventory.negative_stock the stock check passes, but the
+ *   value ledger refuses the reversal (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a) and nothing changes;
+ * - production run cancel: the same through the body and through ?allowNegativeStock=true (the
+ *   output went out since, so with the capability the value ledger refuses it too, until PR-6.5a);
  * - production run resubmit with the bypass: 403 and the request stays in NeedsRevision without the
  *   capability, Pending with it.
  *
@@ -20,6 +22,7 @@ import { createFiscalYear } from '../helpers/periodFixture';
 import { createCapUser } from '../helpers/rbacFixture';
 import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { systemAccounts } from '../../services/systemAccounts';
+import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
 
 const state = vi.hoisted(() => ({ tx: null as Tx | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
@@ -165,10 +168,13 @@ d('goods receipt cancel with the negative-stock bypass', () => {
       expect(plain.status).toBe(400);
       expect(plain.body.code).toBe('GR_CANCEL_INSUFFICIENT_STOCK');
 
-      const ok = await cancel(admin);
-      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-      expect(ok.body.status).toBe('Cancelled');
-      expect(await stockOf(tx, item.id, warehouseId)).toEqual({ item: -8_000, warehouse: -8_000 });
+      // The bypass passes the stock check, but 8.000 kg of the receipt went out since: on the value
+      // ledger taking its value back needs a value true-up (PR-6.5a), so it is refused until then.
+      const refused = await cancel(admin);
+      expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+      expect(refused.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await stockOf(tx, item.id, warehouseId)).toEqual({ item: 2_000, warehouse: 2_000 });
+      expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.id } })).status).not.toBe('Cancelled');
     });
   });
 });
@@ -206,17 +212,20 @@ d('production run cancel with the negative-stock bypass', () => {
     });
   });
 
-  it('lets a holder of inventory.negative_stock cancel into negative stock', async () => {
+  it('lets a holder of inventory.negative_stock past the stock check; the value ledger then refuses', async () => {
     await inRollback(async (tx) => {
       const { warehouseId, clerk, admin } = await setup(tx);
       const { run, output } = await usedRun(tx, warehouseId, clerk);
 
+      // 50 kg of the output went out since: on the value ledger taking its value back needs a value
+      // true-up (PR-6.5a / PR-6.12), so the cancel is refused until then and nothing changes.
       const r = await callRoute(productionRunsRouter, 'put', '/:id/cancel', {
         params: { id: run.id }, query: { allowNegativeStock: 'true' }, body: { negativeStockReason: REASON }, userId: admin.userId, role: admin.role,
       });
-      expect(r.status, JSON.stringify(r.body)).toBe(200);
-      expect((await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } })).isCancelled).toBe(true);
-      expect(await stockOf(tx, output.id, warehouseId)).toEqual({ item: -50, warehouse: -50 });
+      expect(r.status, JSON.stringify(r.body)).toBe(409);
+      expect(r.body.code).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect((await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } })).isCancelled).toBe(false);
+      expect(await stockOf(tx, output.id, warehouseId)).toEqual({ item: 10, warehouse: 10 });
     });
   });
 });

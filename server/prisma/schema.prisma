@@ -1273,6 +1273,8 @@ model InventoryItem {
   description          String?
   currentStock         Decimal                  @default(0) @map("current_stock") @db.Decimal(15, 3)
   averageCost          Decimal                  @default(0) @map("average_cost") @db.Decimal(20, 6)
+  // Value ledger (E3-R6): Σ value_delta of the item's active movements, 2 dp; average_cost derives from it.
+  stockValue           Decimal                  @default(0) @map("stock_value") @db.Decimal(20, 2)
   minimumStock         Decimal                  @default(0) @map("minimum_stock") @db.Decimal(15, 3)
   isActive             Boolean                  @default(true) @map("is_active")
   isDummy              Boolean                  @default(false) @map("is_dummy")
@@ -1372,6 +1374,9 @@ model StockMovement {
   quantity                  Decimal             @db.Decimal(20, 3)
   unitCost                  Decimal             @default(0) @map("unit_cost") @db.Decimal(20, 6)
   totalValue                Decimal             @default(0) @map("total_value") @db.Decimal(20, 2)
+  // Value ledger (E3-R6): signed value this row moves into (+) or out of (−) the item's stock_value,
+  // 2 dp; total_value = |value_delta| for display. Transfer legs carry 0.
+  valueDelta                Decimal             @default(0) @map("value_delta") @db.Decimal(20, 2)
   notes                     String?
   referenceType             String?             @map("reference_type")
   referenceId               String?             @map("reference_id")
@@ -1402,6 +1407,11 @@ model StockMovement {
   productionInputBatchUsage ProductionRunItem[] @relation("ProductionInputBatch")
   consumingSalesItems       SalesInvoiceItem[]  @relation("SalesBatchSource")
   consumingTransferItems    StockTransferItem[] @relation("TransferBatchSource")
+  // Revaluation row (quantity 0, warehouse NULL) that changes the value of another movement, e.g. a
+  // purchase invoice price delta on an STT receipt. Batch cost shown = row value + Σ its active ones.
+  adjustsMovementId         String?             @map("adjusts_movement_id")
+  adjustsMovement           StockMovement?      @relation("MovementAdjusts", fields: [adjustsMovementId], references: [id])
+  adjustingMovements        StockMovement[]     @relation("MovementAdjusts")
   createdAt                 DateTime            @default(now()) @map("created_at")
   updatedAt                 DateTime            @updatedAt @map("updated_at")
 
@@ -1410,6 +1420,7 @@ model StockMovement {
   @@index([date])
   @@index([movementType])
   @@index([fiscalYearId])
+  @@index([adjustsMovementId])
   @@map("stock_movements")
 }
 

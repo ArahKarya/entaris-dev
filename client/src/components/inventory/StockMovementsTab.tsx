@@ -34,6 +34,7 @@ import {
   formatQty,
   isInbound,
   isValueOnly,
+  movementValueText,
   movementCancelBlock,
   movementEditBlock,
   movementTypeLabel,
@@ -195,7 +196,7 @@ export function StockMovementsTab({ canEdit, canCancel, onCreate, onEdit, onCanc
           const m = row.original;
           return (
             <span className={cn(m.isCancelled ? 'text-muted-foreground line-through' : 'text-foreground')}>
-              {m.totalValue != null ? formatRupiah(m.totalValue, { symbol: false }) : '—'}
+              {movementValueText(m, { symbol: false })}
             </span>
           );
         },

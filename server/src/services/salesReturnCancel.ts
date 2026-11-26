@@ -6,6 +6,7 @@ import { assertPeriodOpen } from '../utils/periodGuard';
 import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
+import { reverseDocumentMovements } from './inventory/inventoryLedger';
 import type { NegativeStockBypass } from '../utils/negativeStockGate';
 
 type Tx = Prisma.TransactionClient;
@@ -15,8 +16,10 @@ type Tx = Prisma.TransactionClient;
  * invoiceCancellation):
  *   - flip JV-RN (and JV-COGS-RN) to Cancelled, mark ALE rows cancelled,
  *     reverse account balances
- *   - cancel the StockMovement(s) it created and decrement stock back; rejected with
- *     STOCK_INSUFFICIENT when the return's warehouse no longer holds it (opts bypass)
+ *   - take the In(s) it created back exactly through the value ledger (quantity and value_delta,
+ *     the amounts of the voided COGS reversal); rejected with STOCK_INSUFFICIENT when the return's
+ *     warehouse no longer holds it (opts bypass), and with REVERSAL_NEEDS_TRUE_UP when goods of
+ *     the item went out since (value true-up, PR-6.5a)
  *   - restore the original invoice's outstanding by arReducedAmount
  *   - cancel the linked CustomerDeposit Payment (blocked if already applied)
  *   - recompute party outstanding
@@ -82,26 +85,13 @@ export async function cancelSalesReturnInTx(
     },
   );
 
+  await reverseDocumentMovements(tx, { referenceType: 'SalesReturn', referenceId: ret.id }, { userId: trail?.cancelledById ?? ret.createdBy });
+
   // Reverse main + COGS journals.
   for (const jvNumber of [`JV-${ret.returnNumber}`, `JV-COGS-${ret.returnNumber}`]) {
     const journal = await tx.journalEntry.findUnique({ where: { entryNumber: jvNumber }, include: { items: true } });
     if (!journal || journal.status === 'Cancelled') continue;
     await voidJournalInTx(tx, journal, 'retur', trail);
-  }
-
-  // Cancel the stock movements created by this return and take the stock back out.
-  for (const sm of movements) {
-    await tx.inventoryItem.update({
-      where: { id: sm.itemId },
-      data: { currentStock: { decrement: Number(sm.quantity) } },
-    });
-    if (sm.warehouseId) {
-      await tx.inventoryStock.update({
-        where: { itemId_warehouseId: { itemId: sm.itemId, warehouseId: sm.warehouseId } },
-        data: { currentStock: { decrement: Number(sm.quantity) } },
-      });
-    }
-    await tx.stockMovement.update({ where: { id: sm.id }, data: { isCancelled: true } });
   }
 
   // Restore invoice outstanding by the AR portion that was reduced. A Cancelled invoice keeps 0:

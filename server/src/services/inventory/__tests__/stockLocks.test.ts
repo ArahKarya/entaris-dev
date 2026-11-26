@@ -23,8 +23,8 @@ const WH_2 = 'wh-2';
 const sqlOf = (call: unknown[]) => (call[0] as TemplateStringsArray).join('?');
 
 const items = [
-  { id: ITEM_A, name: 'Gabah', unit: 'Kg', isActive: true, accountId: null, currentStock: '1000', averageCost: '6000' },
-  { id: ITEM_B, name: 'Beras', unit: 'Kg', isActive: true, accountId: 'acc-1', currentStock: '50', averageCost: '12000' },
+  { id: ITEM_A, name: 'Gabah', unit: 'Kg', isActive: true, accountId: null, currentStock: '1000', averageCost: '6000', stockValue: '6000000' },
+  { id: ITEM_B, name: 'Beras', unit: 'Kg', isActive: true, accountId: 'acc-1', currentStock: '50', averageCost: '12000', stockValue: '600000' },
 ];
 
 /** A tx whose stock rows are `stocks` (itemId::warehouseId -> qty) and whose items are `items`. */

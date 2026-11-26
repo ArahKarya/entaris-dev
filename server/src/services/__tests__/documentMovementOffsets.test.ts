@@ -47,8 +47,12 @@ describe('goods receipt movements', () => {
   const grTx = (averageCost: string) =>
     makeAutoTx({
       'party.findUnique': () => ({ id: 'sup', name: 'Supplier', isActive: true, partyType: 'Supplier' }),
-      'inventoryItem.findUnique': () => ({ id: 'i1', name: 'GKP', isActive: true, accountId: null, averageCost, currentStock: '0' }),
+      // lockInventoryRows reads the item and its warehouse row back after locking them.
+      'inventoryItem.findMany': () => [{ id: 'i1', name: 'GKP', unit: 'Kg', isActive: true, accountId: null, averageCost, currentStock: '0', stockValue: '0' }],
+      'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
+      'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '0' }],
       'warehouse.findUnique': () => ({ id: 'wh-1' }),
+      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
     });
   const body = (extra: object = {}) => ({
     date: '2026-10-10',
@@ -60,7 +64,7 @@ describe('goods receipt movements', () => {
   it('stores Hutang Belum Tagih as the counter account', async () => {
     const { tx, fn } = grTx('0');
     await submitGoodsReceiptInTx(tx, body(), 'u1');
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'GoodsReceipt', offsetAccountId: 'acc-2.1.5', totalValue: 50000 });
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'GoodsReceipt', offsetAccountId: 'acc-2.1.5', totalValue: '50000' });
     const je = fn('journalEntry.create').mock.calls[0]![0].data.items.create;
     expect(je.find((l: any) => l.credit > 0).accountId).toBe('acc-2.1.5');
   });
@@ -68,7 +72,7 @@ describe('goods receipt movements', () => {
   it('leaves it empty for customer-owned goods (no journal)', async () => {
     const { tx, fn } = grTx('0');
     await submitGoodsReceiptInTx(tx, body({ isCustomerOwned: true }), 'u1');
-    expect(movementData(fn)[0]).toMatchObject({ totalValue: 0, offsetAccountId: null });
+    expect(movementData(fn)[0]).toMatchObject({ totalValue: '0', offsetAccountId: null });
     expect(fn('journalEntry.create')).not.toHaveBeenCalled();
   });
 });
@@ -77,7 +81,7 @@ describe('delivery order movements', () => {
   const doHandlers = () => ({
     'party.findUnique': () => ({ id: 'cust', name: 'Cust', isActive: true, partyType: 'Customer' }),
     // lockInventoryRows reads the items back after locking them; the average comes from here.
-    'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '9000' }],
+    'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '9000', stockValue: '900000' }],
     'inventoryItem.findUnique': () => ({ id: 'i1', name: 'Beras', unit: 'Kg', averageCost: '9000' }),
     'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
     'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '100' }],
@@ -134,7 +138,7 @@ describe('delivery order movements', () => {
     const h = doHandlers();
     const { tx, fn } = makeAutoTx({
       ...h,
-      'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '0' }],
+      'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, currentStock: '100', averageCost: '0', stockValue: '0' }],
     });
     await submitDeliveryOrderInTx(tx, body, 'u1');
     expect(movementData(fn)[0]?.offsetAccountId).toBeNull();
@@ -172,10 +176,15 @@ describe('sales return restock movements', () => {
       }),
       'account.findUnique': ({ where }) => ({ id: where.id, accountNumber: where.id, name: where.id, rootType: 'EXPENSE', isGroup: false, isActive: true }),
       'journalEntry.create': ({ data }) => ({ id: `je-${data.entryNumber}` }),
+      // lockInventoryRows reads the item and its warehouse row back; the item posts to the INVENTORY mapping.
+      'inventoryItem.findMany': () => [{ id: 'i1', name: 'Beras', unit: 'Kg', isActive: true, accountId: null, averageCost: '7000', currentStock: '10', stockValue: '70000' }],
+      'warehouse.findMany': () => [{ id: 'wh-1', name: 'Gudang' }],
+      'inventoryStock.findMany': () => [{ itemId: 'i1', warehouseId: 'wh-1', currentStock: '10' }],
+      'systemAccountMapping.findFirst': () => ({ accountId: 'acc-inv' }),
     });
     await submitSalesReturnInTx(tx, { salesInvoiceId: 'si-1', date: '2026-10-10', items: [{ salesInvoiceItemId: 'sii-1', quantity: 2 }] }, 'u1');
 
-    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'SalesReturn', totalValue: 14000, offsetAccountId: 'acc-COGS' });
+    expect(movementData(fn)[0]).toMatchObject({ referenceType: 'SalesReturn', totalValue: '14000', offsetAccountId: 'acc-COGS' });
     const cogsJe = fn('journalEntry.create').mock.calls.map((c) => c[0].data).find((d) => d.entryNumber.startsWith('JV-COGS-'));
     expect(cogsJe.items.create.find((l: any) => l.credit > 0).accountId).toBe('acc-COGS');
   });

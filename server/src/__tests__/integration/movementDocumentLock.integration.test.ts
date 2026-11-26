@@ -263,7 +263,8 @@ d('references sent by a client', () => {
       for (const [row, expected] of [[manual, null], [legacy, 'PurchaseInvoice']] as const) {
         const res = await editMovement(row.id, { movementType: 'In', quantity: 12, unitCost: 1_000, date: DAY, offsetAccountId, referenceType: 'GoodsReceipt' });
         expect(res.status).toBe(200);
-        const after = await tx.stockMovement.findUniqueOrThrow({ where: { id: row.id } });
+        // The edit cancels the row and posts a new one, which carries the old row's reference type.
+        const after = await tx.stockMovement.findUniqueOrThrow({ where: { id: res.body.id } });
         expect(after.referenceType).toBe(expected);
         expect(after.referenceId).toBeNull();
         expect(Number(after.quantity)).toBe(12);
@@ -378,6 +379,13 @@ d('e3-movement-reference-audit', () => {
 
       const typed = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceType: 'SalesInvoice' });
       const opening = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceType: 'OpeningBalance' });
+      // The value-ledger migration's baseline row: a reference type without a document, not a client's.
+      const baseline = await tx.stockMovement.create({
+        data: {
+          movementNumber: `IT-E3R2-VB-${tag()}`, date: DATE, fiscalYearId: fy.id, createdById: actor.userId, itemId: beras.id,
+          warehouseId: null, movementType: 'Revaluation', quantity: 0, totalValue: 1000, valueDelta: -1000, referenceType: 'ValuationBaseline',
+        },
+      });
       const berasBatch = await movement(tx, { itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 10 });
       const wrongBatch = await tx.stockMovement.update({
         where: { id: (await movement(tx, { itemId: bekatul.id, warehouseId: a.id, movementType: 'Out', quantity: 1 })).id },
@@ -396,7 +404,7 @@ d('e3-movement-reference-audit', () => {
         itemId: beras.id, warehouseId: a.id, movementType: 'In', quantity: 1, referenceType: 'GoodsReceipt', referenceId: '00000000-0000-4000-8000-0000000000ff',
       });
 
-      const mine = new Set([out.id, typed.id, opening.id, berasBatch.id, wrongBatch.id, okBatch.id, inboundLinked.id, orphanId.id, missingDoc.id]);
+      const mine = new Set([out.id, typed.id, opening.id, baseline.id, berasBatch.id, wrongBatch.id, okBatch.id, inboundLinked.id, orphanId.id, missingDoc.id]);
       const found = (await findMovementReferenceIssues(tx)).filter((r) => mine.has(r.id));
       const byList = (l: string) => found.filter((r) => r.list === l).map((r) => [r.id, r.note]);
       expect(byList('a')).toEqual([[typed.id, expect.stringMatching(/client/)]]);

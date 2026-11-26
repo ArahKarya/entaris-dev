@@ -3,7 +3,7 @@
  * (pages/InventoryPage.tsx). Kept free of React so they can be unit tested.
  */
 import i18n from '@/i18n';
-import { formatNumber, toNumber } from '@/lib/format';
+import { formatNumber, formatRupiah, toNumber } from '@/lib/format';
 import type { Paginated } from '@/components/shared';
 
 export type Qty = string | number;
@@ -111,6 +111,7 @@ const REFERENCE_TYPES = [
   'StockTransfer',
   'OpeningBalance',
   'StockDriftRepair',
+  'ValuationBaseline',
 ] as const;
 type ReferenceType = (typeof REFERENCE_TYPES)[number];
 const isReferenceType = (type: string): type is ReferenceType => (REFERENCE_TYPES as readonly string[]).includes(type);
@@ -130,6 +131,8 @@ export interface StockMovementRow {
   quantity: Qty;
   unitCost?: Qty;
   totalValue?: Qty | null;
+  /** Signed value of the row (value ledger); total_value is its absolute amount. */
+  valueDelta?: Qty | null;
   notes?: string | null;
   referenceType?: string | null;
   referenceId?: string | null;
@@ -156,6 +159,23 @@ export interface StockMovementSummary {
   revaluationValue: number;
 }
 
+/**
+ * Value column text. A value-only Revaluation row shows its signed value_delta ("+100.000" /
+ * "-60.000"): total_value is only its amount, and a decrease must not read as an increase.
+ * Quantity rows show total_value; their direction is in the quantity column.
+ */
+export function movementValueText(
+  m: Pick<StockMovementRow, 'movementType' | 'totalValue' | 'valueDelta'>,
+  opts: { symbol?: boolean } = {},
+): string {
+  if (isValueOnly(m.movementType)) {
+    const v = toNumber(m.valueDelta ?? null);
+    if (v === null) return m.totalValue != null ? formatRupiah(m.totalValue, opts) : '—';
+    return v > 0 ? `+${formatRupiah(v, opts)}` : formatRupiah(v, opts);
+  }
+  return m.totalValue != null ? formatRupiah(m.totalValue, opts) : '—';
+}
+
 /** Documents that write their own movements (server: services/documentMovementLock.ts). */
 const LOCKING_DOCUMENTS = [
   'GoodsReceipt', 'DeliveryOrder', 'SalesReturn', 'ProductionRun', 'StockOpname', 'StockTransfer', 'PurchaseInvoice', 'SalesInvoice',
@@ -169,7 +189,8 @@ type LockableRow = Pick<StockMovementRow, 'referenceType' | 'referenceId' | 'mov
  * Mirrors the server's document lock so the menu never offers an action that is always rejected:
  * a movement of a document that names it (referenceId set) is changed through that document,
  * OpeningBalance and the drift repair write-off (StockDriftRepair) are corrected with a stock
- * adjustment, and transfer rows only through the transfer.
+ * adjustment, transfer rows only through the transfer, and a Revaluation without a document (the
+ * valuation baseline) never per row.
  */
 function documentBlock(m: LockableRow, action: 'edit' | 'cancel'): string | null {
   if (m.isCancelled) return i18n.t('inventoryRows.block.cancelled', { ns: 'inventory' });
@@ -179,6 +200,7 @@ function documentBlock(m: LockableRow, action: 'edit' | 'cancel'): string | null
   const doc: LockingDocument | null = isTransfer
     ? 'StockTransfer'
     : m.referenceType && m.referenceId && isLockingDocument(m.referenceType) ? m.referenceType : null;
+  if (!doc && isValueOnly(m.movementType)) return i18n.t('inventoryRows.block.revaluation', { ns: 'inventory' });
   if (!doc) return null;
   return i18n.t(action === 'edit' ? 'inventoryRows.block.editFromDocument' : 'inventoryRows.block.cancelFromDocument', {
     ns: 'inventory',

@@ -9,7 +9,7 @@ const names = { inputNames: ['GKP'], outputNames: ['Beras', 'Bekatul'], runNumbe
 /** PRD R1: 1.000 kg GKP @ 6.000 -> 600 kg beras + 100 kg bekatul NRV 2.000, conversion 300/kg. */
 function r1(over: { hppOverride?: number; bekatulPrice?: number } = {}) {
   return computeProductionCosting({
-    inputs: [{ quantity: 1000, unitCost: 6000 }],
+    inputs: [{ quantity: 1000, value: 6_000_000 }],
     outputs: [{ quantity: 600 }, { quantity: 100, unitPrice: over.bekatulPrice ?? 2000, isByProduct: true }],
     costs: [{ description: 'Konversi', costSide: 'InputSide', basis: 'InputQty', rate: 300 }],
     hppOverride: over.hppOverride,
@@ -31,7 +31,7 @@ describe('productionJournalLines', () => {
   it('a gain above the conversion cost credits the rest to COGS', () => {
     // Typed main price 11.000: output 6.600.000 + 200.000 against 6.000.000 -> 300.000 conversion, 500.000 COGS.
     const plan = computeProductionCosting({
-      inputs: [{ quantity: 1000, unitCost: 6000 }],
+      inputs: [{ quantity: 1000, value: 6_000_000 }],
       outputs: [{ quantity: 600, unitPrice: 11_000 }, { quantity: 100, unitPrice: 2000, isByProduct: true }],
       costs: [{ description: 'Konversi', costSide: 'InputSide', basis: 'InputQty', rate: 300 }],
     }).journalPlan;
@@ -53,7 +53,7 @@ describe('productionJournalLines', () => {
   });
 
   it('leaves zero-value lines out and gives no lines for a run without value', () => {
-    const plan = computeProductionCosting({ inputs: [{ quantity: 100, unitCost: 0 }], outputs: [{ quantity: 60, unitPrice: 0 }] }).journalPlan;
+    const plan = computeProductionCosting({ inputs: [{ quantity: 100, value: 0 }], outputs: [{ quantity: 60, unitPrice: 0 }] }).journalPlan;
     expect(productionJournalLines({ plan, accounts, ...names })).toEqual([]);
   });
 });

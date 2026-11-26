@@ -1,12 +1,14 @@
 import type { Prisma } from '@prisma/client';
+import Decimal from 'decimal.js';
 import { updateBalancesForItems } from '../utils/accountBalance';
 import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { BusinessError } from '../utils/errors';
-import { calcWeightedAverage } from '../utils/weightedAverage';
-import { adjustWarehouseStock, resolveWarehouseId } from '../utils/warehouseStock';
+import { resolveWarehouseId } from '../utils/warehouseStock';
 import { systemAccounts } from './systemAccounts';
 import { lockInventoryRows } from './inventory/stockLocks';
+import { postInbound } from './inventory/inventoryLedger';
+import { VALUE_DP } from './inventory/inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 
@@ -19,7 +21,9 @@ export interface OpeningStockItem {
 export interface OpeningStockInput {
   item: OpeningStockItem;
   quantity: number;
+  /** The file's unit price; the row stores totalValue / quantity (the ledger's one definition). */
   unitCost: number;
+  /** Booked at 2 dp: the journal and the ledger take the same amount. */
   totalValue: number;
   /** Optional warehouse code from the import file; the default warehouse is used when empty. */
   warehouseCode?: string;
@@ -42,12 +46,13 @@ async function resolveImportWarehouseId(tx: Tx, warehouseCode?: string): Promise
 }
 
 /**
- * Post an imported opening stock balance: GL DR Persediaan / CR Ekuitas Saldo
- * Awal, then an In movement linked to that journal (warehouse, counter account
- * and journal stored) and the per-warehouse stock, like other inbound paths.
+ * Post an imported opening stock balance: GL DR Persediaan / CR Ekuitas Saldo Awal, then an In
+ * movement through the value ledger (postInbound) at the same amount, linked to that journal
+ * (warehouse, counter account and journal stored). An item whose inventory account is gone is
+ * refused: its value would have no journal.
  */
 export async function postOpeningStockInTx(tx: Tx, input: OpeningStockInput) {
-  const { quantity, unitCost, totalValue, userId } = input;
+  const { quantity, totalValue, userId } = input;
   const now = input.now ?? new Date();
   const fiscalYear = await getOpenFiscalYear(tx, now);
   const warehouseId = await resolveImportWarehouseId(tx, input.warehouseCode);
@@ -60,83 +65,73 @@ export async function postOpeningStockInTx(tx: Tx, input: OpeningStockInput) {
   if (!lockedItem) throw new BusinessError('Item stok tidak ditemukan.');
   const item = { ...lockedItem, code: input.item.code };
 
-  // GL: DR Inventory / CR Ekuitas Saldo Awal
+  // GL: DR Inventory / CR Ekuitas Saldo Awal, of the amount the ledger books (2 dp), so book = GL.
+  // The account must exist: value without its journal would leave the book above the GL.
+  const value = new Decimal(totalValue).toDecimalPlaces(VALUE_DP);
   const invAccount = item.accountId
     ? await tx.account.findUnique({ where: { id: item.accountId } })
     : await systemAccounts.getAccount('INVENTORY');
+  if (!invAccount) throw new BusinessError(`Akun persediaan item '${item.code}' tidak ditemukan.`);
   const openingEquity = await systemAccounts.getAccount('OPENING_EQUITY');
 
-  let journalEntryId: string | null = null;
-  if (invAccount) {
-    const description = `Saldo awal stok: ${item.code}`;
-    const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
-    const journal = await tx.journalEntry.create({
-      data: {
-        entryNumber: jvNumber,
-        date: now,
-        narration: `Saldo awal stok: ${item.code} - ${item.name}`,
-        status: 'Submitted',
-        fiscalYearId: fiscalYear.id,
-        createdBy: userId,
-        submittedAt: now,
-        sourceType: 'OPENING',
-        items: {
-          create: [
-            { accountId: invAccount.id, debit: totalValue, credit: 0, description },
-            { accountId: openingEquity.id, debit: 0, credit: totalValue, description },
-          ],
-        },
-      },
-      include: { items: true },
-    });
-
-    await tx.accountingLedgerEntry.createMany({
-      data: journal.items.map((ji) => ({
-        date: now,
-        accountId: ji.accountId,
-        debit: ji.debit,
-        credit: ji.credit,
-        referenceType: 'JournalEntry' as const,
-        referenceId: journal.id,
-        description: ji.description || description,
-        fiscalYearId: fiscalYear.id,
-      })),
-    });
-
-    await updateBalancesForItems(
-      tx,
-      journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) })),
-    );
-    journalEntryId = journal.id;
-  }
-
+  const description = `Saldo awal stok: ${item.code}`;
+  const jvNumber = await generateDocumentNumber(tx, 'JV', now, fiscalYear.id);
   const mvNumber = await generateDocumentNumber(tx, 'SM', now, fiscalYear.id);
-  const movement = await tx.stockMovement.create({
+  const journal = await tx.journalEntry.create({
     data: {
-      movementNumber: mvNumber,
-      itemId: item.id,
-      warehouseId,
-      movementType: 'In',
-      quantity,
-      unitCost,
-      totalValue,
+      entryNumber: jvNumber,
       date: now,
-      referenceType: 'OpeningBalance',
-      offsetAccountId: journalEntryId ? openingEquity.id : null,
-      journalEntryId,
-      notes: `Stok awal dari import: ${item.code} - ${item.name}`,
-      createdById: userId,
+      narration: `Saldo awal stok: ${item.code} - ${item.name}`,
+      status: 'Submitted',
       fiscalYearId: fiscalYear.id,
+      createdBy: userId,
+      submittedAt: now,
+      sourceType: 'OPENING',
+      items: {
+        create: [
+          { accountId: invAccount.id, debit: value.toNumber(), credit: 0, description },
+          { accountId: openingEquity.id, debit: 0, credit: value.toNumber(), description },
+        ],
+      },
     },
+    include: { items: true },
   });
 
-  // Update currentStock and averageCost on the item, then the per-warehouse balance.
-  const newAvgCost = calcWeightedAverage(item.currentStock, item.averageCost, quantity, unitCost);
-  await tx.inventoryItem.update({
-    where: { id: item.id },
-    data: { currentStock: { increment: quantity }, averageCost: newAvgCost },
+  await tx.accountingLedgerEntry.createMany({
+    data: journal.items.map((ji) => ({
+      date: now,
+      accountId: ji.accountId,
+      debit: ji.debit,
+      credit: ji.credit,
+      referenceType: 'JournalEntry' as const,
+      referenceId: journal.id,
+      description: ji.description || description,
+      fiscalYearId: fiscalYear.id,
+    })),
   });
-  await adjustWarehouseStock(tx, item.id, warehouseId, quantity);
+
+  await updateBalancesForItems(
+    tx,
+    journal.items.map((i) => ({ accountId: i.accountId, debit: Number(i.debit), credit: Number(i.credit) })),
+  );
+  const journalEntryId = journal.id;
+
+  // The In row through the value ledger: stock, warehouse row, book value and average together.
+  const { movement } = await postInbound(tx, {
+    movementType: 'In',
+    movementNumber: mvNumber,
+    itemId: item.id,
+    warehouseId,
+    quantity,
+    value,
+    date: now,
+    referenceType: 'OpeningBalance',
+    offsetAccountId: openingEquity.id,
+    journalEntryId,
+    notes: `Stok awal dari import: ${item.code} - ${item.name}`,
+    createdById: userId,
+    fiscalYearId: fiscalYear.id,
+  });
 
   return { movementId: movement.id, journalEntryId, warehouseId };
 }

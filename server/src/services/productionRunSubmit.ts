@@ -4,7 +4,6 @@ import { generateDocumentNumber } from '../utils/documentNumber';
 import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { resolveWarehouseId } from '../utils/warehouseStock';
 import { logger } from '../lib/logger';
-import { computeProductionCosting } from './production/productionCosting';
 import { loadProductionCostContext } from './production/productionCostContext';
 import { lockProductionStockInTx, persistProductionRunDetails, postProductionEffectsInTx } from './production/productionPosting';
 
@@ -16,8 +15,8 @@ export interface SubmitProductionRunInput {
   // location. Otherwise resolveWarehouseId falls back to the default. One of
   // the two must resolve, else the service throws.
   warehouseId?: string | null;
-  // Optional batch tracking: sourceMovementId is the picked inbound batch and batchUnitCost
-  // locks its cost at pick time. Without them, costing falls back to WAC.
+  // Optional batch tracking: sourceMovementId is the picked inbound batch and batchUnitCost the
+  // cost the picker showed. Both are traceability only: the value ledger values every input.
   inputs: Array<{
     itemId: string;
     quantity: number;
@@ -62,9 +61,10 @@ export interface SubmitProductionRunInput {
 }
 
 /**
- * Submit a production run: take its PR number, lock its items, load and cost it
- * (productionCostContext, productionCosting), create the run, then post its stock, COGS
- * auto-settle and journal JV-<runNumber> (productionPosting).
+ * Submit a production run: take its PR number, lock its items, load and check it
+ * (productionCostContext), create the run, then post its stock through the value ledger, cost it
+ * from the values the inputs took out, post the COGS auto-settle and journal JV-<runNumber>
+ * (productionPosting), and persist the costing.
  */
 export async function submitProductionRunInTx(
   tx: Tx,
@@ -92,12 +92,6 @@ export async function submitProductionRunInTx(
     context: 'productionRun.submit',
     userId,
   });
-  const costing = computeProductionCosting({
-    inputs: body.inputs.map((input, i) => ({ quantity: input.quantity, unitCost: costedInputs[i]!.unitCost })),
-    outputs: body.outputs,
-    costs: body.costs,
-    hppOverride: body.hppOverride,
-  });
 
   const run = await tx.productionRun.create({
     data: {
@@ -107,7 +101,6 @@ export async function submitProductionRunInTx(
       referenceType: body.referenceType || null,
       referenceId: body.referenceId || null,
       referenceNumber: body.referenceNumber || null,
-      yieldPct: costing.yieldPct,
       // OEE capture fields (optional). Single machineId/startAt/endAt are persisted for
       // backward compat but not used in the OEE compute below.
       machineId: body.machineId ?? null,
@@ -127,6 +120,22 @@ export async function submitProductionRunInTx(
     },
   });
 
+  const costing = await postProductionEffectsInTx(tx, {
+    run: { id: run.id, runNumber },
+    date: txDate,
+    fiscalYearId: fiscalYear.id,
+    warehouseId: productionWarehouseId,
+    notes: body.notes || null,
+    userId,
+    inputs: body.inputs,
+    outputs: body.outputs,
+    costs: body.costs,
+    hppOverride: body.hppOverride,
+    costedInputs,
+    itemMap,
+    revision: false,
+  });
+
   if (costing.clampedNegativeNumerator) {
     logger.warn(
       {
@@ -140,20 +149,6 @@ export async function submitProductionRunInTx(
     );
   }
 
-  await postProductionEffectsInTx(tx, {
-    run: { id: run.id, runNumber },
-    date: txDate,
-    fiscalYearId: fiscalYear.id,
-    warehouseId: productionWarehouseId,
-    notes: body.notes || null,
-    userId,
-    inputs: body.inputs,
-    outputs: body.outputs,
-    costedInputs,
-    costing,
-    itemMap,
-    revision: false,
-  });
   await persistProductionRunDetails(tx, run.id, { body, warehouseId: productionWarehouseId, costedInputs, costing });
 
   return tx.productionRun.findUnique({

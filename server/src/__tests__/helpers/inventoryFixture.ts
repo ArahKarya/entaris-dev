@@ -1,13 +1,32 @@
 import Decimal from 'decimal.js';
+import { averageAfter } from '../../services/inventory/inventoryValueMath';
 import type { Tx } from './routeHarness';
 
 const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** Adds `qty` and `value` to the item total and stock_value; the average is re-derived (averageAfter). */
+async function addItemStock(db: Tx, itemId: string, qty: Decimal, value: Decimal): Promise<void> {
+  const item = await db.inventoryItem.findUniqueOrThrow({
+    where: { id: itemId },
+    select: { currentStock: true, averageCost: true, stockValue: true },
+  });
+  const stock = new Decimal(item.currentStock.toString()).plus(qty);
+  const stockValue = new Decimal(item.stockValue.toString()).plus(value);
+  await db.inventoryItem.update({
+    where: { id: itemId },
+    data: {
+      currentStock: stock.toString(),
+      stockValue: stockValue.toString(),
+      averageCost: averageAfter(stock, stockValue, item.averageCost.toString()).toString(),
+    },
+  });
+}
 
 export interface SeedStockInput {
   itemId: string;
   warehouseId: string;
   qty: Decimal.Value;
-  /** Unit cost of the seeded stock; the item's average becomes the blend of its stock and this. */
+  /** Unit cost of the seeded stock; the item's average becomes stock_value / stock afterwards. */
   avg: Decimal.Value;
   /** Movement date: a business day (YYYY-MM-DD) or a Date; must fall in an existing fiscal year. */
   date: string | Date;
@@ -18,9 +37,11 @@ export interface SeedStockInput {
 }
 
 /**
- * Puts `qty` at `avg` into one warehouse the way an inbound posting does: the warehouse row, the
- * item total and average, and a valued `In` movement (so a replay of the item's movements explains
- * the stock), consistently. No journal is written, so the fixture adds no ledger entries.
+ * Puts `qty` at `avg` into one warehouse the way an inbound posting of the value ledger does: the
+ * warehouse row, the item total, stock_value (+ round(qty x avg, 2)) and the average derived from
+ * it, and a valued `In` movement whose value_delta is that amount (so a replay explains the stock
+ * and assertLedgerInvariant holds), consistently. No journal is written, so the fixture adds no
+ * ledger entries.
  * Works on a rollback transaction and, for race tests, on a real client (the rows are committed;
  * the test deletes them). Integration tests use this instead of writing `currentStock` /
  * `averageCost` directly.
@@ -34,20 +55,8 @@ export async function seedStock(db: Tx, input: SeedStockInput): Promise<{ moveme
   const userId = input.userId
     ?? (await db.user.findFirstOrThrow({ where: { role: 'Admin', isActive: true } })).id;
 
-  const item = await db.inventoryItem.findUniqueOrThrow({
-    where: { id: input.itemId },
-    select: { currentStock: true, averageCost: true },
-  });
-  const before = new Decimal(item.currentStock.toString());
-  const current = new Decimal(item.averageCost.toString());
-  let blended = current;
-  if (qty.gt(0) && avg.gt(0)) {
-    blended = before.lte(0) ? avg : before.times(current).plus(qty.times(avg)).div(before.plus(qty));
-  }
-  await db.inventoryItem.update({
-    where: { id: input.itemId },
-    data: { currentStock: { increment: qty.toNumber() }, averageCost: blended.toDecimalPlaces(2).toNumber() },
-  });
+  const value = qty.times(avg).toDecimalPlaces(2);
+  await addItemStock(db, input.itemId, qty, value);
   await db.inventoryStock.upsert({
     where: { itemId_warehouseId: { itemId: input.itemId, warehouseId: input.warehouseId } },
     create: { itemId: input.itemId, warehouseId: input.warehouseId, currentStock: qty.toNumber() },
@@ -62,7 +71,8 @@ export async function seedStock(db: Tx, input: SeedStockInput): Promise<{ moveme
       movementType: 'In',
       quantity: qty.toNumber(),
       unitCost: avg.toNumber(),
-      totalValue: qty.times(avg).toDecimalPlaces(2).toNumber(),
+      totalValue: value.abs().toNumber(),
+      valueDelta: value.toNumber(),
       notes: 'Fixture stok uji',
       fiscalYearId,
       createdById: userId,
@@ -84,17 +94,12 @@ export async function seedUnplacedStock(db: Tx, input: Omit<SeedStockInput, 'war
     ?? (await db.fiscalYear.findFirstOrThrow({ where: { startDate: { lte: day }, endDate: { gte: day } } })).id;
   const userId = input.userId
     ?? (await db.user.findFirstOrThrow({ where: { role: 'Admin', isActive: true } })).id;
-  const item = await db.inventoryItem.findUniqueOrThrow({ where: { id: input.itemId }, select: { currentStock: true, averageCost: true } });
-  const before = new Decimal(item.currentStock.toString());
-  const blended = before.lte(0) ? avg : before.times(item.averageCost.toString()).plus(qty.times(avg)).div(before.plus(qty));
-  await db.inventoryItem.update({
-    where: { id: input.itemId },
-    data: { currentStock: { increment: qty.toNumber() }, averageCost: blended.toDecimalPlaces(2).toNumber() },
-  });
+  const value = qty.times(avg).toDecimalPlaces(2);
+  await addItemStock(db, input.itemId, qty, value);
   const movement = await db.stockMovement.create({
     data: {
       movementNumber: `IT-LOOSE-${tag()}`, date: day, itemId: input.itemId, warehouseId: null, movementType: 'In',
-      quantity: qty.toNumber(), unitCost: avg.toNumber(), totalValue: qty.times(avg).toDecimalPlaces(2).toNumber(),
+      quantity: qty.toNumber(), unitCost: avg.toNumber(), totalValue: value.abs().toNumber(), valueDelta: value.toNumber(),
       notes: 'Fixture stok tanpa gudang', fiscalYearId, createdById: userId,
     },
   });

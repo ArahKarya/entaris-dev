@@ -8,9 +8,9 @@ import { getOpenFiscalYear } from '../utils/fiscalYear';
 import { systemAccounts } from './systemAccounts';
 import { computePurchaseInvoiceTotals } from './purchaseInvoiceCalc';
 import { resolvePurchaseLineType, resolvePurchaseOrderIdFromReceipts } from './purchaseInvoiceLinks';
-import { logger } from '../lib/logger';
 import { lockInventoryRows } from './inventory/stockLocks';
-import { UNIT_COST_DP } from '../utils/costPrecision';
+import { postRevaluation } from './inventory/inventoryLedger';
+import { cogsAccountFor } from './ledger/systemRoleAccounts';
 
 type Tx = Prisma.TransactionClient;
 
@@ -51,7 +51,11 @@ export interface SubmitPurchaseInvoiceInput {
 /**
  * Submit a purchase invoice: hargaAkhir per item includes PPN/PPh/potonganItem, landed cost
  * (biayaLain + non-linked items) is allocated across STT-linked items, and the JE posts DR per
- * item inventory account / CR AP. Pending COGS backfill from earlier negative-stock sales settles.
+ * item inventory account / CR AP. The landed-cost delta of an STT line (invoice amount − the STT's
+ * locked cost) is a Revaluation of the received item through the value ledger (postRevaluation,
+ * reference 'PurchaseInvoice', adjusting the STT movement, which is never rewritten): the part stock
+ * absorbs goes to the item's inventory account, the rest (no stock left, or a decrease beyond
+ * stock_value) to COGS in the same journal.
  */
 export async function submitPurchaseInvoiceInTx(
   tx: Tx,
@@ -111,6 +115,12 @@ export async function submitPurchaseInvoiceInTx(
     }
   }
 
+  // Lock the received items before the invoice number, the Revaluation numbers and the journal
+  // accounts (LOCK ORDER in services/inventory/stockLocks.ts): the landed-cost Revaluations below
+  // read stock and stock_value under it.
+  const receivedItemIds = Array.from(sttItemMap.values()).map((gri) => gri.inventoryItemId as string);
+  await lockInventoryRows(tx, { itemIds: receivedItemIds });
+
   // Goods enter only via STT/BPB: every line with inventoryItemId must link to a submitted
   // goodsReceiptItemId (no double stock-in). Service / free-account lines need no link.
   const orphanInventoryLines = body.items.filter(
@@ -146,8 +156,8 @@ export async function submitPurchaseInvoiceInTx(
   const grandTotalNum = grandTotal.toNumber();
   const invoiceNumber = await generateDocumentNumber(tx, 'PI', parsedDate, fiscalYear.id);
 
-  // Pre-fetch inventory items to resolve per-item accounts.
-  const invItemIds = body.items.map((i) => i.inventoryItemId).filter(Boolean) as string[];
+  // Pre-fetch inventory items (of the lines and of the received STT lines) to resolve per-item accounts.
+  const invItemIds = [...body.items.map((i) => i.inventoryItemId).filter(Boolean) as string[], ...receivedItemIds];
   const inventoryItems = invItemIds.length > 0
     ? await tx.inventoryItem.findMany({ where: { id: { in: invItemIds } } })
     : [];
@@ -237,20 +247,12 @@ export async function submitPurchaseInvoiceInTx(
 
   // DR Persediaan per item account for non-linked lines. STT-linked lines were accrued at STT
   // submit; PI reverses the accrual and posts the landed-cost delta to Persediaan, not 5.11, so
-  // the movement unit cost reflects the full PI cost (incl. "Resiko Macan" and header biaya_lain).
+  // the batch cost reflects the full PI cost (incl. "Resiko Macan" and header biaya_lain).
   const debitByAccount = new Map<string, { amount: Decimal; names: string[] }>();
   let accruedReversal = new Decimal(0); // DR Hutang Belum Tagih (provisional total)
-
-  // Track landed cost adjustment per STT-linked line untuk update
-  // stockMovement + averageCost + GL DR Persediaan.
-  const landedAdjustments: {
-    invItem: typeof invoice.items[number];
-    grItem: any;
-    qty: Decimal;
-    provisionalTotal: Decimal;
-    effectiveAmount: Decimal;
-    delta: Decimal;  // effective - provisional (positive = landed cost lebih tinggi)
-  }[] = [];
+  // Part of the landed-cost deltas stock could not absorb (revaluationSplit): DR (+) / CR (−) COGS.
+  let landedToCogs = new Decimal(0);
+  const cogsNames: string[] = [];
 
   for (const invItem of invoice.items) {
     const effective = effectiveAmountMap.get(invItem.id);
@@ -266,27 +268,32 @@ export async function submitPurchaseInvoiceInTx(
       const provisionalCost = new Decimal(grItem.lockedUnitCost.toString());
       const provisionalTotal = sttQty.times(provisionalCost).toDecimalPlaces(2);
       const effectiveAmount = amt;
-      const delta = effectiveAmount.minus(provisionalTotal);
+      const delta = effectiveAmount.minus(provisionalTotal).toDecimalPlaces(2);
       accruedReversal = accruedReversal.plus(provisionalTotal);
-      landedAdjustments.push({ invItem, grItem, qty: sttQty, provisionalTotal, effectiveAmount, delta });
+      if (delta.isZero()) continue;
 
-      // Post the delta to the item's inventory account (1.4.x, else default INVENTORY), aggregated
-      // per account in debitByAccount like non-linked lines.
-      if (!delta.isZero()) {
-        let drAccountId = inventoryAccount.id;
-        if (invItem.inventoryItemId) {
-          const linkedItem = invItemMap.get(invItem.inventoryItemId);
-          if (linkedItem?.accountId) drAccountId = linkedItem.accountId;
-        }
-        const deltaAmt = delta.toDecimalPlaces(2);
-        const existing = debitByAccount.get(drAccountId);
-        // A negative delta (inventory down) becomes a CR when the journal is built.
-        if (existing) {
-          existing.amount = existing.amount.plus(deltaAmt);
-          existing.names.push(`adj-landed ${invItem.itemName}`);
-        } else {
-          debitByAccount.set(drAccountId, { amount: deltaAmt, names: [`adj-landed ${invItem.itemName}`] });
-        }
+      // The delta revalues the received item (the STT movement keeps its locked cost). What stock
+      // absorbs goes to the item's inventory account (1.4.x, else default INVENTORY), aggregated per
+      // account like non-linked lines; the rest goes to COGS.
+      const reval = await postRevaluation(tx, {
+        itemId: grItem.inventoryItemId, date: parsedDate, fiscalYearId: fiscalYear.id, createdById: userId, delta,
+        referenceType: 'PurchaseInvoice', referenceId: invoice.id, referenceNumber: invoice.invoiceNumber,
+        adjustsMovementId: grItem.stockMovementId ?? null,
+        notes: `Selisih harga Invoice pembelian ${invoice.invoiceNumber} atas STT ${grItem.goodsReceipt.sttNumber}`,
+      });
+      if (!reval.toCogs.isZero()) {
+        landedToCogs = landedToCogs.plus(reval.toCogs);
+        cogsNames.push(invItem.itemName);
+      }
+      if (reval.valueDelta.isZero()) continue;
+      const drAccountId = invItemMap.get(grItem.inventoryItemId)?.accountId || inventoryAccount.id;
+      const existing = debitByAccount.get(drAccountId);
+      // A negative delta (inventory down) becomes a CR when the journal is built.
+      if (existing) {
+        existing.amount = existing.amount.plus(reval.valueDelta);
+        existing.names.push(`adj-landed ${invItem.itemName}`);
+      } else {
+        debitByAccount.set(drAccountId, { amount: reval.valueDelta, names: [`adj-landed ${invItem.itemName}`] });
       }
       continue;
     }
@@ -333,14 +340,6 @@ export async function submitPurchaseInvoiceInTx(
     }
   }
 
-  // Lock the items whose average the landed cost realigns below, before the journal locks its
-  // accounts (lock order in services/inventory/stockLocks.ts): the stock and average read there
-  // then cannot change under a concurrent posting.
-  await lockInventoryRows(tx, {
-    itemIds: landedAdjustments.flatMap((adj) =>
-      !adj.delta.isZero() && adj.grItem?.stockMovementId && adj.invItem.inventoryItemId ? [adj.invItem.inventoryItemId] : []),
-  });
-
   const jvNumber = `JV-${invoice.invoiceNumber}`;
   const debitJournalItems: { accountId: string; partyId?: string | null; debit: number; credit: number; description: string }[] =
     Array.from(debitByAccount.entries()).map(([accountId, data]) => ({
@@ -349,6 +348,15 @@ export async function submitPurchaseInvoiceInTx(
       credit: 0,
       description: `Persediaan ${data.names.join(', ')}: ${invoice.invoiceNumber}`,
     }));
+
+  // Landed cost on goods already gone (or a decrease beyond their value) goes to COGS.
+  if (!landedToCogs.isZero()) {
+    const cogsAccount = await cogsAccountFor(tx);
+    const amount = landedToCogs.abs().toDecimalPlaces(2).toNumber();
+    const description = `HPP adj. landed cost ${cogsNames.join(', ')}: ${invoice.invoiceNumber}`;
+    if (landedToCogs.gt(0)) debitJournalItems.push({ accountId: cogsAccount.id, debit: amount, credit: 0, description });
+    else creditJournalItems.push({ accountId: cogsAccount.id, debit: 0, credit: amount, description });
+  }
 
   // STT-linked accrual reversal: DR Hutang Belum Tagih @ provisional total.
   if (!accruedReversal.isZero() && accruedAccount) {
@@ -414,55 +422,6 @@ export async function submitPurchaseInvoiceInTx(
       where: { id: { in: grIds }, invoiceId: null },
       data: { invoiceId: invoice.id, invoicedAt: parsedDate },
     });
-  }
-
-  // Landed cost: set stockMovement unit_cost/total_value to the effective amount and recalc
-  // averageCost per STT-linked item so future WAC/COGS match. Physical qty is unchanged.
-  for (const adj of landedAdjustments) {
-    if (adj.delta.isZero()) continue;
-    if (!adj.grItem?.stockMovementId) continue;
-
-    // Effective unit_cost = effectiveAmount / qty
-    const newUnitCost = adj.qty.gt(0)
-      ? adj.effectiveAmount.div(adj.qty).toDecimalPlaces(UNIT_COST_DP).toNumber()
-      : 0;
-
-    await tx.stockMovement.update({
-      where: { id: adj.grItem.stockMovementId },
-      data: {
-        unitCost: newUnitCost,
-        totalValue: adj.effectiveAmount.toDecimalPlaces(2).toNumber(),
-      },
-    });
-
-    // WAC = (oldStock * oldAvg + delta) / oldStock; delta is already DR'd to Persediaan above.
-    if (adj.invItem.inventoryItemId) {
-      const fresh = await tx.inventoryItem.findUnique({
-        where: { id: adj.invItem.inventoryItemId },
-        select: { currentStock: true, averageCost: true },
-      });
-      // Realign WAC only when stock is positive; otherwise the delta belongs to goods already sold,
-      // so WAC is left alone and logged. Known limitation: that delta stays in Persediaan, not COGS.
-      if (fresh && Number(fresh.currentStock) > 0) {
-        const stock = new Decimal(fresh.currentStock.toString());
-        const oldAvg = new Decimal(fresh.averageCost.toString());
-        const newAvg = stock.times(oldAvg).plus(adj.delta).div(stock).toDecimalPlaces(UNIT_COST_DP);
-        await tx.inventoryItem.update({
-          where: { id: adj.invItem.inventoryItemId },
-          data: { averageCost: newAvg.toNumber() },
-        });
-      } else if (fresh) {
-        logger.warn(
-          {
-            invoiceNumber: invoice.invoiceNumber,
-            itemId: adj.invItem.inventoryItemId,
-            currentStock: Number(fresh.currentStock),
-            delta: adj.delta.toString(),
-          },
-          'Landed cost: stok ≤ 0 saat realign WAC — WAC tidak diubah (landed cost untuk barang yang sudah keluar)',
-        );
-      }
-    }
   }
 
   return invoice;

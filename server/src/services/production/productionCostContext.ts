@@ -7,10 +7,11 @@ type Tx = Prisma.TransactionClient;
 
 /**
  * Read-only loader for production costing (E6-R1): the run's items with their validation, the
- * input stock check at the production warehouse, the picked batches through assertBatchSource,
- * and the unit cost each input is consumed at. Submit and edit call it once, under
- * lockProductionStockInTx (productionPosting.ts) and at the point where the stock and WAC they
- * cost against are current (edit: after its old movements are reversed).
+ * input stock check at the production warehouse and the picked batches through assertBatchSource.
+ * It decides no cost: each input is valued by the ledger row that takes it out (postOutbound in
+ * productionPosting.ts, E3-R6), and a picked batch is traceability only (E6-R3). Submit and edit
+ * call it once, under lockProductionStockInTx and at the point where the stock they check is current
+ * (edit: after its old movements are reversed).
  */
 
 export interface ContextInputLine {
@@ -37,10 +38,11 @@ export interface ProductionCostContextInput {
 export interface CostedInput {
   /** The picked batch, null without one. */
   sourceMovementId: string | null;
-  /** Unit cost snapshot of the picked batch, null without one. */
+  /**
+   * Unit cost snapshot of the picked batch for production_run_items, null without one. Display
+   * only: it never values the input (the ledger does).
+   */
   batchUnitCost: number | null;
-  /** Unit cost the input is consumed at: the batch snapshot, else WAC (0 when not positive). */
-  unitCost: number;
 }
 
 /** Where the inputs are taken from, and who takes them (for the bypass log). */
@@ -104,11 +106,11 @@ async function assertInputStock(tx: Tx, body: ProductionCostContextInput, stock:
 }
 
 /**
- * Batch snapshot + unit cost per input. The batch must be an active inbound movement of the
- * same item; its cost is the client's `batchUnitCost` (>= 0) captured at pick time, else the
- * batch's stored unit cost. Per-batch remaining qty is not enforced yet (E6-PR3).
+ * Batch link + snapshot per input. The batch must be an active inbound movement of the same item;
+ * the snapshot is the client's `batchUnitCost` (>= 0) captured at pick time, else the batch cost.
+ * Neither values the input. Per-batch remaining qty is not enforced yet (E6-PR3).
  */
-async function costInputs(tx: Tx, inputs: ReadonlyArray<ContextInputLine>, itemMap: Map<string, InventoryItem>): Promise<CostedInput[]> {
+async function batchInputs(tx: Tx, inputs: ReadonlyArray<ContextInputLine>, itemMap: Map<string, InventoryItem>): Promise<CostedInput[]> {
   const out: CostedInput[] = [];
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i]!;
@@ -127,15 +129,14 @@ async function costInputs(tx: Tx, inputs: ReadonlyArray<ContextInputLine>, itemM
         ? Number(input.batchUnitCost)
         : Number(batch.unitCost);
     }
-    const wac = Number(item.averageCost);
-    out.push({ sourceMovementId, batchUnitCost, unitCost: batchUnitCost ?? (wac > 0 ? wac : 0) });
+    out.push({ sourceMovementId, batchUnitCost });
   }
   return out;
 }
 
 /**
  * Loads and validates the run's items, checks the input stock at the production warehouse, then
- * resolves each input's batch and unit cost. Call it under lockProductionStockInTx.
+ * resolves each input's batch. Call it under lockProductionStockInTx.
  */
 export async function loadProductionCostContext(
   tx: Tx,
@@ -147,5 +148,5 @@ export async function loadProductionCostContext(
   const itemMap = new Map(allItems.map((i) => [i.id, i]));
   validateItems(body, itemMap);
   await assertInputStock(tx, body, stock);
-  return { itemMap, inputs: await costInputs(tx, body.inputs, itemMap) };
+  return { itemMap, inputs: await batchInputs(tx, body.inputs, itemMap) };
 }

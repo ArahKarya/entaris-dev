@@ -7912,7 +7912,7 @@
       "output": {
         "data": "object"
       },
-      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar.",
+      "outputSummary": "Objek total pergerakan masuk/keluar/dibatalkan (jumlah, qty, nilai) plus revaluationCount/revaluationValue: baris Revaluation (nilai saja, qty 0) tidak masuk total masuk/keluar; revaluationValue = jumlah bertanda (positif menaikkan, negatif menurunkan nilai persediaan).",
       "handler": "GET /api/inventory/movements/summary",
       "permAction": "view",
       "enabled": true,
@@ -16284,7 +16284,8 @@
         "400 PERIOD_LOCKED: eksekusi ditolak karena tanggal dokumen ada di periode yang dikunci; pengajuan tetap Pending",
         "400 JOURNAL_ALREADY_REVERSED: eksekusi ProductionRunEdit ditolak karena salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, pengajuan tetap Pending",
         "400 MOVEMENT_SOURCE_BATCH_INVALID: eksekusi ProductionRun/ProductionRunEdit ditolak karena batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; minta pengaju memilih batch masuk aktif item yang sama, pengajuan tetap Pending",
-        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: eksekusi ProductionRun/ProductionRunEdit ditolak karena akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem, pengajuan tetap Pending"
+        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: eksekusi ProductionRun/ProductionRunEdit ditolak karena akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem, pengajuan tetap Pending",
+        "409 REVERSAL_NEEDS_TRUE_UP: eksekusi ProductionRunEdit ditolak karena output run itu (juga produk samping bernilai 0) sudah keluar sejak diterima; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia), pengajuan tetap Pending"
       ],
       "related": [
         "appr_request_get",
@@ -21128,7 +21129,7 @@
       "phase": 3,
       "service": "goodsReceiptSubmit",
       "draftCapable": false,
-      "postingEffect": "Stok masuk (StockMovement In) + stok per gudang bertambah; WAC dihitung ulang dengan lockedUnitCost (atau averageCost bila 0). Jurnal: DR Persediaan (1.4.0) / CR Hutang Belum Tagih (2.1.5). qtyReceived item PO bertambah bila terkait PO. Barang titipan pelanggan (isCustomerOwned): GL nol dan tidak bisa ditagih.",
+      "postingEffect": "Stok masuk (StockMovement In) + stok per gudang bertambah; nilai persediaan item bertambah sebesar qty x lockedUnitCost (atau averageCost bila 0) dan rata-rata dihitung dari nilai itu. Jurnal: DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar nilai yang sama. qtyReceived item PO bertambah bila terkait PO. Barang titipan Customer (isCustomerOwned): nilai dan GL nol, tidak bisa ditagih, dan ditolak ke item yang punya stok milik perusahaan; barang perusahaan juga ditolak ke item yang berisi barang titipan Customer.",
       "confirm_template": "Catat penerimaan barang dari pemasok {partyId} tanggal {date}, {items} baris item. Stok dan hutang belum tagih akan dibukukan. Setujui?",
       "prerequisites": [
         "Periode fiskal terbuka",
@@ -21139,6 +21140,7 @@
         "400: pemasok tidak aktif/bukan supplier",
         "400: PO sudah dibatalkan/belum dipesan/sudah ditutup",
         "400: item atau gudang tidak ditemukan/tidak aktif",
+        "400 GR_CUSTOMER_OWNED_OWN_STOCK: STT titipan Customer ke item yang punya stok milik perusahaan, atau STT barang perusahaan ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
@@ -21207,7 +21209,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
+      "postingEffect": "Reverse stok masuk (stok & per-gudang berkurang, nilai persediaan berkurang sebesar nilai baris STT = debit Persediaan jurnal STT). Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak STT diterima, atau stok jadi 0 dengan sisa nilai. Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.",
       "confirm_template": "Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant). Bypass stok minus (allowNegativeStock) juga butuh capability inventory.negative_stock (default hanya Admin).",
       "prerequisites": [
@@ -21221,6 +21223,7 @@
         "400: ada PI Paid / PI belum dibatalkan",
         "400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu",
         "400 GR_CANCEL_INSUFFICIENT_STOCK: stok gudang penerimaan tidak cukup untuk dibalikkan (baris item yang sama dijumlah per gudang)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak STT diterima (juga lewat bypass stok minus), atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
@@ -21771,7 +21774,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok: +/- qty di gudang & total item; WAC dihitung ulang (rata-rata tertimbang) untuk In/AdjustmentIn. Nilai: masuk = qty x unitCost; keluar = qty x WAC item saat disimpan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.",
+      "postingEffect": "Stok: +/- qty di gudang & total item; nilai persediaan item ikut bergerak dan rata-rata dihitung dari nilai itu. Nilai: masuk = qty x unitCost; keluar = bagian nilai persediaan item (nilai x qty / stok; sisa penuh bila stok habis), unitCost dari klien diabaikan. GL (bila nilai > 0, jurnal JV-... sumber Dokumen sistem): masuk = DR Persediaan item (akun item atau 1.4.0) / CR akun lawan; keluar = DR akun lawan (default Selisih Persediaan) / CR Persediaan.",
       "confirm_template": "Catat {movementType} {quantity} untuk item {itemId} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal akan langsung berubah.",
       "prerequisites": [
         "Tahun fiskal terbuka untuk tanggal transaksi.",
@@ -22061,7 +22064,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "fall back to WAC-based costing (legacy behavior)."
+              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
             },
             {
               "name": "batchUnitCost",
@@ -22388,7 +22391,7 @@
       "level": 2,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: stok input keluar (SM Out) & output masuk (SM In), WAC output dihitung ulang, COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).",
+      "postingEffect": "Cabang bypass: stok input keluar (SM Out, dinilai dari buku nilai persediaan; batch terpilih hanya penelusuran, tidak menentukan nilai) & output masuk (SM In) sebesar nilai baris, termasuk produk samping NRV 0 yang ikut menurunkan rata-rata; COGS backfill diselesaikan, jurnal JV-<runNo>: DR Persediaan output / CR Persediaan input, selisih nilai CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan, s.d. total biaya konversi) dan sisanya CR akun terpetakan COGS (HPP); rugi produksi = DR akun COGS. Cabang non-bypass: hanya membuat ApprovalRequest (tanpa efek stok/GL sampai disetujui).",
       "confirm_template": "Posting draft produksi {id} menjadi Data Produksi? Stok, WAC, dan jurnal akan terbentuk (non-Admin: masuk antrian persetujuan).",
       "accessNote": "Pembuat draft atau pemegang approval.bypass. Klaim draft atomik sehingga tidak bisa dobel-posting.",
       "prerequisites": [
@@ -25003,7 +25006,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -25119,7 +25122,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang non-bypass: tidak ada efek GL/stok sampai disetujui (ApprovalRequest Pending, notifikasi ke Admin). Cabang bypass/standalone: DR Persediaan (akun persediaan per item) / CR Hutang Usaha (2.1.1), stok masuk + WAC, penyelesaian backfill COGS stok minus; PPN/PPh/potongan/biaya lain dialokasikan (landed cost). Baris tertaut STT (goodsReceiptItemId): stok tidak dibuat ulang; DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1) dan STT.invoiceId diisi.",
+      "postingEffect": "Cabang non-bypass: tidak ada efek GL/stok sampai disetujui (ApprovalRequest Pending, notifikasi ke Admin). Cabang bypass/standalone: DR Persediaan (akun persediaan per item) / CR Hutang Usaha (2.1.1), stok masuk + WAC, penyelesaian backfill COGS stok minus; PPN/PPh/potongan/biaya lain dialokasikan (landed cost). Baris tertaut STT (goodsReceiptItemId): stok tidak dibuat ulang; DR Hutang Belum Tagih (2.1.5) @ biaya STT / CR Hutang Usaha (2.1.1); selisih harga Invoice vs biaya STT menjadi baris Revaluation di buku nilai persediaan (mutasi STT tidak ditimpa): porsi yang terserap stok DR/CR Persediaan, sisanya (stok habis atau penurunan melebihi nilai stok) DR/CR HPP (akun terpetakan COGS); STT.invoiceId diisi.",
       "confirm_template": "Buat Invoice Pembelian dari pemasok {partyId} tanggal {date}, {items} baris. Role non-Admin akan masuk antrian persetujuan. Setujui?",
       "prerequisites": [
         "Pemasok aktif",
@@ -25199,7 +25202,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.",
+      "postingEffect": "Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.",
       "confirm_template": "Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.",
       "accessNote": "Butuh capability doc.cancel (default Admin dan Accountant).",
       "errors": [
@@ -25208,6 +25211,7 @@
         "400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu",
         "400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu",
         "400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak nilai PI masuk, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
@@ -25289,7 +25293,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
+      "postingEffect": "Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok, lewat baris Revaluation buku nilai; bagian yang tidak terserap stok ke HPP) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya (rata-rata tidak pernah negatif). Jurnal revisi ikut dibatalkan bila PI dibatalkan. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).",
       "confirm_template": "Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?",
       "prerequisites": [
         "PI berstatus Submitted/Paid (belum dibatalkan)",
@@ -25535,7 +25539,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -26541,7 +26545,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk di biaya asli + JV-COGS-RN: DR Persediaan / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).",
+      "postingEffect": "Cabang langsung (role bypass): JV-RN: DR akun terpetakan SALES_RETURN (bawaan 4.3 Retur Penjualan; + DR PPN Keluaran) / CR 1.2.1 Piutang (porsi mengurangi outstanding) dan CR Uang Muka Pelanggan 2.1.2 untuk kelebihan (dibuat Payment CustomerDeposit sebagai kredit pelanggan); untuk baris restock: stok masuk lewat buku nilai persediaan dan ikut rata-rata, bernilai porsi nilai yang dikeluarkan Surat Jalan asal (qty retur / qty SJ x nilai mutasi SJ; total retur satu baris tidak pernah melebihi nilai itu, retur terakhir mengambil sisanya) + JV-COGS-RN sebesar nilai yang sama: DR Persediaan (akun item atau INVENTORY) / CR akun terpetakan COGS. Cabang non-bypass: hanya ApprovalRequest SalesReturn (belum ada efek GL/stok).",
       "confirm_template": "Buat Retur Penjualan untuk invoice {salesInvoiceId} tanggal {date}?",
       "accessNote": "Role tanpa approval.bypass hanya mengantrikan approval; keputusan oleh Admin/pemegang approval.decide.",
       "prerequisites": [
@@ -26551,7 +26555,9 @@
       ],
       "errors": [
         "400: qty retur melebihi sisa yang bisa diretur.",
+        "400 SALES_RETURN_DUPLICATE_LINE: satu baris invoice muncul lebih dari sekali dalam items; gabungkan qty-nya dalam satu baris",
         "400: invoice sudah dibatalkan.",
+        "400: gudang retur wajib dipilih untuk baris restock (bila baris Invoice dan Surat Jalan asal juga tanpa gudang).",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 ACCOUNT_MAPPING_MISSING: peran SALES_RETURN atau COGS belum dipetakan di Akun Sistem",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
@@ -26620,12 +26626,13 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun), dan membatalkan deposit kredit pelanggan terkait.",
+      "postingEffect": "Membalik JV-RN dan JV-COGS-RN (saldo akun dikembalikan, ledger dibatalkan), membatalkan pergerakan stok masuk retur (stok turun, nilai persediaan turun persis sebesar nilai masuknya = debit Persediaan JV-COGS-RN), dan membatalkan deposit kredit pelanggan terkait. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak retur diterima.",
       "confirm_template": "Batalkan Retur Penjualan {id} (jurnal & stok dibalik)?",
       "errors": [
         "400: kredit pelanggan dari retur sudah dipakai — batalkan penggunaannya dulu.",
         "400: retur sudah dibatalkan (juga hasil klik ganda/retry: permintaan kedua menunggu yang pertama selesai; tidak ada yang dibalik dua kali)",
         "400 STOCK_INSUFFICIENT: barang retur sudah keluar lagi; stok gudang retur tidak cukup untuk dibalik (dicek per gudang)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak retur diterima (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: alasan bypass stok minus wajib (min 10 karakter)",
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
@@ -26776,7 +26783,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -26868,7 +26875,7 @@
       "phase": 3,
       "service": "salesInvoiceSubmit",
       "draftCapable": false,
-      "postingEffect": "GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO memakai unitCost terkunci di SJ). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.",
+      "postingEffect": "GL: DR 1.2.1 Piutang Usaha (grand total) [+ DR 1.5.4 PPh dibayar dimuka bila pphPct>0; akun 1.5.4 hilang = 400, tidak dilewati] / CR akun pendapatan per baris (4.1 Penjualan, 4.2 Pendapatan Jasa, atau akun item jasa/kustom) + CR PPN Keluaran. HPP: DR akun terpetakan COGS / CR Persediaan (WAC; baris dari DO: HPP = seluruh nilai mutasi Keluar SJ itu, berapa pun qty invoice-nya, juga untuk item nonaktif). Stok: pergerakan Keluar & stok turun; stok minus butuh allowNegativeStock+capability. Status Submitted (Paid bila grand total 0). DO terkait ditandai Invoiced.",
       "confirm_template": "Terbitkan Invoice Penjualan untuk pelanggan {partyId} tanggal {date} (jurnal & stok langsung diposting)?",
       "accessNote": "Risiko direklasifikasi dari write: endpoint ini memposting GL, stok, dan HPP sekaligus.",
       "prerequisites": [
@@ -27116,7 +27123,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok gudang & total disesuaikan sebesar selisih (SM AdjustmentIn/Out per item berselisih). GL: surplus = DR Persediaan (akun item atau 1.4.0) / CR Selisih Persediaan (INVENTORY_VARIANCE, default 6.38); defisit = DR Selisih Persediaan / CR Persediaan. Revaluasi unitCost: averageCost item diganti dan selisih nilai dijurnal ke akun yang sama.",
+      "postingEffect": "Stok gudang & total disesuaikan sebesar selisih (SM AdjustmentIn/Out per item berselisih). GL: surplus = DR Persediaan (akun item atau 1.4.0) / CR Selisih Persediaan (INVENTORY_VARIANCE, default 6.38); defisit = DR Selisih Persediaan / CR Persediaan. Lewat buku nilai persediaan: surplus bernilai qty x biaya baris (ikut rata-rata), defisit dinilai dari buku nilai (bukan unitCost yang diketik). Revaluasi unitCost (sesudah penyesuaian qty): stok terhitung dinilai ulang ke biaya itu (baris Revaluation, selisih nilai ke Selisih Persediaan; porsi yang tidak terserap persediaan ke HPP); tanpa stok tersisa sesudah opname, unitCost yang berbeda dari WAC ditolak (400 OPNAME_REVALUATION_NO_STOCK).",
       "confirm_template": "Finalkan stok opname tanggal {date} gudang {warehouseId}? Stok dan jurnal selisih akan langsung diposting.",
       "prerequisites": [
         "Tahun fiskal aktif untuk tanggal opname.",
@@ -27127,6 +27134,7 @@
         "400: masih ada stok opname Draft",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400: stok aktual tidak boleh negatif",
+        "400 OPNAME_REVALUATION_NO_STOCK: unitCost berbeda dari WAC padahal stok item sesudah opname 0 atau minus; kosongkan unitCost atau samakan dengan WAC",
         "400: item tidak ditemukan",
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
       ],
@@ -30261,7 +30269,7 @@
       "group": "Stok & Produksi",
       "toolset": "persediaan",
       "module": "inventory",
-      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; WAC dihitung ulang dari riwayat dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
+      "desc": "Mengedit pergerakan stok manual dengan cara membatalkan yang lama (stok dan jurnal dibalik) lalu membuat yang baru; baris lama dibalik persis sebesar nilainya di buku nilai persediaan (rata-rata mengikuti nilai buku, tidak dihitung ulang dari riwayat) dan penyelesaian COGS backfill disesuaikan. BUKAN edit draft. Aturan nilai dan akun lawan sama dengan inv_mov_create: stok keluar dinilai rata-rata item sesudah pembalikan baris lama (unitCost diabaikan), stok masuk wajib unitCost > 0 dan akun lawan. Referensi dokumen diisi sistem: referenceType di input diabaikan dan kolomnya tidak diubah. Mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) dan saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok. Bila jenis baru stok masuk, tautan batch sumber dihapus.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -30360,7 +30368,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Membalik stok & jurnal lama (jurnal lama berstatus Cancelled, saldo akun dikurangi per baris), memposting stok & jurnal baru sesuai nilai baru (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar pada WAC sesudah pembalikan), reverse+settle ulang COGS backfill, recompute WAC item dari replay.",
+      "postingEffect": "Pergerakan lama dibatalkan: stok dan nilainya kembali persis, jurnal lama berstatus Cancelled (saldo akun dikurangi per baris). Pergerakan baru (nomor SM baru) dan jurnal baru diposting sesuai isian (DR/CR Persediaan vs akun lawan seperti inv_mov_create; stok keluar dinilai dari nilai persediaan sesudah pembalikan); reverse+settle ulang COGS backfill. Edit stok masuk ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sesudahnya.",
       "confirm_template": "Ubah pergerakan stok {id} menjadi {movementType} {quantity} tanggal {date} (biaya satuan {unitCost}; stok keluar dinilai rata-rata sistem)? Stok dan jurnal lama dibalik lalu dibuat ulang.",
       "prerequisites": [
         "Pergerakan belum dibatalkan.",
@@ -30370,8 +30378,11 @@
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
+        "400: pergerakan lama tanpa gudang tidak dapat diedit; batalkan lalu catat ulang",
         "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
+        "400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu",
         "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk membalik Stok Masuk lama, atau untuk Stok Keluar / Penyesuaian Stok - yang baru (dicek per gudang, bukan total item)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
         "400 FISCAL_YEAR_MISSING: tanggal baru tidak punya tahun buku",
@@ -30423,7 +30434,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; WAC dan COGS backfill disesuaikan.",
+      "postingEffect": "Stok dan nilainya dibalik persis (In dikurangi / Out ditambah); jurnal terkait status Cancelled + saldo akun dikurangi per baris jurnal; COGS backfill dibalik. Pembatalan stok masuk ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sesudahnya.",
       "confirm_template": "Batalkan pergerakan stok {id}? Stok dan jurnal akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -30433,8 +30444,10 @@
       ],
       "errors": [
         "400: gerakan sudah dibatalkan",
-        "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat dibatalkan per baris; batalkan dokumennya, saldo awal lewat Penyesuaian Stok",
+        "400 MOVEMENT_DOCUMENT_LOCKED: mutasi milik dokumen (STT, surat jalan, retur, produksi, opname, transfer, invoice lama) atau saldo awal tidak dapat diedit per baris; ubah dari dokumennya, saldo awal lewat Penyesuaian Stok",
+        "400: stok masuk ini sudah dipakai sebagai batch sumber transaksi lain (mis. transfer atau stok keluar); batalkan transaksi tersebut dulu",
         "400 STOCK_INSUFFICIENT: stok di gudang mutasi tidak cukup untuk pembalikan (dicek per gudang, bukan total item)",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sesudah stok masuk ini, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku tertutup, koreksi lewat jurnal manual di periode berjalan",
@@ -30744,7 +30757,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "fall back to WAC-based costing (legacy behavior)."
+              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
             },
             {
               "name": "batchUnitCost",
@@ -31018,7 +31031,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": true,
-      "postingEffect": "Cabang bypass (Admin): stok input/output lama dibalik, WAC output dihitung ulang, jurnal lama dibatalkan, stok & jurnal baru diposting (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.",
+      "postingEffect": "Cabang bypass (Admin): stok input/output lama dibalik persis sebesar nilainya di buku nilai persediaan (ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output, juga produk samping bernilai 0, sudah keluar sejak diterima; berlaku juga untuk edit header saja seperti mesin, shift, atau catatan), jurnal lama dibatalkan, stok & jurnal baru diposting (input dinilai dari buku nilai) (JV-<runNo>-R<n>: DR persediaan output / CR persediaan input; selisih ke CR akun terpetakan PRODUCTION_CONVERSION (bawaan 5.12 Biaya Konversi Dibebankan) atau CR/DR akun terpetakan COGS). Cabang non-bypass: hanya membuat ApprovalRequest ProductionRunEdit (belum ada efek) - efek terjadi saat disetujui.",
       "confirm_template": "Edit Data Produksi {id}? Stok, WAC, dan jurnal akan direvisi (non-Admin: masuk antrian persetujuan).",
       "accessNote": "Role tanpa capability approval.bypass hanya mengantrekan permintaan edit; satu pengajuan Pending per run (409 bila sudah ada).",
       "prerequisites": [
@@ -31035,7 +31048,8 @@
         "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
         "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal run sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)",
         "400 MOVEMENT_SOURCE_BATCH_INVALID: batch sumber input ke-N tidak ditemukan, milik item lain, sudah dibatalkan, atau bukan stok masuk; pilih batch masuk aktif item yang sama (juga saat disetujui; pengajuan tetap Pending)",
-        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal revisi tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem (juga saat disetujui; pengajuan tetap Pending)"
+        "400 ACCOUNT_INACTIVE / ACCOUNT_GROUP: akun persediaan item (atau akun INVENTORY bawaan), akun COGS, atau akun PRODUCTION_CONVERSION yang dipakai jurnal revisi tidak aktif atau akun grup; aktifkan akun, ganti akun item, atau petakan peran ke akun detail di Akun Sistem (juga saat disetujui; pengajuan tetap Pending)",
+        "409 REVERSAL_NEEDS_TRUE_UP: output run ini (juga produk samping bernilai 0) sudah keluar sejak diterima, dari gudang dan dokumen mana pun; edit ditolak (juga edit header saja: mesin, shift, catatan) sampai koreksi nilai otomatis tersedia, tidak ada yang berubah (juga saat disetujui; pengajuan tetap Pending)"
       ],
       "related": [
         "prod_run_get",
@@ -31047,7 +31061,7 @@
       "group": "Stok & Produksi",
       "toolset": "produksi",
       "module": "production",
-      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, WAC item output dihitung ulang dari pergerakan masuk tersisa, jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.",
+      "desc": "Membatalkan Data Produksi yang sudah diposting: semua pergerakan stok dibalik, tiap baris persis sebesar nilainya di buku nilai persediaan (rata-rata mengikuti nilai buku, tidak dihitung ulang dari riwayat; ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output, juga produk samping bernilai 0, sudah keluar sejak diterima), jurnal JV-<runNo> dan revisinya JV-<runNo>-R<n> dibatalkan (JV-<runNo>0 milik run lain tidak tersentuh) dengan pembatal tercatat, run ditandai batal. Bypass stok minus (allowNegativeStock di body atau query) butuh alasan minimal 10 karakter dan capability inventory.negative_stock.",
       "risk": "critical",
       "roles": [
         "Admin",
@@ -31099,7 +31113,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok input dikembalikan, stok output dikurangi (ditolak bila stok output tidak cukup kecuali allowNegativeStock); WAC output recompute; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal.",
+      "postingEffect": "Stok input dikembalikan dan stok output dikurangi, masing-masing persis sebesar nilainya di buku nilai persediaan (ditolak bila stok output tidak cukup kecuali allowNegativeStock); rata-rata mengikuti nilai buku; jurnal produksi Cancelled dan saldo akun dibalik per baris jurnal. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila output (juga produk samping bernilai 0, yang ikut menurunkan rata-rata) sudah keluar sejak diterima, juga lewat bypass stok minus.",
       "confirm_template": "Batalkan Data Produksi {id}? Stok dan jurnal produksi akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -31114,7 +31128,8 @@
         "403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut produksi), koreksi lewat jurnal manual di periode berjalan",
         "400 JOURNAL_ALREADY_REVERSED: salah satu jurnal produksi sudah dibalik dengan jurnal lain; periksa/batalkan jurnal pembaliknya dulu, tidak ada yang berubah",
-        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci"
+        "400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci",
+        "409 REVERSAL_NEEDS_TRUE_UP: output run ini (juga produk samping bernilai 0) sudah keluar sejak diterima, dari gudang dan dokumen mana pun (juga lewat bypass stok minus); nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)"
       ],
       "related": [
         "prod_run_get"
@@ -31232,7 +31247,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "fall back to WAC-based costing (legacy behavior)."
+              "description": "Batch masuk asal input (penelusuran saja; nilai input dari buku nilai persediaan, bukan biaya batch)."
             },
             {
               "name": "batchUnitCost",
@@ -32589,7 +32604,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -32805,7 +32820,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -33063,7 +33078,7 @@
               "in": "body",
               "type": "uuid",
               "required": false,
-              "description": "From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS."
+              "description": "From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement."
             },
             {
               "name": "sourceMovementId",
@@ -34076,7 +34091,7 @@
       "level": 1,
       "phase": 1,
       "draftCapable": false,
-      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Revaluasi nilai satuan (averageCost) tidak otomatis dikembalikan.",
+      "postingEffect": "Stok dibalik sebesar -selisih; baris yang gerakannya sudah batal (data lama) dilewati, tidak dibalik dua kali; pergerakan penyesuaian isCancelled; jurnal selisih persediaan Cancelled dan saldo akun dibalik per baris jurnal. Semua baris opname (termasuk Revaluation) dibalik persis sebesar nilainya di buku nilai persediaan. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item surplus/revaluasi sudah keluar sejak opname, dan 409 OPNAME_LEGACY_REVALUATION untuk opname lama yang revaluasinya dijurnal tanpa baris Revaluation.",
       "confirm_template": "Batalkan stok opname {id}? Penyesuaian stok dan jurnal selisih akan dibalik.",
       "prerequisites": [
         "User memiliki capability doc.cancel.",
@@ -34087,6 +34102,8 @@
         "400: stok opname sudah dibatalkan",
         "400 STOCK_INSUFFICIENT: stok gudang opname tidak cukup untuk membalik surplus (dijumlah per item per gudang)",
         "400 STALE_STATUS: permintaan lain (klik ganda/retry) sudah membatalkan opname ini lebih dulu; tidak ada yang dibalik dua kali",
+        "409 REVERSAL_NEEDS_TRUE_UP: barang item surplus atau revaluasi sudah keluar sejak opname; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)",
+        "409 OPNAME_LEGACY_REVALUATION: opname lama berisi revaluasi nilai dari sebelum buku nilai persediaan; minta akuntan membuat jurnal koreksi",
         "409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi",
         "403: tanpa capability doc.cancel",
         "400 PERIOD_CLOSED: tahun buku dokumen atau jurnalnya tertutup (pesan menyebut stok opname), koreksi lewat jurnal manual di periode berjalan",

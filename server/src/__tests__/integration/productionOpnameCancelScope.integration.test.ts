@@ -29,6 +29,7 @@ import { nextRevisionNumber } from '../../services/production/productionPosting'
 import productionRunsRouter from '../../routes/inventory/productionRuns';
 import stockOpnameRouter from '../../routes/stockOpname';
 import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -224,6 +225,7 @@ d('production run cancel scope', () => {
       expect((await tx.journalEntry.findUniqueOrThrow({ where: { id: je.id } })).status).toBe('Submitted');
       expect([await balanceOf(tx, acc.asset.id), await balanceOf(tx, acc.expense.id)]).toEqual(balances);
       expect((await tx.productionRun.findUniqueOrThrow({ where: { id: run.id } })).isCancelled).toBe(false);
+      await assertLedgerInvariant(tx, [item.id], { warehouses: true });
     });
   });
 });
@@ -318,6 +320,7 @@ d('production run revision numbers', () => {
         { entryNumber: `${base}-R1`, status: 'Cancelled', cancelledById: userId, cancelReason: 'Revisi produksi' },
         { entryNumber: `${base}-R2`, status: 'Submitted', cancelledById: null, cancelReason: null },
       ]);
+      await assertLedgerInvariant(tx, [input.id, output.id], { warehouses: true });
     });
   });
 });

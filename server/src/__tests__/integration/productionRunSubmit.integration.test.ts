@@ -22,6 +22,7 @@ import { submitProductionRunInTx } from '../../services/productionRunSubmit';
 import { systemAccounts } from '../../services/systemAccounts';
 import { mapProductionLeafAccounts } from '../helpers/productionFixture';
 import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -143,6 +144,7 @@ d('submitProductionRunInTx — single input / single output', () => {
         const totalDebit = je!.items.reduce((s, i) => s + Number(i.debit), 0);
         const totalCredit = je!.items.reduce((s, i) => s + Number(i.credit), 0);
         expect(totalDebit).toBe(totalCredit);
+        await assertLedgerInvariant(tx, [inputItem.id, outputItem.id], { warehouses: true });
 
         throw new RollbackSentinel();
       }, { timeout: 30000 });

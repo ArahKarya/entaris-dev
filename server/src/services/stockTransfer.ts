@@ -6,6 +6,7 @@ import { assertPeriodsOpen } from '../utils/periodGuard';
 import { claimCancel } from '../utils/cancelClaim';
 import { logger } from '../lib/logger';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
+import { postTransfer, reverseMovement } from './inventory/inventoryLedger';
 
 type Tx = Prisma.TransactionClient;
 
@@ -40,8 +41,9 @@ export interface SubmitStockTransferInput {
 }
 
 /**
- * Submit a stock transfer: paired TransferOut/TransferIn movements with no GL impact (same
- * account, net zero); inventory_items.current_stock (total across warehouses) is unchanged.
+ * Submit a stock transfer: paired TransferOut/TransferIn movements through the value ledger
+ * (postTransfer, value_delta 0) with no GL impact (same account, net zero); the item total,
+ * stock_value and average are unchanged.
  */
 export async function submitStockTransferInTx(
   tx: Tx,
@@ -107,12 +109,11 @@ export async function submitStockTransferInTx(
     include: { items: true },
   });
 
-  // Adjust stocks + create paired movements per line.
+  // Paired movements per line.
   for (const it of body.items) {
     const item = locked.items.get(it.itemId)!;
-    const qty = it.quantity;
-    // A picked batch locks unitCost to its stored cost so the batch consumption ledger stays consistent.
-    let unitCost = item.averageCost.toNumber();
+    // A picked batch shows its stored cost on both legs (display only: a transfer moves no value).
+    let displayUnitCost: string | null = null;
     if (it.sourceMovementId) {
       const batch = await tx.stockMovement.findUnique({
         where: { id: it.sourceMovementId },
@@ -124,60 +125,27 @@ export async function submitStockTransferInTx(
       if (batch.movementType !== 'In' && batch.movementType !== 'AdjustmentIn' && batch.movementType !== 'TransferIn') {
         throw new BusinessError(`Batch sumber untuk "${item.name}" bukan stok masuk.`);
       }
-      unitCost = Number(batch.unitCost);
+      displayUnitCost = batch.unitCost.toString();
     }
-    const totalValue = qty * unitCost;
 
-    await tx.inventoryStock.upsert({
-      where: { itemId_warehouseId: { itemId: it.itemId, warehouseId: body.fromWarehouseId } },
-      create: { itemId: it.itemId, warehouseId: body.fromWarehouseId, currentStock: -qty },
-      update: { currentStock: { decrement: qty } },
-    });
-    await tx.inventoryStock.upsert({
-      where: { itemId_warehouseId: { itemId: it.itemId, warehouseId: body.toWarehouseId } },
-      create: { itemId: it.itemId, warehouseId: body.toWarehouseId, currentStock: qty },
-      update: { currentStock: { increment: qty } },
-    });
-
+    // The TransferIn notes name the TransferOut number; the ledger numbers the TransferIn after it.
     const smOutNo = await generateDocumentNumber(tx, 'SM', date, fy.id);
-    const smOut = await tx.stockMovement.create({
-      data: {
-        movementNumber: smOutNo,
-        date,
-        itemId: it.itemId,
-        warehouseId: body.fromWarehouseId,
-        movementType: 'TransferOut',
-        quantity: qty,
-        unitCost,
-        totalValue,
-        // Batch back-link for the batch consumption ledger
-        sourceMovementId: it.sourceMovementId || null,
-        notes: `Transfer ke ${toWh.name}`,
-        referenceType: 'StockTransfer',
-        referenceId: transfer.id,
-        referenceNumber: transferNumber,
-        fiscalYearId: fy.id,
-        createdById: userId,
-      },
-    });
-    const smInNo = await generateDocumentNumber(tx, 'SM', date, fy.id);
-    await tx.stockMovement.create({
-      data: {
-        movementNumber: smInNo,
-        date,
-        itemId: it.itemId,
-        warehouseId: body.toWarehouseId,
-        movementType: 'TransferIn',
-        quantity: qty,
-        unitCost,
-        totalValue,
-        notes: `Transfer dari ${fromWh.name} (ref: ${smOut.movementNumber})`,
-        referenceType: 'StockTransfer',
-        referenceId: transfer.id,
-        referenceNumber: transferNumber,
-        fiscalYearId: fy.id,
-        createdById: userId,
-      },
+    await postTransfer(tx, {
+      itemId: it.itemId,
+      fromWarehouseId: body.fromWarehouseId,
+      toWarehouseId: body.toWarehouseId,
+      quantity: it.quantity,
+      date,
+      fiscalYearId: fy.id,
+      createdById: userId,
+      referenceType: 'StockTransfer',
+      referenceId: transfer.id,
+      referenceNumber: transferNumber,
+      // Batch back-link for the batch consumption ledger
+      sourceMovementId: it.sourceMovementId || null,
+      displayUnitCost,
+      out: { movementNumber: smOutNo, notes: `Transfer ke ${toWh.name}` },
+      in: { notes: `Transfer dari ${fromWh.name} (ref: ${smOutNo})` },
     });
   }
 
@@ -269,23 +237,12 @@ export async function cancelStockTransferInTx(
     },
   );
 
-  // TransferOut returns to the source, TransferIn leaves the destination. Upsert: with the bypass
-  // the destination row may be missing.
+  // TransferOut returns to the source, TransferIn leaves the destination (each leg at its own
+  // warehouse; the lock above created any missing row). A transfer leg moves no value, so its
+  // reversal writes no sweep row and the user only labels it.
   for (const m of active) {
-    const qty = Number(m.quantity);
-    const out = m.movementType === 'TransferOut';
-    const warehouseId = out ? transfer.fromWarehouseId : transfer.toWarehouseId;
-    await tx.inventoryStock.upsert({
-      where: { itemId_warehouseId: { itemId: m.itemId, warehouseId } },
-      create: { itemId: m.itemId, warehouseId, currentStock: out ? qty : -qty },
-      update: { currentStock: { increment: out ? qty : -qty } },
-    });
+    await reverseMovement(tx, m.id, { userId: transfer.createdBy });
   }
-
-  await tx.stockMovement.updateMany({
-    where: { id: { in: active.map((m) => m.id) }, isCancelled: false },
-    data: { isCancelled: true },
-  });
 
   return tx.stockTransfer.findUniqueOrThrow({ where: { id: transferId } });
 }

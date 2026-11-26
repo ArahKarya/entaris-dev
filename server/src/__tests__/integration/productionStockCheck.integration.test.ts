@@ -7,7 +7,9 @@
  *   100"; PK only at B and the run at A -> refused; the negative-stock bypass passes and is logged;
  * - E3-R3: GKP 700 + 500 from 1.000 -> refused; 800 kg at B (0 there) while A holds 1.000 -> refused;
  * - an edit checks the new inputs after its own reversal, at its (new) warehouse;
- * - reversing an output (cancel, edit) is checked at the movement's warehouse, not the item total.
+ * - reversing an output (cancel, edit) is checked at the movement's warehouse, not the item total;
+ *   with the bypass, an output that went out since is refused by the value ledger
+ *   (REVERSAL_NEEDS_TRUE_UP, until PR-6.5a).
  *
  * Committed fixtures (same year, deleted after; no value, so no journal or account balance moves):
  * - two cancels of one run at once: one cancels, the other gets STALE_STATUS, stock reversed once;
@@ -38,6 +40,7 @@ vi.mock('../../lib/prisma', () => ({
 import { logger } from '../../lib/logger';
 import { systemAccounts } from '../../services/systemAccounts';
 import { STOCK_INSUFFICIENT } from '../../services/inventory/stockLocks';
+import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
 import { STALE_STATUS } from '../../utils/cancelClaim';
 import { PERIOD_LOCKED } from '../../utils/periodGuard';
 import { submitProductionRunInTx, type SubmitProductionRunInput } from '../../services/productionRunSubmit';
@@ -46,6 +49,7 @@ import { cancelProductionRunInTx } from '../../services/productionRunCancel';
 import { createFiscalYear } from '../helpers/periodFixture';
 import { seedStock } from '../helpers/inventoryFixture';
 import { createProductionWorld, seedWorldStock, worldDate, type ProductionWorld } from '../helpers/productionFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -80,7 +84,9 @@ async function inWorld(fn: (tx: Tx, world: ProductionWorld) => Promise<void>) {
       state.tx = tx;
       systemAccounts.invalidateCache();
       try {
-        await fn(tx, await createProductionWorld(tx, YEAR));
+        const world = await createProductionWorld(tx, YEAR);
+        await fn(tx, world);
+        await assertLedgerInvariant(tx, Object.values(world.items).map((i) => i.id), { warehouses: true });
       } finally {
         state.tx = null;
         systemAccounts.invalidateCache();
@@ -225,11 +231,13 @@ d('production input stock at the production warehouse (rollback)', () => {
       expect(await tx.productionRun.findUniqueOrThrow({ where: { id: first.id }, select: { isCancelled: true } }))
         .toEqual({ isCancelled: false });
 
-      // With the bypass the cancel goes through and A goes negative; B is untouched.
-      await cancelProductionRunInTx(tx, first.id, {
+      // The bypass passes the stock check at A, but the 600 beras of the run went out since: on the
+      // value ledger taking their value back needs a value true-up (PR-6.5a / PR-6.12), so it is
+      // refused until then and nothing changes, at A or at B.
+      expect(await codeOf(attempt(tx, (t) => cancelProductionRunInTx(t, first.id, {
         userId: w.userId, allowNegativeStock: true, negativeStockReason: 'IT 6.2b koreksi produksi',
-      });
-      expect(await stockAt(tx, beras, w.warehouseA.id)).toBe(-600);
+      })))).toBe(REVERSAL_NEEDS_TRUE_UP);
+      expect(await stockAt(tx, beras, w.warehouseA.id)).toBe(0);
       expect(await stockAt(tx, beras, w.warehouseB.id)).toBe(1000);
     });
   });
@@ -330,6 +338,7 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       const totals = await prisma.inventoryItem.findMany({ where: { id: { in: [f.gkp, f.beras] } }, select: { id: true, currentStock: true } });
       expect(Object.fromEntries(totals.map((t) => [t.id, Number(t.currentStock)]))).toEqual({ [f.gkp]: 1000, [f.beras]: 0 });
       expect(await prisma.stockMovement.count({ where: { referenceId: f.runId, isCancelled: false } })).toBe(0);
+      await assertLedgerInvariant(prisma as unknown as Tx, [f.gkp, f.beras], { warehouses: true });
     } finally {
       await f.cleanup();
     }
@@ -348,6 +357,7 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       const db = prisma as unknown as Tx;
       expect(await stockAt(db, f.gkp, f.wh)).toBe(1000);
       expect(await stockAt(db, f.beras, f.wh)).toBe(0);
+      await assertLedgerInvariant(prisma as unknown as Tx, [f.gkp, f.beras], { warehouses: true });
     } finally {
       await f.cleanup();
     }
@@ -376,6 +386,7 @@ d('production run cancel claim and run lock (committed fixtures)', () => {
       const db = prisma as unknown as Tx;
       expect(await stockAt(db, f.gkp, f.wh)).toBe(400);
       expect(await stockAt(db, f.beras, f.wh)).toBe(300);
+      await assertLedgerInvariant(prisma as unknown as Tx, [f.gkp, f.beras], { warehouses: true });
     } finally {
       await prisma.$executeRaw`UPDATE period_lock SET lock_date = ${lock?.lock_date ?? null}::date WHERE id = 1`;
       await f.cleanup();

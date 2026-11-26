@@ -36,7 +36,7 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 - Nomor `STT-...`. `gr_create` langsung berstatus `Submitted` (tidak ada draft): memposting stok masuk per gudang dan jurnal accrual.
 - Harga di STT **tidak wajib**. Bila `lockedUnitCost` = 0/kosong, dipakai `averageCost` saat ini sebagai harga provisional. Harga aktual baru muncul di PI.
 - Terkait PO: PO harus `Submitted`, belum ditutup, belum dibatalkan. `qtyReceived` item PO bertambah.
-- **Barang titipan pelanggan** (`isCustomerOwned=true`, jasa repros): GL nol, tidak boleh terkait PO, dan tidak pernah ditagih PI.
+- **Barang titipan pelanggan** (`isCustomerOwned=true`, jasa repros): nilai dan GL nol, tidak boleh terkait PO, dan tidak pernah ditagih PI. Ditolak (`GR_CUSTOMER_OWNED_OWN_STOCK`) ke item yang punya stok milik perusahaan, dan STT barang perusahaan ditolak dengan kode yang sama ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan.
 - `gr_pending` = STT `Submitted`, belum ditagih (`invoiceId` kosong), bukan legacy, bukan titipan, untuk satu pemasok. Dipakai saat menyusun PI.
 - Filter daftar STT (`status`): `Uninvoiced`, `Invoiced`, `CustomerOwned`, `Cancelled`, `Draft`, `Submitted`. STT virtual hasil backfill PI lama (`isLegacyBackfill=true`) disembunyikan kecuali `includeLegacy=true`.
 
@@ -57,12 +57,12 @@ PI (harga aktual + selisih harga + hutang usaha riil)
 | Langkah | Jurnal / efek |
 |---|---|
 | PO (buat/ubah/ajukan/tutup/batal) | Tidak ada GL, stok, WAC |
-| STT submit (`gr_create`) | DR Persediaan (1.4.0) / CR Hutang Belum Tagih (2.1.5). Stok masuk, WAC dihitung ulang. Titipan pelanggan: GL nol |
-| STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dibalik; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`) |
+| STT submit (`gr_create`) | DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar qty x harga. Stok dan nilai persediaan masuk, rata-rata dari nilai. Titipan pelanggan: nilai dan GL nol |
+| STT batal (`gr_cancel`) | Jurnal `JV-{stt}` dibatalkan (void, tanpa `JV-{stt}-CXL`): ledger-nya batal, saldo 1.4.0 dan Hutang Belum Tagih dibalik per baris; stok dan nilainya dibalik sebesar debit Persediaan jurnal STT; `qtyReceived` PO dikurangi. Ditolak selama ada baris STT yang masih ditagih PI aktif (`GR_LINE_INVOICED`), dan 409 `REVERSAL_NEEDS_TRUE_UP` bila barang item itu sudah keluar sejak STT diterima |
 | PI standalone (`pi_create`, role bypass) | DR Persediaan (per akun item) / CR Hutang Usaha (2.1.1); stok masuk + WAC; backfill COGS stok minus |
-| PI dari STT | DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang |
-| Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> Persediaan + koreksi WAC; porsi sudah keluar -> akun Selisih Harga Pembelian terpetakan (bawaan 5.11). Lawan selalu Hutang Usaha (akun AP terpetakan, bawaan 2.1.1) |
-| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), STT dilepas (`invoiceId` dikosongkan) |
+| PI dari STT | DR Hutang Belum Tagih (2.1.5) @ biaya STT / CR Hutang Usaha (2.1.1); stok tidak dibuat ulang. Selisih harga PI vs biaya STT = baris Revaluation buku nilai (mutasi STT tidak ditimpa; biaya batch = nilai STT + Revaluation-nya): porsi terserap stok DR/CR Persediaan, sisanya (stok habis atau penurunan melebihi nilai stok) DR/CR HPP |
+| Revisi harga PI (`pi_revise_price`) | Delta = (rate baru - lama) x qty. Porsi masih di stok -> baris Revaluation buku nilai + Persediaan (bagian yang tidak terserap stok -> HPP; rata-rata tidak pernah negatif); porsi sudah keluar -> akun Selisih Harga Pembelian terpetakan (bawaan 5.11). Lawan selalu Hutang Usaha (akun AP terpetakan, bawaan 2.1.1). Jurnal revisi ikut dibatalkan bila PI dibatalkan |
+| PI batal (`pi_cancel`) | Reverse GL, stok yang dibuat PI dibalik (ditolak `STOCK_INSUFFICIENT` bila gudangnya tidak cukup, kecuali `allowNegativeStock` + alasan dengan capability `inventory.negative_stock`), Revaluation selisih harga milik PI (landed cost dan revisi) dibalik sebesar nilainya dan jurnal revisinya dibatalkan (ditolak 409 `REVERSAL_NEEDS_TRUE_UP` bila barangnya sudah keluar sejak itu atau stok jadi 0 dengan sisa nilai), STT dilepas (`invoiceId` dikosongkan) |
 | Aplikasi uang muka (`vdep_apply`) | DR Hutang Usaha (2.1.1) / CR Uang Muka Vendor (1.3); outstanding PI turun |
 | Refund/offset uang muka (`vdep_refund`) | Offset: DR 2.1.1 / CR 1.3. Refund kas: DR Kas/Bank / CR 1.3 |
 | Batal refund uang muka (`vdep_refund_cancel`) | Jurnal refund kas di-void; `refundedAmount` turun dan saldo uang muka pemasok pulih |
@@ -82,7 +82,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 - **STT tidak punya harga wajib.** Jangan menyimpulkan nilai persediaan dari STT; nilai aktual ada di PI. Selisih antara harga provisional STT dan harga PI masuk ke 5.11.
 - **Membatalkan STT yang sudah ditagih** ditolak sampai PI-nya dibatalkan; PI yang sudah punya pembayaran teralokasi atau uang muka aktif juga tidak bisa dibatalkan (batalkan pembayaran/aplikasi dulu). Urutan pembatalan: pembayaran/aplikasi uang muka -> PI -> STT.
-- `gr_cancel` menolak bila stok tidak cukup untuk dibalikkan (barang sudah dipakai/dijual). Opsi `allowNegativeStock` + `negativeStockReason` (min 10 karakter) hanya untuk override Admin.
+- `gr_cancel` menolak bila stok tidak cukup untuk dibalikkan (barang sudah dipakai/dijual). Opsi `allowNegativeStock` + `negativeStockReason` (min 10 karakter) hanya untuk override Admin, dan selama koreksi nilai otomatis belum ada pembatalan setelah barang item itu keluar tetap ditolak 409 `REVERSAL_NEEDS_TRUE_UP`.
 - STT titipan pelanggan tidak muncul di `gr_pending` dan tidak bisa ditagih; jangan menaut ke PO.
 - PO Draft tidak dibatalkan, tetapi dihapus; PO Submitted tidak dihapus, tetapi dibatalkan atau ditutup.
 - `po_close` tidak mengubah `status` (tetap `Submitted`); gunakan `receiptStatus=closed` atau `closedAt` untuk mengenalinya.
@@ -194,7 +194,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** STT dengan status Cancelled.
 
-**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, WAC dihitung ulang dari riwayat). Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.
+**Efek pembukuan/stok:** Reverse stok masuk (stok & per-gudang berkurang, nilai persediaan berkurang sebesar nilai baris STT = debit Persediaan jurnal STT). Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak STT diterima, atau stok jadi 0 dengan sisa nilai. Jurnal STT JV-{stt} dibatalkan (void): status Cancelled, ledger-nya ditandai batal, saldo Persediaan dan Hutang Belum Tagih dibalik per baris jurnal; tidak ada jurnal JV-{stt}-CXL. STT hilang dari laporan bulan penerimaannya. qtyReceived PO dikurangi.
 
 **Teks konfirmasi:** Batalkan STT {id}? Stok akan dikembalikan dan accrual hutang dibalik.
 
@@ -211,6 +211,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: ada PI Paid / PI belum dibatalkan
 - 400 GR_LINE_INVOICED: masih ada baris STT yang ditagih di PI yang belum dibatalkan (pesan menyebut nomor PI-nya); batalkan PI tersebut dulu
 - 400 GR_CANCEL_INSUFFICIENT_STOCK: stok gudang penerimaan tidak cukup untuk dibalikkan (baris item yang sama dijumlah per gudang)
+- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak STT diterima (juga lewat bypass stok minus), atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
@@ -288,7 +289,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** STT yang dibuat (id, sttNumber, status Submitted). HTTP 201.
 
-**Efek pembukuan/stok:** Stok masuk (StockMovement In) + stok per gudang bertambah; WAC dihitung ulang dengan lockedUnitCost (atau averageCost bila 0). Jurnal: DR Persediaan (1.4.0) / CR Hutang Belum Tagih (2.1.5). qtyReceived item PO bertambah bila terkait PO. Barang titipan pelanggan (isCustomerOwned): GL nol dan tidak bisa ditagih.
+**Efek pembukuan/stok:** Stok masuk (StockMovement In) + stok per gudang bertambah; nilai persediaan item bertambah sebesar qty x lockedUnitCost (atau averageCost bila 0) dan rata-rata dihitung dari nilai itu. Jurnal: DR Persediaan (akun item atau 1.4.0) / CR Hutang Belum Tagih (2.1.5) sebesar nilai yang sama. qtyReceived item PO bertambah bila terkait PO. Barang titipan Customer (isCustomerOwned): nilai dan GL nol, tidak bisa ditagih, dan ditolak ke item yang punya stok milik perusahaan; barang perusahaan juga ditolak ke item yang berisi barang titipan Customer.
 
 **Teks konfirmasi:** Catat penerimaan barang dari pemasok {partyId} tanggal {date}, {items} baris item. Stok dan hutang belum tagih akan dibukukan. Setujui?
 
@@ -303,6 +304,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: pemasok tidak aktif/bukan supplier
 - 400: PO sudah dibatalkan/belum dipesan/sudah ditutup
 - 400: item atau gudang tidak ditemukan/tidak aktif
+- 400 GR_CUSTOMER_OWNED_OWN_STOCK: STT titipan Customer ke item yang punya stok milik perusahaan, atau STT barang perusahaan ke item yang berisi barang titipan Customer; pakai item terpisah untuk barang titipan
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400 PERIOD_LOCKED: tanggal dokumen pada atau sebelum tanggal kunci periode bulanan (period_lock_get); minta pemegang hak period.lock memundurkan kunci
 
@@ -494,7 +496,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** { id, status: 'Cancelled' }.
 
-**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik; STT terkait kembali 'belum ditagih'.
+**Efek pembukuan/stok:** Reverse GL faktur (jurnal Cancelled, saldo akun dibalik, outstanding = 0, outstanding pemasok dihitung ulang); stok yang dibuat PI dibalik beserta nilainya, dan baris Revaluation selisih harga milik PI (landed cost/revisi) dibalik sebesar nilainya sehingga nilai persediaan turun sebesar selisih itu; jurnal revisi harga PI ini (sejak buku nilai) ikut dibatalkan; STT terkait kembali 'belum ditagih'. Ditolak 409 REVERSAL_NEEDS_TRUE_UP bila barang item itu sudah keluar sejak nilainya masuk, atau stok jadi 0 dengan sisa nilai.
 
 **Teks konfirmasi:** Batalkan Invoice Pembelian {id}? Jurnal dan stok terkait akan dibalik.
 
@@ -509,6 +511,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 - 400: Invoice memiliki pembayaran teralokasi - batalkan pembayaran dulu
 - 400: Invoice memiliki alokasi uang muka aktif - batalkan alokasi dulu
 - 400 STOCK_INSUFFICIENT: invoice lama (tanpa STT) yang membuat stok sendiri: stok gudangnya tidak cukup untuk dibalik (dicek per gudang)
+- 409 REVERSAL_NEEDS_TRUE_UP: barang item ini sudah keluar sejak nilai PI masuk, atau stok jadi 0 dengan sisa nilai; nilai persediaan perlu dikoreksi akuntan (koreksi otomatis belum tersedia)
 - 409 STOCK_BUSY: stok item ini sedang diproses transaksi lain lebih dari 5 detik; coba lagi sebentar lagi
 - 400: alasan bypass stok minus wajib (min 10 karakter)
 - 403 NEGATIVE_STOCK_FORBIDDEN: allowNegativeStock tanpa capability inventory.negative_stock (alasan dicek lebih dulu)
@@ -548,7 +551,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 | `items[].taxPct` | body | `number` | tidak | PPN % per baris |
 | `items[].pphPct` | body | `number` | tidak | PPh % per baris |
 | `items[].description` | body | `string` | tidak |  |
-| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did) + use locked unitCost for COGS. |
+| `items[].deliveryOrderItemId` | body | `uuid` | tidak | From-DO line: skip stock-out (DO already did); COGS is the value of the DO movement. |
 | `items[].sourceMovementId` | body | `uuid` | tidak | the sales line for Phase 6 "loaded margin" reports. |
 | `items[].rate` | body | `number` | ya | (mis. potongan jasa angkutan vendor pakai armada perusahaan). |
 | `items[].kualitas` | body | `string` | tidak |  |
@@ -598,7 +601,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** Bypass: PI yang dibuat (HTTP 201). Non-bypass: { pendingApproval: true, request, message } (HTTP 202).
 
-**Efek pembukuan/stok:** Cabang non-bypass: tidak ada efek GL/stok sampai disetujui (ApprovalRequest Pending, notifikasi ke Admin). Cabang bypass/standalone: DR Persediaan (akun persediaan per item) / CR Hutang Usaha (2.1.1), stok masuk + WAC, penyelesaian backfill COGS stok minus; PPN/PPh/potongan/biaya lain dialokasikan (landed cost). Baris tertaut STT (goodsReceiptItemId): stok tidak dibuat ulang; DR Hutang Belum Tagih (2.1.5) +/- Selisih Harga Pembelian (5.11) / CR Hutang Usaha (2.1.1) dan STT.invoiceId diisi.
+**Efek pembukuan/stok:** Cabang non-bypass: tidak ada efek GL/stok sampai disetujui (ApprovalRequest Pending, notifikasi ke Admin). Cabang bypass/standalone: DR Persediaan (akun persediaan per item) / CR Hutang Usaha (2.1.1), stok masuk + WAC, penyelesaian backfill COGS stok minus; PPN/PPh/potongan/biaya lain dialokasikan (landed cost). Baris tertaut STT (goodsReceiptItemId): stok tidak dibuat ulang; DR Hutang Belum Tagih (2.1.5) @ biaya STT / CR Hutang Usaha (2.1.1); selisih harga Invoice vs biaya STT menjadi baris Revaluation di buku nilai persediaan (mutasi STT tidak ditimpa): porsi yang terserap stok DR/CR Persediaan, sisanya (stok habis atau penurunan melebihi nilai stok) DR/CR HPP (akun terpetakan COGS); STT.invoiceId diisi.
 
 **Teks konfirmasi:** Buat Invoice Pembelian dari pemasok {partyId} tanggal {date}, {items} baris. Role non-Admin akan masuk antrian persetujuan. Setujui?
 
@@ -819,7 +822,7 @@ Biaya tambahan di PI (`biayaLain`, potongan item, PPN, PPh) dialokasikan sebagai
 
 **Isi hasil:** Bypass: hasil revisi (jurnal/penyesuaian). Non-bypass: permintaan persetujuan (HTTP 202).
 
-**Efek pembukuan/stok:** Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya; WAC dikoreksi. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).
+**Efek pembukuan/stok:** Cabang bypass: delta = (rate baru - lama) x qty; harga naik: CR Hutang Usaha (akun terpetakan) / DR Persediaan (porsi stok, lewat baris Revaluation buku nilai; bagian yang tidak terserap stok ke HPP) + DR Selisih Harga Pembelian (akun terpetakan, bawaan 5.11; porsi sudah keluar); harga turun kebalikannya (rata-rata tidak pernah negatif). Jurnal revisi ikut dibatalkan bila PI dibatalkan. Cabang non-bypass: tidak ada efek sampai permintaan disetujui (satu permintaan Pending per PI).
 
 **Teks konfirmasi:** Revisi harga Invoice Pembelian {id} ({lines} baris). Alasan: {reason}. Setujui?
 

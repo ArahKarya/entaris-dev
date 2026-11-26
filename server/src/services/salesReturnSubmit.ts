@@ -9,8 +9,14 @@ import { cogsAccountFor, salesReturnAccount } from './ledger/systemRoleAccounts'
 import { logger } from '../lib/logger';
 import { lockArThenSalesInvoiceInTx, setSalesInvoiceOutstandingInTx } from './salesInvoiceStatus';
 import { lockInventoryRows } from './inventory/stockLocks';
+import { postInbound } from './inventory/inventoryLedger';
+import { inventoryAccountFor } from './inventory/itemAccount';
+import { UNIT_COST_DP, VALUE_DP } from './inventory/inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
+
+/** Error code (400): a return request lists the same invoice line twice. */
+export const SALES_RETURN_DUPLICATE_LINE = 'SALES_RETURN_DUPLICATE_LINE';
 
 // Mirrors CreateSalesReturnSchema (already Zod-validated at the route).
 export interface SubmitSalesReturnInput {
@@ -33,14 +39,11 @@ export interface SubmitSalesReturnInput {
  *   - main JE (JV-RN-...): DR 4.3 Retur Penjualan (subtotal) + DR PPN Keluaran
  *     (tax) / CR Piutang (porsi yang mengurangi outstanding) + CR Uang Muka
  *     Pelanggan (sisa → kredit pelanggan)
- *   - for restock lines: StockMovement In (referenceType 'SalesReturn'),
- *     increment stock, and a COGS-reversal JE (JV-COGS-RN-...): DR Persediaan /
- *     CR HPP at the original loaded cost
+ *   - for restock lines: an In through the value ledger (referenceType 'SalesReturn'), which
+ *     blends into the average (E3-R7), and a COGS-reversal JE (JV-COGS-RN-...): DR Persediaan /
+ *     CR HPP of the same value (returnLineValue)
  *   - a CustomerDeposit Payment row for the credit portion (no own JE — the
  *     liability is already CR'd by the main JE)
- *
- * Cost source priority per line: DO stockMovement.unitCost → invoice line
- * unitCostLoaded → item.averageCost.
  */
 /** Net value of one returned line: qty × invoice rate less the line discount (before tax). */
 export function returnLineAmount(quantity: number, rate: number, discountPct: number): number {
@@ -58,6 +61,56 @@ export function returnTotal(lines: Array<{ amount: number; taxPct: number }>): n
     .reduce((s, r) => s.plus(new Decimal(r.amount).mul(new Decimal(r.taxPct).div(100))), new Decimal(0))
     .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   return subtotal.plus(tax).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+}
+
+/** What earlier restocked returns of one invoice line took back of its delivery note's Out. */
+export interface ReturnedFromDelivery {
+  quantity: Decimal;
+  value: Decimal;
+}
+
+/**
+ * Value of a restocked return of `quantity` taken from a delivery note Out of `deliveredQty` that
+ * took `deliveredValue` out of the book (−value_delta, the invoice's COGS): the proportional share,
+ * 2 dp, never more than what earlier returns left of it; the return that brings the returned
+ * quantity to the delivered quantity takes the rest, so the returns of a line add up to its COGS.
+ */
+export function returnLineValue(
+  quantity: Decimal.Value,
+  delivery: { quantity: Decimal.Value; value: Decimal.Value },
+  prior: ReturnedFromDelivery,
+): Decimal {
+  const deliveredQty = new Decimal(delivery.quantity);
+  const left = Decimal.max(new Decimal(delivery.value).minus(prior.value), 0);
+  if (deliveredQty.lte(0)) return new Decimal(0);
+  if (prior.quantity.plus(quantity).gte(deliveredQty)) return left;
+  return Decimal.min(new Decimal(delivery.value).times(quantity).div(deliveredQty).toDecimalPlaces(VALUE_DP), left);
+}
+
+/** Σ quantity and value_delta of the active restocked returns of each invoice line. */
+async function returnedFromDelivery(tx: Tx, invoiceItemIds: string[]): Promise<Map<string, ReturnedFromDelivery>> {
+  const prior = await tx.salesReturnItem.findMany({
+    where: {
+      salesInvoiceItemId: { in: invoiceItemIds }, restock: true, stockMovementId: { not: null },
+      salesReturn: { status: { not: 'Cancelled' } },
+    },
+    select: { salesInvoiceItemId: true, stockMovementId: true },
+  });
+  const movements = await tx.stockMovement.findMany({
+    where: { id: { in: prior.map((p) => p.stockMovementId!) }, isCancelled: false },
+    select: { id: true, quantity: true, valueDelta: true },
+  });
+  const byId = new Map(movements.map((m) => [m.id, m]));
+  const out = new Map<string, ReturnedFromDelivery>();
+  for (const p of prior) {
+    const m = byId.get(p.stockMovementId!);
+    if (!m) continue;
+    const sum = out.get(p.salesInvoiceItemId) ?? { quantity: new Decimal(0), value: new Decimal(0) };
+    out.set(p.salesInvoiceItemId, {
+      quantity: sum.quantity.plus(m.quantity.toString()), value: sum.value.plus(m.valueDelta.toString()),
+    });
+  }
+  return out;
 }
 
 /**
@@ -113,6 +166,16 @@ export async function submitSalesReturnInTx(
   if (invoice.status === 'Cancelled') throw new BusinessError('Invoice sudah dibatalkan, tidak bisa diretur.');
   if (invoice.status === 'Draft') throw new BusinessError('Invoice masih draft, belum bisa diretur.');
 
+  // One return line per invoice line: the qty guard and the value cap below read earlier returns
+  // per invoice line, and each return item is linked to its own In by invoice line.
+  const seenLines = new Set<string>();
+  for (const line of body.items) {
+    if (seenLines.has(line.salesInvoiceItemId)) {
+      throw new BusinessError('Satu baris invoice hanya boleh muncul sekali dalam satu retur.', SALES_RETURN_DUPLICATE_LINE);
+    }
+    seenLines.add(line.salesInvoiceItemId);
+  }
+
   // Already-returned quantity per invoice line (non-cancelled returns) — guard.
   const priorReturns = await tx.salesReturnItem.groupBy({
     by: ['salesInvoiceItemId'],
@@ -129,7 +192,6 @@ export async function submitSalesReturnInTx(
   // System / contra accounts.
   const arAccount = await systemAccounts.getAccount('AR');
   const customerDepositAccount = await systemAccounts.getAccount('CUSTOMER_DEPOSIT');
-  const inventoryAccount = await systemAccounts.getAccount('INVENTORY');
   const cogsAccount = await cogsAccountFor(tx);
   const returAccount = await salesReturnAccount(tx);
 
@@ -148,8 +210,10 @@ export async function submitSalesReturnInTx(
     taxPct: number;
     restock: boolean;
     unitCostLoaded: number | null;
-    invAccountId: string | null;  // inventory account for COGS reversal credit
+    /** What the restock puts into the book and the COGS reversal debits to inventory (2 dp). */
+    value: Decimal;
   }> = [];
+  const returned = await returnedFromDelivery(tx, invoice.items.map((i) => i.id));
 
   for (const line of body.items) {
     const src = invoice.items.find((i) => i.id === line.salesInvoiceItemId);
@@ -170,20 +234,28 @@ export async function submitSalesReturnInTx(
 
     const restock = line.restock !== false && !!src.inventoryItemId;
 
-    // Cost source priority for COGS reversal.
-    let unitCost: number | null = null;
-    if (src.deliveryOrderItem?.stockMovement) {
-      unitCost = Number(src.deliveryOrderItem.stockMovement.unitCost);
-    } else if (src.unitCostLoaded != null) {
-      unitCost = Number(src.unitCostLoaded);
-    } else if (src.inventoryItem) {
-      unitCost = Math.max(0, Number(src.inventoryItem.averageCost));
+    // Value of the line: its share of the value the delivery note's Out took out of the book (the
+    // invoice's COGS), capped by what earlier restocked returns left of it. A line billed without
+    // a note (legacy direct sale) falls back to its loaded cost, then the current average. Only a
+    // restocked line posts it (and counts against the cap); a damaged one keeps it for display.
+    const delivery = src.deliveryOrderItem?.stockMovement;
+    let value = new Decimal(0);
+    if (delivery) {
+      if (!delivery.isCancelled) {
+        const prior = returned.get(src.id) ?? { quantity: new Decimal(0), value: new Decimal(0) };
+        value = returnLineValue(line.quantity, { quantity: delivery.quantity.toString(), value: new Decimal(delivery.valueDelta.toString()).negated() }, prior);
+      }
+    } else if (src.inventoryItemId) {
+      const legacyCost = src.unitCostLoaded != null ? new Decimal(src.unitCostLoaded.toString()) : Decimal.max(0, src.inventoryItem?.averageCost.toString() ?? 0);
+      value = legacyCost.times(line.quantity).toDecimalPlaces(VALUE_DP);
     }
+    const warehouseId = line.warehouseId || src.warehouseId || delivery?.warehouseId || null;
+    if (restock && !warehouseId) throw new BusinessError(`Gudang retur untuk '${src.itemName}' wajib dipilih.`);
 
     resolved.push({
       salesInvoiceItemId: src.id,
       inventoryItemId: src.inventoryItemId,
-      warehouseId: line.warehouseId || src.warehouseId || null,
+      warehouseId,
       accountId: src.accountId,
       itemName: src.itemName,
       quantity: line.quantity,
@@ -193,8 +265,8 @@ export async function submitSalesReturnInTx(
       amount,
       taxPct: Number(src.taxPct),
       restock,
-      unitCostLoaded: unitCost,
-      invAccountId: src.inventoryItem?.accountId ?? inventoryAccount.id,
+      unitCostLoaded: src.inventoryItemId && line.quantity > 0 ? value.div(line.quantity).toDecimalPlaces(UNIT_COST_DP).toNumber() : null,
+      value,
     });
   }
 
@@ -345,57 +417,41 @@ export async function submitSalesReturnInTx(
   const returnItemByInvLine = new Map(createdReturnItems.map((ri) => [ri.salesInvoiceItemId, ri]));
 
   let totalCogsReversal = new Decimal(0);
-  const cogsCreditByAccount = new Map<string, { amount: number; names: string[] }>();
+  const cogsCreditByAccount = new Map<string, { amount: Decimal; names: string[] }>();
 
   for (const r of resolved) {
     if (!r.restock || !r.inventoryItemId) continue;
-    const cost = r.unitCostLoaded ?? 0;
     const ri = returnItemByInvLine.get(r.salesInvoiceItemId);
+    const invItem = invoice.items.find((i) => i.id === r.salesInvoiceItemId)!.inventoryItem;
+    const acctId = invItem ? await inventoryAccountFor(tx, invItem) : null;
+    if (!acctId) throw new BusinessError('Akun Persediaan belum dipetakan di Akun Sistem.');
 
-    // StockMovement In
-    const smNumber = await generateDocumentNumber(tx, 'SM', parsedDate, fiscalYear.id);
-    const smTotalValue = new Decimal(r.quantity).times(new Decimal(cost)).toDecimalPlaces(2).toNumber();
-    const sm = await tx.stockMovement.create({
-      data: {
-        movementNumber: smNumber,
-        date: parsedDate,
-        itemId: r.inventoryItemId,
-        warehouseId: r.warehouseId,
-        movementType: 'In',
-        quantity: r.quantity,
-        unitCost: cost,
-        totalValue: smTotalValue,
-        referenceType: 'SalesReturn',
-        referenceId: salesReturn.id,
-        referenceNumber: returnNumber,
-        // The COGS reversal journal credits HPP for every valued restock line.
-        offsetAccountId: smTotalValue > 0 ? cogsAccount.id : null,
-        fiscalYearId: fiscalYear.id,
-        createdById: userId,
-      },
+    // In through the value ledger at the line's value: it blends into the average (E3-R7), and the
+    // COGS reversal below debits the same amount to the item's inventory account (book = GL).
+    const { movement } = await postInbound(tx, {
+      movementType: 'In',
+      itemId: r.inventoryItemId,
+      warehouseId: r.warehouseId!,
+      quantity: r.quantity,
+      value: r.value,
+      date: parsedDate,
+      fiscalYearId: fiscalYear.id,
+      createdById: userId,
+      referenceType: 'SalesReturn',
+      referenceId: salesReturn.id,
+      referenceNumber: returnNumber,
+      // The COGS reversal journal credits HPP for every valued restock line.
+      offsetAccountId: cogsAccount.id,
     });
     if (ri) {
-      await tx.salesReturnItem.update({ where: { id: ri.id }, data: { stockMovementId: sm.id } });
-    }
-    await tx.inventoryItem.update({
-      where: { id: r.inventoryItemId },
-      data: { currentStock: { increment: r.quantity } },
-    });
-    if (r.warehouseId) {
-      await tx.inventoryStock.upsert({
-        where: { itemId_warehouseId: { itemId: r.inventoryItemId, warehouseId: r.warehouseId } },
-        update: { currentStock: { increment: r.quantity } },
-        create: { itemId: r.inventoryItemId, warehouseId: r.warehouseId, currentStock: r.quantity },
-      });
+      await tx.salesReturnItem.update({ where: { id: ri.id }, data: { stockMovementId: movement.id } });
     }
 
-    const cogsAmount = new Decimal(r.quantity).times(new Decimal(cost)).toDecimalPlaces(2).toNumber();
-    if (cogsAmount > 0) {
-      totalCogsReversal = totalCogsReversal.plus(cogsAmount);
-      const acctId = r.invAccountId || inventoryAccount.id;
+    if (r.value.gt(0)) {
+      totalCogsReversal = totalCogsReversal.plus(r.value);
       const ex = cogsCreditByAccount.get(acctId);
-      if (ex) { ex.amount += cogsAmount; ex.names.push(r.itemName); }
-      else cogsCreditByAccount.set(acctId, { amount: cogsAmount, names: [r.itemName] });
+      if (ex) { ex.amount = ex.amount.plus(r.value); ex.names.push(r.itemName); }
+      else cogsCreditByAccount.set(acctId, { amount: r.value, names: [r.itemName] });
     }
   }
 
@@ -405,7 +461,7 @@ export async function submitSalesReturnInTx(
     const cogsJv = `JV-COGS-${returnNumber}`;
     const cogsItems: Array<{ accountId: string; debit: number; credit: number; description: string }> = [];
     for (const [acctId, data] of cogsCreditByAccount) {
-      cogsItems.push({ accountId: acctId, debit: data.amount, credit: 0, description: `Persediaan masuk (retur) ${data.names.join(', ')}: ${returnNumber}` });
+      cogsItems.push({ accountId: acctId, debit: data.amount.toNumber(), credit: 0, description: `Persediaan masuk (retur) ${data.names.join(', ')}: ${returnNumber}` });
     }
     cogsItems.push({ accountId: cogsAccount.id, debit: 0, credit: totalCogsNum, description: `Balik HPP (retur): ${returnNumber}` });
 

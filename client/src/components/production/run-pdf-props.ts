@@ -1,6 +1,23 @@
 import type { ProductionRunPDFProps } from '../../lib/pdf/ProductionRunPDF';
 import type { useCompanyPDF } from '../../lib/pdf/useCompanyPDF';
 
+/** The stored line fields runLineUnitCost reads (numbers arrive as strings from Prisma Decimals). */
+export interface RunLineCostFields {
+  unitPrice?: string | number | null;
+  batchUnitCost?: string | number | null;
+  item?: { averageCost?: string | number | null } | null;
+}
+
+/**
+ * Unit cost of a stored run line. An input's unit_price is the cost the value ledger took it out at
+ * (runs posted before that were costed at the batch snapshot); an output's is its resolved price.
+ */
+export function runLineUnitCost(line: RunLineCostFields): number {
+  if (line.unitPrice != null) return Number(line.unitPrice);
+  if (line.batchUnitCost != null) return Number(line.batchUnitCost);
+  return Number(line.item?.averageCost ?? 0);
+}
+
 // Helper: map run + company → PDF props
 export function buildPdfProps(run: any, company: ReturnType<typeof useCompanyPDF>): ProductionRunPDFProps {
   const allItems: any[] = run.items ?? [];
@@ -8,17 +25,12 @@ export function buildPdfProps(run: any, company: ReturnType<typeof useCompanyPDF
     const batchRef = line.sourceMovement
       ? `${line.sourceMovement.referenceNumber || line.sourceMovement.movementNumber} (${new Date(line.sourceMovement.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: '2-digit' })})`
       : null;
-    const lineCost = line.batchUnitCost != null
-      ? Number(line.batchUnitCost)
-      : line.unitPrice != null
-        ? Number(line.unitPrice)
-        : Number(line.item?.averageCost ?? 0);
     return {
       code: line.item?.code ?? null,
       name: line.item?.name ?? '',
       qty: Number(line.quantity),
       unit: line.item?.unit ?? '',
-      unitCost: lineCost,
+      unitCost: runLineUnitCost(line),
       isByProduct: line.isByProduct,
       batchRef,
     };

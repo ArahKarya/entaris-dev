@@ -148,6 +148,24 @@ d('stock drift report', () => {
       expect([row.itemQty, row.warehouseQty, row.drift, row.driftValue, row.unwarehousedNetQty].map(String)).toEqual(['1100', '1000', '100', '500000', '100']);
     });
   });
+
+  it('does not count value-only Revaluation rows (no warehouse, quantity 0) as movements without a warehouse', async () => {
+    await inRollback(async (tx) => {
+      const s = await setup(tx);
+      for (const [n, referenceType] of [['VB', 'ValuationBaseline'], ['RV', 'PurchaseInvoice']] as const) {
+        await tx.stockMovement.create({
+          data: {
+            movementNumber: `IT-E3DR-${n}-${tag()}`, date: new Date(`${DAY}T00:00:00.000Z`), itemId: s.gkp.id, warehouseId: null,
+            movementType: 'Revaluation', quantity: 0, totalValue: 25_000, valueDelta: -25_000, referenceType,
+            fiscalYearId: s.seed.fiscalYearId, createdById: s.actor.userId,
+          },
+        });
+      }
+      const row = await driftOf(tx, s.gkp.id);
+      expect(row).toMatchObject({ unwarehousedMovements: 1 });
+      expect(String(row.unwarehousedNetQty)).toBe('100');
+    });
+  });
 });
 
 d('stock drift repair', () => {

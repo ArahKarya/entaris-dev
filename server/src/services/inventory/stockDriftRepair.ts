@@ -35,7 +35,7 @@ export interface StockDriftRow {
   averageCost: Decimal;
   /** round(drift x average, 2): the value carried without warehouse stock. */
   driftValue: Decimal;
-  /** Active movements without a warehouse (other than this repair's): where the drift usually came from. */
+  /** Active movements without a warehouse (other than this repair's and value-only Revaluation rows): where the drift usually came from. */
   unwarehousedMovements: number;
   unwarehousedNetQty: Decimal;
   /** Per warehouse holding stock, `CODE:qty` joined by ';'. */
@@ -61,6 +61,7 @@ export async function findStockDrift(db: Db, opts: { itemIds?: string[] } = {}):
              SUM(CASE WHEN m.movement_type::text IN ('In', 'AdjustmentIn', 'TransferIn') THEN m.quantity ELSE -m.quantity END) AS net
         FROM stock_movements m
        WHERE m.warehouse_id IS NULL AND NOT m.is_cancelled AND m.reference_type IS DISTINCT FROM ${STOCK_DRIFT_REFERENCE}
+         AND m.movement_type::text <> 'Revaluation'
        GROUP BY m.item_id
     )
     SELECT i.id AS "itemId", i.code, i.name, i.unit,

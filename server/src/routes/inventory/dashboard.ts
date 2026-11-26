@@ -205,7 +205,7 @@ router.get('/recent-movements', async (_req, res) => {
       take: 10,
       select: {
         id: true, movementNumber: true, date: true, movementType: true,
-        quantity: true, totalValue: true, notes: true,
+        quantity: true, totalValue: true, valueDelta: true, notes: true,
         item: { select: { name: true, unit: true, code: true } },
       },
     });
@@ -214,6 +214,7 @@ router.get('/recent-movements', async (_req, res) => {
       ...m,
       quantity: Number(m.quantity),
       totalValue: Number(m.totalValue),
+      valueDelta: Number(m.valueDelta),
     })));
   } catch (error) {
     logger.error({ error }, 'GET /inventory/dashboard/recent-movements error');

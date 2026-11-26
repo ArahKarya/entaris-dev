@@ -14,6 +14,8 @@ import { cancelSalesInvoiceInTx } from '../../services/invoiceCancellation';
 import { settleCogsBackfillForItem } from '../../services/cogsBackfillService';
 import { reverseCogsSettlementsByTrigger } from '../../services/cogsBackfillReverse';
 import { cancelTrail } from '../../utils/cancelClaim';
+import { seedStock } from '../helpers/inventoryFixture';
+import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -43,15 +45,21 @@ class RollbackSentinel extends Error {
 
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
-/** Service invoice + a manual inventory item with a deferred-COGS queue row against it. */
+/**
+ * Service invoice + a manual inventory item with a deferred-COGS queue row against it, and `qty` of
+ * the item in stock at `costAtSale` (the stock-in a settlement follows; its differential moves value
+ * out of that stock through the value ledger).
+ */
 async function seedInvoiceWithQueue(tx: Tx, tag: string, qty: number, costAtSale: number) {
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const party = await tx.party.create({
     data: { name: `TEST-CUST-${tag}-${stamp}`, partyType: 'Customer', isActive: true },
   });
   const item = await tx.inventoryItem.create({
-    data: { code: `TEST-CBQ-${tag}-${stamp}`, name: `CBQ ${tag} ${stamp}`, unit: 'kg', currentStock: 0, averageCost: costAtSale, isActive: true },
+    data: { code: `TEST-CBQ-${tag}-${stamp}`, name: `CBQ ${tag} ${stamp}`, unit: 'kg', isActive: true },
   });
+  const warehouse = await tx.warehouse.create({ data: { code: `TEST-CBQ-${tag}-${stamp}`, name: `CBQ ${tag} ${stamp}` } });
+  await seedStock(tx, { itemId: item.id, warehouseId: warehouse.id, qty, avg: costAtSale, date: new Date(), userId });
   const invoice = await submitSalesInvoiceInTx(
     tx,
     {
@@ -106,6 +114,11 @@ d('cancelSalesInvoiceInTx — COGS backfill queue', () => {
         const ale = await tx.accountingLedgerEntry.findMany({ where: { referenceId: jeId } });
         expect(ale.length).toBe(2);
         expect(ale.every((a) => a.isCancelled)).toBe(true);
+        // The settlement's Revaluation (−80.000 on the 100 kg in stock) is taken back with its JV.
+        const settleRow = await tx.stockMovement.findUniqueOrThrow({ where: { journalEntryId: jeId } });
+        expect([settleRow.movementType, Number(settleRow.valueDelta), settleRow.isCancelled]).toEqual(['Revaluation', -80_000, true]);
+        expect(Number((await tx.inventoryItem.findUniqueOrThrow({ where: { id: item.id } })).stockValue)).toBe(1_000_000);
+        await assertLedgerInvariant(tx, [item.id]);
 
         // Later stock-in must not settle the closed queue any more.
         const again = await settleCogsBackfillForItem(tx, {

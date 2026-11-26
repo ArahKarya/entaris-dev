@@ -223,7 +223,8 @@
     },
     "inputs": {
       "batch": "Batch:",
-      "lockedCost": "Cost terkunci:",
+      "batchCost": "Harga batch saat dipilih:",
+      "ledgerCost": "Biaya bahan (buku nilai):",
       "title": "Bahan Input ({{count}})"
     },
     "journal": {

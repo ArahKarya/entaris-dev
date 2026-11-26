@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import type { Prisma } from '@prisma/client';
 import { replayWeightedAverage, sortMovementsForReplay, type ReplayMovement } from '../../utils/weightedAverageReplay';
-import { UNIT_COST_DP } from '../../utils/costPrecision';
+import { UNIT_COST_DP } from './inventoryValueMath';
 
 type Db = Pick<Prisma.TransactionClient, 'stockMovement' | 'systemAccountMapping'>;
 
@@ -12,7 +12,8 @@ type Db = Pick<Prisma.TransactionClient, 'stockMovement' | 'systemAccountMapping
  * re-pricing old rows is left to the value ledger baseline and the inventory vs GL reconciliation.
  *
  *  a. active manual Out / AdjustmentOut whose unit cost differs from the average replayed (the one
- *     replay in utils/weightedAverageReplay.ts) over the item's active rows posted before it.
+ *     replay in utils/weightedAverageReplay.ts, with the blend rule of the live code at the time,
+ *     legacyLiveBlend) over the item's active rows posted before it.
  *     `difference` = quantity x (unit cost − replayed average), the amount the row over- (> 0) or
  *     under-valued (< 0) on the inventory account.
  *  b. active manual row whose offset account is an OPENING_EQUITY account.
@@ -42,6 +43,19 @@ const COST_TOLERANCE = new Decimal('0.005');
 
 const OUTBOUND = new Set(['Out', 'AdjustmentOut']);
 
+/**
+ * The blend rule of the live code that valued these rows, before the value ledger (E3-R7): a
+ * zero-cost inbound, a sales return and an opname gain added stock without touching the average.
+ * Replaying with today's rule would flag Outs that were priced right at the time.
+ */
+function legacyLiveBlend(m: ReplayMovement): boolean {
+  if (m.movementType !== 'In' && m.movementType !== 'AdjustmentIn') return false;
+  if (new Decimal(m.unitCost.toString()).lte(0)) return false;
+  if (m.movementType === 'In' && m.referenceType === 'SalesReturn') return false;
+  if (m.movementType === 'AdjustmentIn' && m.referenceType === 'StockOpname') return false;
+  return true;
+}
+
 export interface AuditMovement extends ReplayMovement {
   movementNumber: string;
   date: Date;
@@ -61,7 +75,7 @@ export function outboundCostFindings(rows: readonly AuditMovement[]): ManualMove
   const out: ManualMovementAuditRow[] = [];
   sorted.forEach((row, index) => {
     if (!row.manual || !OUTBOUND.has(row.movementType)) return;
-    const replay = replayWeightedAverage(sorted.slice(0, index), { fallbackAverageCost: 0 });
+    const replay = replayWeightedAverage(sorted.slice(0, index), { fallbackAverageCost: 0, blends: legacyLiveBlend });
     const average = new Decimal(replay.averageCost);
     const unitCost = new Decimal(row.unitCost.toString());
     if (unitCost.minus(average).abs().lt(COST_TOLERANCE)) return;

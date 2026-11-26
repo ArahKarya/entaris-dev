@@ -1,5 +1,6 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { BusinessError } from '../../utils/errors';
+import { batchUnitCosts } from './inventoryLedger';
 
 type Tx = Prisma.TransactionClient;
 
@@ -12,7 +13,8 @@ const INBOUND_BATCH_TYPES = new Set(['In', 'AdjustmentIn', 'TransferIn']);
  * item; anything else skews batch availability and blocks cancelling an unrelated receipt.
  * The warehouse is not checked, as in the production and transfer batch pickers.
  * `inputLine` (1-based) names the production input line in the message instead of the item.
- * Transfer still keeps its own copy of this rule (E3-PR4 moves it here).
+ * Transfer still keeps its own copy of this rule (E3-PR4 moves it here). The unit cost returned
+ * is the batch cost (batchUnitCosts: the row plus the Revaluations that adjust it).
  */
 export async function assertBatchSource(
   tx: Tx,
@@ -20,7 +22,7 @@ export async function assertBatchSource(
 ): Promise<{ id: string; unitCost: Prisma.Decimal }> {
   const batch = await tx.stockMovement.findUnique({
     where: { id: input.sourceMovementId },
-    select: { id: true, itemId: true, isCancelled: true, movementType: true, unitCost: true },
+    select: { id: true, itemId: true, isCancelled: true, movementType: true, quantity: true, unitCost: true, totalValue: true, valueDelta: true },
   });
   const name = input.itemName;
   const line = input.inputLine;
@@ -41,5 +43,6 @@ export async function assertBatchSource(
     if (line) throw new BusinessError(`Batch sumber bukan stok masuk (input ke-${line}).`, code);
     throw new BusinessError(`Batch sumber untuk "${name}" bukan stok masuk.`, code);
   }
-  return { id: batch.id, unitCost: batch.unitCost };
+  const cost = (await batchUnitCosts(tx, [batch])).get(batch.id)!;
+  return { id: batch.id, unitCost: new Prisma.Decimal(cost.toString()) };
 }

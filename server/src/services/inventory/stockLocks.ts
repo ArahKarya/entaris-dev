@@ -55,6 +55,8 @@ export interface LockedItem {
   /** Total across warehouses. */
   currentStock: Decimal;
   averageCost: Decimal;
+  /** Value ledger book value (E3-R6): Σ active value_delta of the item. */
+  stockValue: Decimal;
 }
 
 export interface LockedStock {
@@ -137,12 +139,13 @@ export async function lockInventoryRows(
     await tx.$queryRaw`SELECT id FROM inventory_items WHERE id = ANY(${itemIds}::text[]) ORDER BY id FOR NO KEY UPDATE`;
     const itemRows = await tx.inventoryItem.findMany({
       where: { id: { in: itemIds } },
-      select: { id: true, name: true, unit: true, isActive: true, accountId: true, currentStock: true, averageCost: true },
+      select: { id: true, name: true, unit: true, isActive: true, accountId: true, currentStock: true, averageCost: true, stockValue: true },
     });
     const items = new Map<string, LockedItem>(itemRows.map((i) => [i.id, {
       ...i,
       currentStock: new Decimal(i.currentStock.toString()),
       averageCost: new Decimal(i.averageCost.toString()),
+      stockValue: new Decimal(i.stockValue.toString()),
     }]));
 
     const warehouseIds = [...new Set(pairs.map((p) => p.warehouseId))];

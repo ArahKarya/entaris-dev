@@ -17,6 +17,7 @@ const EXPECTED: Record<string, Record<string, number>> = {
   'services/openingStockImport.ts': { OPENING: 1 },
   'services/cashBookDraftPost.ts': { CASH_BOOK: 1 },
   'services/systemAccountRemap.ts': { SYSTEM_DOC: 1 },
+  'services/purchaseInvoiceRevise.ts': { SYSTEM_DOC: 1 },
 };
 
 function count(text: string, needle: string): number {

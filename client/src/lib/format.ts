@@ -99,7 +99,7 @@ export function formatRupiah(value: NumericInput, options: RupiahOptions = {}): 
   return negative === 'parens' ? `(${withSymbol})` : `-${withSymbol}`;
 }
 
-/** Decimal places of a stored unit or average cost (server: utils/costPrecision.ts UNIT_COST_DP). */
+/** Decimal places of a stored unit or average cost (server: services/inventory/inventoryValueMath.ts UNIT_COST_DP). */
 export const UNIT_COST_DP = 6;
 
 /**

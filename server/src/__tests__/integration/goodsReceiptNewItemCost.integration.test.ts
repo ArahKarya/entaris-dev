@@ -18,6 +18,7 @@ import { submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
 import { submitPurchaseInvoiceInTx } from '../../services/purchaseInvoiceSubmit';
 import { getOpenFiscalYear } from '../../utils/fiscalYear';
 import { systemAccountNumber } from '../helpers/systemAccountNumbers';
+import { batchUnitCosts } from '../../services/inventory/inventoryLedger';
 
 const hasDb = !!process.env.DATABASE_URL;
 const d = hasDb ? describe : describe.skip;
@@ -159,9 +160,12 @@ d('STT item baru (tanpa averageCost)', () => {
 
       const after = await tx.inventoryItem.findUnique({ where: { id: item.id } });
       expect(Number(after.averageCost)).toBe(12_500);
+      // The STT row keeps the provisional cost; the batch cost adds the invoice's Revaluation (+500.000).
       const sm = await tx.stockMovement.findFirst({ where: { referenceType: 'GoodsReceipt', referenceId: stt.id } });
-      expect(Number(sm.unitCost)).toBe(12_500);
-      expect(Number(sm.totalValue)).toBe(12_500_000);
+      expect(Number(sm.unitCost)).toBe(12_000);
+      expect(Number(sm.totalValue)).toBe(12_000_000);
+      expect((await batchUnitCosts(tx, [sm])).get(sm.id)!.toNumber()).toBe(12_500);
+      expect(Number(after.stockValue)).toBe(12_500_000);
     });
   });
 
