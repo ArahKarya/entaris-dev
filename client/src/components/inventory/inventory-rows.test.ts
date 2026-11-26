@@ -62,6 +62,12 @@ describe('movement rules', () => {
     expect(referenceTypeLabel('ValuationBaseline')).toBe('Nilai Awal Buku Nilai');
   });
 
+  it('blocks a negative-stock settlement row per row and labels it (E3-R9)', () => {
+    expect(movementCancelBlock(row('NegativeStockSettle', 'sm-1', 'Revaluation'))).toMatch(/revaluasi nilai/);
+    expect(movementEditBlock(row('NegativeStockSettle', 'sm-1', 'Revaluation'))).toMatch(/buku nilai/);
+    expect(referenceTypeLabel('NegativeStockSettle')).toBe('Penyelesaian Stok Minus');
+  });
+
   it('shows a Revaluation value with its sign and a quantity row at its total value', () => {
     const NBSP = '\u00a0';
     expect(movementValueText({ movementType: 'Revaluation', totalValue: '60000.00', valueDelta: '-60000.00' }, { symbol: false })).toBe('-60.000');

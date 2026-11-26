@@ -237,6 +237,7 @@
     "referenceType": {
       "DeliveryOrder": "Surat Jalan",
       "GoodsReceipt": "STT",
+      "NegativeStockSettle": "Penyelesaian Stok Minus",
       "OpeningBalance": "Saldo Awal",
       "ProductionRun": "Proses Produksi",
       "PurchaseInvoice": "Invoice Pembelian",

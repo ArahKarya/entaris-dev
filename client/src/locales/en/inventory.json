@@ -237,6 +237,7 @@
     "referenceType": {
       "DeliveryOrder": "Delivery Order",
       "GoodsReceipt": "Goods Receipt",
+      "NegativeStockSettle": "Negative stock settlement",
       "OpeningBalance": "Opening balance",
       "ProductionRun": "Production run",
       "PurchaseInvoice": "Purchase Invoice",

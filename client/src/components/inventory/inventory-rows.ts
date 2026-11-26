@@ -112,6 +112,7 @@ const REFERENCE_TYPES = [
   'OpeningBalance',
   'StockDriftRepair',
   'ValuationBaseline',
+  'NegativeStockSettle',
 ] as const;
 type ReferenceType = (typeof REFERENCE_TYPES)[number];
 const isReferenceType = (type: string): type is ReferenceType => (REFERENCE_TYPES as readonly string[]).includes(type);
