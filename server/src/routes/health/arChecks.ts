@@ -25,13 +25,18 @@ export function detailRows(rows: readonly PartySubledgerDiff[], noParty = '(tanp
 /**
  * The rows, or an error result naming the account when the role's mapping is ambiguous
  * (PARTY_ROLE_AMBIGUOUS): the check cannot tell that account's lines apart, and one failing check
- * must not take the whole health check down.
+ * must not take the whole health check down. `codes` widens the mapping problems caught (the
+ * inventory checks also catch ACCOUNT_MAPPING_MISSING).
  */
-export async function rowsOrAmbiguous<T>(name: string, find: () => Promise<T[]>): Promise<T[] | CheckResult> {
+export async function rowsOrAmbiguous<T>(
+  name: string,
+  find: () => Promise<T>,
+  codes: readonly string[] = [PARTY_ROLE_AMBIGUOUS],
+): Promise<T | CheckResult> {
   try {
     return await find();
   } catch (err) {
-    if (!(err instanceof BusinessError) || err.code !== PARTY_ROLE_AMBIGUOUS) throw err;
+    if (!(err instanceof BusinessError) || !err.code || !codes.includes(err.code)) throw err;
     return { name, status: 'error', message: err.message, count: 1, details: [], fixable: false };
   }
 }

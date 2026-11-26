@@ -54,6 +54,8 @@ type CheckKey =
   | 'stockMismatch'
   | 'warehouseDrift'
   | 'inventoryVarianceAccount'
+  | 'inventoryVsGl'
+  | 'stockValueInvariant'
   | 'arSubledger'
   | 'customerDepositSubledger'
   | 'apSubledger'
@@ -72,6 +74,8 @@ const CHECKS: Record<string, { key: CheckKey; fixKey?: string }> = {
   'Stock vs Movement Mismatch': { key: 'stockMismatch' },
   'Drift Stok per Gudang': { key: 'warehouseDrift' },
   'Inventory Variance Account': { key: 'inventoryVarianceAccount' },
+  'Inventory vs GL': { key: 'inventoryVsGl' },
+  'Stock Value Invariant': { key: 'stockValueInvariant' },
   'AR vs Subledger': { key: 'arSubledger' },
   'Customer Deposit vs Subledger': { key: 'customerDepositSubledger' },
   'AP vs Subledger': { key: 'apSubledger' },
