@@ -5,7 +5,8 @@
  *   cancelling an STT takes back exactly the inventory debit of its journal, and GL = stock_value;
  * - a legacy STT whose total_value a purchase invoice overwrote (value_delta = the locked cost, as
  *   the value-ledger backfill sets it): cancelling it takes back the locked cost, not total_value;
- * - an STT whose goods partly went out since is refused with REVERSAL_NEEDS_TRUE_UP, nothing moves;
+ * - an STT whose goods partly went out since: the value true-up (PR-6.5a) re-values what went out,
+ *   one journal against COGS on the day of the cancel;
  * - customer-owned goods (owner decision #5): refused into an item that holds own goods, accepted at
  *   value 0 into an item that holds none; own goods refused into an item that holds customer goods;
  * - opening stock import: the journal debit and the ledger value are the same 2 dp amount;
@@ -24,11 +25,17 @@ import { txPrismaProxy, type Tx } from '../helpers/routeHarness';
 import { assertLedgerInvariant } from '../helpers/ledgerInvariant';
 import { bookOf, createSalesFlowWorld, deliver, glBalance, receiveStock, type SalesFlowWorld } from '../helpers/salesFlowFixture';
 import { REVERSAL_NEEDS_TRUE_UP } from '../../services/inventory/inventoryLedger';
+import { sourceKeys } from '../../services/ledger/journalSource';
 import { systemAccounts } from '../../services/systemAccounts';
 import { BusinessError } from '../../utils/errors';
 
-const state = vi.hoisted(() => ({ tx: null as Tx | null }));
+const state = vi.hoisted(() => ({ tx: null as Tx | null, today: null as string | null }));
 vi.mock('../../lib/prisma', () => ({ prisma: txPrismaProxy(state) }));
+// "Today" of a cancel's value true-up journal (owner decision #3): the fixture year when set.
+vi.mock('../../utils/businessDate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/businessDate')>();
+  return { ...actual, businessToday: (...args: Parameters<typeof actual.businessToday>) => state.today ?? actual.businessToday(...args) };
+});
 
 import { prisma as appPrisma } from '../../lib/prisma';
 import { GR_CUSTOMER_OWNED_OWN_STOCK, submitGoodsReceiptInTx } from '../../services/goodsReceiptSubmit';
@@ -151,18 +158,29 @@ d('goods receipt (STT) on the value ledger', () => {
     });
   });
 
-  it('cancel after goods of the item went out is refused with REVERSAL_NEEDS_TRUE_UP and nothing moves', async () => {
+  it('cancel after goods of the item went out: the value true-up re-values what went out against COGS', async () => {
     await inWorld(async (tx, w) => {
+      state.today = DAY;
       await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 1_000, avg: 12_000, day: DAY });
       const stt = await receiveStock(tx, w, { warehouseId: w.warehouseA.id, qty: 1_000, avg: 10_000, day: DAY });
       await deliver(tx, w, DAY, [{ qty: 100 }]);
       const before = await bookOf(tx, w.item.id);
       expect(before).toEqual({ stock: '1900.000', value: '20900000.00', average: '11000.000000' });
 
-      expect(await codeOf(inRouteTx((t) => cancelGoodsReceiptInTx(t, stt.goodsReceiptId, w.userId))))
-        .toBe(REVERSAL_NEEDS_TRUE_UP);
-      expect(await bookOf(tx, w.item.id)).toEqual(before);
-      expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.goodsReceiptId } })).status).toBe('Submitted');
+      try {
+        await inRouteTx((t) => cancelGoodsReceiptInTx(t, stt.goodsReceiptId, w.userId));
+      } finally {
+        state.today = null;
+      }
+      // Without the 10.000 receipt the 100 went out at 12.000: 100.000 more COGS, CR inventory.
+      expect(await bookOf(tx, w.item.id)).toEqual({ stock: '900.000', value: '10800000.00', average: '12000.000000' });
+      const trueUp = await tx.journalEntry.findFirstOrThrow({ where: { sourceKey: sourceKeys.inventoryTrueUp(stt.movementId) }, include: { items: true } });
+      expect(trueUp.date.toISOString().slice(0, 10)).toBe(DAY);
+      expect(trueUp.items.find((i) => i.accountId === w.accounts.inventory.id)?.credit.toFixed(2)).toBe('100000.00');
+      expect(trueUp.items.find((i) => i.accountId === w.accounts.cogs.id)?.debit.toFixed(2)).toBe('100000.00');
+      // The delivery note is not invoiced: GL = book + its 1.100.000.
+      expect(money(await glBalance(tx, w.accounts.inventory.id))).toBe('11900000.00');
+      expect((await tx.goodsReceipt.findUniqueOrThrow({ where: { id: stt.goodsReceiptId } })).status).toBe('Cancelled');
     });
   });
 

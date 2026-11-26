@@ -31,18 +31,16 @@ import { businessToday } from '../../utils/businessDate';
 import { generateDocumentNumber } from '../../utils/documentNumber';
 import { assertPeriodOpen } from '../../utils/periodGuard';
 import { logger } from '../../lib/logger';
+import { addsNegativeWindow, replayItemValue } from '../../utils/weightedAverageReplay';
+import { needsTrueUp, preBaseline, pricedPastZero, residueAtZero, unexplained } from './reversalErrors';
 import { lockInventoryRows, stockKey, type LockedItem } from './stockLocks';
-import { UNIT_COST_DP, VALUE_DP, averageAfter, invariantTolerance, outboundValue, revaluationSplit } from './inventoryValueMath';
+import {
+  INVENTORY_VALUE_NEGATIVE, UNIT_COST_DP, VALUE_DP, averageAfter, invariantTolerance, outboundValue, revaluationSplit,
+} from './inventoryValueMath';
 
 type Tx = Prisma.TransactionClient;
 
-/**
- * Error code (409): reversing this row would leave the book wrong without a value true-up (PR-6.5a):
- * an inbound reversal with value after goods of the item went out (unless the stock reaches 0 and
- * is swept), one that takes stock_value below 0 or leaves stock on hand with no value, or a
- * reversal that leaves value at zero stock without sweepAtZero.
- */
-export const REVERSAL_NEEDS_TRUE_UP = 'REVERSAL_NEEDS_TRUE_UP';
+export { REVERSAL_NEEDS_TRUE_UP, TRUE_UP_PRE_BASELINE, TRUE_UP_UNEXPLAINED } from './reversalErrors';
 
 /** Fields of a new movement row; a new movement names its warehouse (OutboundInput has one exception). */
 interface MovementBase {
@@ -123,11 +121,17 @@ export interface PostedMovement {
 
 export interface ReverseOptions {
   userId: string;
-  /** 'replay' (a value true-up) arrives in PR-6.5a; until then a reversal that needs one is refused. */
-  trueUp?: 'none';
+  /**
+   * 'replay': the value true-up of a cancel (E3-R8). When goods of the item went out after the row,
+   * the item's rows are replayed from its last ValuationBaseline with and without it
+   * (replayItemValue), and the difference the row made to what went out comes back to the book
+   * (returned as trueUp, posted against COGS by postReversalValueJournals). 'none' (default): the
+   * row comes back exactly, and a reversal that would need a true-up is refused (REVERSAL_NEEDS_TRUE_UP).
+   */
+  trueUp?: 'none' | 'replay';
   /** Stock that reaches 0 hands its remaining value to the caller as toCogs (one Revaluation row). */
   sweepAtZero?: boolean;
-  /** Business day (YYYY-MM-DD) of the sweep row and of the caller's COGS journal; default today (WIB). */
+  /** Business day (YYYY-MM-DD) of the true-up / sweep row and its journal; default today (WIB, owner decision #3). */
   journalDay?: string;
   /** The reversal undoes a document for an edit: a refusal says so instead of naming a cancel. */
   forEdit?: boolean;
@@ -143,9 +147,14 @@ export interface ReverseResult {
   movement: StockMovement;
   /** −(the row's value_delta): the inventory amount of the journal the caller voids. */
   valueDelta: Decimal;
+  /** Value true-up (trueUp 'replay'): + back into the book, − out of it, against COGS (0: none). */
+  trueUp: Decimal;
   /** Value swept out at zero stock; the caller posts DR COGS / CR inventory of it (0: nothing swept). */
   toCogs: Decimal;
-  /** The Revaluation row of the sweep, or null. */
+  /**
+   * The Revaluation row of the true-up and the sweep together (value_delta = trueUp − toCogs, the
+   * inventory amount of postReversalValueJournals), or null when both are 0.
+   */
   sweep: StockMovement | null;
   stockAfter: Decimal;
   stockValueAfter: Decimal;
@@ -418,35 +427,8 @@ async function soldSince(tx: Tx, movement: StockMovement): Promise<boolean> {
   return later !== null;
 }
 
-function needsTrueUp(itemName: string, next: ItemState, forEdit: boolean): BusinessError {
-  if (forEdit) {
-    return new BusinessError(
-      `Edit ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
-        + `(stok sesudahnya ${next.stock.toString()}, nilai ${next.value.toFixed(VALUE_DP)}). Koreksi nilai otomatis belum tersedia; hubungi akuntan.`,
-      REVERSAL_NEEDS_TRUE_UP,
-      409,
-    );
-  }
-  return new BusinessError(
-    `Pembatalan ditolak: '${itemName}' sudah sebagian keluar, jadi nilai persediaannya perlu dikoreksi `
-      + `(stok sesudahnya ${next.stock.toString()}, nilai ${next.value.toFixed(VALUE_DP)}). Koreksi nilai otomatis belum tersedia; hubungi akuntan.`,
-    REVERSAL_NEEDS_TRUE_UP,
-    409,
-  );
-}
-
-/** Stock 0 with value left and no sweep asked: nothing needs to have gone out for this one. */
-function residueAtZero(itemName: string, next: ItemState): BusinessError {
-  return new BusinessError(
-    `Pembatalan ditolak: stok '${itemName}' menjadi 0 tetapi nilai persediaannya masih ${next.value.toFixed(VALUE_DP)}, `
-      + 'jadi sisa nilai itu perlu dikoreksi. Koreksi nilai otomatis belum tersedia; hubungi akuntan.',
-    REVERSAL_NEEDS_TRUE_UP,
-    409,
-  );
-}
-
 /**
- * The value to sweep after a reversal, or a refusal (train guard until PR-6.5a); a Revaluation row
+ * The value to sweep after a reversal without trueUp 'replay', or a refusal (train guard); a Revaluation row
  * counts as inbound here:
  * - an inbound reversal that moves value after goods went out (soldSince), except when the stock
  *   reaches 0 and is swept: then the sweep makes the total COGS exact;
@@ -495,17 +477,66 @@ async function sweepPeriod(tx: Tx, opts: ReverseOptions): Promise<SweepPeriod> {
   return { date, fiscalYearId: fiscalYear.id };
 }
 
-/** The Revaluation row that takes `residue` out of the book at zero stock, owned by the reversed row's document. */
-async function writeSweepRow(tx: Tx, movement: StockMovement, residue: Decimal, period: SweepPeriod, userId: string): Promise<StockMovement> {
+/**
+ * The Revaluation row of a reversal's true-up and zero-stock sweep (value_delta = trueUp − residue),
+ * owned by the reversed row's document and adjusting the reversed row.
+ */
+async function writeSettlementRow(
+  tx: Tx,
+  movement: StockMovement,
+  amounts: { trueUp: Decimal; residue: Decimal },
+  period: SweepPeriod,
+  userId: string,
+): Promise<StockMovement> {
   const { date, fiscalYearId } = period;
+  const valueDelta = amounts.trueUp.minus(amounts.residue);
   const movementNumber = await generateDocumentNumber(tx, 'SM', date, fiscalYearId);
+  const notes = amounts.trueUp.isZero()
+    ? `Sisa nilai saat stok 0 (pembatalan ${movement.movementNumber})`
+    : `Koreksi nilai persediaan (pembatalan ${movement.movementNumber})`;
   return insertMovement(tx, {
     movementNumber, date, itemId: movement.itemId, warehouseId: null, movementType: 'Revaluation',
-    quantity: 0, unitCost: 0, totalValue: residue.abs().toString(), valueDelta: residue.negated().toString(),
+    quantity: 0, unitCost: 0, totalValue: valueDelta.abs().toString(), valueDelta: valueDelta.toString(),
     adjustsMovementId: movement.id, referenceType: movement.referenceType, referenceId: movement.referenceId,
-    referenceNumber: movement.referenceNumber, notes: `Sisa nilai saat stok 0 (pembatalan ${movement.movementNumber})`,
-    fiscalYearId, createdById: userId,
+    referenceNumber: movement.referenceNumber, notes, fiscalYearId, createdById: userId,
   });
+}
+
+const STOCK_EXPLAINED_TOLERANCE = new Decimal('0.0005');
+
+/**
+ * Value true-up of taking `movement` out of the item's history (trueUp 'replay'), 2 dp, + into the
+ * book. 0 when no goods of the item went out since the row's value entered the book: then the exact
+ * reversal already leaves the book the row's absence would have. Otherwise the replay with the row
+ * must reproduce current_stock (TRUE_UP_UNEXPLAINED) and the row must lie after the baseline
+ * (TRUE_UP_PRE_BASELINE), and without the row no goods may go out past zero (or a Revaluation land
+ * at no stock) where they did not with it (addsNegativeWindow, TRUE_UP_UNEXPLAINED until PR-6.6);
+ * the true-up is what the outbound rows since took differently without it:
+ * replay(without) − (replay(with) − the row's value_delta). Taking the difference of two replays,
+ * not of the replay and stock_value, keeps older settlement rows of the book out of it.
+ */
+async function replayTrueUp(tx: Tx, movement: StockMovement, item: LockedItem): Promise<Decimal> {
+  if (!(await soldSince(tx, movement))) return new Decimal(0);
+  try {
+    const withRow = await replayItemValue(tx, movement.itemId);
+    if (!withRow.replayedIds.has(movement.id)) throw withRow.baselineId ? preBaseline(item.name, movement) : unexplained(item.name);
+    if (withRow.stock.minus(item.currentStock).abs().gt(STOCK_EXPLAINED_TOLERANCE)) throw unexplained(item.name);
+    const without = await replayItemValue(tx, movement.itemId, { excludeMovementIds: [movement.id] });
+    if (addsNegativeWindow(withRow, without)) throw pricedPastZero(item.name);
+    return without.value.minus(withRow.value.minus(dec(movement.valueDelta))).toDecimalPlaces(VALUE_DP);
+  } catch (e) {
+    // A replayed book that values stock on hand below 0 explains nothing either.
+    if (e instanceof BusinessError && e.code === INVENTORY_VALUE_NEGATIVE) throw unexplained(item.name);
+    throw e;
+  }
+}
+
+/** The value to sweep after a replayed reversal: residue at zero stock (sweepAtZero), never stock on hand below 0. */
+function replaySweep(itemName: string, next: ItemState, sweepAtZero: boolean, intermediate: boolean): Decimal {
+  if (next.stock.gt(0) && next.value.lt(0)) throw unexplained(itemName);
+  if (!next.stock.isZero() || next.value.isZero() || intermediate) return new Decimal(0);
+  if (!sweepAtZero) throw residueAtZero(itemName, next);
+  return next.value;
 }
 
 /** Claims the row for this reversal: a concurrent reversal of the same row finds it cancelled. */
@@ -525,7 +556,7 @@ async function reverseTransferLeg(tx: Tx, movement: StockMovement, item: LockedI
   await claimReversal(tx, movement.id);
   await writeStock(tx, movement.itemId, movement.warehouseId, movement.movementType === 'TransferOut' ? quantity : quantity.negated(), null);
   return {
-    movement: { ...movement, isCancelled: true }, valueDelta: new Decimal(0), toCogs: new Decimal(0), sweep: null,
+    movement: { ...movement, isCancelled: true }, valueDelta: new Decimal(0), trueUp: new Decimal(0), toCogs: new Decimal(0), sweep: null,
     stockAfter: item.currentStock, stockValueAfter: item.stockValue, averageCostAfter: item.averageCost,
   };
 }
@@ -538,8 +569,11 @@ async function reverseTransferLeg(tx: Tx, movement: StockMovement, item: LockedI
  *   delta when the invoice is cancelled (its journal is voided by the caller);
  * - TransferOut / TransferIn: the quantity at its warehouse only (value_delta 0).
  * The caller checks the stock an inbound reversal needs (assertStockAvailable, reversal) and voids
- * the row's journal, whose inventory amount is −valueDelta. Refused with REVERSAL_NEEDS_TRUE_UP where
- * the book would need a true-up (reversalSweep).
+ * the row's journal, whose inventory amount is −valueDelta. With trueUp 'replay' the row's effect on
+ * goods that went out since comes back as trueUp (replayTrueUp) and, with sweepAtZero, value left at
+ * zero stock as toCogs: one Revaluation row (sweep) dated opts.journalDay in an open period, whose
+ * journal the caller posts with postReversalValueJournals. Without it a reversal that needs a
+ * true-up is refused with REVERSAL_NEEDS_TRUE_UP (reversalSweep).
  */
 export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseOptions): Promise<ReverseResult> {
   const ref = await tx.stockMovement.findUnique({ where: { id: movementId }, select: { itemId: true, warehouseId: true } });
@@ -555,20 +589,24 @@ export async function reverseMovement(tx: Tx, movementId: string, opts: ReverseO
   const quantity = dec(movement.quantity);
   const qtyDelta = inbound ? quantity.negated() : quantity;
   const valueDelta = dec(movement.valueDelta).negated();
-  const reversed = stateAfter(item, qtyDelta, valueDelta);
-  const residue = await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts);
+  const sweepAtZero = opts.sweepAtZero === true;
+  const trueUp = opts.trueUp === 'replay' ? await replayTrueUp(tx, movement, item) : new Decimal(0);
+  const reversed = stateAfter(item, qtyDelta, valueDelta.plus(trueUp));
+  const residue = opts.trueUp === 'replay'
+    ? replaySweep(item.name, reversed, sweepAtZero, opts.intermediate === true)
+    : await reversalSweep(tx, movement, item.name, reversed, valueDelta, opts);
   // Every guard runs before the first write: a caller that catches a refusal keeps a whole book.
-  const period = residue.isZero() ? null : await sweepPeriod(tx, opts);
+  const period = trueUp.isZero() && residue.isZero() ? null : await sweepPeriod(tx, opts);
 
   await claimReversal(tx, movement.id);
-  const sweep = period ? await writeSweepRow(tx, movement, residue, period, opts.userId) : null;
-  const next = sweep ? { ...reversed, value: reversed.value.minus(residue) } : reversed;
+  const sweep = period ? await writeSettlementRow(tx, movement, { trueUp, residue }, period, opts.userId) : null;
+  const next = residue.isZero() ? reversed : { ...reversed, value: reversed.value.minus(residue) };
   await writeStock(tx, movement.itemId, movement.warehouseId, qtyDelta, next);
   if (valueDelta.isZero() && !quantity.isZero()) {
     logger.warn({ movementId: movement.id, movementNumber: movement.movementNumber, itemId: movement.itemId }, 'Reversed a stock movement that carries no value');
   }
   return {
-    movement: { ...movement, isCancelled: true }, valueDelta, toCogs: residue, sweep,
+    movement: { ...movement, isCancelled: true }, valueDelta, trueUp, toCogs: residue, sweep,
     stockAfter: next.stock, stockValueAfter: next.value, averageCostAfter: next.average,
   };
 }

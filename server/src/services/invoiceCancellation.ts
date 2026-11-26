@@ -9,6 +9,7 @@ import { claimCancel, type CancelTrail } from '../utils/cancelClaim';
 import { lockArThenSalesInvoiceInTx } from './salesInvoiceStatus';
 import { assertStockAvailable, lockInventoryRows } from './inventory/stockLocks';
 import { REVERSAL_NEEDS_TRUE_UP, reverseDocumentMovements } from './inventory/inventoryLedger';
+import { postReversalValueJournals } from './inventory/reversalValueJournal';
 import { findDocumentJournals } from './ledger/cancelJournals';
 import { purchaseRevisionPrefix } from './ledger/journalSource';
 import type { NegativeStockBypass } from '../utils/negativeStockGate';
@@ -52,8 +53,8 @@ export const INVOICE_HAS_ACTIVE_RETURNS = 'INVOICE_HAS_ACTIVE_RETURNS';
 /**
  * Cancel a sales invoice: cancel its JE, COGS JE and their -suffixed satellites (balances reversed per JE item account, so
  * per-item COGS sub-accounts are restored), reverse its own stock movements through the value
- * ledger (quantity and value exactly; delivery-order movements stay with the note), recompute party
- * outstanding. Rejected with PERIOD_CLOSED when the invoice's fiscal year, or that of any journal
+ * ledger (quantity and value; when goods of the item went out after them, a true-up against COGS,
+ * E3-R8; delivery-order movements stay with the note), recompute party outstanding. Rejected with PERIOD_CLOSED when the invoice's fiscal year, or that of any journal
  * it voids, is closed, and then with INVOICE_HAS_ACTIVE_RETURNS while a return is not cancelled.
  * `trail` (who and why) is stored on the voided journals. Caller owns the transaction.
  */
@@ -130,6 +131,14 @@ export async function cancelSalesInvoiceInTx(
     pairs: stockMovements.flatMap((sm) => (sm.warehouseId ? [{ itemId: sm.itemId, warehouseId: sm.warehouseId }] : [])),
   });
 
+  // The COGS journal voided below credited inventory with the value these rows took out of the
+  // book. Reversed (and any true-up journalled) before the voids lock more accounts (lock order).
+  const userId = trail?.cancelledById ?? invoice.createdBy;
+  const reversed = await reverseDocumentMovements(
+    tx, { referenceType: 'SalesInvoice', referenceId: invoice.id }, { userId, trueUp: 'replay', sweepAtZero: true },
+  );
+  await postReversalValueJournals(tx, reversed, { userId, documentLabel: `Invoice ${invoice.invoiceNumber}` });
+
   // Revenue/AR journal, COGS journal and every satellite of either (JV-<no>-CORR, -CORR-PPN,
   // -CORR-QTY-n, -WAPU, -RATE-FIX, …). Satellites left active would keep moving AR, revenue, PPh
   // and PPN for an invoice that no longer exists.
@@ -138,9 +147,6 @@ export async function cancelSalesInvoiceInTx(
   // Deferred COGS of this invoice is void with it: close its backfill queue and reverse its
   // auto-settle JVs, otherwise later stock-ins keep moving inventory value into HPP.
   await closeCogsBackfillForSalesInvoice(tx, invoice.id, trail);
-
-  // The voided COGS journal credited inventory with the value these rows took out of the book.
-  await reverseDocumentMovements(tx, { referenceType: 'SalesInvoice', referenceId: invoice.id }, { userId: trail?.cancelledById ?? invoice.createdBy });
 
   // Release linked Delivery Orders back to Submitted state so they can be
   // billed by another invoice. Their stock movements remain valid.
@@ -168,9 +174,9 @@ export async function cancelSalesInvoiceInTx(
  * a Revaluation row that carries the invoice's landed-cost delta ('PurchaseInvoice', posted at
  * submit or by the value-ledger backfill) or a price revision ('PurchaseRevision') on an STT
  * receipt, taken back by its value_delta while the voided journal (JV-<no>, or the revision journal
- * keyed sourceKeys.purchaseRevision) reverses the same amount in inventory. Either is refused with
- * REVERSAL_NEEDS_TRUE_UP when goods of the item went out since its value entered the book, or when a
- * receipt leaves stock 0 with value left (value true-up, PR-6.5a).
+ * keyed sourceKeys.purchaseRevision) reverses the same amount in inventory. When goods of the item
+ * went out since its value entered the book, the value they took differently comes back as a
+ * true-up against COGS, and value left at zero stock is swept to COGS (E3-R8).
  */
 export async function cancelPurchaseInvoiceInTx(
   tx: Tx,
@@ -232,6 +238,14 @@ export async function cancelPurchaseInvoiceInTx(
 
   await assertLandedCostBacked(tx, invoice);
 
+  // Both types in one pass, newest first: a revision was posted on the book the landed cost left.
+  // Reversed (and any true-up journalled) before the voids below lock accounts (lock order).
+  const userId = trail?.cancelledById ?? invoice.createdBy;
+  const reversed = await reverseDocumentMovements(
+    tx, { referenceType: PURCHASE_INVOICE_ROW_TYPES, referenceId: invoice.id }, { userId, trueUp: 'replay', sweepAtZero: true },
+  );
+  await postReversalValueJournals(tx, reversed, { userId, documentLabel: `Invoice ${invoice.invoiceNumber}` });
+
   // Main AP journal plus satellites (JV-<no>-CORR, -CORR-2, …).
   const jvNumber = `JV-${invoice.invoiceNumber}`;
   const mainExisted = await tx.journalEntry.count({ where: { entryNumber: jvNumber } });
@@ -253,13 +267,6 @@ export async function cancelPurchaseInvoiceInTx(
   }
 
   await recalcPartyOutstanding(tx, invoice.partyId);
-
-  // Both types in one pass, newest first: a revision was posted on the book the landed cost left.
-  await reverseDocumentMovements(
-    tx,
-    { referenceType: PURCHASE_INVOICE_ROW_TYPES, referenceId: invoice.id },
-    { userId: trail?.cancelledById ?? invoice.createdBy },
-  );
 
   await reverseCogsSettlementsByTrigger(tx, 'PurchaseInvoice', invoice.id, trail);
 
